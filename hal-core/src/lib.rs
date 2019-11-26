@@ -13,8 +13,8 @@ pub trait Architecture {
 
 pub trait Address:
     Copy
-    + ops::Add<usize>
-    + ops::Sub<usize>
+    + ops::Add<usize, Output = Self>
+    + ops::Sub<usize, Output = Self>
     + ops::AddAssign<usize>
     + ops::SubAssign<usize>
     + PartialEq
@@ -38,7 +38,7 @@ pub trait Address:
     fn offset(self, offset: i32) -> Self;
 
     /// Returns `true` if `self` is aligned on the specified alignment.
-    fn is_aligned<A: Into<usize>>(self, align: A) -> Self {
+    fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
         self.align_down(align) == self
     }
 }
