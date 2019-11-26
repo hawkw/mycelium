@@ -12,9 +12,35 @@ pub trait Architecture {
 }
 
 pub trait Address:
-    Copy + ops::Add<usize> + ops::Sub<usize> + ops::AddAssign<usize> + ops::SubAssign<usize>
+    Copy
+    + ops::Add<usize>
+    + ops::Sub<usize>
+    + ops::AddAssign<usize>
+    + ops::SubAssign<usize>
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
 {
-    // TODO(eliza): more ops (align up/down?)
+    /// Aligns `self` up to `align`.
+    ///
+    /// The specified alignment must be a power of two.
+    fn align_up<A: Into<usize>>(self, align: A) -> Self;
+
+    /// Aligns `self` down to `align`.
+    ///
+    /// The specified alignment must be a power of two.
+    fn align_down<A: Into<usize>>(self, align: A) -> Self;
+
+    /// Offsets this address by `offset`.
+    ///
+    /// If the specified offset would overflow, this function saturates instead.
+    fn offset(self, offset: i32) -> Self;
+
+    /// Returns `true` if `self` is aligned on the specified alignment.
+    fn is_aligned<A: Into<usize>>(self, align: A) -> Self {
+        self.align_down(align) == self
+    }
 }
 
 pub use self::boot::BootInfo;
