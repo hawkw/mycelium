@@ -37,6 +37,9 @@ pub trait Address:
     /// If the specified offset would overflow, this function saturates instead.
     fn offset(self, offset: i32) -> Self;
 
+    /// Returns the difference between `self` and `other`.
+    fn difference(self, other: Self) -> isize;
+
     /// Returns `true` if `self` is aligned on the specified alignment.
     fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
         self.align_down(align) == self
