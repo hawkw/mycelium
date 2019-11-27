@@ -1,6 +1,6 @@
 use crate::Architecture;
 
-pub mod frame;
+pub mod page;
 
 /// A cross-platform representation of a memory region.
 #[derive(Debug, Clone)]
