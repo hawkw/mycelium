@@ -1,10 +1,9 @@
-use crate::Address;
-use core::ops;
+use crate::Architecture;
 
 /// A cross-platform representation of a memory region.
 #[derive(Debug, Clone)]
-pub struct Region<A: Address> {
-    base: A,
+pub struct Region<A: Architecture> {
+    base: A::PAddr,
     // TODO(eliza): should regions be stored as (start -> end) or as
     // (base + offset)?
     size: usize,
@@ -45,9 +44,9 @@ enum KindInner {
     PageTable,
 }
 
-impl<A: Address> Region<A> {
+impl<A: Architecture> Region<A> {
     /// Returns the base address of the memory region
-    pub fn base_addr(&self) -> A {
+    pub fn base_addr(&self) -> A::PAddr {
         self.base
     }
 
@@ -56,11 +55,14 @@ impl<A: Address> Region<A> {
         self.size
     }
 
+    /// Returns `true` if `self` contains the specified address.
+    pub fn contains(&self, addr: impl Into<A::PAddr>) -> bool {
+        let addr = addr.into();
+        addr > self.base && addr < self.end_addr()
+    }
+
     /// Returns the end address of the memory region.
-    pub fn end_addr(&self) -> A
-    where
-        A: ops::Add<usize, Output = A>,
-    {
+    pub fn end_addr(&self) -> A::PAddr {
         self.base + self.size
     }
 
@@ -68,7 +70,7 @@ impl<A: Address> Region<A> {
         self.kind
     }
 
-    pub fn new(base: A, size: usize, kind: RegionKind) -> Self {
+    pub fn new(base: A::PAddr, size: usize, kind: RegionKind) -> Self {
         Self { base, size, kind }
     }
 }

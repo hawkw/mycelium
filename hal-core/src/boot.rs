@@ -3,7 +3,7 @@ use core::iter::Iterator;
 
 pub trait BootInfo {
     type Arch: Architecture;
-    type MemoryMap: Iterator<Item = mem::Region<<Self::Arch as Architecture>::PAddr>>;
+    type MemoryMap: Iterator<Item = mem::Region<Self::Arch>>;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap;
