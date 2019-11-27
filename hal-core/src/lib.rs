@@ -44,6 +44,8 @@ pub trait Address:
     fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
         self.align_down(align) == self
     }
+
+    fn as_ptr(&self) -> *const ();
 }
 
 pub use self::boot::BootInfo;

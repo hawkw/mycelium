@@ -1,5 +1,7 @@
 use crate::Architecture;
 
+pub mod frame;
+
 /// A cross-platform representation of a memory region.
 #[derive(Debug, Clone)]
 pub struct Region<A: Architecture> {
