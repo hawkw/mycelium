@@ -121,6 +121,28 @@ impl<A: Address, S: Size> Page<A, S> {
             end: end - 1,
         }
     }
+
+    /// Returns the entire contents of the page as a slice.
+    ///
+    /// # Safety
+    ///
+    /// When calling this method, ensure that the page will not be mutated
+    /// concurrently, including by user code.
+    pub unsafe fn as_slice(&self) -> &[u8] {
+        let start = self.base.as_ptr() as *const u8;
+        slice::from_raw_parts::<u8>(start, S::SIZE)
+    }
+
+    /// Returns the entire contents of the page as a mutable slice.
+    ///
+    /// # Safety
+    ///
+    /// When calling this method, ensure that the page will not be read or mutated
+    /// concurrently, including by user code.
+    pub unsafe fn as_slice_mut(&mut self) -> &mut [u8] {
+        let start = self.base.as_ptr() as *const u8;
+        slice::from_raw_parts_mut::<u8>(start, S::SIZE)
+    }
 }
 
 impl<A: Address, S: Size> ops::Add<usize> for Page<A, S> {
@@ -140,13 +162,6 @@ impl<A: Address, S: Size> ops::Sub<usize> for Page<A, S> {
             base: self.base - (S::SIZE * rhs),
             _size: PhantomData,
         }
-    }
-}
-
-impl<A: Address, S: Size> AsRef<[u8]> for Page<A, S> {
-    fn as_ref(&self) -> &[u8] {
-        let start = self.base.as_ptr() as *const u8;
-        unsafe { slice::from_raw_parts::<u8>(start, S::SIZE) }
     }
 }
 
