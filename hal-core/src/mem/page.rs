@@ -140,7 +140,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// When calling this method, ensure that the page will not be read or mutated
     /// concurrently, including by user code.
     pub unsafe fn as_slice_mut(&mut self) -> &mut [u8] {
-        let start = self.base.as_ptr() as *const u8;
+        let start = self.base.as_ptr() as *mut u8;
         slice::from_raw_parts_mut::<u8>(start, S::SIZE)
     }
 }
