@@ -3,22 +3,22 @@ name: CI
 on: [push]
 
 jobs:
-- build:
-  runs-on: ubuntu-latest
-  steps:
-  - uses: actions/checkout@v1
-  - name: Build
-    uses: actions-rs/cargo@v1.0.1
-    with:
-      command: build
-  - name: Test
-    uses: actions-rs/cargo@v1.0.1
-    with:
-      command: test --all
-- clippy:  
-  runs-on: ubuntu-latest
-  needs: build
-  steps:
-  - uses: actions/checkout@v1
-  - name: rust-clippy-check
-    uses: actions-rs/clippy-check@v1.0.5
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Build
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: build
+    - name: Test
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: test --all
+  clippy:  
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - uses: actions/checkout@v1
+    - name: rust-clippy-check
+      uses: actions-rs/clippy-check@v1.0.5
