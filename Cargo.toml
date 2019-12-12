@@ -2,4 +2,28 @@
 members = [
     "util",
     "hal-core",
+    "hal-x86_64",
 ]
+
+[package]
+name = "mycelium-kernel"
+version = "0.1.0"
+authors = ["Eliza Weisman <eliza@elizas.website>"]
+edition = "2018"
+
+[lib]
+name = "mycelium_kernel"
+
+[dependencies]
+hal-core = { path = "hal-core" }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+bootloader = "0.8.0"
+hal-x86_64 = { path = "hal-x86_64" }
+
+[package.metadata.bootimage]
+default-target = "x86_64-mycelium.json"
+
+[package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
+memcpy = true
+sysroot_path = "target/x86_64/sysroot"
