@@ -15,7 +15,8 @@ jobs:
     - name: "x86_64 boot image"
       uses: actions-rs/cargo@v1.0.1
       with:
-        command: cargo bootimage --target=x86_64-mycelium.json
+        command: bootimage
+        args: --target=x86_64-mycelium.json
     - name: Test
       uses: actions-rs/cargo@v1.0.1
       with:
