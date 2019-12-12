@@ -3,6 +3,8 @@
 use core::{fmt, ops};
 use hal_core::{Address, Architecture};
 
+pub mod vga;
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct PAddr(u64);
 

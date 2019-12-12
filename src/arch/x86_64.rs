@@ -1,5 +1,5 @@
 use hal_core::{boot::BootInfo, Architecture};
-use hal_x86_64::X64;
+use hal_x86_64::{vga, X64};
 
 static HELLO: &[u8] = b"Hello World!";
 
@@ -13,27 +13,28 @@ impl BootInfo for X64BootInfo {
     // TODO(eliza): implement
     type MemoryMap = core::iter::Empty<hal_core::mem::Region<X64>>;
 
+    type Writer = vga::Writer;
+
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
-        core::iter::empty()
+        unimplemented!("eliza: add this!")
+    }
+
+    fn writer(&self) -> Self::Writer {
+        vga::writer()
     }
 }
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
-    let vga_buffer = 0xb8000 as *mut u8;
-
-    for (i, &byte) in HELLO.iter().enumerate() {
-        unsafe {
-            *vga_buffer.offset(i as isize * 2) = byte;
-            *vga_buffer.offset(i as isize * 2 + 1) = 0xb;
-        }
-    }
+    // TODO(eliza): unpack bootinfo!
     let bootinfo = X64BootInfo { _p: () };
     mycelium_kernel::kernel_main(&bootinfo);
 }
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    mycelium_kernel::handle_panic(info)
+    let mut vga = vga::writer();
+    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
+    mycelium_kernel::handle_panic(&mut vga, info)
 }

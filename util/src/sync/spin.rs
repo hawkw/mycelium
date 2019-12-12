@@ -1,6 +1,9 @@
 use super::atomic::{spin_loop_hint, AtomicBool, Ordering};
 use crate::cell::CausalCell;
-use core::{fmt, ops};
+use core::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
 
 /// A simple spinlock ensuring mutual exclusion.
 #[derive(Debug)]
@@ -14,7 +17,16 @@ pub struct MutexGuard<'a, T> {
 }
 
 impl<T> Mutex<T> {
+    #[cfg(any(test, feature = "loom"))]
     pub fn new(data: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+            data: CausalCell::new(data),
+        }
+    }
+
+    #[cfg(not(any(test, feature = "loom")))]
+    pub const fn new(data: T) -> Self {
         Self {
             locked: AtomicBool::new(false),
             data: CausalCell::new(data),
@@ -39,16 +51,19 @@ impl<T> Mutex<T> {
     }
 }
 
+unsafe impl<T> Send for Mutex<T> {}
+unsafe impl<T> Sync for Mutex<T> {}
+
 // === impl MutexGuard ===
 
-impl<'a, T> ops::Deref for MutexGuard<'a, T> {
+impl<'a, T> Deref for MutexGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         self.mutex.data.with(|ptr| unsafe { &*ptr })
     }
 }
 
-impl<'a, T> ops::DerefMut for MutexGuard<'a, T> {
+impl<'a, T> DerefMut for MutexGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.mutex.data.with_mut(|ptr| unsafe { &mut *ptr })
     }
