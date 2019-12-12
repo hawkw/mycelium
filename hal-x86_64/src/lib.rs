@@ -1,5 +1,5 @@
 //! Implementation of the Mycelium HAL for 64-bit x86 platforms.
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 use core::{fmt, ops};
 use hal_core::{Address, Architecture};
 

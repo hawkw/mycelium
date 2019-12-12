@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, Architecture};
 
