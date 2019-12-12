@@ -1,6 +1,6 @@
 #![no_std]
 use core::ops;
-mod boot;
+pub mod boot;
 pub mod interrupt;
 pub mod mem;
 

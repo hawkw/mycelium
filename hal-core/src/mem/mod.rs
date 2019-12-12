@@ -75,6 +75,10 @@ impl<A: Architecture> Region<A> {
     pub fn new(base: A::PAddr, size: usize, kind: RegionKind) -> Self {
         Self { base, size, kind }
     }
+
+    pub fn page_range<S: page::Size>(&self) -> page::PageRange<A::PAddr, S> {
+        unimplemented!("eliza")
+    }
 }
 
 impl RegionKind {
