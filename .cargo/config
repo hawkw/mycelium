@@ -1,0 +1,6 @@
+[target.'cfg(all(target_arch = "x86_64", target_os="none"))']
+runner = "bootimage runner"
+
+[alias]
+dev-env = "install cargo-xbuild bootimage "
+run-x64 = "xrun --target=x86_64-mycelium.json"

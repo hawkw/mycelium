@@ -38,3 +38,12 @@ cargo xrun --target=x86_64-mycelium-kernel.json
 of course [QEMU] needs to be installed for this.
 
 [QEMU]: https://www.qemu.org/
+
+### cargo aliases
+
+to make life easier, i've also added some cargo aliases:
+
+- `cargo dev-env` installs the required dev environment tools (currently
+  `cargo-xbuild` and `bootimage`)
+- `cargo run-x64` is an alias for `cargo xrun
+  --target=x86_64-mycelium-kernel.json` (so you don't need to type all that)
