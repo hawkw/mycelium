@@ -15,7 +15,22 @@ jobs:
       uses: actions-rs/cargo@v1.0.1
       with:
         command: test
-  clippy:  
+
+  x64_image:
+    name: "x86_64 bootimage"
+    needs: build
+    steps:
+      - uses: actions/checkout@v1
+      - name: install dev env
+        uses: actions-rs/cargo@v1.0.1
+        with:
+          command: dev-env
+      - name: build boot image
+        uses: actions-rs/cargo@v1.0.1
+        with:
+          command: cargo bootimage --target=x86_64-mycelium.json
+
+  clippy:
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -23,4 +38,4 @@ jobs:
     - name: rust-clippy-check
       uses: actions-rs/clippy-check@v1.0.5
       with:
-        token: ${{ secrets.GITHUB_TOKEN }} 
+        token: ${{ secrets.GITHUB_TOKEN }}
