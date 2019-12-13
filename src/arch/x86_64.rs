@@ -24,6 +24,7 @@ impl BootInfo for X64BootInfo {
 }
 
 #[no_mangle]
+#[cfg(not(test))]
 pub extern "C" fn _start() -> ! {
     // TODO(eliza): unpack bootinfo!
     let bootinfo = X64BootInfo { _p: () };
