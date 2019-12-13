@@ -18,6 +18,6 @@ where
 }
 
 pub fn handle_panic(writer: &mut impl Write, info: &core::panic::PanicInfo) -> ! {
-    writeln!(writer, "something went very wrong: {}", info).unwrap();
+    writeln!(writer, "something went very wrong:\n{}", info).unwrap();
     loop {}
 }
