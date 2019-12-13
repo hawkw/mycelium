@@ -1,7 +1,4 @@
-use core::{
-    any::{Any, TypeId},
-    fmt,
-};
+use core::{any::TypeId, fmt};
 
 /// `Error` is a trait representing the basic expectations for error values,
 /// i.e., values of type `E` in `Result<T, E>`.

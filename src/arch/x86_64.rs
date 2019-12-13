@@ -1,7 +1,5 @@
-use hal_core::{boot::BootInfo, Architecture};
+use hal_core::boot::BootInfo;
 use hal_x86_64::{vga, X64};
-
-static HELLO: &[u8] = b"Hello World!";
 
 #[derive(Debug)]
 pub struct X64BootInfo {

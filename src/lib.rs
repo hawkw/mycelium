@@ -12,11 +12,12 @@ where
         "hello from mycelium {} (on {})",
         env!("CARGO_PKG_VERSION"),
         A::NAME
-    );
+    )
+    .unwrap();
     loop {}
 }
 
 pub fn handle_panic(writer: &mut impl Write, info: &core::panic::PanicInfo) -> ! {
-    writeln!(writer, "something went very wrong: {}", info);
+    writeln!(writer, "something went very wrong: {}", info).unwrap();
     loop {}
 }
