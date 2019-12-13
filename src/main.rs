@@ -1,8 +1,8 @@
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), no_main)]
+#![cfg_attr(target_os = "none", no_std)]
+#![cfg_attr(target_os = "none", no_main)]
 pub mod arch;
 
-#[cfg(test)]
+#[cfg(not(target_os = "none"))]
 fn main() {
     unreachable!()
 }

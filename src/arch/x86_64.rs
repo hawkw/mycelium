@@ -24,7 +24,7 @@ impl BootInfo for X64BootInfo {
 }
 
 #[no_mangle]
-#[cfg(not(test))]
+#[cfg(target_os = "none")]
 pub extern "C" fn _start() -> ! {
     // TODO(eliza): unpack bootinfo!
     let bootinfo = X64BootInfo { _p: () };
@@ -32,7 +32,7 @@ pub extern "C" fn _start() -> ! {
 }
 
 #[panic_handler]
-#[cfg(not(test))]
+#[cfg(target_os = "none")]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let mut vga = vga::writer();
     vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
