@@ -7,12 +7,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
-    - uses: actions/checkout@v1
-    - name: "install dev env"
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rust-src
+    - name: install dev env
       uses: actions-rs/cargo@v1.0.1
       with:
         command: dev-env
-    - name: "x86_64 boot image"
+    - name: x86_64 boot image
       uses: actions-rs/cargo@v1.0.1
       with:
         command: bootimage
