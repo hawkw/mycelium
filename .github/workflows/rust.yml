@@ -12,7 +12,7 @@ jobs:
       with:
         profile: minimal
         toolchain: nightly
-        components: rust-src
+        components: rust-src, llvm-tools-preview
     - name: install dev env
       uses: actions-rs/cargo@v1.0.1
       with:
