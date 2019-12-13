@@ -6,13 +6,15 @@ someday this will do stuff
 
 to build mycelium for x86_64, you need the following:
 
-- the `cargo xbuild` and `bootimage` tools
 - a nightly rust compiler
+- the `cargo xbuild` and `bootimage` tools
+- the `rust-src` and `llvm-tools-preview` Rustup components
 
 you can install these tools with:
 
 ```shell
 cargo install cargo-xbuild bootimage
+rustup component add rust-src llvm-tools-preview
 ```
 
 then, you can build mycelium with:
