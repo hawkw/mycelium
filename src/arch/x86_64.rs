@@ -33,6 +33,7 @@ pub extern "C" fn _start() -> ! {
 }
 
 #[panic_handler]
+#[cfg(not(test))]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let mut vga = vga::writer();
     vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
