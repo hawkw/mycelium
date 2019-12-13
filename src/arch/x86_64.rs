@@ -59,7 +59,7 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn bootloader_name(&self) -> &str {
-        "rust-bootinfo"
+        "rust-bootloader"
     }
 }
 
