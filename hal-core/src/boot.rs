@@ -12,6 +12,12 @@ pub trait BootInfo {
     /// Returns a writer for printing early kernel diagnostics
     fn writer(&self) -> Self::Writer;
 
+    fn bootloader_name(&self) -> &str;
+
+    fn bootloader_version(&self) -> Option<&str> {
+        None
+    }
+
     // TODO(eliza): figure out a non-bad way to represent boot command lines (is
     // it reasonable to convert them to rust strs when we barely have an operating
     // system???)
