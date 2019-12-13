@@ -11,11 +11,11 @@ lazy_static::lazy_static! {
 }
 
 pub fn writer() -> Writer {
-    Writer(BUFFER.lock())
+    Writer(())
 }
 
 #[derive(Debug)]
-pub struct Writer(spin::MutexGuard<'static, Buffer>);
+pub struct Writer(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -163,13 +163,13 @@ impl fmt::Debug for Buffer {
 
 impl Writer {
     pub fn set_color(&mut self, color: ColorSpec) {
-        self.0.set_color(color);
+        BUFFER.lock().set_color(color);
     }
 }
 
 impl fmt::Write for Writer {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.0.write(s);
+        BUFFER.lock().write(s);
         Ok(())
     }
 }
