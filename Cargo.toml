@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "alloc",
     "util",
     "hal-core",
     "hal-x86_64",
