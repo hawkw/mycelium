@@ -6,6 +6,7 @@ use hal_core::{Address, Architecture};
 pub mod vga;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
 pub struct PAddr(u64);
 
 #[derive(Debug)]
