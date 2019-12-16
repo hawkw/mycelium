@@ -101,7 +101,6 @@ impl Buffer {
     }
 
     fn write_char(&mut self, ch: u8) {
-        // TODO(eliza): assert char is ascii?
         if ch == b'\n' {
             self.newline();
             return;
