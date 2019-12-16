@@ -1,9 +1,9 @@
 use crate::Architecture;
-
+use core::fmt;
 pub mod page;
 
 /// A cross-platform representation of a memory region.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Region<A: Architecture> {
     base: A::PAddr,
     // TODO(eliza): should regions be stored as (start -> end) or as
@@ -12,7 +12,7 @@ pub struct Region<A: Architecture> {
     kind: RegionKind,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 #[repr(C)]
 pub struct RegionKind(KindInner);
 
@@ -47,6 +47,10 @@ enum KindInner {
 }
 
 impl<A: Architecture> Region<A> {
+    pub fn new(base: A::PAddr, size: usize, kind: RegionKind) -> Self {
+        Self { base, size, kind }
+    }
+
     /// Returns the base address of the memory region
     pub fn base_addr(&self) -> A::PAddr {
         self.base
@@ -72,16 +76,27 @@ impl<A: Architecture> Region<A> {
         self.kind
     }
 
-    pub fn new(base: A::PAddr, size: usize, kind: RegionKind) -> Self {
-        Self { base, size, kind }
-    }
-
     pub fn page_range<S: page::Size>(&self) -> page::PageRange<A::PAddr, S> {
         unimplemented!("eliza")
     }
 }
 
+impl<A: Architecture> fmt::Debug for Region<A>
+where
+    A::PAddr: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Region")
+            .field("base", &self.base)
+            .field("size", &self.size)
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
 impl RegionKind {
+    pub const UNKNOWN: Self = Self(KindInner::Unknown);
+
     /// Free memory
     pub const FREE: Self = Self(KindInner::Free);
 
@@ -111,4 +126,20 @@ impl RegionKind {
 
     /// Memory used for a page table.
     pub const PAGE_TABLE: Self = Self(KindInner::PageTable);
+}
+
+impl fmt::Debug for RegionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            &RegionKind::FREE => f.pad("FREE"),
+            &RegionKind::USED => f.pad("USED"),
+            &RegionKind::BOOT => f.pad("BOOT"),
+            &RegionKind::BOOT_RECLAIMABLE => f.pad("BOOT_RECLAIMABLE"),
+            &RegionKind::BAD => f.pad("BAD T_T"),
+            &RegionKind::KERNEL => f.pad("KERNEL"),
+            &RegionKind::KERNEL_STACK => f.pad("KERNEL_STACK"),
+            &RegionKind::PAGE_TABLE => f.pad("PAGE_TABLE"),
+            _ => f.pad("UNKNOWN ?_?"),
+        }
+    }
 }
