@@ -17,6 +17,8 @@ mod causal {
         data: UnsafeCell<T>,
     }
 
+    unsafe impl<T> Sync for CausalCell<T> {}
+
     /// Deferred causal cell check.
     ///
     /// When not running under `loom`, this does nothing.
@@ -29,7 +31,7 @@ mod causal {
     impl<T> CausalCell<T> {
         /// Construct a new instance of `CausalCell` which will wrap the specified
         /// value.
-        pub fn new(data: T) -> CausalCell<T> {
+        pub const fn new(data: T) -> CausalCell<T> {
             Self {
                 data: UnsafeCell::new(data),
             }

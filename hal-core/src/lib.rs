@@ -1,6 +1,6 @@
-#![no_std]
+#![cfg_attr(target_os = "none", no_std)]
 use core::ops;
-mod boot;
+pub mod boot;
 pub mod interrupt;
 pub mod mem;
 
