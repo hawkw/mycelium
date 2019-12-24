@@ -1,3 +1,4 @@
+use super::HeaderType;
 use core::ptr;
 
 pub type StandardDevice = Device<StandardDetails>;
@@ -19,7 +20,7 @@ pub struct Header {
     status: u16,
     revision_id: u8,
     prog_if: u8,
-    class: Class,
+    class: DeviceClasses,
     cache_line_size: u8,
     latency_timer: u8,
     header_type: HeaderType,
@@ -58,11 +59,6 @@ pub struct CardBusDetails {
     // WIP
 }
 
-
-#[derive(Debug, Copy)]
-#[repr(transparent)]
-pub struct HeaderType(u8);
-
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeviceId {
@@ -79,7 +75,7 @@ pub struct SubsystemId {
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct Class {
+struct DeviceClasses {
     subclass: u8,
     class: u8,
 }
@@ -88,42 +84,17 @@ pub struct Class {
 #[repr(transparent)]
 pub struct BistReg(u8);
 
-impl HeaderType {
-    const MF_BIT: u8 = 0b1000_0000;
-    const TYPE_MASK: u8 = 0b0111_1111;
-    const TYPE_STANDARD: u8 = 0x00h;
-    const TYPE_PCI_BRIDGE: u8 = 0x01h;
-    const TYPE_CARDBUS_BRIDGE: u8 = 0x02h;
-
-    pub fn is_standard(self) -> bool {
-        (self.0 & Self::TYPE_MASK) == Self::TYPE_STANDARD
-    }
-
-    pub fn is_pci_bridge(self) -> bool {
-        (self.0 & Self::TYPE_MASK) == Self::TYPE_PCI_BRIDGE
-    }
-
-    pub fn is_cardbus_bridge(self) -> bool {
-        (self.0 & Self::TYPE_MASK) == Self::TYPE_CARDBUS_BRIDGE
-    }
-
-    pub fn is_multifunction(self) -> bool {
-        self.0 & Self::MF_BIT == 1
-    }
-}
-
-
 impl BistReg {
-    const CAPABLE_BIT: u8 = 0b1000_000;
-    const START_BIT: u8 = 0b0100_000;
+    const CAPABLE_BIT: u8 = 0b1000_0000;
+    const START_BIT: u8 = 0b0100_0000;
     const COMPLETION_MASK: u8 = 0b0000_0111;
 
     pub fn is_bist_capable(&self) -> bool {
-        (*self.0) & Self::CAPABLE_BIT == 1
+        (self.0) & Self::CAPABLE_BIT != 0
     }
 
     pub fn start_bist(&mut self) {
-        let val = (*self.0) | Self::START_BIT;
+        let val = (self.0) | Self::START_BIT;
         let ptr = (&mut self.0) as *mut u8;
         unsafe {
             ptr::write_volatile(ptr, val);
@@ -146,7 +117,6 @@ impl CommandReg {
         ptr::write_volatile((&mut self.0) as *mut u16, command)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
