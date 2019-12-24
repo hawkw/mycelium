@@ -197,6 +197,14 @@ class_enum! {
     }
 }
 
+class_enum! {
+    pub enum Memory<NoProgIf> {
+        Ram = 0x00,
+        Flash = 0x01,
+        Other = 0x80,
+    }
+}
+
 impl TryFrom<(u8, u8, u8)> for Class {
     type Error = error::UnexpectedValue<u8>;
     fn try_from((class, subclass, prog_if): (u8, u8, u8)) -> Result<Self, Self::Error> {
