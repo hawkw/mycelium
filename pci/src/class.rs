@@ -2,16 +2,21 @@ use crate::error;
 use core::convert::TryFrom;
 
 macro_rules! class_enum {
-    (pub enum $name:ident<NoProgIf> {
-        $(
-            // $($m:meta)*
-            $variant:ident = $value:expr
-        ),+
-        $(,)?
-    }) => {
+    (
+        $(#[$m:meta])*
+        $v:vis enum $name:ident<NoProgIf> {
+            $(
+                $(#[$mm:meta])*
+                $variant:ident = $value:expr
+            ),+
+            $(,)?
+        }
+    ) => {
         class_enum! {
-            pub enum $name {
+            $(#[$m])*
+            $v enum $name {
                 $(
+                    $(#[$mm])*
                     $variant = $value
                 ),+
             }
@@ -28,16 +33,22 @@ macro_rules! class_enum {
             }
         }
     };
-    (pub enum $name:ident<$kind:ident, $rest:ty> {
-        $(
-            // $($m:meta)*
-            $variant:ident $(($next:ty))? = $value:expr
-        ),+
-        $(,)?
-    }) => {
-        #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-        pub enum $name {
+
+    (
+        $(#[$m:meta])*
+        $v:vis enum $name:ident<$kind:ident, $rest:ty> {
             $(
+                $(#[$mm:meta])*
+                $variant:ident $(($next:ty))? = $value:expr
+            ),+
+            $(,)?
+        }
+    ) => {
+        $(#[$m])*
+        #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+        $v enum $name {
+            $(
+                $(#[$mm])*
                 $variant $( ($next) )?
             ),+
         }
@@ -55,53 +66,33 @@ macro_rules! class_enum {
 
         class_enum!{
             enum $kind {
-                // $($m:meta)*
                 $(
                     $variant = $value
                 ),+
             }
         }
     };
-    (pub enum $name:ident {
-        $(
-            // $($m:meta)*
-            $variant:ident = $value:expr
-        ),+
-        $(,)?
-    }) => {
 
+    (
+        $(#[$m:meta])*
+        $v:vis enum $name:ident {
+            $(
+                $(#[$mm:meta])*
+                $variant:ident = $value:expr
+            ),+
+            $(,)?
+        }
+    ) => {
+        $(#[$m])*
         #[derive(Copy, Clone, Debug, PartialEq, Eq)]
         #[repr(u8)]
-        pub enum $name {
+        $v enum $name {
             $(
-                // $($m:meta)*
+                $(#[$mm])*
                 $variant = $value
             ),+
         }
 
-        class_enum! { @tryfrom $name, $($variant = $value),+ }
-    };
-
-    (enum $name:ident {
-        $(
-            // $($m:meta)*
-            $variant:ident = $value:expr
-        ),+
-        $(,)?
-    }) => {
-        #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-        #[repr(u8)]
-        enum $name {
-            $(
-                // $($m:meta)*
-                $variant = $value
-            ),+
-        }
-        class_enum! { @tryfrom $name, $($variant = $value),+ }
-    };
-    (@tryfrom $name:ident, $(
-        $variant:ident = $value:expr
-    ),+ ) => {
         impl TryFrom<u8> for $name {
             type Error = error::UnexpectedValue<u8>;
             fn try_from(num: u8) -> Result<Self, Self::Error> {
@@ -113,7 +104,7 @@ macro_rules! class_enum {
                 }
             }
         }
-    }
+    };
 }
 
 class_enum! {
