@@ -121,8 +121,8 @@ class_enum! {
         Unclassified(Unclassified) = 0x00,
         MassStorage(MassStorage) = 0x01,
         Network(Network) = 0x02,
-        Display = 0x03,
-        Multimedia = 0x04,
+        Display(Display) = 0x03,
+        Multimedia(Multimedia) = 0x04,
         Memory = 0x05,
         Bridge = 0x06,
         SimpleComm = 0x07,
@@ -174,6 +174,25 @@ class_enum! {
         Picmig2_14 = 0x06,
         Infiniband = 0x07,
         Fabric = 0x08,
+        Other = 0x80,
+    }
+}
+
+class_enum! {
+    pub enum Display<DisplayValue, u8> {
+        VgaCompatible(iface::VgaCompatible) = 0x00,
+        Xga = 0x01,
+        ThreeD = 0x02,
+        Other = 0x80,
+    }
+}
+
+class_enum! {
+    pub enum Multimedia<NoProgIf> {
+        MultimediaVideo = 0x00,
+        MultimediaAudio = 0x01,
+        ComputerTelephony = 0x02,
+        Audio = 0x03,
         Other = 0x80,
     }
 }
@@ -250,6 +269,13 @@ pub mod iface {
         pub enum Nvm {
             Nvmhci = 0x01,
             NvmExpress = 0x02,
+        }
+    }
+
+    class_enum! {
+        pub enum VgaCompatible {
+            VgaController = 0x00,
+            Compat8514 = 0x01,
         }
     }
 }
