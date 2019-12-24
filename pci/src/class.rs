@@ -120,7 +120,7 @@ class_enum! {
     pub enum Class<ClassValue, (u8, u8)> {
         Unclassified(Unclassified) = 0x00,
         MassStorage(MassStorage) = 0x01,
-        Network = 0x02,
+        Network(Network) = 0x02,
         Display = 0x03,
         Multimedia = 0x04,
         Memory = 0x05,
@@ -160,6 +160,21 @@ class_enum! {
         SerialAttachedScsi(iface::SerialAttachedScsi) = 0x07,
         NonVolatileMem(iface::Nvm) = 0x08,
         Other = 0x80
+    }
+}
+
+class_enum! {
+    pub enum Network<NoProgIf> {
+        Ethernet = 0x00,
+        TokenRing = 0x01,
+        Fddi = 0x02,
+        Atm = 0x03,
+        Isdn = 0x04,
+        WorldFip = 0x05,
+        Picmig2_14 = 0x06,
+        Infiniband = 0x07,
+        Fabric = 0x08,
+        Other = 0x80,
     }
 }
 
