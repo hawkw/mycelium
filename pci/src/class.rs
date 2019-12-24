@@ -173,16 +173,39 @@ impl TryFrom<(u8, u8, u8)> for Class {
 pub mod iface {
     use super::*;
 
-    class_enum! {
-        pub enum Ide {
-            IsaOnly = 0x00,
-            PciOnly = 0x05,
-            IsaWithPci = 0x0A,
-            PciWithIsa = 0x0F,
-            IsaOnlyBusMastering = 0x80,
-            PciOnlyBusMastering = 0x85,
-            IsaWithPciBusMastering = 0x8A,
-            PciWithIsaBusMastering = 0x8F
+    #[derive(Debug, Eq, PartialEq, Copy, Clone)]
+    #[repr(transparent)]
+    pub struct Ide(u8);
+
+    impl Ide {
+        const PCI_NATIVE: u8 = 0b0101;
+        const SWITCHABLE: u8 = 0b1010;
+        const BUS_MASTERING: u8 = 0x8;
+
+        pub fn supports_bus_mastering(&self) -> bool {
+            self.0 & Self::BUS_MASTERING == Self::BUS_MASTERING
+        }
+
+        pub fn is_switchable(&self) -> bool {
+            self.0 & Self::SWITCHABLE == Self::SWITCHABLE
+        }
+
+        pub fn is_isa_native(&self) -> bool {
+            !self.is_pci_native()
+        }
+
+        pub fn is_pci_native(&self) -> bool {
+            self.0 & Self::PCI_NATIVE == Self::PCI_NATIVE
+        }
+    }
+
+    impl TryFrom<u8> for Ide {
+        type Error = error::UnexpectedValue<u8>;
+        fn try_from(u: u8) -> Result<Self, Self::Error> {
+            if u > 0x8f {
+                return Err(error::unexpected(u));
+            }
+            Ok(Self(u))
         }
     }
 
@@ -219,13 +242,14 @@ pub mod iface {
 #[cfg(test)]
 mod test {
     use super::*;
+
     #[test]
     fn test_parsing() {
-        let pci_mass_storage_ide = (0x01, 0x01, 0x05);
-        let class = Class::try_from(pci_mass_storage_ide);
+        let mass_storage_sata_achi = (0x01, 0x06, 0x01);
+        let class = Class::try_from(mass_storage_sata_achi);
         assert_eq!(
             class,
-            Ok(Class::MassStorage(MassStorage::Ide(IdeIface::PciOnly))),
+            Ok(Class::MassStorage(MassStorage::Sata(iface::Sata::Achi1))),
         );
     }
 }
