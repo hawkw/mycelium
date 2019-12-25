@@ -76,8 +76,13 @@ impl<A: Architecture> Region<A> {
         self.kind
     }
 
-    pub fn page_range<S: page::Size>(&self) -> page::PageRange<A::PAddr, S> {
-        unimplemented!("eliza")
+    pub fn page_range<S: page::Size>(
+        &self,
+    ) -> Result<page::PageRange<A::PAddr, S>, page::NotAligned<S>> {
+        use page::Page;
+        let page_1 = Page::starting_at(self.base)?;
+        let page_n = Page::containing(self.end_addr());
+        Ok(page_1.range_inclusive(page_n))
     }
 }
 

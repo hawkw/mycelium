@@ -12,6 +12,8 @@ pub trait Architecture {
 
     type InterruptCtrl: interrupt::Control + 'static;
 
+    type MinPageSize: mem::page::Size;
+
     /// The name of the architecture, as a string.
     const NAME: &'static str;
 
@@ -70,6 +72,11 @@ pub trait Address:
     /// Returns `true` if `self` is aligned on the specified alignment.
     fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
         self.align_down(align) == self
+    }
+
+    /// Returns `true` if `self` is aligned on the specified page size.
+    fn is_page_aligned<P: mem::page::Size>(self) -> bool {
+        self.is_aligned(P::SIZE)
     }
 
     fn as_ptr(&self) -> *const ();

@@ -17,7 +17,16 @@ pub struct MutexGuard<'a, T> {
 }
 
 impl<T> Mutex<T> {
+    #[cfg(any(test, feature = "loom"))]
     pub fn new(data: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+            data: CausalCell::new(data),
+        }
+    }
+
+    #[cfg(all(not(test), not(feature = "loom")))]
+    pub const fn new(data: T) -> Self {
         Self {
             locked: AtomicBool::new(false),
             data: CausalCell::new(data),

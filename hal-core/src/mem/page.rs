@@ -13,7 +13,8 @@ pub trait Size: Copy + PartialEq + Eq {
 /// This trait is unsafe to implement, as implementations are responsible for
 /// guaranteeing that allocated pages are unique, and may not be allocated by
 /// another page allocator.
-pub unsafe trait Alloc<A: Architecture, S: Size> {
+pub unsafe trait Alloc<S: Size> {
+    type Arch: Architecture;
     /// Allocate a single page.
     ///
     /// Note that an implementation of this method is provided as long as an
@@ -22,7 +23,7 @@ pub unsafe trait Alloc<A: Architecture, S: Size> {
     /// # Returns
     /// - `Ok(Page)` if a page was successfully allocated.
     /// - `Err` if no more pages can be allocated by this allocator.
-    fn alloc(&mut self) -> Result<Page<A::PAddr, S>, AllocErr> {
+    fn alloc(&mut self) -> Result<Page<<Self::Arch as Architecture>::PAddr, S>, AllocErr> {
         self.alloc_range(1).map(|r| r.start())
     }
 
@@ -31,7 +32,10 @@ pub unsafe trait Alloc<A: Architecture, S: Size> {
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&mut self, len: usize) -> Result<PageRange<A::PAddr, S>, AllocErr>;
+    fn alloc_range(
+        &mut self,
+        len: usize,
+    ) -> Result<PageRange<<Self::Arch as Architecture>::PAddr, S>, AllocErr>;
 
     /// Deallocate a single page.
     ///
@@ -41,7 +45,10 @@ pub unsafe trait Alloc<A: Architecture, S: Size> {
     /// # Returns
     /// - `Ok(())` if the page was successfully deallocated.
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc(&mut self, page: Page<A::PAddr, S>) -> Result<(), AllocErr> {
+    fn dealloc(
+        &mut self,
+        page: Page<<Self::Arch as Architecture>::PAddr, S>,
+    ) -> Result<(), AllocErr> {
         self.dealloc_range(page.range_inclusive(page))
     }
 
@@ -50,7 +57,10 @@ pub unsafe trait Alloc<A: Architecture, S: Size> {
     /// # Returns
     /// - `Ok(())` if a range of pages was successfully deallocated
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc_range(&self, range: PageRange<A::PAddr, S>) -> Result<(), AllocErr>;
+    fn dealloc_range(
+        &self,
+        range: PageRange<<Self::Arch as Architecture>::PAddr, S>,
+    ) -> Result<(), AllocErr>;
 }
 
 /// A memory page.
@@ -186,6 +196,14 @@ impl<A: fmt::Debug, S: Size> fmt::Debug for Page<A, S> {
         f.debug_struct("Page")
             .field("base", &self.base)
             .field("size", &S::SIZE)
+            .finish()
+    }
+}
+
+impl<S> fmt::Debug for NotAligned<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NotAligned")
+            .field("size", &format_args!("{}", core::any::type_name::<S>()))
             .finish()
     }
 }

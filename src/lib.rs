@@ -1,8 +1,14 @@
 #![cfg_attr(target_os = "none", no_std)]
+extern crate alloc;
 
 use core::fmt::Write;
-use hal_core::{boot::BootInfo, mem, Architecture};
+use hal_core::{boot::BootInfo, mem, Address, Architecture};
+
 mod interrupt;
+
+#[global_allocator]
+#[cfg(target_os = "none")]
+static ALLOCATOR: mycelium_alloc::LockAlloc = mycelium_alloc::LockAlloc::none();
 
 pub fn kernel_main<A>(bootinfo: &impl BootInfo<Arch = A>) -> !
 where
@@ -26,6 +32,7 @@ where
     let mut regions = 0;
     let mut free_regions = 0;
     let mut free_bytes = 0;
+    let mut largest_free: Option<mem::Region<_>> = None;
 
     log::info!("memory map:");
 
@@ -42,7 +49,21 @@ where
         if region.kind() == mem::RegionKind::FREE {
             free_regions += 1;
             free_bytes += size;
+            if region.base_addr().is_page_aligned::<A::MinPageSize>() {
+                write!(&mut writer, ", page-aligned").unwrap();
+                // if let Some(max) = largest_free.as_ref() {
+                //     if size > max.size() {
+                //         largest_free = Some(region);
+                //     }
+                // } else {
+                //     largest_free = Some(region);
+                // }
+                if largest_free.is_none() {
+                    largest_free = Some(region);
+                }
+            }
         }
+        writeln!(&mut writer, "").unwrap();
     }
 
     log::info!(
@@ -54,19 +75,30 @@ where
 
     A::init_interrupts::<interrupt::Handlers<A>, _>(bootinfo);
 
-    // if this function returns we would boot loop. Hang, instead, so the debug
-    // output can be read.
-    //
-    // eventually we'll call into a kernel main loop here...
-    #[allow(clippy::empty_loop)]
+    let largest_free = largest_free.expect("found no free memory regions!");
+    writeln!(
+        &mut writer,
+        "largest free memory region: {:?}",
+        largest_free,
+    )
+    .unwrap();
+
+    let bump_pg = largest_free
+        .page_range::<A::MinPageSize>()
+        .expect("region was already checked for alignment")
+        .next()
+        .unwrap();
+
+    writeln!(&mut writer, "bump allocator page {:?}", bump_pg,).unwrap();
+    // ALLOCATOR.set_allocator(bump.as_dyn_alloc());
+
+    // let a_vec = alloc::vec![1, 2, 3];
+    // writeln!(&mut writer, "allocated a vec: {:?}", a_vec).unwrap();
+
     loop {}
 }
 
 pub fn handle_panic(writer: &mut impl Write, info: &core::panic::PanicInfo) -> ! {
-    writeln!(writer, "something went very wrong:\n{}", info).unwrap();
-
-    // we can't panic or make the thread sleep here, as we are in the panic
-    // handler!
-    #[allow(clippy::empty_loop)]
+    writeln!(writer, "\nsomething went very wrong:\n{}", info).unwrap();
     loop {}
 }

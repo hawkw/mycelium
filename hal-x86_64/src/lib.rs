@@ -13,6 +13,7 @@ use hal_core::{Address, Architecture};
 pub mod cpu;
 pub mod interrupt;
 pub mod log;
+pub mod page;
 pub mod segment;
 pub mod serial;
 pub mod vga;
@@ -31,6 +32,7 @@ pub struct X64;
 impl Architecture for X64 {
     type PAddr = PAddr;
     type VAddr = VAddr;
+    type MinPageSize = page::Size4Kb;
     const NAME: &'static str = "x86_64";
     type InterruptCtrl = crate::interrupt::Idt;
 
@@ -115,24 +117,27 @@ impl Address for PAddr {
         self.0 as usize
     }
 
-    fn align_up<A: Into<usize>>(self, _align: A) -> Self {
-        unimplemented!("eliza")
+    fn align_up<A: Into<usize>>(self, align: A) -> Self {
+        let align = align.into() as u64;
+        assert!(align.is_power_of_two());
+        let mask = align - 1;
+        if self.0 & mask == 0 {
+            return self;
+        }
+        Self((self.0 | mask) + 1)
     }
 
     /// Aligns `self` down to `align`.
     ///
     /// The specified alignment must be a power of two.
-    fn align_down<A: Into<usize>>(self, _align: A) -> Self {
-        unimplemented!("eliza")
-    }
-
-    /// Returns `true` if `self` is aligned on the specified alignment.
-    fn is_aligned<A: Into<usize>>(self, _align: A) -> bool {
-        unimplemented!("eliza")
+    fn align_down<A: Into<usize>>(self, align: A) -> Self {
+        let align = align.into() as u64;
+        assert!(align.is_power_of_two());
+        Self(self.0 & !(align - 1))
     }
 
     fn as_ptr(&self) -> *const () {
-        unimplemented!("eliza")
+        self.0 as *const _
     }
 }
 
