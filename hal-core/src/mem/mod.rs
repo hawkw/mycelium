@@ -130,15 +130,15 @@ impl RegionKind {
 
 impl fmt::Debug for RegionKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            &RegionKind::FREE => f.pad("FREE"),
-            &RegionKind::USED => f.pad("USED"),
-            &RegionKind::BOOT => f.pad("BOOT"),
-            &RegionKind::BOOT_RECLAIMABLE => f.pad("BOOT_RECLAIMABLE"),
-            &RegionKind::BAD => f.pad("BAD T_T"),
-            &RegionKind::KERNEL => f.pad("KERNEL"),
-            &RegionKind::KERNEL_STACK => f.pad("KERNEL_STACK"),
-            &RegionKind::PAGE_TABLE => f.pad("PAGE_TABLE"),
+        match *self {
+            RegionKind::FREE => f.pad("FREE"),
+            RegionKind::USED => f.pad("USED"),
+            RegionKind::BOOT => f.pad("BOOT"),
+            RegionKind::BOOT_RECLAIMABLE => f.pad("BOOT_RECLAIMABLE"),
+            RegionKind::BAD => f.pad("BAD T_T"),
+            RegionKind::KERNEL => f.pad("KERNEL"),
+            RegionKind::KERNEL_STACK => f.pad("KERNEL_STACK"),
+            RegionKind::PAGE_TABLE => f.pad("PAGE_TABLE"),
             _ => f.pad("UNKNOWN ?_?"),
         }
     }

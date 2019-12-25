@@ -43,7 +43,7 @@ pub trait Address:
         if offset > 0 {
             self + offset as usize
         } else {
-            let offset = offset * -1;
+            let offset = -offset;
             self - offset as usize
         }
     }
@@ -51,7 +51,7 @@ pub trait Address:
     /// Returns the difference between `self` and `other`.
     fn difference(self, other: Self) -> isize {
         if self > other {
-            (self.as_usize() - other.as_usize()) as isize * -1
+            -(self.as_usize() as isize - other.as_usize() as isize)
         } else {
             (other.as_usize() - self.as_usize()) as isize
         }
