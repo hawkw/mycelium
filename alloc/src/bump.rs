@@ -108,7 +108,7 @@ impl BumpPage {
         let ptr = top;
         unsafe {
             ptr::write(
-                ptr as *mut Header,
+                ptr as *mut _ as *mut Header,
                 Header {
                     top,
                     end,
