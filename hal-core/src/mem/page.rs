@@ -192,6 +192,8 @@ impl<A: fmt::Debug, S: Size> fmt::Debug for Page<A, S> {
 
 // === impl PageRange ===
 
+// A PageRange has a minimum size of 1, this will never be empty.
+#[allow(clippy::len_without_is_empty)]
 impl<A: Address, S: Size> PageRange<A, S> {
     pub fn start(&self) -> Page<A, S> {
         self.start

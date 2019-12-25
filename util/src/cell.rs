@@ -131,9 +131,7 @@ mod causal {
         /// Panic if the CausaalCell access was invalid.
         ///
         /// When not running under `loom`, this does nothing.
-        pub fn check(mut self) {
-            self = CausalCheck::default();
-        }
+        pub fn check(self) {}
 
         /// Merge this check with another check
         ///

@@ -8,9 +8,20 @@ pub trait Control {
     type Vector;
 
     /// Disable interrupts.
+    ///
+    /// # Safety
+    ///
+    /// This may cause a fault if called when interrupts are already disabled
+    /// (depending on the platform). It does not guarantee that interrupts will
+    /// ever be unmasked.
     unsafe fn disable_irq(&mut self);
 
     /// Enable interrupts.
+    ///
+    /// # Safety
+    ///
+    /// This may cause a fault if called when interrupts are already enabled
+    /// (depending on the platform).
     unsafe fn enable_irq(&mut self);
 
     /// Returns `true` if interrupts are enabled.

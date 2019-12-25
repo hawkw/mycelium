@@ -88,19 +88,19 @@ impl Address for PAddr {
         self.0 as usize
     }
 
-    fn align_up<A: Into<usize>>(self, align: A) -> Self {
+    fn align_up<A: Into<usize>>(self, _align: A) -> Self {
         unimplemented!("eliza")
     }
 
     /// Aligns `self` down to `align`.
     ///
     /// The specified alignment must be a power of two.
-    fn align_down<A: Into<usize>>(self, align: A) -> Self {
+    fn align_down<A: Into<usize>>(self, _align: A) -> Self {
         unimplemented!("eliza")
     }
 
     /// Returns `true` if `self` is aligned on the specified alignment.
-    fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
+    fn is_aligned<A: Into<usize>>(self, _align: A) -> bool {
         unimplemented!("eliza")
     }
 

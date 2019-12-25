@@ -1,4 +1,5 @@
 #![cfg_attr(target_os = "none", no_std)]
+
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem, Architecture};
 
@@ -46,10 +47,20 @@ where
         regions, free_regions, free_bytes,
     )
     .unwrap();
+
+    // if this function returns we would boot loop. Hang, instead, so the debug
+    // output can be read.
+    //
+    // eventually we'll call into a kernel main loop here...
+    #[allow(clippy::empty_loop)]
     loop {}
 }
 
 pub fn handle_panic(writer: &mut impl Write, info: &core::panic::PanicInfo) -> ! {
     writeln!(writer, "something went very wrong:\n{}", info).unwrap();
+
+    // we can't panic or make the thread sleep here, as we are in the panic
+    // handler!
+    #[allow(clippy::empty_loop)]
     loop {}
 }

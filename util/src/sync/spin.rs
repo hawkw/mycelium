@@ -25,7 +25,7 @@ impl<T> Mutex<T> {
     }
 
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        if self.locked.compare_and_swap(false, true, Ordering::Acquire) == false {
+        if !self.locked.compare_and_swap(false, true, Ordering::Acquire) {
             Some(MutexGuard { mutex: self })
         } else {
             None
@@ -33,7 +33,7 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        while self.locked.compare_and_swap(false, true, Ordering::Acquire) != false {
+        while self.locked.compare_and_swap(false, true, Ordering::Acquire) {
             while self.locked.load(Ordering::Relaxed) {
                 spin_loop_hint();
             }
