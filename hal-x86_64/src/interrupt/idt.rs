@@ -1,9 +1,15 @@
 use crate::{cpu, segment};
 use core::marker::PhantomData;
 
+#[repr(C)]
+#[repr(align(16))]
+pub struct Idt {
+    descriptors: [Descriptor; Self::NUM_VECTORS],
+}
+
 #[derive(Debug, Eq, PartialEq)]
 #[repr(C)]
-pub struct Descriptor<F> {
+pub struct Descriptor<T = ()> {
     offset_low: u16,
     pub segment: segment::Selector,
     ist_offset: u16,
@@ -11,14 +17,14 @@ pub struct Descriptor<F> {
     offset_mid: u16,
     offset_hi: u32,
     _zero: u32,
-    _f: PhantomData<F>,
+    _f: PhantomData<Isr<T>>,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
 pub struct Attrs(u8);
 
-impl<F> Descriptor<F> {
+impl<T> Descriptor<T> {
     pub const fn null() -> Self {
         Self {
             offset_low: 0,
@@ -100,5 +106,20 @@ impl Attrs {
         let ring = (ring as u8) << Self::RING_SHIFT;
         self.0 &= !Self::RING_BITS | ring;
         self
+    }
+}
+
+impl Idt {
+    const NUM_VECTORS: usize = 256;
+
+    pub const fn new() -> Self {
+        Self {
+            descriptors: [Descriptor::null(); Self::NUM_VECTORS],
+        }
+    }
+
+    pub fn load(&'static self) {
+        let ptr = crate::cpu::DtablePtr::new(self);
+        unsafe { asm!("lidt ($0)" :: "r" (&ptr) : "memory") }
     }
 }

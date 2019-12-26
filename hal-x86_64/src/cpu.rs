@@ -1,3 +1,5 @@
+use core::mem;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Ring {
@@ -15,6 +17,24 @@ impl Ring {
             0b10 => Ring::Ring2,
             0b11 => Ring::Ring3,
             bits => panic!("invalid ring {:#02b}", bits),
+        }
+    }
+}
+
+#[repr(C, packed)]
+pub(crate) struct DtablePtr {
+    limit: u16,
+    base: *const (),
+}
+
+impl DtablePtr {
+    pub(crate) fn new<T>(t: &'static T) -> Self {
+        let limit = (mem::size_of::<T>() - 1) as u16
+        let base = t as *const _;
+
+        Self {
+            limit,
+            base,
         }
     }
 }
