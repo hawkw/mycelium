@@ -1,28 +1,21 @@
 /// An interrupt controller for a platform.
-pub trait Control {
-    type Error;
-    /// The type of this platform's interrupt vector.
-    ///
-    /// TODO(eliza): This is *probably* always a `u8`, do we really need to have
-    /// this?
-    type Vector;
-
-    /// Disable interrupts.
+pub trait Control<I: Interrupt> {
+    /// Disable all interrupts.
     ///
     /// # Safety
     ///
     /// This may cause a fault if called when interrupts are already disabled
     /// (depending on the platform). It does not guarantee that interrupts will
     /// ever be unmasked.
-    unsafe fn disable_irq(&mut self);
+    unsafe fn disable(&mut self);
 
-    /// Enable interrupts.
+    /// Enable all interrupts.
     ///
     /// # Safety
     ///
     /// This may cause a fault if called when interrupts are already enabled
     /// (depending on the platform).
-    unsafe fn enable_irq(&mut self);
+    unsafe fn enable(&mut self);
 
     /// Returns `true` if interrupts are enabled.
     fn is_enabled(&self) -> bool;
@@ -33,13 +26,7 @@ pub trait Control {
     /// the handler; that ISR will construct an interrupt context for the
     /// handler. The ISR is responsible for entering a critical section while
     /// the handler is active.
-    fn register_handler<I>(
-        &mut self,
-        irq: &I,
-        handler: I::Handler,
-    ) -> Result<(), RegistrationError>
-    where
-        I: Interrupt<Ctrl = Self>;
+    fn register_handler(&mut self, irq: &I, handler: I::Handler) -> Result<(), RegistrationError>;
 
     /// Enter a critical section, returning a guard.
     fn enter_critical(&mut self) -> CriticalGuard<'_, Self> {
@@ -52,7 +39,6 @@ pub trait Control {
 
 /// An interrupt.
 pub trait Interrupt {
-    type Ctrl: Control + ?Sized;
     /// The type of handler for this interrupt.
     ///
     /// This should always be a function pointer; but we cannot constrain this
