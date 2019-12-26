@@ -1,6 +1,7 @@
 pub mod idt;
+pub mod vector;
 use crate::segment;
-use core::fmt;
+use core::{fmt, marker::PhantomData};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -13,6 +14,13 @@ pub type ErrorCode = u64;
 
 /// An interrupt service routine.
 pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct Interrupt<T = ()> {
+    vector: u8,
+    _t: PhantomData<Isr<T>>,
+}
 
 #[derive(Copy, Clone)]
 #[repr(transparent)]
@@ -66,6 +74,63 @@ impl fmt::Debug for Registers {
             .field("stack_ptr", &format_args!("{:#x}", self.stack_ptr))
             .field("stack_segment", &format_args!("{:#x}", self.stack_segment))
             .finish()
+    }
+}
+
+impl<T> Interrupt<T> {
+    /// Divide-by-zero interrupt (#D0)
+    pub const DIVIDE_BY_ZERO: Interrupt = Interrupt::new_untyped(0);
+
+    pub const DEBUG: Interrupt = Interrupt::new_untyped(1);
+
+    /// Non-maskable interrupt.
+    pub const NMI: Interrupt = Interrupt::new_untyped(2);
+
+    pub const BREAKPOINT: Interrupt = Interrupt::new_untyped(3);
+
+    pub const OVERFLOW: Interrupt = Interrupt::new_untyped(4);
+
+    pub const BOUND_RANGE_EXCEEDED: Interrupt = Interrupt::new_untyped(5);
+
+    pub const INVALID_OPCODE: Interrupt = Interrupt::new_untyped(6);
+
+    /// A device not available exception
+    pub const DEVICE_NOT_AVAILABLE: Interrupt = Interrupt::new_untyped(7);
+
+    // TODO(eliza): can we enforce that this diverges?
+    pub const DOUBLE_FAULT: Interrupt<ErrorCode> = Interrupt::new_untyped(8);
+
+    /// On modern CPUs, this interrupt is reserved; this error fires a general
+    /// protection fault instead.
+    const COPROCESSOR_SEGMENT_OVERRUN: Interrupt = Interrupt::new_untyped(9);
+
+    pub const INVALID_TSS: Interrupt<ErrorCode> = Interrupt::new_untyped(10);
+
+    pub const SEGMENT_NOT_PRESENT: Interrupt<ErrorCode> = Interrupt::new_untyped(11);
+
+    pub const STACK_SEGMENT_FAULT: Interrupt<ErrorCode> = Interrupt::new_untyped(12);
+
+    pub const GENERAL_PROTECTION_FAULT: Interrupt<ErrorCode> = Interrupt::new_untyped(13);
+
+    pub const PAGE_FAULT: Interrupt<PageFaultCode> = Interrupt::new_untyped(14);
+
+    pub const X87_FPU_EXCEPTION_PENDING: Interrupt = Interrupt::new_untyped(16);
+
+    pub const ALIGNMENT_CHECK: Interrupt<ErrorCode> = Interrupt::new_untyped(17);
+
+    pub const MACHINE_CHECK: Interrupt<ErrorCode> = Interrupt::new_untyped(18);
+
+    pub const SIMD_FLOATING_POINT: Interrupt = Interrupt::new_untyped(19);
+
+    pub const VIRTUALIZATION_EXCEPTION: Interrupt = Interrupt::new_untyped(20);
+
+    pub const SECURITY_EXCEPTION: Interrupt<ErrorCode> = Interrupt::new_untyped(30);
+
+    const fn new_untyped(vector: u8) -> Self {
+        Self {
+            vector,
+            _t: PhantomData,
+        }
     }
 }
 
