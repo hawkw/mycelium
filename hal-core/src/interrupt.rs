@@ -1,5 +1,12 @@
+use core::marker::PhantomData;
+
 /// An interrupt controller for a platform.
-pub trait Control<I: Interrupt> {
+pub trait Control {
+    type Vector;
+
+    // type PageFault: Interrupt<Ctrl = Self>;
+    // const PAGE_FAULT: Self::PageFault;
+
     /// Disable all interrupts.
     ///
     /// # Safety
@@ -26,12 +33,18 @@ pub trait Control<I: Interrupt> {
     /// the handler; that ISR will construct an interrupt context for the
     /// handler. The ISR is responsible for entering a critical section while
     /// the handler is active.
-    fn register_handler(&mut self, irq: &I, handler: I::Handler) -> Result<(), RegistrationError>;
+    unsafe fn register_handler_raw<I>(
+        &mut self,
+        irq: &I,
+        handler: *const (),
+    ) -> Result<(), RegistrationError>
+    where
+        I: Interrupt<Ctrl = Self>;
 
     /// Enter a critical section, returning a guard.
     fn enter_critical(&mut self) -> CriticalGuard<'_, Self> {
         unsafe {
-            self.disable_irq();
+            self.disable();
         }
         CriticalGuard { ctrl: self }
     }
@@ -46,11 +59,14 @@ pub trait Interrupt {
     /// function.
     type Handler;
 
-    /// Returns the interrupt vector associated with this interrupt.
+    type Ctrl: Control + ?Sized;
+
     fn vector(&self) -> <Self::Ctrl as Control>::Vector;
 
     /// Returns the name of this interrupt, for diagnostics etc.
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &'static str {
+        "unknown interrupt"
+    }
 }
 
 /// Errors that may occur while registering an interrupt handler.
@@ -76,7 +92,7 @@ enum RegistrationErrorKind {
 impl<'a, C: Control + ?Sized> Drop for CriticalGuard<'a, C> {
     fn drop(&mut self) {
         unsafe {
-            self.ctrl.enable_irq();
+            self.ctrl.enable();
         }
     }
 }

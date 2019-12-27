@@ -1,6 +1,6 @@
 use crate::cpu;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct Selector(u16);
 

@@ -1,5 +1,6 @@
+use super::Interrupt;
 use crate::{cpu, segment};
-use core::marker::PhantomData;
+use core::{marker::PhantomData, mem};
 
 #[repr(C)]
 #[repr(align(16))]
@@ -7,9 +8,9 @@ pub struct Idt {
     descriptors: [Descriptor; Self::NUM_VECTORS],
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(C)]
-pub struct Descriptor<T = ()> {
+pub struct Descriptor {
     offset_low: u16,
     pub segment: segment::Selector,
     ist_offset: u16,
@@ -17,14 +18,14 @@ pub struct Descriptor<T = ()> {
     offset_mid: u16,
     offset_hi: u32,
     _zero: u32,
-    _f: PhantomData<Isr<T>>,
+    // _f: PhantomData<T>,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
 pub struct Attrs(u8);
 
-impl<T> Descriptor<T> {
+impl Descriptor {
     pub const fn null() -> Self {
         Self {
             offset_low: 0,
@@ -34,8 +35,17 @@ impl<T> Descriptor<T> {
             offset_mid: 0,
             offset_hi: 0,
             _zero: 0,
-            _f: PhantomData,
+            // _f: PhantomData,
         }
+    }
+
+    fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
+        self.segment = segment::code_segment();
+        let addr = handler as u64;
+        self.offset_low = addr as u16;
+        self.offset_mid = (addr >> 16) as u16;
+        self.offset_hi = (addr >> 32) as u32;
+        self.attrs.set_present(true).set_32_bit(false)
     }
 }
 
@@ -121,5 +131,36 @@ impl Idt {
     pub fn load(&'static self) {
         let ptr = crate::cpu::DtablePtr::new(self);
         unsafe { asm!("lidt ($0)" :: "r" (&ptr) : "memory") }
+    }
+}
+
+impl hal_core::interrupt::Control for Idt {
+    type Vector = u8;
+
+    unsafe fn disable(&mut self) {
+        asm!("cli" :::: "volatile");
+    }
+
+    unsafe fn enable(&mut self) {
+        asm!("sti" :::: "volatile");
+    }
+
+    fn is_enabled(&self) -> bool {
+        unimplemented!("eliza do this one!!!")
+    }
+
+    unsafe fn register_handler_raw<I>(
+        &mut self,
+        irq: &I,
+        handler: *const (),
+    ) -> Result<(), hal_core::interrupt::RegistrationError>
+    where
+        I: hal_core::interrupt::Interrupt<Ctrl = Self>,
+    {
+        self.descriptors[irq.vector() as usize]
+            // .cast_mut::<I::Handler>()
+            .set_handler(handler);
+        // TODO(eliza): validate this you dipshit!
+        Ok(())
     }
 }

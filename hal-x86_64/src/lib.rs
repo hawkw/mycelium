@@ -25,6 +25,16 @@ pub struct X64;
 impl Architecture for X64 {
     type PAddr = PAddr;
     const NAME: &'static str = "x86_64";
+    type InterruptCtrl = crate::interrupt::Idt;
+
+    fn init_interrupts(
+        bootinfo: &impl hal_core::boot::BootInfo<Arch = Self>,
+    ) -> &'static mut Self::InterruptCtrl
+    where
+        Self: Sized,
+    {
+        crate::interrupt::init(bootinfo)
+    }
 }
 
 impl fmt::Debug for PAddr {

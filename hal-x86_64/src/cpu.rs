@@ -29,12 +29,9 @@ pub(crate) struct DtablePtr {
 
 impl DtablePtr {
     pub(crate) fn new<T>(t: &'static T) -> Self {
-        let limit = (mem::size_of::<T>() - 1) as u16
-        let base = t as *const _;
+        let limit = (mem::size_of::<T>() - 1) as u16;
+        let base = t as *const _ as *const ();
 
-        Self {
-            limit,
-            base,
-        }
+        Self { limit, base }
     }
 }

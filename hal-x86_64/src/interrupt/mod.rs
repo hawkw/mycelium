@@ -1,7 +1,7 @@
 pub mod idt;
-pub mod vector;
 use crate::segment;
 use core::{fmt, marker::PhantomData};
+pub use idt::Idt;
 
 #[derive(Debug)]
 #[repr(C)]
@@ -19,7 +19,7 @@ pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 #[repr(C)]
 pub struct Interrupt<T = ()> {
     vector: u8,
-    _t: PhantomData<Isr<T>>,
+    _t: PhantomData<T>,
 }
 
 #[derive(Copy, Clone)]
@@ -34,6 +34,41 @@ pub struct Registers {
     pub cpu_flags: u64, // TODO(eliza): rflags type?
     pub stack_ptr: u64, // TODO(eliza): add VAddr
     pub stack_segment: u64,
+}
+
+pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'static mut idt::Idt {
+    use core::fmt::Write;
+    use hal_core::interrupt::Control;
+
+    static mut IDT: idt::Idt = idt::Idt::new();
+    const TEST_IRQ: Interrupt = Interrupt::new_untyped(69);
+
+    extern "x86-interrupt" fn test_handler(frame: Context<'_>) {
+        use crate::vga;
+
+        let mut vga = vga::writer();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
+        writeln!(&mut vga, "lol im in ur test interrupt\n{:#?}", frame).unwrap();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+    }
+
+    let mut writer = bootinfo.writer();
+
+    writeln!(&mut writer, "\tintializing interrupts...").unwrap();
+
+    unsafe {
+        IDT.register_handler_raw(&TEST_IRQ, test_handler as *const ())
+            .unwrap();
+        IDT.load();
+    }
+
+    writeln!(&mut writer, "\ttesting interrupts...").unwrap();
+    unsafe {
+        asm!("int 69" :::: "volatile");
+    }
+    writeln!(&mut writer, "\tit worked?").unwrap();
+
+    unsafe { &mut IDT }
 }
 
 impl<'a, T> Context<'a, T> {
@@ -126,11 +161,20 @@ impl<T> Interrupt<T> {
 
     pub const SECURITY_EXCEPTION: Interrupt<ErrorCode> = Interrupt::new_untyped(30);
 
-    const fn new_untyped(vector: u8) -> Self {
+    pub(crate) const fn new_untyped(vector: u8) -> Self {
         Self {
             vector,
             _t: PhantomData,
         }
+    }
+}
+
+impl<T> hal_core::interrupt::Interrupt for Interrupt<T> {
+    type Ctrl = idt::Idt;
+    type Handler = Isr<T>;
+
+    fn vector(&self) -> u8 {
+        self.vector
     }
 }
 
