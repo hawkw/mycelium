@@ -271,11 +271,11 @@ mod tests {
         let mut idt_entry = Descriptor::null();
         idt_entry.set_handler(0x12348765_abcdfdec as *const ());
 
-        let idt_bytes = unsafe { std::mem::transmute::<&Descriptor, &[u8; 16]>(&idt_entry) };
+        let idt_bytes = unsafe { core::mem::transmute::<&Descriptor, &[u8; 16]>(&idt_entry) };
 
         let expected_idt: [u8; 16] = [
             0xec, 0xfd, // offset bits 0..15 (little-endian? oh god)
-            0x33, 0x00  // selector (.. wait, this is from the host...)
+            0x33, 0x00, // selector (.. wait, this is from the host...)
             0x00, // ist (no stack switching at the moment)
             0x8e, // type/attr bits, 0x8e for 32-bit ring-0 interrupt descriptor
             0xcd, 0xab, // bits 16..31 (still little-endian)
@@ -283,6 +283,6 @@ mod tests {
             0x00, 0x00, 0x00, 0x00
         ];
 
-        assert_eq!(idt_bytes, &[0x00u8; 16]);
+        assert_eq!(idt_bytes, &expected_idt);
     }
 }
