@@ -13,7 +13,7 @@ pub struct Idt {
 pub struct Descriptor {
     offset_low: u16,
     pub segment: segment::Selector,
-    ist_offset: u16,
+    ist_offset: u8,
     pub attrs: Attrs,
     offset_mid: u16,
     offset_hi: u32,
@@ -38,8 +38,6 @@ impl Descriptor {
             // _f: PhantomData,
         }
     }
-    #[cold]
-    #[inline(never)]
     pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
         self.segment = segment::code_segment();
         let addr = handler as u64;
@@ -233,5 +231,16 @@ impl<'a> hal_core::interrupt::RegisterHandler<vectors::Test<super::Context<'a>>,
             (&mut self.descriptors[69]).set_handler(FNPTR as *const ());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idt_entry_is_correct_size() {
+        use core::mem::size_of;
+        assert_eq!(size_of::<Descriptor>(), 16);
     }
 }
