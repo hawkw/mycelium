@@ -68,3 +68,14 @@ impl Selector {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::mem::size_of;
+
+    #[test]
+    fn segment_selector_is_correct_size() {
+        assert_eq!(size_of::<Selector>(), 2);
+    }
+}

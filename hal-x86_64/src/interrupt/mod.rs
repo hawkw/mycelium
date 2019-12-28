@@ -34,11 +34,12 @@ pub struct PageFaultCode(u64);
 #[repr(C)]
 pub struct Registers {
     pub instruction_ptr: VAddr, // TODO(eliza): add VAddr
-    _pad: [u16; 3],
     pub code_segment: segment::Selector,
-    pub cpu_flags: u64, // TODO(eliza): rflags type?
-    pub stack_ptr: u64, // TODO(eliza): add VAddr
-    pub stack_segment: u64,
+    _pad: [u16; 3],
+    pub cpu_flags: u64,   // TODO(eliza): rflags type?
+    pub stack_ptr: VAddr, // TODO(eliza): add VAddr
+    pub stack_segment: segment::Selector,
+    _pad2: [u16; 3],
 }
 
 static mut IDT: idt::Idt = idt::Idt::new();
@@ -50,6 +51,7 @@ extern "x86-interrupt" fn nop(cx: Context<'_>) {}
 struct TestHandlersImpl;
 
 impl Handlers<crate::X64> for TestHandlersImpl {
+    #[inline(never)]
     fn page_fault<C>(cx: C)
     where
         C: ctx::Context<Arch = crate::X64> + ctx::PageFault,
@@ -60,6 +62,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
+    #[inline(never)]
     fn code_fault<C>(cx: C)
     where
         C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
@@ -68,8 +71,10 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
         writeln!(&mut vga, "code fault\n{:#?}", cx.registers()).unwrap();
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        loop {}
     }
 
+    #[inline(never)]
     fn double_fault<C>(cx: C)
     where
         C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
@@ -81,7 +86,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         loop {}
     }
 
-    #[inline(always)]
+    #[inline(never)]
     fn timer_tick() {
         // let mut vga = vga::writer();
         // vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
@@ -89,7 +94,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         // vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
-    #[inline(always)]
+    #[inline(never)]
     fn test_interrupt<C>(cx: C)
     where
         C: ctx::Context<Arch = crate::X64>,
@@ -103,7 +108,6 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         )
         .unwrap();
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
-        loop {}
     }
 }
 
@@ -133,6 +137,7 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
     unsafe {
         asm!("int $0" :: "i"(69) :: "volatile");
     }
+    // loop {}
     writeln!(&mut writer, "\tit worked?").unwrap();
 
     unsafe { &mut IDT }
@@ -207,7 +212,14 @@ impl hal_core::interrupt::Control for Idt {
             registers: &mut Registers,
             code: PageFaultCode,
         ) {
-            H::page_fault(Context { registers, code })
+            H::page_fault(Context { registers, code });
+        }
+
+        extern "x86-interrupt" fn double_fault_isr<H: Handlers<crate::X64>>(
+            registers: &mut Registers,
+            code: u64,
+        ) {
+            H::double_fault(Context { registers, code });
         }
 
         extern "x86-interrupt" fn timer_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
@@ -225,6 +237,7 @@ impl hal_core::interrupt::Control for Idt {
         self.descriptors[0x20].set_handler(timer_isr::<H> as *const ());
         self.descriptors[69].set_handler(test_isr::<H> as *const ());
         self.descriptors[14].set_handler(page_fault_isr::<H> as *const ());
+        self.descriptors[8].set_handler(double_fault_isr::<H> as *const ());
         Ok(())
     }
 
@@ -250,8 +263,8 @@ impl fmt::Debug for Registers {
             .field("instruction_ptr", &self.instruction_ptr)
             .field("code_segment", &self.code_segment)
             .field("cpu_flags", &format_args!("{:#b}", self.cpu_flags))
-            .field("stack_ptr", &format_args!("{:#x}", self.stack_ptr))
-            .field("stack_segment", &format_args!("{:#x}", self.stack_segment))
+            .field("stack_ptr", &self.stack_ptr)
+            .field("stack_segment", &self.stack_segment)
             .finish()
     }
 }
@@ -325,6 +338,7 @@ impl<T> Interrupt<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::mem::size_of;
 
     #[test]
     fn context_is_correct_size() {
@@ -338,5 +352,10 @@ mod tests {
             size_of::<Context<'_, PageFaultCode>>(),
             size_of::<&mut Registers>() + size_of::<PageFaultCode>()
         );
+    }
+
+    #[test]
+    fn registers_is_correct_size() {
+        assert_eq!(size_of::<Registers>(), 40);
     }
 }
