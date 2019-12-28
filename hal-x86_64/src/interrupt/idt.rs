@@ -46,7 +46,7 @@ impl Descriptor {
         self.offset_hi = (addr >> 32) as u32;
         self.attrs
             .set_present(true)
-            .set_32_bit(false)
+            .set_32_bit(true)
             .set_gate_kind(GateKind::Interrupt)
     }
 }
@@ -54,7 +54,7 @@ impl Descriptor {
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[repr(u8)]
 pub enum GateKind {
-    Interrupt = 0b0001_0110,
+    Interrupt = 0b0000_0110,
     Trap = 0b0000_0111,
     Task = 0b0000_0101,
 }
@@ -92,7 +92,8 @@ impl Attrs {
     }
 
     pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
-        self.0 &= ((!Self::KIND_BITS) | kind as u8);
+        self.0 &= !Self::KIND_BITS;
+        self.0 |= kind as u8;
         self
     }
 
@@ -242,5 +243,46 @@ mod tests {
     fn idt_entry_is_correct_size() {
         use core::mem::size_of;
         assert_eq!(size_of::<Descriptor>(), 16);
+    }
+
+    #[test]
+    fn idt_attrs_are_correct() {
+        let mut present_32bit_interrupt = Attrs::null();
+        present_32bit_interrupt
+            .set_present(true)
+            .set_32_bit(true)
+            .set_gate_kind(GateKind::Interrupt);
+
+        // expected bit pattern here is:
+        // |   1|   0    0|   0|   1    1    1    0|
+        // |   P|      DPL|   Z|          Gate Type|
+        //
+        // P: Present (1)
+        // DPL: Descriptor Privilege Level (0 => ring 0)
+        // Z: this bit is 0 for a 64-bit IDT. for a 32-bit IDT, this may be 1 for task gates.
+        // Gate Type: 32-bit interrupt gate is 0b1110. that's just how it is.
+        assert_eq!(present_32bit_interrupt.0 as u8, 0b1000_1110);
+    }
+
+    #[test]
+    fn idt_entry_is_correct() {
+        use core::mem::size_of;
+
+        let mut idt_entry = Descriptor::null();
+        idt_entry.set_handler(0x12348765_abcdfdec as *const ());
+
+        let idt_bytes = unsafe { std::mem::transmute::<&Descriptor, &[u8; 16]>(&idt_entry) };
+
+        let expected_idt: [u8; 16] = [
+            0xec, 0xfd, // offset bits 0..15 (little-endian? oh god)
+            0x33, 0x00  // selector (.. wait, this is from the host...)
+            0x00, // ist (no stack switching at the moment)
+            0x8e, // type/attr bits, 0x8e for 32-bit ring-0 interrupt descriptor
+            0xcd, 0xab, // bits 16..31 (still little-endian)
+            0x65, 0x87, 0x34, 0x12, // and bits 32..63
+            0x00, 0x00, 0x00, 0x00
+        ];
+
+        assert_eq!(idt_bytes, &[0x00u8; 16]);
     }
 }
