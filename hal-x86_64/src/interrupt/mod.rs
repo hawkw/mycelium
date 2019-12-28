@@ -1,7 +1,12 @@
 pub mod idt;
-use crate::segment;
-use core::{fmt, marker::PhantomData};
+use crate::{segment, vga, VAddr};
+use core::{
+    fmt::{self, Write},
+    marker::PhantomData,
+};
 pub use idt::Idt;
+
+use hal_core::interrupt::{ctx, Handlers};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -11,8 +16,6 @@ pub struct Context<'a, T = ()> {
 }
 
 pub type ErrorCode = u64;
-
-pub type PageFaultContext<'a> = Context<'a, PageFaultCode>;
 
 /// An interrupt service routine.
 pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
@@ -30,7 +33,7 @@ pub struct PageFaultCode(u64);
 
 #[repr(C)]
 pub struct Registers {
-    pub instruction_ptr: u64, // TODO(eliza): add VAddr
+    pub instruction_ptr: VAddr, // TODO(eliza): add VAddr
     _pad: [u16; 3],
     pub code_segment: segment::Selector,
     pub cpu_flags: u64, // TODO(eliza): rflags type?
@@ -44,8 +47,67 @@ static mut IDT: idt::Idt = idt::Idt::new();
 #[inline(never)]
 extern "x86-interrupt" fn nop(cx: Context<'_>) {}
 
+struct TestHandlersImpl;
+
+impl Handlers<crate::X64> for TestHandlersImpl {
+    fn page_fault<C>(cx: C)
+    where
+        C: ctx::Context<Arch = crate::X64> + ctx::PageFault,
+    {
+        let mut vga = vga::writer();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
+        writeln!(&mut vga, "page fault\n{:#?}", cx.registers()).unwrap();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+    }
+
+    fn code_fault<C>(cx: C)
+    where
+        C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
+    {
+        let mut vga = vga::writer();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
+        writeln!(&mut vga, "code fault\n{:#?}", cx.registers()).unwrap();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+    }
+
+    fn double_fault<C>(cx: C)
+    where
+        C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
+    {
+        let mut vga = vga::writer();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
+        writeln!(&mut vga, "double fault\n{:#?}", cx.registers()).unwrap();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        loop {}
+    }
+
+    #[inline(always)]
+    fn timer_tick() {
+        // let mut vga = vga::writer();
+        // vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
+        // writeln!(&mut vga, "timer").unwrap();
+        // vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+    }
+
+    #[inline(always)]
+    fn test_interrupt<C>(cx: C)
+    where
+        C: ctx::Context<Arch = crate::X64>,
+    {
+        let mut vga = vga::writer();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Yellow, vga::Color::Black));
+        writeln!(
+            &mut vga,
+            "lol im in ur test interrupt\n{:#?}",
+            cx.registers()
+        )
+        .unwrap();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        loop {}
+    }
+}
+
 pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'static mut idt::Idt {
-    use core::fmt::Write;
     use hal_core::interrupt::Control;
 
     let mut writer = bootinfo.writer();
@@ -53,20 +115,16 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
     writeln!(&mut writer, "\tintializing interrupts...").unwrap();
 
     unsafe {
-        // (&mut IDT).descriptors[0x20].set_handler(nop as *const ());
-        IDT.register_handler::<hal_core::interrupt::vectors::Test<Context<'_>>, Context<'_>>(
-            |frame| {
-                use crate::vga;
+        // use crate::vga;
 
-                let mut vga = vga::writer();
-                vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
-                writeln!(&mut vga, "lol im in ur test interrupt\n{:#?}", frame).unwrap();
-                vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
-            },
-        )
-        .unwrap();
+        // let mut vga = vga::writer();
+        // vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
+        // writeln!(&mut vga, "lol im in ur test interrupt\n{:#?}", frame).unwrap();
+        // vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        // // (&mut IDT).descriptors[0x20].set_handler(nop as *const ());
 
-        writeln!(&mut writer, "{:?}", IDT.descriptors[69]).unwrap();
+        IDT.register_handlers::<TestHandlersImpl>().unwrap();
+        writeln!(&mut writer, "{:#?}", IDT.descriptors[69]).unwrap();
         IDT.load();
         IDT.enable();
     }
@@ -80,8 +138,11 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
     unsafe { &mut IDT }
 }
 
-impl<'a, T> Context<'a, T> {
-    pub fn registers(&self) -> &Registers {
+impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
+    type Arch = crate::X64;
+    type Registers = Registers;
+
+    fn registers(&self) -> &Registers {
         &self.registers
     }
 
@@ -89,8 +150,24 @@ impl<'a, T> Context<'a, T> {
     ///
     /// Mutating the value of saved interrupt registers can cause
     /// undefined behavior.
-    pub unsafe fn registers_mut(&mut self) -> &mut Registers {
+    unsafe fn registers_mut(&mut self) -> &mut Registers {
         &mut self.registers
+    }
+}
+
+impl<'a> hal_core::interrupt::ctx::PageFault for Context<'a, PageFaultCode> {
+    fn fault_vaddr(&self) -> crate::VAddr {
+        unimplemented!("eliza")
+    }
+}
+
+impl<'a> hal_core::interrupt::ctx::CodeFault for Context<'a, ErrorCode> {
+    fn is_user_mode(&self) -> bool {
+        false // TODO(eliza)
+    }
+
+    fn instruction_ptr(&self) -> crate::VAddr {
+        self.registers.instruction_ptr
     }
 }
 
@@ -106,13 +183,71 @@ impl<'a> Context<'a, PageFaultCode> {
     }
 }
 
+impl hal_core::interrupt::Control for Idt {
+    type Arch = crate::X64;
+    // type Vector = u8;
+
+    unsafe fn disable(&mut self) {
+        asm!("cli" :::: "volatile");
+    }
+
+    unsafe fn enable(&mut self) {
+        asm!("sti" :::: "volatile");
+    }
+
+    fn is_enabled(&self) -> bool {
+        unimplemented!("eliza do this one!!!")
+    }
+
+    fn register_handlers<H>(&mut self) -> Result<(), hal_core::interrupt::RegistrationError>
+    where
+        H: Handlers<Self::Arch>,
+    {
+        extern "x86-interrupt" fn page_fault_isr<H: Handlers<crate::X64>>(
+            registers: &mut Registers,
+            code: PageFaultCode,
+        ) {
+            H::page_fault(Context { registers, code })
+        }
+
+        extern "x86-interrupt" fn timer_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
+            H::timer_tick();
+        }
+
+        extern "x86-interrupt" fn test_isr<H: Handlers<crate::X64>>(registers: &mut Registers) {
+            H::test_interrupt(Context {
+                registers,
+                code: (),
+            });
+        }
+        // TODO(eliza): code fault isrs
+
+        self.descriptors[0x20].set_handler(timer_isr::<H> as *const ());
+        self.descriptors[69].set_handler(test_isr::<H> as *const ());
+        self.descriptors[14].set_handler(page_fault_isr::<H> as *const ());
+        Ok(())
+    }
+
+    // unsafe fn register_handler_raw<I>(
+    //     &mut self,
+    //     irq: &I,
+    //     handler: *const (),
+    // ) -> Result<(), hal_core::interrupt::RegistrationError>
+    // where
+    //     I: hal_core::interrupt::Interrupt<Ctrl = Self>,
+    // {
+    //     self.descriptors[irq.vector() as usize]
+    //         // .cast_mut::<I::Handler>()
+    //         .set_handler(handler);
+    //     // TODO(eliza): validate this you dipshit!
+    //     Ok(())
+    // }
+}
+
 impl fmt::Debug for Registers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Registers")
-            .field(
-                "instruction_ptr",
-                &format_args!("{:#x}", self.instruction_ptr),
-            )
+            .field("instruction_ptr", &self.instruction_ptr)
             .field("code_segment", &self.code_segment)
             .field("cpu_flags", &format_args!("{:#b}", self.cpu_flags))
             .field("stack_ptr", &format_args!("{:#x}", self.stack_ptr))
