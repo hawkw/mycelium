@@ -7,6 +7,8 @@ pub mod mem;
 pub trait Architecture {
     /// The architecture's physical address representation.
     type PAddr: Address;
+    /// The architecture's virtual address representation.
+    type VAddr: Address;
 
     type InterruptCtrl: interrupt::Control + 'static;
 

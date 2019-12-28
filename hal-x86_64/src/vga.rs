@@ -106,8 +106,8 @@ impl Buffer {
             return;
         }
 
-        if self.col >= BUF_WIDTH {
-            if self.row >= BUF_HEIGHT {
+        if self.col >= (BUF_WIDTH - 1) {
+            if self.row >= (BUF_HEIGHT - 1) {
                 self.newline();
             } else {
                 self.row += 1;
@@ -120,7 +120,7 @@ impl Buffer {
     }
 
     fn newline(&mut self) {
-        if self.row >= BUF_HEIGHT {
+        if self.row >= (BUF_HEIGHT - 1) {
             let mut rows = self.buf.iter_mut();
             let mut prev_row = rows.next().expect("fixed size buf should have rows");
             for row in rows {

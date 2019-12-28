@@ -5,7 +5,7 @@ use core::{marker::PhantomData, mem};
 #[repr(C)]
 #[repr(align(16))]
 pub struct Idt {
-    descriptors: [Descriptor; Self::NUM_VECTORS],
+    pub(crate) descriptors: [Descriptor; Self::NUM_VECTORS],
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -38,14 +38,18 @@ impl Descriptor {
             // _f: PhantomData,
         }
     }
-
-    fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
         self.segment = segment::code_segment();
         let addr = handler as u64;
         self.offset_low = addr as u16;
         self.offset_mid = (addr >> 16) as u16;
         self.offset_hi = (addr >> 32) as u32;
-        self.attrs.set_present(true).set_32_bit(false)
+        self.attrs
+            .set_present(true)
+            .set_32_bit(false)
+            .set_gate_kind(GateKind::Interrupt)
     }
 }
 
@@ -90,7 +94,7 @@ impl Attrs {
     }
 
     pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
-        self.0 &= Self::IS_32_BIT | kind as u8;
+        self.0 &= ((!Self::KIND_BITS) | kind as u8);
         self
     }
 
@@ -134,8 +138,14 @@ impl Idt {
     }
 }
 
+impl core::fmt::Debug for Idt {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_list().entries(self.descriptors[..].iter()).finish()
+    }
+}
+
 impl hal_core::interrupt::Control for Idt {
-    type Vector = u8;
+    // type Vector = u8;
 
     unsafe fn disable(&mut self) {
         asm!("cli" :::: "volatile");
@@ -149,18 +159,79 @@ impl hal_core::interrupt::Control for Idt {
         unimplemented!("eliza do this one!!!")
     }
 
-    unsafe fn register_handler_raw<I>(
+    // unsafe fn register_handler_raw<I>(
+    //     &mut self,
+    //     irq: &I,
+    //     handler: *const (),
+    // ) -> Result<(), hal_core::interrupt::RegistrationError>
+    // where
+    //     I: hal_core::interrupt::Interrupt<Ctrl = Self>,
+    // {
+    //     self.descriptors[irq.vector() as usize]
+    //         // .cast_mut::<I::Handler>()
+    //         .set_handler(handler);
+    //     // TODO(eliza): validate this you dipshit!
+    //     Ok(())
+    // }
+}
+
+// trait AsExternFnHack<I, O> {
+//     extern "x86-interrupt" fn as_extern_fn(&self, inp: I) -> O;
+// }
+
+// impl<I> AsExternFnHack<I, ()> for fn(I) {
+//     extern "x86-interrupt" fn as_extern_fn(&self, inp: I) -> O {
+//         (self)(inp)
+//     }
+// }
+
+// fn into_extern_fn(f: fn())
+
+use hal_core::interrupt::vectors;
+
+impl<'a>
+    hal_core::interrupt::RegisterHandler<
+        vectors::PageFault<super::PageFaultContext<'a>>,
+        super::PageFaultContext<'a>,
+    > for Idt
+{
+    fn register(
         &mut self,
-        irq: &I,
-        handler: *const (),
-    ) -> Result<(), hal_core::interrupt::RegistrationError>
-    where
-        I: hal_core::interrupt::Interrupt<Ctrl = Self>,
-    {
-        self.descriptors[irq.vector() as usize]
-            // .cast_mut::<I::Handler>()
-            .set_handler(handler);
-        // TODO(eliza): validate this you dipshit!
+        handler: fn(super::PageFaultContext<'a>),
+    ) -> Result<
+        (),
+        hal_core::interrupt::RegistrationError<vectors::PageFault<super::PageFaultContext<'a>>>,
+    > {
+        // self.descriptors[14]
+        //     .set_handler(
+        //         ((handler as AsExternFnHack<super::PageFaultContext<'a>, ()>).as_extern_fn_hack)
+        //             as *const (),
+        //     )
+        //     .set_gate_kind(GateKind::Trap);
+        unimplemented!();
+        Ok(())
+    }
+}
+
+impl<'a> hal_core::interrupt::RegisterHandler<vectors::Test<super::Context<'a>>, super::Context<'a>>
+    for Idt
+{
+    fn register(
+        &mut self,
+        handler: fn(super::Context<'a>),
+    ) -> Result<(), hal_core::interrupt::RegistrationError<vectors::Test<super::Context<'a>>>> {
+        fn null_handler(_: super::Context<'_>) {
+            unreachable!("bad")
+        }
+        static mut FNPTR: fn(super::Context<'_>) = null_handler;
+        extern "x86-interrupt" fn isr(cx: super::Context<'_>) {
+            panic!("asdf");
+            unsafe { (FNPTR)(cx) }
+        }
+        unsafe {
+            FNPTR = core::mem::transmute(handler);
+            (&mut self.descriptors[69]).set_handler(FNPTR as *const ());
+        }
         Ok(())
     }
 }

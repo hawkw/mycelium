@@ -12,6 +12,8 @@ pub struct Context<'a, T = ()> {
 
 pub type ErrorCode = u64;
 
+pub type PageFaultContext<'a> = Context<'a, PageFaultCode>;
+
 /// An interrupt service routine.
 pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 
@@ -36,35 +38,42 @@ pub struct Registers {
     pub stack_segment: u64,
 }
 
+static mut IDT: idt::Idt = idt::Idt::new();
+
+#[cold]
+#[inline(never)]
+extern "x86-interrupt" fn nop(cx: Context<'_>) {}
+
 pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'static mut idt::Idt {
     use core::fmt::Write;
     use hal_core::interrupt::Control;
-
-    static mut IDT: idt::Idt = idt::Idt::new();
-    const TEST_IRQ: Interrupt = Interrupt::new_untyped(69);
-
-    extern "x86-interrupt" fn test_handler(frame: Context<'_>) {
-        use crate::vga;
-
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
-        writeln!(&mut vga, "lol im in ur test interrupt\n{:#?}", frame).unwrap();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
-    }
 
     let mut writer = bootinfo.writer();
 
     writeln!(&mut writer, "\tintializing interrupts...").unwrap();
 
     unsafe {
-        IDT.register_handler_raw(&TEST_IRQ, test_handler as *const ())
-            .unwrap();
+        // (&mut IDT).descriptors[0x20].set_handler(nop as *const ());
+        IDT.register_handler::<hal_core::interrupt::vectors::Test<Context<'_>>, Context<'_>>(
+            |frame| {
+                use crate::vga;
+
+                let mut vga = vga::writer();
+                vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
+                writeln!(&mut vga, "lol im in ur test interrupt\n{:#?}", frame).unwrap();
+                vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+            },
+        )
+        .unwrap();
+
+        writeln!(&mut writer, "{:?}", IDT.descriptors[69]).unwrap();
         IDT.load();
+        IDT.enable();
     }
 
     writeln!(&mut writer, "\ttesting interrupts...").unwrap();
     unsafe {
-        asm!("int 69" :::: "volatile");
+        asm!("int $0" :: "i"(69) :: "volatile");
     }
     writeln!(&mut writer, "\tit worked?").unwrap();
 
@@ -169,14 +178,14 @@ impl<T> Interrupt<T> {
     }
 }
 
-impl<T> hal_core::interrupt::Interrupt for Interrupt<T> {
-    type Ctrl = idt::Idt;
-    type Handler = Isr<T>;
+// impl<T> hal_core::interrupt::Interrupt for Interrupt<T> {
+//     type Ctrl = idt::Idt;
+//     type Handler = Isr<T>;
 
-    fn vector(&self) -> u8 {
-        self.vector
-    }
-}
+//     fn vector(&self) -> u8 {
+//         self.vector
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

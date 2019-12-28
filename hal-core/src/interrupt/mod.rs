@@ -1,9 +1,10 @@
+use core::fmt;
 use core::marker::PhantomData;
+
+pub mod vectors;
 
 /// An interrupt controller for a platform.
 pub trait Control {
-    type Vector;
-
     // type PageFault: Interrupt<Ctrl = Self>;
     // const PAGE_FAULT: Self::PageFault;
 
@@ -33,13 +34,17 @@ pub trait Control {
     /// the handler; that ISR will construct an interrupt context for the
     /// handler. The ISR is responsible for entering a critical section while
     /// the handler is active.
-    unsafe fn register_handler_raw<I>(
+    fn register_handler<I, C>(
         &mut self,
-        irq: &I,
-        handler: *const (),
-    ) -> Result<(), RegistrationError>
+        handler: fn(C) -> I::Out,
+    ) -> Result<(), RegistrationError<I>>
     where
-        I: Interrupt<Ctrl = Self>;
+        Self: RegisterHandler<I, C>,
+        I: Interrupt<C>,
+        // C: Context,
+    {
+        self.register(handler)
+    }
 
     /// Enter a critical section, returning a guard.
     fn enter_critical(&mut self) -> CriticalGuard<'_, Self> {
@@ -50,29 +55,34 @@ pub trait Control {
     }
 }
 
+pub trait RegisterHandler<I, C>
+where
+    I: Interrupt<C>,
+    // C: Context,
+    Self: Sized,
+{
+    fn register(&mut self, handler: fn(C) -> I::Out) -> Result<(), RegistrationError<I>>;
+}
+
+pub trait Context {
+    type Registers: fmt::Debug;
+
+    fn registers(&self) -> &Self::Registers;
+}
+
 /// An interrupt.
-pub trait Interrupt {
-    /// The type of handler for this interrupt.
-    ///
-    /// This should always be a function pointer; but we cannot constrain this
-    /// associated type since we don't know the _arguments_ to the handler
-    /// function.
-    type Handler;
+pub trait Interrupt<Ctx> {
+    type Out;
+    // // type Ctrl: Control + ?Sized;
 
-    type Ctrl: Control + ?Sized;
-
-    fn vector(&self) -> <Self::Ctrl as Control>::Vector;
-
-    /// Returns the name of this interrupt, for diagnostics etc.
-    fn name(&self) -> &'static str {
-        "unknown interrupt"
-    }
+    const NAME: &'static str = "unknown interrupt";
 }
 
 /// Errors that may occur while registering an interrupt handler.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct RegistrationError {
+#[derive(Clone, Eq, PartialEq)]
+pub struct RegistrationError<I> {
     kind: RegistrationErrorKind,
+    _irq: PhantomData<fn(I)>,
 }
 
 #[derive(Debug)]
@@ -98,12 +108,13 @@ impl<'a, C: Control + ?Sized> Drop for CriticalGuard<'a, C> {
 }
 
 // === impl RegistrationError ===
-impl RegistrationError {
+impl<I> RegistrationError<I> {
     /// Returns a new error indicating that the registered interrupt vector does
     /// not exist.
     pub fn nonexistant() -> Self {
         Self {
             kind: RegistrationErrorKind::Nonexistant,
+            _irq: PhantomData,
         }
     }
 
@@ -112,6 +123,7 @@ impl RegistrationError {
     pub fn already_registered() -> Self {
         Self {
             kind: RegistrationErrorKind::AlreadyRegistered,
+            _irq: PhantomData,
         }
     }
 
@@ -119,6 +131,7 @@ impl RegistrationError {
     pub fn other(message: &'static str) -> Self {
         Self {
             kind: RegistrationErrorKind::Other(message),
+            _irq: PhantomData,
         }
     }
 
@@ -134,5 +147,23 @@ impl RegistrationError {
             RegistrationErrorKind::AlreadyRegistered => true,
             _ => false,
         }
+    }
+}
+
+// impl<I: Interrupt<C>, C> fmt::Display for RegistrationError<I> {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         write!("failed to register {} handler", I::NAME)
+//     }
+// }
+
+impl<I> fmt::Debug for RegistrationError<I> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RegistrationError")
+            .field("kind", &self.kind)
+            .field(
+                "interrupt",
+                &format_args!("{}", core::any::type_name::<I>()),
+            )
+            .finish()
     }
 }
