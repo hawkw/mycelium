@@ -59,12 +59,14 @@ impl Selector {
     }
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
-        self.0 &= !Self::RING_BITS | ring as u16;
+        self.0 &= !Self::RING_BITS;
+        self.0 |= ring as u16;
         self
     }
 
     pub fn set_index(&mut self, index: u16) -> &mut Self {
-        self.0 &= !Self::INDEX_BITS | index << Self::INDEX_SHIFT;
+        self.0 &= !Self::INDEX_BITS;
+        self.0 |= index << Self::INDEX_SHIFT;
         self
     }
 }

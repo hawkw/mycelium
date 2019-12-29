@@ -119,7 +119,8 @@ impl Attrs {
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
         let ring = (ring as u8) << Self::RING_SHIFT;
-        self.0 &= !Self::RING_BITS | ring;
+        self.0 &= !Self::RING_BITS;
+        self.0 |= ring;
         self
     }
 }
