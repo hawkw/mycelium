@@ -1,8 +1,17 @@
 use core::mem;
+use core::fmt;
 
 #[repr(transparent)]
 pub struct Port {
     num: u16,
+}
+
+impl fmt::Debug for Port {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Port")
+            .field("num", &format_args!("{:#02x}", self.num))
+            .finish()
+    }
 }
 
 impl Port {

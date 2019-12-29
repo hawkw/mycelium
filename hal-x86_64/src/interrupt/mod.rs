@@ -160,6 +160,8 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
 
     unsafe {
         PIC.set_irq_addresses(0x20, 0x28);
+        // functionally a no-op, since interrupts from PC/AT PIC are enabled at boot, just being
+        // clear for you, the reader, that at this point they are definitely intentionally enabled.
         PIC.enable();
     }
 

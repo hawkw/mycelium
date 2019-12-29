@@ -78,23 +78,39 @@ impl hal_core::interrupt::Control for CascadedPic {
 
 impl CascadedPic {
     pub(crate) unsafe fn set_irq_addresses(&mut self, primary_start: u8, secondary_start: u8) {
+        // iowait and its uses below are guidance from the osdev wiki for compatibility with "older
+        // machines". it is not entirely clear what "older machines" exactly means, or where this
+        // is or is not necessary precisely. this code happens to work in qemu without `iowait()`,
+        // but is largely untested on real hardware where this may be a concern.
+        let iowait = || { cpu::Port::at(0x80).writeb(0) };
+
         let primary_mask = self.primary.data.readb();
         let secondary_mask = self.secondary.data.readb();
 
-        const EXTENDED_CONFIG: u8 = 0x01u8; // if present, there are four initialization control words
-        const PIC_INIT: u8 = 0x10u8; // reinitialize the 8259 PIC
+        const EXTENDED_CONFIG: u8 = 0x01; // if present, there are four initialization control words
+        const PIC_INIT: u8 = 0x10; // reinitialize the 8259 PIC
 
         self.primary.command.writeb(PIC_INIT | EXTENDED_CONFIG);
+        iowait();
         self.secondary.command.writeb(PIC_INIT | EXTENDED_CONFIG);
+        iowait();
         self.primary.data.writeb(primary_start);
+        iowait();
         self.secondary.data.writeb(secondary_start);
+        iowait();
         self.primary.data.writeb(4); // magic number: secondary pic is at IRQ2 (how does 4 say this ???)
+        iowait();
         self.secondary.data.writeb(2); // magic number: secondary pic has cascade identity 2 (??)
+        iowait();
         self.primary.data.writeb(1); // 8086/88 (MCS-80/85) mode
+        iowait();
         self.secondary.data.writeb(1); // 8086/88 (MCS-80/85) mode
+        iowait();
 
         self.primary.data.writeb(primary_mask);
+        iowait();
         self.secondary.data.writeb(secondary_mask);
+        iowait();
         self.primary.address = primary_start;
         self.secondary.address = secondary_start;
     }
