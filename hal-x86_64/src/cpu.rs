@@ -2,7 +2,7 @@ use core::mem;
 
 #[repr(transparent)]
 pub struct Port {
-    num: u16
+    num: u16,
 }
 
 impl Port {

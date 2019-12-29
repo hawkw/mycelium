@@ -107,7 +107,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
             4 => {
                 writeln!(&mut vga, "timer tock").unwrap();
             }
-            _ => { }
+            _ => {}
         }
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
@@ -120,8 +120,17 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         // 0x60 is a magic PC/AT number.
         let scancode = unsafe { cpu::Port::at(0x60).readb() };
         let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::LightGray, vga::Color::Black));
-        writeln!(&mut vga, "got scancode {}. the time is now: {}", scancode, unsafe { TIMER }).unwrap();
+        vga.set_color(vga::ColorSpec::new(
+            vga::Color::LightGray,
+            vga::Color::Black,
+        ));
+        writeln!(
+            &mut vga,
+            "got scancode {}. the time is now: {}",
+            scancode,
+            unsafe { TIMER }
+        )
+        .unwrap();
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 

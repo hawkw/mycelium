@@ -54,7 +54,9 @@ impl hal_core::interrupt::Control for CascadedPic {
     where
         H: Handlers<Self::Arch>,
     {
-        Err(RegistrationError::other("x86_64 handlers must be registered via the IDT, not to the PIC interrupt component"))
+        Err(RegistrationError::other(
+            "x86_64 handlers must be registered via the IDT, not to the PIC interrupt component",
+        ))
     }
 
     unsafe fn disable(&mut self) {
