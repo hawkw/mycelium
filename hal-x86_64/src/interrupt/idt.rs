@@ -123,6 +123,54 @@ impl Attrs {
 impl Idt {
     const NUM_VECTORS: usize = 256;
 
+    /// Divide-by-zero interrupt (#D0)
+    pub const DIVIDE_BY_ZERO: usize = 0;
+
+    pub const DEBUG: usize = 1;
+
+    /// Non-maskable interrupt.
+    pub const NMI: usize = 2;
+
+    pub const BREAKPOINT: usize = 3;
+
+    pub const OVERFLOW: usize = 4;
+
+    pub const BOUND_RANGE_EXCEEDED: usize = 5;
+
+    pub const INVALID_OPCODE: usize = 6;
+
+    /// A device not available exception
+    pub const DEVICE_NOT_AVAILABLE: usize = 7;
+
+    // TODO(eliza): can we enforce that this diverges?
+    pub const DOUBLE_FAULT: usize = 8;
+
+    /// On modern CPUs, this interrupt is reserved; this error fires a general
+    /// protection fault instead.
+    const COPROCESSOR_SEGMENT_OVERRUN: usize = 9;
+
+    pub const INVALID_TSS: usize = 10;
+
+    pub const SEGMENT_NOT_PRESENT: usize = 11;
+
+    pub const STACK_SEGMENT_FAULT: usize = 12;
+
+    pub const GENERAL_PROTECTION_FAULT: usize = 13;
+
+    pub const PAGE_FAULT: usize = 14;
+
+    pub const X87_FPU_EXCEPTION_PENDING: usize = 16;
+
+    pub const ALIGNMENT_CHECK: usize = 17;
+
+    pub const MACHINE_CHECK: usize = 18;
+
+    pub const SIMD_FLOATING_POINT: usize = 19;
+
+    pub const VIRTUALIZATION_EXCEPTION: usize = 20;
+
+    pub const SECURITY_EXCEPTION: usize = 30;
+
     pub const fn new() -> Self {
         Self {
             descriptors: [Descriptor::null(); Self::NUM_VECTORS],
