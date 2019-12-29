@@ -2,7 +2,7 @@ use crate::io::{self, BufRead, Error, ErrorKind, Initializer, Read, Seek, SeekFr
 use core::{cmp, fmt, mem};
 
 #[cfg(feature = "alloc")]
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 
 // =============================================================================
 // Forwarding implementations
