@@ -46,11 +46,6 @@ pub struct Registers {
 
 static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
-
-#[cold]
-#[inline(never)]
-extern "x86-interrupt" fn nop(cx: Context<'_>) {}
-
 static mut TIMER: usize = 0;
 
 struct TestHandlersImpl;
@@ -168,14 +163,6 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
     writeln!(&mut writer, "\tintializing IDT...").unwrap();
 
     unsafe {
-        // use crate::vga;
-
-        // let mut vga = vga::writer();
-        // vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
-        // writeln!(&mut vga, "lol im in ur test interrupt\n{:#?}", frame).unwrap();
-        // vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
-        // // (&mut IDT).descriptors[0x20].set_handler(nop as *const ());
-
         IDT.register_handlers::<TestHandlersImpl>().unwrap();
         writeln!(&mut writer, "{:#?}", IDT.descriptors[69]).unwrap();
         IDT.load();
@@ -300,21 +287,6 @@ impl hal_core::interrupt::Control for Idt {
         self.descriptors[8].set_handler(double_fault_isr::<H> as *const ());
         Ok(())
     }
-
-    // unsafe fn register_handler_raw<I>(
-    //     &mut self,
-    //     irq: &I,
-    //     handler: *const (),
-    // ) -> Result<(), hal_core::interrupt::RegistrationError>
-    // where
-    //     I: hal_core::interrupt::Interrupt<Ctrl = Self>,
-    // {
-    //     self.descriptors[irq.vector() as usize]
-    //         // .cast_mut::<I::Handler>()
-    //         .set_handler(handler);
-    //     // TODO(eliza): validate this you dipshit!
-    //     Ok(())
-    // }
 }
 
 impl fmt::Debug for Registers {
@@ -385,15 +357,6 @@ impl<T> Interrupt<T> {
         }
     }
 }
-
-// impl<T> hal_core::interrupt::Interrupt for Interrupt<T> {
-//     type Ctrl = idt::Idt;
-//     type Handler = Isr<T>;
-
-//     fn vector(&self) -> u8 {
-//         self.vector
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

@@ -1,7 +1,4 @@
-use super::{Interrupt, Registers};
 use crate::{cpu, segment};
-use core::{marker::PhantomData, mem};
-use hal_core::interrupt::Handlers;
 
 #[repr(C)]
 #[repr(align(16))]
@@ -19,7 +16,6 @@ pub struct Descriptor {
     offset_mid: u16,
     offset_hi: u32,
     _zero: u32,
-    // _f: PhantomData<T>,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -36,7 +32,6 @@ impl Descriptor {
             offset_mid: 0,
             offset_hi: 0,
             _zero: 0,
-            // _f: PhantomData,
         }
     }
 
@@ -158,67 +153,6 @@ impl core::fmt::Debug for Descriptor {
             .finish()
     }
 }
-
-// trait AsExternFnHack<I, O> {
-//     extern "x86-interrupt" fn as_extern_fn(&self, inp: I) -> O;
-// }
-
-// impl<I> AsExternFnHack<I, ()> for fn(I) {
-//     extern "x86-interrupt" fn as_extern_fn(&self, inp: I) -> O {
-//         (self)(inp)
-//     }
-// }
-
-// fn into_extern_fn(f: fn())
-
-// use hal_core::interrupt::vectors;
-
-// impl<'a>
-//     hal_core::interrupt::RegisterHandler<
-//         vectors::PageFault<super::PageFaultContext<'a>>,
-//         super::PageFaultContext<'a>,
-//     > for Idt
-// {
-//     fn register(
-//         &mut self,
-//         handler: fn(super::PageFaultContext<'a>),
-//     ) -> Result<
-//         (),
-//         hal_core::interrupt::RegistrationError<vectors::PageFault<super::PageFaultContext<'a>>>,
-//     > {
-//         // self.descriptors[14]
-//         //     .set_handler(
-//         //         ((handler as AsExternFnHack<super::PageFaultContext<'a>, ()>).as_extern_fn_hack)
-//         //             as *const (),
-//         //     )
-//         //     .set_gate_kind(GateKind::Trap);
-//         unimplemented!();
-//         Ok(())
-//     }
-// }
-
-// impl<'a> hal_core::interrupt::RegisterHandler<vectors::Test<super::Context<'a>>, super::Context<'a>>
-//     for Idt
-// {
-//     fn register(
-//         &mut self,
-//         handler: fn(super::Context<'a>),
-//     ) -> Result<(), hal_core::interrupt::RegistrationError<vectors::Test<super::Context<'a>>>> {
-//         fn null_handler(_: super::Context<'_>) {
-//             unreachable!("bad")
-//         }
-//         static mut FNPTR: fn(super::Context<'_>) = null_handler;
-//         extern "x86-interrupt" fn isr(cx: super::Context<'_>) {
-//             panic!("asdf");
-//             unsafe { (FNPTR)(cx) }
-//         }
-//         unsafe {
-//             FNPTR = core::mem::transmute(handler);
-//             (&mut self.descriptors[69]).set_handler(FNPTR as *const ());
-//         }
-//         Ok(())
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
