@@ -58,7 +58,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     {
         let mut vga = vga::writer();
         vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        writeln!(&mut vga, "page fault\n{:#?}", cx.registers()).unwrap();
+        log::error!("page fault\n{:#?}", cx.registers());
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
@@ -69,7 +69,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     {
         let mut vga = vga::writer();
         vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        writeln!(&mut vga, "code fault\n{:#?}", cx.registers()).unwrap();
+        log::error!("code fault\n{:#?}", cx.registers());
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
         loop {}
     }
@@ -81,7 +81,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     {
         let mut vga = vga::writer();
         vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        writeln!(&mut vga, "double fault\n{:#?}", cx.registers()).unwrap();
+        log::error!("double fault\n{:#?}", cx.registers());
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
         loop {}
     }
@@ -93,18 +93,15 @@ impl Handlers<crate::X64> for TestHandlersImpl {
             TIMER
         };
         let seconds_hand = timer % 8;
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
         match seconds_hand {
             0 => {
-                writeln!(&mut vga, "timer tick").unwrap();
+                log::trace!("timer tick");
             }
             4 => {
-                writeln!(&mut vga, "timer tock").unwrap();
+                log::trace!("timer tock");
             }
             _ => {}
         }
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
     #[inline(never)]
@@ -119,13 +116,12 @@ impl Handlers<crate::X64> for TestHandlersImpl {
             vga::Color::LightGray,
             vga::Color::Black,
         ));
-        writeln!(
-            &mut vga,
+        log::info!(
+            // for now
             "got scancode {}. the time is now: {}",
             scancode,
             unsafe { TIMER }
-        )
-        .unwrap();
+        );
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
@@ -136,22 +132,14 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     {
         let mut vga = vga::writer();
         vga.set_color(vga::ColorSpec::new(vga::Color::Yellow, vga::Color::Black));
-        writeln!(
-            &mut vga,
-            "lol im in ur test interrupt\n{:#?}",
-            cx.registers()
-        )
-        .unwrap();
+        log::info!("lol im in ur test interrupt\n{:#?}", cx.registers());
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 }
 
 pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'static mut idt::Idt {
     use hal_core::interrupt::Control;
-
-    let mut writer = bootinfo.writer();
-
-    writeln!(&mut writer, "\tconfiguring 8259 PIC interrupts...").unwrap();
+    log::info!("configuring 8259 PIC interrupts...");
 
     unsafe {
         PIC.set_irq_addresses(0x20, 0x28);
@@ -160,21 +148,21 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
         PIC.enable();
     }
 
-    writeln!(&mut writer, "\tintializing IDT...").unwrap();
+    log::info!("intializing IDT...");
 
     unsafe {
         IDT.register_handlers::<TestHandlersImpl>().unwrap();
-        writeln!(&mut writer, "{:#?}", IDT.descriptors[69]).unwrap();
+        log::debug!("{:#?}", IDT.descriptors[69]);
         IDT.load();
         IDT.enable();
     }
 
-    writeln!(&mut writer, "\ttesting interrupts...").unwrap();
+    log::debug!("testing interrupts...");
     unsafe {
         asm!("int $0" :: "i"(69) :: "volatile");
     }
     // loop {}
-    writeln!(&mut writer, "\tit worked?").unwrap();
+    log::debug!("it worked");
 
     unsafe { &mut IDT }
 }

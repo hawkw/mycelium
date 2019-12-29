@@ -16,6 +16,7 @@ name = "mycelium_kernel"
 
 [dependencies]
 hal-core = { path = "hal-core" }
+log = { version = "0.4", default_features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 bootloader = "0.8.0"
