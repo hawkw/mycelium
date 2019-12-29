@@ -51,6 +51,8 @@ static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
 #[inline(never)]
 extern "x86-interrupt" fn nop(cx: Context<'_>) {}
 
+static mut TIMER: usize = 0;
+
 struct TestHandlersImpl;
 
 impl Handlers<crate::X64> for TestHandlersImpl {
@@ -91,10 +93,23 @@ impl Handlers<crate::X64> for TestHandlersImpl {
 
     #[inline(never)]
     fn timer_tick() {
-        // let mut vga = vga::writer();
-        // vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
-        // writeln!(&mut vga, "timer").unwrap();
-        // vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        let timer = unsafe {
+            TIMER += 1;
+            TIMER
+        };
+        let seconds_hand = timer % 8;
+        let mut vga = vga::writer();
+        vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
+        match seconds_hand {
+            0 => {
+                writeln!(&mut vga, "timer tick").unwrap();
+            }
+            4 => {
+                writeln!(&mut vga, "timer tock").unwrap();
+            }
+            _ => { }
+        }
+        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
     #[inline(never)]
