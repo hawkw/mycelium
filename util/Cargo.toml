@@ -8,11 +8,10 @@ edition = "2018"
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["alloc"]
-alloc = ["memchr"]
+alloc = []
 
 [dependencies]
 loom = { version = "0.2.14", optional = true }
-memchr = { version = "2", default-features = false, optional = true }
 
 [dev-dependencies]
 loom = "0.2.14"
