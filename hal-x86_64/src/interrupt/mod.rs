@@ -1,6 +1,6 @@
 pub mod idt;
 pub mod pic;
-use crate::{segment, vga, VAddr};
+use crate::{cpu, segment, vga, VAddr};
 use core::{
     fmt::{self, Write},
     marker::PhantomData,
@@ -109,6 +109,15 @@ impl Handlers<crate::X64> for TestHandlersImpl {
             }
             _ => { }
         }
+        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+    }
+
+    #[inline(never)]
+    fn keyboard_controller() {
+        let mut vga = vga::writer();
+        vga.set_color(vga::ColorSpec::new(vga::Color::LightGray, vga::Color::Black));
+        let scancode = unsafe { cpu::Port::at(0x60).readb() };
+        writeln!(&mut vga, "got scancode {}. the time is now: {}", scancode, unsafe { TIMER }).unwrap();
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
@@ -254,6 +263,13 @@ impl hal_core::interrupt::Control for Idt {
             }
         }
 
+        extern "x86-interrupt" fn keyboard_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
+            H::keyboard_controller();
+            unsafe {
+                PIC.end_interrupt(0x21);
+            }
+        }
+
         extern "x86-interrupt" fn test_isr<H: Handlers<crate::X64>>(registers: &mut Registers) {
             H::test_interrupt(Context {
                 registers,
@@ -263,6 +279,7 @@ impl hal_core::interrupt::Control for Idt {
         // TODO(eliza): code fault isrs
 
         self.descriptors[0x20].set_handler(timer_isr::<H> as *const ());
+        self.descriptors[0x21].set_handler(keyboard_isr::<H> as *const ());
         self.descriptors[69].set_handler(test_isr::<H> as *const ());
         self.descriptors[14].set_handler(page_fault_isr::<H> as *const ());
         self.descriptors[8].set_handler(double_fault_isr::<H> as *const ());

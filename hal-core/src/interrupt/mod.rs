@@ -81,6 +81,8 @@ pub trait Handlers<A: Architecture> {
 
     fn timer_tick();
 
+    fn keyboard_controller();
+
     fn test_interrupt<C>(cx: C)
     where
         C: ctx::Context<Arch = A>,
