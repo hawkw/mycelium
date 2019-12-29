@@ -1,5 +1,27 @@
 use core::mem;
 
+#[repr(transparent)]
+pub struct Port {
+    num: u16
+}
+
+impl Port {
+    pub const fn at(address: u16) -> Self {
+        Port { num: address }
+    }
+
+    pub unsafe fn readb(&self) -> u8 {
+        let result: u8;
+        asm!("inb %dx, %al" : "={al}"(result) : "{dx}"(self.num) :: "volatile");
+        result
+    }
+
+    pub unsafe fn writeb(&self, value: u8) {
+        asm!("outb %al, %dx" :: "{dx}"(self.num), "{al}"(value) :: "volatile");
+    }
+    // TODO(ixi): anything wider than a byte lol
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Ring {

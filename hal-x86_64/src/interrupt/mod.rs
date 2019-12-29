@@ -1,10 +1,12 @@
 pub mod idt;
+pub mod pic;
 use crate::{segment, vga, VAddr};
 use core::{
     fmt::{self, Write},
     marker::PhantomData,
 };
 pub use idt::Idt;
+pub use pic::CascadedPic;
 
 use hal_core::interrupt::{ctx, Handlers};
 
@@ -43,6 +45,7 @@ pub struct Registers {
 }
 
 static mut IDT: idt::Idt = idt::Idt::new();
+static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
 
 #[cold]
 #[inline(never)]
@@ -116,7 +119,14 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
 
     let mut writer = bootinfo.writer();
 
-    writeln!(&mut writer, "\tintializing interrupts...").unwrap();
+    writeln!(&mut writer, "\tconfiguring 8259 PIC interrupts...").unwrap();
+
+    unsafe {
+        PIC.set_irq_addresses(0x20, 0x28);
+        PIC.enable();
+    }
+
+    writeln!(&mut writer, "\tintializing IDT...").unwrap();
 
     unsafe {
         // use crate::vga;
