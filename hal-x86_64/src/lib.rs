@@ -12,6 +12,7 @@ use hal_core::{Address, Architecture};
 
 pub mod cpu;
 pub mod interrupt;
+pub mod log;
 pub mod segment;
 pub mod serial;
 pub mod vga;

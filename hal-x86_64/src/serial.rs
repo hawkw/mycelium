@@ -9,20 +9,20 @@ lazy_static::lazy_static! {
     static ref COM4: Option<Port> = Port::new(0x2E8).ok();
 }
 
-pub fn com1() -> Option<&Port> {
-    com1.as_ref()
+pub fn com1() -> Option<&'static Port> {
+    COM1.as_ref()
 }
 
-pub fn com2() -> Option<&Port> {
-    com2.as_ref()
+pub fn com2() -> Option<&'static Port> {
+    COM2.as_ref()
 }
 
-pub fn com3() -> Option<&Port> {
-    com3.as_ref()
+pub fn com3() -> Option<&'static Port> {
+    COM3.as_ref()
 }
 
-pub fn com4() -> Option<&Port> {
-    com4.as_ref()
+pub fn com4() -> Option<&'static Port> {
+    COM4.as_ref()
 }
 
 // #[derive(Debug)]
@@ -142,7 +142,7 @@ impl Registers {
         while !self.is_read_ready() {}
         unsafe { self.data.readb() }
     }
-    #[inline]
+
     #[inline]
     fn read_nonblocking(&mut self) -> io::Result<u8> {
         if self.is_read_ready() {

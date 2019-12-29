@@ -22,23 +22,26 @@ where
     .unwrap();
     writeln!(&mut writer, "booting via {}", bootinfo.bootloader_name()).unwrap();
 
+    if let Some(logger) = bootinfo.logger() {
+        log::set_logger(logger).unwrap();
+        log::set_max_level(log::LevelFilter::Trace);
+    }
+
     let mut regions = 0;
     let mut free_regions = 0;
     let mut free_bytes = 0;
 
-    writeln!(&mut writer, "memory map:").unwrap();
+    log::info!("memory map:");
 
     for region in bootinfo.memory_map() {
         let kind = region.kind();
         let size = region.size();
-        writeln!(
-            &mut writer,
+        log::info!(
             "  {:>10?} {:>15?} {:>15?} B",
             region.base_addr(),
             kind,
             size,
-        )
-        .unwrap();
+        );
         regions += 1;
         if region.kind() == mem::RegionKind::FREE {
             free_regions += 1;
@@ -46,12 +49,12 @@ where
         }
     }
 
-    writeln!(
-        &mut writer,
+    log::info!(
         "found {} memory regions, {} free regions ({} bytes)",
-        regions, free_regions, free_bytes,
-    )
-    .unwrap();
+        regions,
+        free_regions,
+        free_bytes,
+    );
 
     A::init_interrupts(bootinfo);
 
