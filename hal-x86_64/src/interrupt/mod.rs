@@ -114,9 +114,13 @@ impl Handlers<crate::X64> for TestHandlersImpl {
 
     #[inline(never)]
     fn keyboard_controller() {
+        // load-bearing read - if we don't read from the keyboard controller we won't
+        // send another interrupt on later keystrokes.
+        //
+        // 0x60 is a magic PC/AT number.
+        let scancode = unsafe { cpu::Port::at(0x60).readb() };
         let mut vga = vga::writer();
         vga.set_color(vga::ColorSpec::new(vga::Color::LightGray, vga::Color::Black));
-        let scancode = unsafe { cpu::Port::at(0x60).readb() };
         writeln!(&mut vga, "got scancode {}. the time is now: {}", scancode, unsafe { TIMER }).unwrap();
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
