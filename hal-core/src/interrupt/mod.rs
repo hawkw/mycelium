@@ -4,14 +4,10 @@ use core::marker::PhantomData;
 
 pub mod ctx;
 pub use self::ctx::Context;
-// pub mod vectors;
 
 /// An interrupt controller for a platform.
 pub trait Control {
     type Arch: Architecture;
-    // type PageFault: Interrupt<Ctrl = Self>;
-    // const PAGE_FAULT: Self::PageFault;
-
     /// Disable all interrupts.
     ///
     /// # Safety
@@ -32,23 +28,6 @@ pub trait Control {
     /// Returns `true` if interrupts are enabled.
     fn is_enabled(&self) -> bool;
 
-    // /// Register an interrupt handler to service the provided interrupt.
-    // ///
-    // /// The interrupt controller is assumed to generate an actual ISR that calls
-    // /// the handler; that ISR will construct an interrupt context for the
-    // /// handler. The ISR is responsible for entering a critical section while
-    // /// the handler is active.
-    // fn register_handler<I, C>(
-    //     &mut self,
-    //     handler: fn(C) -> I::Out,
-    // ) -> Result<(), RegistrationError<I>>
-    // where
-    //     Self: RegisterHandler<I, C>,
-    //     I: Interrupt<C>,
-    //     // C: Context,
-    // {
-    //     self.register(handler)
-    // }
     fn register_handlers<H>(&mut self) -> Result<(), RegistrationError>
     where
         H: Handlers<Self::Arch>;
@@ -91,28 +70,10 @@ pub trait Handlers<A: Architecture> {
     }
 }
 
-// pub trait RegisterHandler<I, C>
-// where
-//     I: Interrupt<C>,
-//     // C: Context,
-//     Self: Sized,
-// {
-//     fn register(&mut self, handler: fn(C) -> I::Out) -> Result<(), RegistrationError<I>>;
-// }
-
-// /// An interrupt.
-// pub trait Interrupt<Ctx> {
-//     type Out;
-//     // // type Ctrl: Control + ?Sized;
-
-//     const NAME: &'static str = "unknown interrupt";
-// }
-
 /// Errors that may occur while registering an interrupt handler.
 #[derive(Clone, Eq, PartialEq)]
 pub struct RegistrationError {
     kind: RegistrationErrorKind,
-    // _irq: PhantomData<fn(I)>,
 }
 
 #[derive(Debug)]
@@ -144,7 +105,6 @@ impl RegistrationError {
     pub fn nonexistant() -> Self {
         Self {
             kind: RegistrationErrorKind::Nonexistant,
-            // _irq: PhantomData,
         }
     }
 
@@ -153,7 +113,6 @@ impl RegistrationError {
     pub fn already_registered() -> Self {
         Self {
             kind: RegistrationErrorKind::AlreadyRegistered,
-            // _irq: PhantomData,
         }
     }
 
@@ -161,7 +120,6 @@ impl RegistrationError {
     pub fn other(message: &'static str) -> Self {
         Self {
             kind: RegistrationErrorKind::Other(message),
-            // _irq: PhantomData,
         }
     }
 
@@ -180,20 +138,10 @@ impl RegistrationError {
     }
 }
 
-// impl<I: Interrupt<C>, C> fmt::Display for RegistrationError<I> {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         write!("failed to register {} handler", I::NAME)
-//     }
-// }
-
 impl fmt::Debug for RegistrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RegistrationError")
             .field("kind", &self.kind)
-            // .field(
-            //     "interrupt",
-            //     &format_args!("{}", core::any::type_name::<I>()),
-            // )
             .finish()
     }
 }
