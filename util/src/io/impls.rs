@@ -18,16 +18,19 @@ impl<R: Read + ?Sized> Read for &mut R {
     }
 
     #[inline]
+    #[cfg(feature = "alloc")]
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
         (**self).read_to_end(buf)
     }
 
     #[inline]
+    #[cfg(feature = "alloc")]
     fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
         (**self).read_to_string(buf)
     }
 
     #[inline]
+    #[cfg(feature = "alloc")]
     fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         (**self).read_exact(buf)
     }
@@ -145,8 +148,7 @@ impl<S: Seek + ?Sized> Seek for Box<S> {
     }
 }
 
-// TODO(eliza): add
-
+#[cfg(feature = "alloc")]
 impl<B: BufRead + ?Sized> BufRead for Box<B> {
     #[inline]
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
