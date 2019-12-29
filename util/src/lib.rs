@@ -2,6 +2,10 @@
 //! libraries.
 #![cfg_attr(target_os = "none", no_std)]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 pub mod cell;
 pub mod error;
+pub mod io;
 pub mod sync;
