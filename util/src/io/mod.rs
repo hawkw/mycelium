@@ -1058,6 +1058,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>) -> Result<usize> {
     unimplemented!("eliza: figure out memchr!!!!")
     // let mut read = 0;
