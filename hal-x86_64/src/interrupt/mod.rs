@@ -234,6 +234,9 @@ impl hal_core::interrupt::Control for Idt {
 
         extern "x86-interrupt" fn timer_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
             H::timer_tick();
+            unsafe {
+                PIC.end_interrupt(0x20);
+            }
         }
 
         extern "x86-interrupt" fn test_isr<H: Handlers<crate::X64>>(registers: &mut Registers) {
