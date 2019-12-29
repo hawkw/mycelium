@@ -15,7 +15,7 @@ struct Serial {
 impl Default for Logger {
     fn default() -> Self {
         Self {
-            vga_max_level: LevelFilter::Info,
+            vga_max_level: LevelFilter::Trace,
             serial: serial::com1().map(|port| Serial {
                 port,
                 max_level: LevelFilter::Trace,
@@ -60,7 +60,7 @@ impl Log for Logger {
 
             print_level_vga(&level, &mut vga);
             vga.set_color(DEFAULT_COLOR);
-            writeln!(vga, "] {:?}", record.args()).unwrap();
+            writeln!(vga, " {:?}", record.args()).unwrap();
         }
 
         if let Some(ref serial) = self.serial {
