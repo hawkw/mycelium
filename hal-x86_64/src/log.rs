@@ -15,7 +15,7 @@ struct Serial {
 impl Default for Logger {
     fn default() -> Self {
         Self {
-            vga_max_level: LevelFilter::Trace,
+            vga_max_level: LevelFilter::Info,
             serial: serial::com1().map(|port| Serial {
                 port,
                 max_level: LevelFilter::Trace,
