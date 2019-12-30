@@ -154,6 +154,8 @@ impl<'a> Iterator for ErrorIter<'a> {
     }
 }
 
+impl Error for &'static str {}
+
 mod private {
     // This is a hack to prevent `type_id` from being overridden by `Error`
     // implementations, since that can enable unsound downcasting.

@@ -1,8 +1,11 @@
+use crate::error;
+use core::fmt;
+
 pub type Result<T> = core::result::Result<T, self::Error>;
 #[derive(Debug)]
-pub struct Error {
+pub struct Error<E: error::Error + 'static = &'static str> {
     kind: ErrorKind,
-    details: Option<&'static str>,
+    source: Option<E>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -74,11 +77,11 @@ pub enum ErrorKind {
     UnexpectedEof,
 }
 
-impl Error {
-    pub fn new(kind: ErrorKind, details: &'static str) -> Self {
+impl<E: error::Error + 'static> Error<E> {
+    pub fn new(kind: ErrorKind, source: E) -> Self {
         Self {
             kind,
-            details: Some(details),
+            source: Some(source),
         }
     }
 
@@ -89,9 +92,49 @@ impl Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Self {
-        Error {
-            kind,
-            details: None,
+        Error { kind, source: None }
+    }
+}
+
+impl<E: error::Error + 'static> error::Error for Error<E> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|e| e as &(dyn error::Error + 'static))
+    }
+}
+
+impl<E: error::Error + 'static> fmt::Display for Error<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(ref source) = self.source {
+            write!(f, "{}: {}", self.kind.as_str(), source)
+        } else {
+            f.write_str(self.kind.as_str())
+        }
+    }
+}
+
+impl ErrorKind {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match *self {
+            ErrorKind::NotFound => "entity not found",
+            ErrorKind::PermissionDenied => "permission denied",
+            ErrorKind::ConnectionRefused => "connection refused",
+            ErrorKind::ConnectionReset => "connection reset",
+            ErrorKind::ConnectionAborted => "connection aborted",
+            ErrorKind::NotConnected => "not connected",
+            ErrorKind::AddrInUse => "address in use",
+            ErrorKind::AddrNotAvailable => "address not available",
+            ErrorKind::BrokenPipe => "broken pipe",
+            ErrorKind::AlreadyExists => "entity already exists",
+            ErrorKind::WouldBlock => "operation would block",
+            ErrorKind::InvalidInput => "invalid input parameter",
+            ErrorKind::InvalidData => "invalid data",
+            ErrorKind::TimedOut => "timed out",
+            ErrorKind::WriteZero => "write zero",
+            ErrorKind::Interrupted => "operation interrupted",
+            ErrorKind::Other => "other error",
+            ErrorKind::UnexpectedEof => "unexpected end of file",
         }
     }
 }
