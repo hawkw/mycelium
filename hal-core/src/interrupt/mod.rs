@@ -51,11 +51,11 @@ pub trait Handlers<A: Architecture> {
         C: ctx::Context<Arch = A> + ctx::CodeFault;
 
     #[inline(always)]
-    fn double_fault<C>(cx: C)
+    fn double_fault<C>(cx: C) -> !
     where
-        C: ctx::Context<Arch = A> + ctx::CodeFault,
+        C: ctx::Context<Arch = A>,
     {
-        Self::code_fault(cx)
+        panic!("double fault:\n{:#?}", cx.registers())
     }
 
     fn timer_tick();

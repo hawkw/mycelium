@@ -8,6 +8,7 @@ pub trait Context {
 
     fn registers(&self) -> &Self::Registers;
     unsafe fn registers_mut(&mut self) -> &mut Self::Registers;
+    fn instruction_ptr(&self) -> <<Self as Context>::Arch as Architecture>::VAddr;
 }
 
 pub trait PageFault: Context {
@@ -18,9 +19,10 @@ pub trait PageFault: Context {
 
 pub trait CodeFault: Context {
     fn is_user_mode(&self) -> bool;
-    fn instruction_ptr(&self) -> <<Self as Context>::Arch as Architecture>::VAddr;
+    fn kind(&self) -> CodeFaultKind;
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum CodeFaultKind {
     /// The code fault was a division by zero.

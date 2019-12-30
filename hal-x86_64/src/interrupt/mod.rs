@@ -67,23 +67,16 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        log::error!("code fault\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        log::error!("code fault: {:?}\n{:#?}", cx.kind(), cx.registers());
         loop {}
     }
 
     #[inline(never)]
-    fn double_fault<C>(cx: C)
+    fn double_fault<C>(cx: C) -> !
     where
-        C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
+        C: ctx::Context<Arch = crate::X64>,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        log::error!("double fault\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
-        loop {}
+        panic!("double fault\n{:#?}", cx.registers());
     }
 
     #[inline(never)]
@@ -112,17 +105,12 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         // 0x60 is a magic PC/AT number.
         let scancode = unsafe { cpu::Port::at(0x60).readb() };
         let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(
-            vga::Color::LightGray,
-            vga::Color::Black,
-        ));
         log::info!(
             // for now
             "got scancode {}. the time is now: {}",
             scancode,
             unsafe { TIMER }
         );
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
     #[inline(never)]
@@ -131,9 +119,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         C: ctx::Context<Arch = crate::X64>,
     {
         let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Yellow, vga::Color::Black));
-        log::info!("lol im in ur test interrupt\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        log::info!("lol im in ur test interrupt\n{:4>#?}", cx.registers());
     }
 }
 
@@ -182,6 +168,10 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
     unsafe fn registers_mut(&mut self) -> &mut Registers {
         &mut self.registers
     }
+
+    fn instruction_ptr(&self) -> VAddr {
+        self.registers.instruction_ptr
+    }
 }
 
 impl<'a> hal_core::interrupt::ctx::PageFault for Context<'a, PageFaultCode> {
@@ -190,13 +180,13 @@ impl<'a> hal_core::interrupt::ctx::PageFault for Context<'a, PageFaultCode> {
     }
 }
 
-impl<'a> hal_core::interrupt::ctx::CodeFault for Context<'a, ErrorCode> {
+impl<'a> hal_core::interrupt::ctx::CodeFault for Context<'a, ctx::CodeFaultKind> {
     fn is_user_mode(&self) -> bool {
         false // TODO(eliza)
     }
 
-    fn instruction_ptr(&self) -> crate::VAddr {
-        self.registers.instruction_ptr
+    fn kind(&self) -> ctx::CodeFaultKind {
+        self.code
     }
 }
 
@@ -246,6 +236,31 @@ impl hal_core::interrupt::Control for Idt {
             H::double_fault(Context { registers, code });
         }
 
+        extern "x86-interrupt" fn divide_error_isr<H: Handlers<crate::X64>>(
+            registers: &mut Registers,
+        ) {
+            H::code_fault(Context {
+                registers,
+                code: ctx::CodeFaultKind::Division,
+            });
+        }
+
+        extern "x86-interrupt" fn overflow_isr<H: Handlers<crate::X64>>(registers: &mut Registers) {
+            H::code_fault(Context {
+                registers,
+                code: ctx::CodeFaultKind::Overflow,
+            });
+        }
+
+        extern "x86-interrupt" fn invalid_opcode_isr<H: Handlers<crate::X64>>(
+            registers: &mut Registers,
+        ) {
+            H::code_fault(Context {
+                registers,
+                code: ctx::CodeFaultKind::InvalidInstruction,
+            });
+        }
+
         extern "x86-interrupt" fn timer_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
             H::timer_tick();
             unsafe {
@@ -266,7 +281,11 @@ impl hal_core::interrupt::Control for Idt {
                 code: (),
             });
         }
-        // TODO(eliza): code fault isrs
+
+        // code fault ISRs
+        self.descriptors[Self::DIVIDE_BY_ZERO].set_handler(divide_error_isr::<H> as *const ());
+        self.descriptors[Self::OVERFLOW].set_handler(overflow_isr::<H> as *const ());
+        self.descriptors[Self::INVALID_OPCODE].set_handler(invalid_opcode_isr::<H> as *const ());
 
         self.descriptors[0x20].set_handler(timer_isr::<H> as *const ());
         self.descriptors[0x21].set_handler(keyboard_isr::<H> as *const ());
