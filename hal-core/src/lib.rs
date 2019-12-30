@@ -15,11 +15,11 @@ pub trait Architecture {
     /// The name of the architecture, as a string.
     const NAME: &'static str;
 
-    fn init_interrupts(
-        bootinfo: &impl boot::BootInfo<Arch = Self>,
-    ) -> &'static mut Self::InterruptCtrl
+    fn init_interrupts<H, B>(bootinfo: &B) -> &'static mut Self::InterruptCtrl
     where
-        Self: Sized;
+        Self: Sized,
+        H: interrupt::Handlers<Self>,
+        B: boot::BootInfo<Arch = Self>;
 }
 
 pub trait Address:

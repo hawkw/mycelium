@@ -48,82 +48,11 @@ static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
 static mut TIMER: usize = 0;
 
-struct TestHandlersImpl;
-
-impl Handlers<crate::X64> for TestHandlersImpl {
-    #[inline(never)]
-    fn page_fault<C>(cx: C)
-    where
-        C: ctx::Context<Arch = crate::X64> + ctx::PageFault,
-    {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        log::error!("page fault\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
-    }
-
-    #[inline(never)]
-    fn code_fault<C>(cx: C)
-    where
-        C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
-    {
-        log::error!("code fault: {:?}\n{:#?}", cx.kind(), cx.registers());
-        loop {}
-    }
-
-    #[inline(never)]
-    fn double_fault<C>(cx: C) -> !
-    where
-        C: ctx::Context<Arch = crate::X64>,
-    {
-        panic!("double fault\n{:#?}", cx.registers());
-    }
-
-    #[inline(never)]
-    fn timer_tick() {
-        let timer = unsafe {
-            TIMER += 1;
-            TIMER
-        };
-        let seconds_hand = timer % 8;
-        match seconds_hand {
-            0 => {
-                log::trace!("timer tick");
-            }
-            4 => {
-                log::trace!("timer tock");
-            }
-            _ => {}
-        }
-    }
-
-    #[inline(never)]
-    fn keyboard_controller() {
-        // load-bearing read - if we don't read from the keyboard controller it won't
-        // send another interrupt on later keystrokes.
-        //
-        // 0x60 is a magic PC/AT number.
-        let scancode = unsafe { cpu::Port::at(0x60).readb() };
-        let mut vga = vga::writer();
-        log::info!(
-            // for now
-            "got scancode {}. the time is now: {}",
-            scancode,
-            unsafe { TIMER }
-        );
-    }
-
-    #[inline(never)]
-    fn test_interrupt<C>(cx: C)
-    where
-        C: ctx::Context<Arch = crate::X64>,
-    {
-        let mut vga = vga::writer();
-        log::info!("lol im in ur test interrupt\n{:4>#?}", cx.registers());
-    }
-}
-
-pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'static mut idt::Idt {
+pub fn init<H, B>(bootinfo: &B) -> &'static mut idt::Idt
+where
+    H: Handlers<crate::X64>,
+    B: hal_core::boot::BootInfo<Arch = crate::X64>,
+{
     use hal_core::interrupt::Control;
     log::info!("configuring 8259 PIC interrupts...");
 
@@ -137,7 +66,7 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
     log::info!("intializing IDT...");
 
     unsafe {
-        IDT.register_handlers::<TestHandlersImpl>().unwrap();
+        IDT.register_handlers::<H>().unwrap();
         log::debug!("{:#?}", IDT.descriptors[69]);
         IDT.load();
         IDT.enable();
@@ -269,7 +198,12 @@ impl hal_core::interrupt::Control for Idt {
         }
 
         extern "x86-interrupt" fn keyboard_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
-            H::keyboard_controller();
+            // load-bearing read - if we don't read from the keyboard controller it won't
+            // send another interrupt on later keystrokes.
+            //
+            // 0x60 is a magic PC/AT number.
+            let scancode = unsafe { cpu::Port::at(0x60).readb() };
+            H::keyboard_controller(scancode);
             unsafe {
                 PIC.end_interrupt(0x21);
             }

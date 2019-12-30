@@ -60,7 +60,10 @@ pub trait Handlers<A: Architecture> {
 
     fn timer_tick();
 
-    fn keyboard_controller();
+    // TODO(eliza): is a scancode sufficiently cross-platform? i don't think it
+    // is...should the HAL handle translating the scancode to some kinda
+    // keyboard input type?
+    fn keyboard_controller(scancode: u8);
 
     fn test_interrupt<C>(cx: C)
     where

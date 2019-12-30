@@ -34,13 +34,13 @@ impl Architecture for X64 {
     const NAME: &'static str = "x86_64";
     type InterruptCtrl = crate::interrupt::Idt;
 
-    fn init_interrupts(
-        bootinfo: &impl hal_core::boot::BootInfo<Arch = Self>,
-    ) -> &'static mut Self::InterruptCtrl
+    fn init_interrupts<H, B>(bootinfo: &B) -> &'static mut Self::InterruptCtrl
     where
         Self: Sized,
+        H: hal_core::interrupt::Handlers<Self>,
+        B: hal_core::boot::BootInfo<Arch = Self>,
     {
-        crate::interrupt::init(bootinfo)
+        crate::interrupt::init::<H, _>(bootinfo)
     }
 }
 

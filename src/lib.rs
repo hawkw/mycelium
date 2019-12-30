@@ -2,6 +2,7 @@
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem, Architecture};
+mod interrupt;
 
 pub fn kernel_main<A>(bootinfo: &impl BootInfo<Arch = A>) -> !
 where
@@ -51,7 +52,7 @@ where
         free_bytes,
     );
 
-    A::init_interrupts(bootinfo);
+    A::init_interrupts::<interrupt::Handlers<A>, _>(bootinfo);
 
     // if this function returns we would boot loop. Hang, instead, so the debug
     // output can be read.
