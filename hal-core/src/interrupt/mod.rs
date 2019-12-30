@@ -1,74 +1,77 @@
+use crate::Architecture;
+use core::fmt;
+use core::marker::PhantomData;
+
+pub mod ctx;
+pub use self::ctx::Context;
+
 /// An interrupt controller for a platform.
 pub trait Control {
-    type Error;
-    /// The type of this platform's interrupt vector.
-    ///
-    /// TODO(eliza): This is *probably* always a `u8`, do we really need to have
-    /// this?
-    type Vector;
-
-    /// Disable interrupts.
+    type Arch: Architecture;
+    /// Disable all interrupts.
     ///
     /// # Safety
     ///
     /// This may cause a fault if called when interrupts are already disabled
     /// (depending on the platform). It does not guarantee that interrupts will
     /// ever be unmasked.
-    unsafe fn disable_irq(&mut self);
+    unsafe fn disable(&mut self);
 
-    /// Enable interrupts.
+    /// Enable all interrupts.
     ///
     /// # Safety
     ///
     /// This may cause a fault if called when interrupts are already enabled
     /// (depending on the platform).
-    unsafe fn enable_irq(&mut self);
+    unsafe fn enable(&mut self);
 
     /// Returns `true` if interrupts are enabled.
     fn is_enabled(&self) -> bool;
 
-    /// Register an interrupt handler to service the provided interrupt.
-    ///
-    /// The interrupt controller is assumed to generate an actual ISR that calls
-    /// the handler; that ISR will construct an interrupt context for the
-    /// handler. The ISR is responsible for entering a critical section while
-    /// the handler is active.
-    fn register_handler<I>(
-        &mut self,
-        irq: &I,
-        handler: I::Handler,
-    ) -> Result<(), RegistrationError>
+    fn register_handlers<H>(&mut self) -> Result<(), RegistrationError>
     where
-        I: Interrupt<Ctrl = Self>;
+        H: Handlers<Self::Arch>;
 
     /// Enter a critical section, returning a guard.
     fn enter_critical(&mut self) -> CriticalGuard<'_, Self> {
         unsafe {
-            self.disable_irq();
+            self.disable();
         }
         CriticalGuard { ctrl: self }
     }
 }
 
-/// An interrupt.
-pub trait Interrupt {
-    type Ctrl: Control + ?Sized;
-    /// The type of handler for this interrupt.
-    ///
-    /// This should always be a function pointer; but we cannot constrain this
-    /// associated type since we don't know the _arguments_ to the handler
-    /// function.
-    type Handler;
+pub trait Handlers<A: Architecture> {
+    fn page_fault<C>(cx: C)
+    where
+        C: ctx::Context<Arch = A> + ctx::PageFault;
 
-    /// Returns the interrupt vector associated with this interrupt.
-    fn vector(&self) -> <Self::Ctrl as Control>::Vector;
+    fn code_fault<C>(cx: C)
+    where
+        C: ctx::Context<Arch = A> + ctx::CodeFault;
 
-    /// Returns the name of this interrupt, for diagnostics etc.
-    fn name(&self) -> &'static str;
+    #[inline(always)]
+    fn double_fault<C>(cx: C)
+    where
+        C: ctx::Context<Arch = A> + ctx::CodeFault,
+    {
+        Self::code_fault(cx)
+    }
+
+    fn timer_tick();
+
+    fn keyboard_controller();
+
+    fn test_interrupt<C>(cx: C)
+    where
+        C: ctx::Context<Arch = A>,
+    {
+        // nop
+    }
 }
 
 /// Errors that may occur while registering an interrupt handler.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct RegistrationError {
     kind: RegistrationErrorKind,
 }
@@ -90,7 +93,7 @@ enum RegistrationErrorKind {
 impl<'a, C: Control + ?Sized> Drop for CriticalGuard<'a, C> {
     fn drop(&mut self) {
         unsafe {
-            self.ctrl.enable_irq();
+            self.ctrl.enable();
         }
     }
 }
@@ -132,5 +135,13 @@ impl RegistrationError {
             RegistrationErrorKind::AlreadyRegistered => true,
             _ => false,
         }
+    }
+}
+
+impl fmt::Debug for RegistrationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RegistrationError")
+            .field("kind", &self.kind)
+            .finish()
     }
 }

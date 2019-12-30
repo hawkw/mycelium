@@ -7,9 +7,19 @@ pub mod mem;
 pub trait Architecture {
     /// The architecture's physical address representation.
     type PAddr: Address;
+    /// The architecture's virtual address representation.
+    type VAddr: Address;
+
+    type InterruptCtrl: interrupt::Control + 'static;
 
     /// The name of the architecture, as a string.
     const NAME: &'static str;
+
+    fn init_interrupts(
+        bootinfo: &impl boot::BootInfo<Arch = Self>,
+    ) -> &'static mut Self::InterruptCtrl
+    where
+        Self: Sized;
 }
 
 pub trait Address:
