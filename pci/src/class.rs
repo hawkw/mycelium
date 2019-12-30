@@ -77,7 +77,7 @@ macro_rules! class_enum {
                     $(
                         $name::$variant $((replace_tt!($next next)))? => {
                             fmt::Display::fmt(&$kind::$variant, f)?;
-                            $(write!(f, " : {}", replace_tt!($next next))?;)?
+                            $(next_display_helper(f, replace_tt!($next next))?;)?
                         }
                     ),*
                 }
@@ -139,6 +139,15 @@ macro_rules! class_enum {
             }
         }
     };
+}
+
+fn next_display_helper(f: &mut fmt::Formatter, next: &impl fmt::Display) -> fmt::Result {
+    // Precision of `0` means we're done, no precision implies infinite precision.
+    match f.precision() {
+        Some(0) => Ok(()),
+        Some(precision) => write!(f, ": {:.*}", precision - 1, next),
+        None => write!(f, ": {}", next),
+    }
 }
 
 class_enum! {
@@ -418,13 +427,17 @@ mod test {
     fn test_display() {
         assert_eq!(
             Class::MassStorage(MassStorage::Sata(iface::Sata::Achi1)).to_string(),
-            "Mass Storage Controller : Serial ATA : AHCI 1.0"
+            "Mass Storage Controller: Serial ATA: AHCI 1.0"
         );
 
         let ide_iface = iface::Ide::try_from(0x8F).unwrap();
         assert_eq!(
             Class::MassStorage(MassStorage::Ide(ide_iface)).to_string(),
-            "Mass Storage Controller : IDE Controller : PCI native mode controller, supports both channels switched to ISA compatibility mode, supports bus mastering"
+            "Mass Storage Controller: IDE Controller: PCI native mode controller, supports both channels switched to ISA compatibility mode, supports bus mastering"
+        );
+        assert_eq!(
+            format!("{:.1}", Class::MassStorage(MassStorage::Ide(ide_iface))),
+            "Mass Storage Controller: IDE Controller"
         );
     }
 }
