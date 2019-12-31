@@ -57,10 +57,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64> + ctx::PageFault,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        tracing::error!("page fault\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::error!(registers = ?cx.registers(), "page fault");
     }
 
     #[inline(never)]
@@ -68,10 +65,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        tracing::error!("code fault\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::error!(registers = ?cx.registers(), "code fault");
         loop {}
     }
 
@@ -80,10 +74,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        tracing::error!("double fault\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::error!(registers = ?cx.registers(), "double fault",);
         loop {}
     }
 
@@ -99,18 +90,12 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         //
         // 0x60 is a magic PC/AT number.
         let scancode = unsafe { cpu::Port::at(0x60).readb() };
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(
-            vga::Color::LightGray,
-            vga::Color::Black,
-        ));
         tracing::info!(
             // for now
             "got scancode {}. the time is now: {}",
             scancode,
             TIMER.load(Ordering::Relaxed)
         );
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
     }
 
     #[inline(never)]
@@ -118,10 +103,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64>,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Yellow, vga::Color::Black));
-        tracing::info!("lol im in ur test interrupt\n{:#?}", cx.registers());
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
     }
 }
 
