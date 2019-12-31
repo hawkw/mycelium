@@ -76,12 +76,7 @@ where
     A::init_interrupts::<interrupt::Handlers<A>, _>(bootinfo);
 
     let largest_free = largest_free.expect("found no free memory regions!");
-    writeln!(
-        &mut writer,
-        "largest free memory region: {:?}",
-        largest_free,
-    )
-    .unwrap();
+    log::info!("largest free memory region: {:?}", largest_free,);
 
     let bump_pg = largest_free
         .page_range::<A::MinPageSize>()
@@ -89,11 +84,12 @@ where
         .next()
         .unwrap();
 
-    writeln!(&mut writer, "bump allocator page {:?}", bump_pg,).unwrap();
-    // ALLOCATOR.set_allocator(bump.as_dyn_alloc());
+    log::debug!("bump allocator page {:?}", bump_pg);
+    let bump = mycelium_alloc::bump::BumpPage::new(bump_pg);
+    ALLOCATOR.set_allocator(bump.as_dyn_alloc());
 
-    // let a_vec = alloc::vec![1, 2, 3];
-    // writeln!(&mut writer, "allocated a vec: {:?}", a_vec).unwrap();
+    let a_vec = alloc::vec![1, 2, 3];
+    log::info!("allocated a vec: {:?}", a_vec);
 
     loop {}
 }
