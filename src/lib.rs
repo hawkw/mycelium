@@ -3,10 +3,6 @@
 
 extern crate alloc;
 
-// Force `mycelium_alloc` to be linked in, as it provides the allocator.
-#[cfg(target_os = "none")]
-extern crate mycelium_alloc;
-
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem, Architecture};
 
@@ -88,9 +84,12 @@ pub fn handle_panic(writer: &mut impl Write, info: &core::panic::PanicInfo) -> !
     loop {}
 }
 
-pub fn handle_alloc_error(writer: &mut impl Write, layout: core::alloc::Layout) -> ! {
-    let _ = writeln!(writer, "alloc error:\n{:?}", layout);
+#[global_allocator]
+#[cfg(target_os = "none")]
+pub static GLOBAL: mycelium_alloc::Alloc = mycelium_alloc::Alloc;
 
-    #[allow(clippy::empty_loop)]
-    loop {}
+#[alloc_error_handler]
+#[cfg(target_os = "none")]
+fn alloc_error(layout: core::alloc::Layout) -> ! {
+    panic!("alloc error: {:?}", layout);
 }

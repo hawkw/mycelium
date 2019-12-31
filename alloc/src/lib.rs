@@ -2,14 +2,12 @@
 //! Allocates into a "large" static array.
 #![no_std]
 
-use core::alloc::Layout;
+use core::alloc::{Layout, GlobalAlloc};
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::ptr;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-#[cfg(target_os = "none")]
-use core::alloc::GlobalAlloc;
 
 // 640k is enough for anyone
 const HEAP_SIZE: usize = 640 * 1024;
@@ -56,11 +54,9 @@ pub unsafe fn dealloc(_ptr: *mut u8, _layout: Layout) {
     // lol
 }
 
-#[cfg(target_os = "none")]
-pub struct Global;
+pub struct Alloc;
 
-#[cfg(target_os = "none")]
-unsafe impl GlobalAlloc for Global {
+unsafe impl GlobalAlloc for Alloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         alloc(layout)
     }
@@ -69,10 +65,6 @@ unsafe impl GlobalAlloc for Global {
         dealloc(ptr, layout)
     }
 }
-
-#[cfg(target_os = "none")]
-#[global_allocator]
-pub static GlOBAL: Global = Global;
 
 #[cfg(test)]
 mod test {

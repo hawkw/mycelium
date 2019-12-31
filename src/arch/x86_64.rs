@@ -73,11 +73,3 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
     mycelium_kernel::handle_panic(&mut vga, info)
 }
-
-#[alloc_error_handler]
-#[cfg(target_os = "none")]
-fn alloc_error(layout: core::alloc::Layout) -> ! {
-    let mut vga = vga::writer();
-    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-    mycelium_kernel::handle_alloc_error(&mut vga, layout)
-}
