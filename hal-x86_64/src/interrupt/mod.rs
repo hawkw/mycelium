@@ -4,6 +4,7 @@ use crate::{cpu, segment, vga, VAddr};
 use core::{
     fmt::{self, Write},
     marker::PhantomData,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 pub use idt::Idt;
 pub use pic::CascadedPic;
@@ -46,7 +47,7 @@ pub struct Registers {
 
 static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
-static mut TIMER: usize = 0;
+static TIMER: AtomicUsize = AtomicUsize::new(0);
 
 struct TestHandlersImpl;
 
@@ -88,23 +89,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
 
     #[inline(never)]
     fn timer_tick() {
-        let timer = unsafe {
-            TIMER += 1;
-            TIMER
-        };
-        let seconds_hand = timer % 8;
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Blue, vga::Color::Black));
-        match seconds_hand {
-            0 => {
-                writeln!(&mut vga, "timer tick").unwrap();
-            }
-            4 => {
-                writeln!(&mut vga, "timer tock").unwrap();
-            }
-            _ => {}
-        }
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        TIMER.fetch_add(1, Ordering::Relaxed);
     }
 
     #[inline(never)]
@@ -123,7 +108,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
             &mut vga,
             "got scancode {}. the time is now: {}",
             scancode,
-            unsafe { TIMER }
+            TIMER.load(Ordering::Relaxed)
         )
         .unwrap();
         vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
