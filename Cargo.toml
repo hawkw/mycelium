@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "alloc",
     "util",
     "hal-core",
     "hal-x86_64",
@@ -16,6 +17,7 @@ name = "mycelium_kernel"
 
 [dependencies]
 hal-core = { path = "hal-core" }
+mycelium-alloc = { path = "alloc" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 bootloader = "0.8.0"

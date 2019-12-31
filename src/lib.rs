@@ -1,7 +1,16 @@
 #![cfg_attr(target_os = "none", no_std)]
+#![cfg_attr(target_os = "none", feature(alloc_error_handler))]
+
+extern crate alloc;
+
+// Force `mycelium_alloc` to be linked in, as it provides the allocator.
+#[cfg(target_os = "none")]
+extern crate mycelium_alloc;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem, Architecture};
+
+use alloc::vec::Vec;
 
 pub fn kernel_main<A>(bootinfo: &impl BootInfo<Arch = A>) -> !
 where
@@ -50,6 +59,18 @@ where
 
     A::init_interrupts(bootinfo);
 
+    {
+        // Let's allocate something, for funsies
+        let mut v = Vec::new();
+        writeln!(&mut writer, "vec: {:?} (@ {:p})", v, v.as_ptr()).unwrap();
+        v.push(5u64);
+        writeln!(&mut writer, "vec: {:?} (@ {:p})", v, v.as_ptr()).unwrap();
+        v.push(10u64);
+        writeln!(&mut writer, "vec: {:?} (@ {:p})", v, v.as_ptr()).unwrap();
+        assert_eq!(v.pop(), Some(10));
+        assert_eq!(v.pop(), Some(5));
+    }
+
     // if this function returns we would boot loop. Hang, instead, so the debug
     // output can be read.
     //
@@ -63,6 +84,13 @@ pub fn handle_panic(writer: &mut impl Write, info: &core::panic::PanicInfo) -> !
 
     // we can't panic or make the thread sleep here, as we are in the panic
     // handler!
+    #[allow(clippy::empty_loop)]
+    loop {}
+}
+
+pub fn handle_alloc_error(writer: &mut impl Write, layout: core::alloc::Layout) -> ! {
+    let _ = writeln!(writer, "alloc error:\n{:?}", layout);
+
     #[allow(clippy::empty_loop)]
     loop {}
 }
