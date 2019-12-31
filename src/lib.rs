@@ -22,50 +22,53 @@ where
     .unwrap();
     writeln!(&mut writer, "booting via {}", bootinfo.bootloader_name()).unwrap();
 
-    if let Some(logger) = bootinfo.logger() {
-        log::set_logger(logger).unwrap();
-        log::set_max_level(log::LevelFilter::Trace);
+    if let Some(subscriber) = bootinfo.subscriber() {
+        tracing::dispatcher::set_global_default(subscriber).unwrap();
     }
 
     let mut regions = 0;
     let mut free_regions = 0;
     let mut free_bytes = 0;
 
-    log::info!("memory map:");
-
-    for region in bootinfo.memory_map() {
-        let kind = region.kind();
-        let size = region.size();
-        log::info!(
-            "  {:>10?} {:>15?} {:>15?} B",
-            region.base_addr(),
-            kind,
-            size,
-        );
-        regions += 1;
-        if region.kind() == mem::RegionKind::FREE {
-            free_regions += 1;
-            free_bytes += size;
+    {
+        let span = tracing::info_span!("memory map");
+        let _enter = span.enter();
+        for region in bootinfo.memory_map() {
+            let kind = region.kind();
+            let size = region.size();
+            tracing::info!(
+                "  {:>10?} {:>15?} {:>15?} B",
+                region.base_addr(),
+                kind,
+                size,
+            );
+            regions += 1;
+            if region.kind() == mem::RegionKind::FREE {
+                free_regions += 1;
+                free_bytes += size;
+            }
         }
-    }
 
-    log::info!(
-        "found {} memory regions, {} free regions ({} bytes)",
-        regions,
-        free_regions,
-        free_bytes,
-    );
+        tracing::info!(
+            "found {} memory regions, {} free regions ({} bytes)",
+            regions,
+            free_regions,
+            free_bytes,
+        );
+    }
 
     A::init_interrupts(bootinfo);
 
     {
+        let span = tracing::info_span!("alloc test");
+        let _enter = span.enter();
         // Let's allocate something, for funsies
         let mut v = Vec::new();
-        writeln!(&mut writer, "vec: {:?} (@ {:p})", v, v.as_ptr()).unwrap();
+        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
         v.push(5u64);
-        writeln!(&mut writer, "vec: {:?} (@ {:p})", v, v.as_ptr()).unwrap();
+        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
         v.push(10u64);
-        writeln!(&mut writer, "vec: {:?} (@ {:p})", v, v.as_ptr()).unwrap();
+        tracing::info!(vec=?v, vec.addr = ?v.as_ptr());
         assert_eq!(v.pop(), Some(10));
         assert_eq!(v.pop(), Some(5));
     }

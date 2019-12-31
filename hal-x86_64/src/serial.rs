@@ -1,6 +1,6 @@
 //! A simple 16550 UART serial port driver.
 use crate::cpu;
-use core::marker::PhantomData;
+use core::{fmt, marker::PhantomData};
 use mycelium_util::{io, sync::spin};
 
 lazy_static::lazy_static! {
@@ -298,6 +298,15 @@ impl<'a> io::Write for Lock<'a, Blocking> {
 
     fn flush(&mut self) -> io::Result<()> {
         while !self.inner.is_write_ready() {}
+        Ok(())
+    }
+}
+
+impl<'a> fmt::Write for Lock<'a, Blocking> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for byte in s.bytes() {
+            self.inner.write_blocking(byte)
+        }
         Ok(())
     }
 }

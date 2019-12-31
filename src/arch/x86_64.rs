@@ -54,13 +54,10 @@ impl BootInfo for RustbootBootInfo {
         vga::writer()
     }
 
-    fn logger(&self) -> Option<&'static dyn log::Log> {
-        static mut LOGGER: hal_x86_64::log::Logger =
-            hal_x86_64::log::Logger::vga_only(log::LevelFilter::Info);
-        unsafe {
-            LOGGER = hal_x86_64::log::Logger::default();
-            Some(&LOGGER)
-        }
+    fn subscriber(&self) -> Option<tracing::Dispatch> {
+        Some(tracing::Dispatch::new(
+            hal_x86_64::tracing::Subscriber::default(),
+        ))
     }
 
     fn bootloader_name(&self) -> &str {

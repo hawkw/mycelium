@@ -18,7 +18,7 @@ pub trait BootInfo {
         None
     }
 
-    fn logger(&self) -> Option<&'static dyn log::Log> {
+    fn subscriber(&self) -> Option<tracing::Dispatch> {
         None
     }
 
