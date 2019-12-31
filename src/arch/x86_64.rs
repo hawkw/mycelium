@@ -72,10 +72,20 @@ pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
     mycelium_kernel::kernel_main(&bootinfo);
 }
 
-#[panic_handler]
-#[cfg(target_os = "none")]
-fn panic(info: &core::panic::PanicInfo) -> ! {
+pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
+    use core::fmt::Write;
+
+    unsafe { asm!("cli" :::: "volatile") }
     let mut vga = vga::writer();
-    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-    mycelium_kernel::handle_panic(&mut vga, info)
+    const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
+    vga.set_color(RED_BG);
+    vga.clear();
+    let _ = vga.write_str("\n  ");
+    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
+    let _ = vga.write_str("OOPSIE WOOPSIE");
+    vga.set_color(RED_BG);
+    let _ = writeln!(vga, "\n\n  uwu we did a widdle fucky-wucky!\n  {}", cause);
+    // TODO(eliza): registers etc
+    #[allow(clippy::empty_loop)]
+    loop {}
 }

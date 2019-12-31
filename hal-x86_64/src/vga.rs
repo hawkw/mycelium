@@ -5,8 +5,6 @@ lazy_static::lazy_static! {
     static ref BUFFER: spin::Mutex<Buffer> = spin::Mutex::new(Buffer {
         col: 0,
         row: 0,
-        indent: 0,
-        chars_this_line: false,
         color: ColorSpec::new(Color::LightGray, Color::Black),
         buf: unsafe { &mut *(0xb8000 as *mut Buf) },
     });
@@ -47,8 +45,6 @@ pub struct ColorSpec(u8);
 pub struct Buffer {
     col: usize,
     row: usize,
-    indent: usize,
-    chars_this_line: bool,
     color: ColorSpec,
     buf: &'static mut Buf,
 }
@@ -121,10 +117,6 @@ impl Buffer {
 
         self.buf[self.row][self.col].write(self.character(ch));
         self.col += 1;
-
-        if ch != b' ' {
-            self.chars_this_line = true;
-        }
     }
 
     fn newline(&mut self) {
@@ -146,8 +138,18 @@ impl Buffer {
             c.write(blank)
         }
 
-        self.col = self.indent;
-        self.chars_this_line = false;
+        self.col = 0;
+    }
+
+    fn clear(&mut self) {
+        let ch = self.character(b' ');
+        for row in self.buf.iter_mut() {
+            for col in row.iter_mut() {
+                col.write(ch);
+            }
+        }
+        self.row = 0;
+        self.col = 0;
     }
 }
 
@@ -174,26 +176,8 @@ impl Writer {
         BUFFER.lock().set_color(color);
     }
 
-    pub fn indent(&mut self, indent: u32) {
-        self.dent(indent as isize)
-    }
-
-    pub fn outdent(&mut self, outdent: u32) {
-        self.dent(-(outdent as isize))
-    }
-
-    /// Indent or outdent the start of each line by the requested number of
-    /// characters.
-    pub fn dent(&mut self, dent: isize) {
-        let mut lock = BUFFER.lock();
-        if dent > 0 {
-            lock.indent = lock.indent.saturating_add(dent as usize);
-        } else {
-            lock.indent = lock.indent.saturating_sub((-dent) as usize)
-        }
-        if !lock.chars_this_line {
-            lock.col = lock.indent;
-        }
+    pub fn clear(&mut self) {
+        BUFFER.lock().clear();
     }
 }
 
