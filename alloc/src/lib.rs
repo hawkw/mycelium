@@ -8,6 +8,14 @@ use core::mem::MaybeUninit;
 use core::ptr;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+macro_rules! try_null {
+    ($e:expr) => {
+        match $e {
+            Some(x) => x,
+            None => return ptr::null_mut(),
+        }
+    }
+}
 
 // 640k is enough for anyone
 const HEAP_SIZE: usize = 640 * 1024;
@@ -18,7 +26,7 @@ struct Heap(UnsafeCell<MaybeUninit<[u8; HEAP_SIZE]>>);
 unsafe impl Sync for Heap {}
 
 static HEAP: Heap = Heap(UnsafeCell::new(MaybeUninit::uninit()));
-static USED: AtomicUsize = AtomicUsize::new(0);
+static FREE: AtomicUsize = AtomicUsize::new(HEAP_SIZE);
 
 /// NOTABLE INVARIANTS:
 ///  * `Layout` is non-zero sized (enforced by `GlobalAlloc`)
@@ -26,22 +34,17 @@ static USED: AtomicUsize = AtomicUsize::new(0);
 pub unsafe fn alloc(layout: Layout) -> *mut u8 {
     let heap = HEAP.0.get() as *mut u8;
 
-    let mut prev = USED.load(Ordering::Relaxed);
+    let mut prev = FREE.load(Ordering::Relaxed);
     loop {
-        let align_offset = heap.add(prev).align_offset(layout.align());
+        // Ensure enough space is allocated
+        let new_free = try_null!(prev.checked_sub(layout.size()));
 
-        // NOTE: layout.size() is non-zero. The check will fail if
-        // `align_offset` exceeds `HEAP_SIZE - prev`.
-        let space = (HEAP_SIZE - prev).saturating_sub(align_offset);
-        if space < layout.size() {
-            return ptr::null_mut();
-        }
+        // Ensure the final pointer is aligned
+        let new_ptr = (heap as usize + new_free) & !(layout.align() - 1);
+        let new_free = try_null!(new_ptr.checked_sub(heap as usize));
 
-        let next = prev + align_offset + layout.size();
-        match USED.compare_exchange_weak(prev, next, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => {
-                return heap.add(prev + align_offset);
-            }
+        match FREE.compare_exchange_weak(prev, new_free, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return new_ptr as *mut u8,
             Err(next_prev) => {
                 prev = next_prev;
                 continue;
