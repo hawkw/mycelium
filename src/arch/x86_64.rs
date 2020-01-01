@@ -84,8 +84,27 @@ pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
     vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
     let _ = vga.write_str("OOPSIE WOOPSIE");
     vga.set_color(RED_BG);
-    let _ = writeln!(vga, "\n\n  uwu we did a widdle fucky-wucky!\n  {}", cause);
-    // TODO(eliza): registers etc
+    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n\n{:2>}", cause);
+    let rflags: u64;
+    let cr0: u64;
+    let cr3: u64;
+    unsafe {
+        asm!("
+            pushfq
+            popq $0
+            mov %cr0, $1
+            mov %cr3, $2
+            "
+            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory"
+        );
+    };
+    let _ = writeln!(
+        vga,
+        "\n  cr0: {:#032b}\n  cr3: {:#032b}\n  rflags: {:#064b}",
+        cr0, cr3, rflags
+    );
+    let _ = vga.write_str("\n\n  it will never be safe to turn off your computer.");
+
     #[allow(clippy::empty_loop)]
     loop {}
 }
