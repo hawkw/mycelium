@@ -54,6 +54,12 @@ impl BootInfo for RustbootBootInfo {
         vga::writer()
     }
 
+    fn subscriber(&self) -> Option<tracing::Dispatch> {
+        Some(tracing::Dispatch::new(
+            hal_x86_64::tracing::Subscriber::default(),
+        ))
+    }
+
     fn bootloader_name(&self) -> &str {
         "rust-bootloader"
     }

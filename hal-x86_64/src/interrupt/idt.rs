@@ -18,7 +18,7 @@ pub struct Descriptor {
     _zero: u32,
 }
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[derive(Eq, PartialEq, Copy, Clone)]
 #[repr(transparent)]
 pub struct Attrs(u8);
 
@@ -177,6 +177,11 @@ impl Idt {
         }
     }
 
+    pub(super) fn set_isr(&mut self, vector: usize, isr: *const ()) {
+        let attrs = self.descriptors[vector].set_handler(isr);
+        tracing::debug!(vector, isr = ?isr, ?attrs, "set isr");
+    }
+
     pub fn load(&'static self) {
         let ptr = crate::cpu::DtablePtr::new(self);
         unsafe { asm!("lidt ($0)" :: "r" (&ptr) : "memory") }
@@ -195,9 +200,17 @@ impl core::fmt::Debug for Descriptor {
             .field("offset_low", &format_args!("{:#x}", self.offset_low))
             .field("segment", &self.segment)
             .field("ist_offset", &format_args!("{:#x}", self.ist_offset))
-            .field("attrs", &format_args!("Attrs({:#08b})", self.attrs.0))
+            .field("attrs", &self.attrs)
             .field("offset_mid", &format_args!("{:#x}", self.offset_mid))
             .field("offset_high", &format_args!("{:#x}", self.offset_hi))
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for Attrs {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("Attrs")
+            .field(&format_args!("{:#08b}", self.0))
             .finish()
     }
 }

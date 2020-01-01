@@ -57,10 +57,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64> + ctx::PageFault,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        writeln!(&mut vga, "page fault\n{:#?}", cx.registers()).unwrap();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::error!(registers = ?cx.registers(), "page fault");
     }
 
     #[inline(never)]
@@ -68,10 +65,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        writeln!(&mut vga, "code fault\n{:#?}", cx.registers()).unwrap();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::error!(registers = ?cx.registers(), "code fault");
         loop {}
     }
 
@@ -80,10 +74,7 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-        writeln!(&mut vga, "double fault\n{:#?}", cx.registers()).unwrap();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::error!(registers = ?cx.registers(), "double fault",);
         loop {}
     }
 
@@ -99,19 +90,12 @@ impl Handlers<crate::X64> for TestHandlersImpl {
         //
         // 0x60 is a magic PC/AT number.
         let scancode = unsafe { cpu::Port::at(0x60).readb() };
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(
-            vga::Color::LightGray,
-            vga::Color::Black,
-        ));
-        writeln!(
-            &mut vga,
+        tracing::info!(
+            // for now
             "got scancode {}. the time is now: {}",
             scancode,
             TIMER.load(Ordering::Relaxed)
-        )
-        .unwrap();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        );
     }
 
     #[inline(never)]
@@ -119,24 +103,17 @@ impl Handlers<crate::X64> for TestHandlersImpl {
     where
         C: ctx::Context<Arch = crate::X64>,
     {
-        let mut vga = vga::writer();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Yellow, vga::Color::Black));
-        writeln!(
-            &mut vga,
-            "lol im in ur test interrupt\n{:#?}",
-            cx.registers()
-        )
-        .unwrap();
-        vga.set_color(vga::ColorSpec::new(vga::Color::Green, vga::Color::Black));
+        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
     }
 }
 
 pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'static mut idt::Idt {
     use hal_core::interrupt::Control;
 
-    let mut writer = bootinfo.writer();
+    let span = tracing::info_span!("interrupts::init");
+    let _enter = span.enter();
 
-    writeln!(&mut writer, "\tconfiguring 8259 PIC interrupts...").unwrap();
+    tracing::info!("configuring 8259 PIC interrupts...");
 
     unsafe {
         PIC.set_irq_addresses(0x20, 0x28);
@@ -145,21 +122,20 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
         PIC.enable();
     }
 
-    writeln!(&mut writer, "\tintializing IDT...").unwrap();
+    tracing::info!("intializing IDT...");
 
     unsafe {
         IDT.register_handlers::<TestHandlersImpl>().unwrap();
-        writeln!(&mut writer, "{:#?}", IDT.descriptors[69]).unwrap();
         IDT.load();
         IDT.enable();
     }
 
-    writeln!(&mut writer, "\ttesting interrupts...").unwrap();
+    tracing::debug!("testing interrupts...");
     unsafe {
         asm!("int $0" :: "i"(69) :: "volatile");
     }
     // loop {}
-    writeln!(&mut writer, "\tit worked?").unwrap();
+    tracing::debug!("it worked");
 
     unsafe { &mut IDT }
 }
@@ -229,6 +205,9 @@ impl hal_core::interrupt::Control for Idt {
     where
         H: Handlers<Self::Arch>,
     {
+        let span = tracing::debug_span!("Idt::register_handlers");
+        let _enter = span.enter();
+
         extern "x86-interrupt" fn page_fault_isr<H: Handlers<crate::X64>>(
             registers: &mut Registers,
             code: PageFaultCode,
@@ -263,13 +242,12 @@ impl hal_core::interrupt::Control for Idt {
                 code: (),
             });
         }
-        // TODO(eliza): code fault isrs
 
-        self.descriptors[0x20].set_handler(timer_isr::<H> as *const ());
-        self.descriptors[0x21].set_handler(keyboard_isr::<H> as *const ());
-        self.descriptors[69].set_handler(test_isr::<H> as *const ());
-        self.descriptors[Self::PAGE_FAULT].set_handler(page_fault_isr::<H> as *const ());
-        self.descriptors[Self::DOUBLE_FAULT].set_handler(double_fault_isr::<H> as *const ());
+        self.set_isr(0x20, timer_isr::<H> as *const ());
+        self.set_isr(0x21, keyboard_isr::<H> as *const ());
+        self.set_isr(69, test_isr::<H> as *const ());
+        self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
+        self.set_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
         Ok(())
     }
 }

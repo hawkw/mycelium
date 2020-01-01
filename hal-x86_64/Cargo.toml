@@ -4,9 +4,11 @@ version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>", "iximeow <git@iximeow.net>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+log = ["tracing/log"]
 
 [dependencies]
 hal-core = { path = "../hal-core" }
 mycelium-util = { path = "../util" }
 lazy_static = { version = "1.4", features = ["spin_no_std"]}
+tracing = {version = "0.1", default_features = false }

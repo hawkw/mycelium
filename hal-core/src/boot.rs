@@ -18,6 +18,10 @@ pub trait BootInfo {
         None
     }
 
+    fn subscriber(&self) -> Option<tracing::Dispatch> {
+        None
+    }
+
     // TODO(eliza): figure out a non-bad way to represent boot command lines (is
     // it reasonable to convert them to rust strs when we barely have an operating
     // system???)

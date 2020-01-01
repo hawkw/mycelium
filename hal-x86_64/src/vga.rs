@@ -1,11 +1,13 @@
-use core::{fmt, ptr};
-use mycelium_util::sync::spin;
+use core::{cmp, fmt, ptr};
+use mycelium_util::{io, sync::spin};
 
 lazy_static::lazy_static! {
     static ref BUFFER: spin::Mutex<Buffer> = spin::Mutex::new(Buffer {
         col: 0,
         row: 0,
-        color: ColorSpec::new(Color::Green, Color::Black),
+        indent: 0,
+        chars_this_line: false,
+        color: ColorSpec::new(Color::LightGray, Color::Black),
         buf: unsafe { &mut *(0xb8000 as *mut Buf) },
     });
 }
@@ -45,6 +47,8 @@ pub struct ColorSpec(u8);
 pub struct Buffer {
     col: usize,
     row: usize,
+    indent: usize,
+    chars_this_line: bool,
     color: ColorSpec,
     buf: &'static mut Buf,
 }
@@ -117,6 +121,10 @@ impl Buffer {
 
         self.buf[self.row][self.col].write(self.character(ch));
         self.col += 1;
+
+        if ch != b' ' {
+            self.chars_this_line = true;
+        }
     }
 
     fn newline(&mut self) {
@@ -138,7 +146,8 @@ impl Buffer {
             c.write(blank)
         }
 
-        self.col = 0;
+        self.col = self.indent;
+        self.chars_this_line = false;
     }
 }
 
@@ -164,11 +173,47 @@ impl Writer {
     pub fn set_color(&mut self, color: ColorSpec) {
         BUFFER.lock().set_color(color);
     }
+
+    pub fn indent(&mut self, indent: u32) {
+        self.dent(indent as isize)
+    }
+
+    pub fn outdent(&mut self, outdent: u32) {
+        self.dent(-(outdent as isize))
+    }
+
+    /// Indent or outdent the start of each line by the requested number of
+    /// characters.
+    pub fn dent(&mut self, dent: isize) {
+        let mut lock = BUFFER.lock();
+        if dent > 0 {
+            lock.indent = lock.indent.saturating_add(dent as usize);
+        } else {
+            lock.indent = lock.indent.saturating_sub((-dent) as usize)
+        }
+        if !lock.chars_this_line {
+            lock.col = lock.indent;
+        }
+    }
 }
 
 impl fmt::Write for Writer {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         BUFFER.lock().write(s);
+        Ok(())
+    }
+}
+
+impl io::Write for Writer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut lock = BUFFER.lock();
+        for &byte in buf.iter() {
+            lock.write_char(byte)
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }
