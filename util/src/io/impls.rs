@@ -237,8 +237,6 @@ impl Read for &[u8] {
     }
 }
 
-// TODO(eliza): add
-
 impl BufRead for &[u8] {
     #[inline]
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
