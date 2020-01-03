@@ -118,20 +118,19 @@ macro_rules! host_funcs {
                 let span = tracing::trace_span!("invoke_index", index, ?args);
                 let _enter = span.enter();
 
-                let mut args_iter = args.as_ref().iter();
                 match HostFunc::try_from(index)? {
                     $(
-                        HostFunc::$variant => {
-                            let _result = $method(
-                                self,
-                                $(match args_iter.next() {
-                                    Some(val) => <$t as WasmPrimitive>::from_wasm_value(*val)?,
-                                    _ => return Err(wasmi::TrapKind::UnexpectedSignature.into()),
-                                }),*
-                            )?;
-                            Ok(option_helper!(
-                                Some $(<$rt as WasmPrimitive>::into_wasm_value(_result))?
-                            ))
+                        HostFunc::$variant => match args.as_ref() {
+                            [$($p),*] => {
+                                let _result = $method(
+                                    self,
+                                    $(<$t as WasmPrimitive>::from_wasm_value(*$p)?),*
+                                )?;
+                                Ok(option_helper!(
+                                    Some $(<$rt as WasmPrimitive>::into_wasm_value(_result))?
+                                ))
+                            }
+                            _ => Err(wasmi::TrapKind::UnexpectedSignature.into()),
                         }
                     ),*
                 }
