@@ -22,10 +22,27 @@ jobs:
       with:
         command: bootimage
         args: --target=x86_64-mycelium.json
-    - name: Test
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rust-src, llvm-tools-preview
+    - name: install dev env
       uses: actions-rs/cargo@v1.0.1
       with:
-        command: test
+        command: dev-env
+    - name: install qemu
+      run: sudo apt-get install qemu
+    - name: run tests
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: test-x64
 
   clippy:
     runs-on: ubuntu-latest
