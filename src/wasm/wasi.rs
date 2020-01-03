@@ -3,14 +3,17 @@ use super::Host;
 // FIXME: These should both be `u16`, and probably generated from the wasi
 // snapshot_0 `witx` definitions.
 const __WASI_ESUCCESS: u16 = 0;
-const __WASI_EIO: u16 = 29;  // Not sure I counted right. Might be some other error.
+const __WASI_EIO: u16 = 29; // Not sure I counted right. Might be some other error.
 
 const __WASI_STDOUT: u32 = 1;
 
 fn get_element_ptr(base: u32, offset: u32, scale: u32) -> Result<u32, wasmi::Trap> {
-    let byte_offset = offset.checked_mul(scale)
+    let byte_offset = offset
+        .checked_mul(scale)
         .ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?;
-    Ok(base.checked_add(byte_offset).ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?)
+    Ok(base
+        .checked_add(byte_offset)
+        .ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?)
 }
 
 /// Loads the value stored at `base + (offset * scale)`.
@@ -21,7 +24,8 @@ fn mem_read<T: wasmi::LittleEndianConvert>(
     scale: u32,
 ) -> Result<T, wasmi::Trap> {
     let addr = get_element_ptr(base, offset, scale)?;
-    let slice = mem.get(addr as usize..)
+    let slice = mem
+        .get(addr as usize..)
         .ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?;
     Ok(T::from_little_endian(slice).map_err(|_| wasmi::TrapKind::MemoryAccessOutOfBounds)?)
 }
@@ -42,7 +46,8 @@ fn mem_write<T: wasmi::LittleEndianConvert>(
     //
     // Assume that the size in wasm matches our host size for the given type.
     let addr_after = get_element_ptr(addr, core::mem::size_of::<T>() as u32, 1)?;
-    let slice = mem.get_mut(addr as usize..addr_after as usize)
+    let slice = mem
+        .get_mut(addr as usize..addr_after as usize)
         .ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?;
     Ok(T::into_little_endian(value, slice))
 }
@@ -50,17 +55,27 @@ fn mem_write<T: wasmi::LittleEndianConvert>(
 /// Reference to a subslice of memory.
 fn mem_slice(mem: &[u8], addr: u32, len: u32) -> Result<&[u8], wasmi::Trap> {
     let end = get_element_ptr(addr, len, 1)?;
-    Ok(mem.get(addr as usize..end as usize).ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?)
+    Ok(mem
+        .get(addr as usize..end as usize)
+        .ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?)
 }
 
 #[allow(dead_code)] // unused
 fn mem_slice_mut(mem: &mut [u8], addr: u32, len: u32) -> Result<&mut [u8], wasmi::Trap> {
     let end = get_element_ptr(addr, len, 1)?;
-    Ok(mem.get_mut(addr as usize..end as usize).ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?)
+    Ok(mem
+        .get_mut(addr as usize..end as usize)
+        .ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?)
 }
 
 #[tracing::instrument(skip(host))]
-pub fn fd_write(host: &mut Host, fd: u32, iovs: u32, iovs_len: u32, nwritten: u32) -> Result<u16, wasmi::Trap> {
+pub fn fd_write(
+    host: &mut Host,
+    fd: u32,
+    iovs: u32,
+    iovs_len: u32,
+    nwritten: u32,
+) -> Result<u16, wasmi::Trap> {
     if fd != __WASI_STDOUT {
         return Ok(__WASI_EIO);
     }

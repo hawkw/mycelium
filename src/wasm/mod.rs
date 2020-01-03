@@ -2,14 +2,18 @@ use alloc::borrow::ToOwned;
 use core::convert::TryFrom;
 use core::fmt;
 
-mod wasi;
 mod convert;
+mod wasi;
 
 use self::convert::WasmPrimitive;
 
 macro_rules! option_helper {
-    (Some $rt:expr) => { Some($rt) };
-    (Some) => { None };
+    (Some $rt:expr) => {
+        Some($rt)
+    };
+    (Some) => {
+        None
+    };
 }
 
 #[derive(Debug)]
@@ -33,10 +37,17 @@ impl Host {
     fn new(instance: &wasmi::ModuleRef) -> Result<Self, wasmi::Error> {
         let memory = match instance.export_by_name("memory") {
             Some(wasmi::ExternVal::Memory(memory)) => memory,
-            _ => return Err(wasmi::Error::Instantiation("required memory export".to_owned())),
+            _ => {
+                return Err(wasmi::Error::Instantiation(
+                    "required memory export".to_owned(),
+                ))
+            }
         };
 
-        Ok(Host { module: instance.clone(), memory })
+        Ok(Host {
+            module: instance.clone(),
+            memory,
+        })
     }
 }
 
@@ -162,8 +173,15 @@ impl wasmi::ImportResolver for HostResolver {
         field_name: &str,
         descriptor: &wasmi::GlobalDescriptor,
     ) -> Result<wasmi::GlobalRef, wasmi::Error> {
-        tracing::error!(module_name, field_name, ?descriptor, "unresolved global import");
-        Err(wasmi::Error::Instantiation("unresolved global import".to_owned()))
+        tracing::error!(
+            module_name,
+            field_name,
+            ?descriptor,
+            "unresolved global import"
+        );
+        Err(wasmi::Error::Instantiation(
+            "unresolved global import".to_owned(),
+        ))
     }
 
     fn resolve_memory(
@@ -172,8 +190,15 @@ impl wasmi::ImportResolver for HostResolver {
         field_name: &str,
         descriptor: &wasmi::MemoryDescriptor,
     ) -> Result<wasmi::MemoryRef, wasmi::Error> {
-        tracing::error!(module_name, field_name, ?descriptor, "unresolved memory import");
-        Err(wasmi::Error::Instantiation("unresolved memory import".to_owned()))
+        tracing::error!(
+            module_name,
+            field_name,
+            ?descriptor,
+            "unresolved memory import"
+        );
+        Err(wasmi::Error::Instantiation(
+            "unresolved memory import".to_owned(),
+        ))
     }
 
     fn resolve_table(
@@ -182,8 +207,15 @@ impl wasmi::ImportResolver for HostResolver {
         field_name: &str,
         descriptor: &wasmi::TableDescriptor,
     ) -> Result<wasmi::TableRef, wasmi::Error> {
-        tracing::error!(module_name, field_name, ?descriptor, "unresolved table import");
-        Err(wasmi::Error::Instantiation("unresolved table import".to_owned()))
+        tracing::error!(
+            module_name,
+            field_name,
+            ?descriptor,
+            "unresolved table import"
+        );
+        Err(wasmi::Error::Instantiation(
+            "unresolved table import".to_owned(),
+        ))
     }
 }
 
@@ -199,4 +231,3 @@ pub fn run_wasm(binary: &[u8]) -> Result<(), wasmi::Error> {
     instance.invoke_export("_start", &[], &mut host)?;
     Ok(())
 }
-
