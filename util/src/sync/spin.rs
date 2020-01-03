@@ -40,6 +40,24 @@ impl<T> Mutex<T> {
         }
         MutexGuard { mutex: self }
     }
+
+    /// Forcibly unlock the mutex.
+    ///
+    /// If a lock is currently held, it will be released, regardless of who's
+    /// holding it. Of course, this is **outrageously, disgustingly unsafe** and
+    /// you should never do it.
+    ///
+    /// # Safety
+    ///
+    /// This deliberately violates mutual exclusion.
+    ///
+    /// Only call this method when it is _guaranteed_ that no stack frame that
+    /// has previously locked the mutex will ever continue executing.
+    /// Essentially, this is only okay to call when the kernel is oopsing and
+    /// all code running on other cores has already been killed.
+    pub unsafe fn force_unlock(&self) {
+        self.locked.store(false, Ordering::Release);
+    }
 }
 
 unsafe impl<T> Send for Mutex<T> {}

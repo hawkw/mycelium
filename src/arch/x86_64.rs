@@ -77,6 +77,15 @@ pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
 
     unsafe { asm!("cli" :::: "volatile") }
     let mut vga = vga::writer();
+    unsafe {
+        // forcibly unlock the mutex around the VGA buffer, to avoid deadlocking
+        // if it was already held when we oopsed.
+        //
+        // TODO(eliza): when we are capable of multiprocessing, we shouldn't do
+        // this until other cores that might be holding the lock are already
+        // killed.
+        vga.force_unlock();
+    }
     const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
     vga.set_color(RED_BG);
     vga.clear();
@@ -105,6 +114,9 @@ pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
     );
     let _ = vga.write_str("\n\n  it will never be safe to turn off your computer.");
 
-    #[allow(clippy::empty_loop)]
-    loop {}
+    loop {
+        unsafe {
+            asm!("hlt" :::: "volatile");
+        }
+    }
 }

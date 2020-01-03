@@ -73,8 +73,6 @@ where
         assert_eq!(v.pop(), Some(5));
     }
 
-    panic!("fake panic!");
-
     // if this function returns we would boot loop. Hang, instead, so the debug
     // output can be read.
     //

@@ -179,6 +179,25 @@ impl Writer {
     pub fn clear(&mut self) {
         BUFFER.lock().clear();
     }
+
+    /// Forcibly unlock the VGA buffer's mutex.
+    ///
+    /// If a lock is currently held, it will be released, regardless of who's
+    /// holding it. Of course, this is **outrageously, disgustingly unsafe** and
+    /// you should never do it.
+    ///
+    /// # Safety
+    ///
+    /// This deliberately violates mutual exclusion.
+    ///
+    /// Only call this method when it is _guaranteed_ that no stack frame that
+    /// has previously locked the mutex will ever continue executing.
+    /// Essentially, this is only okay to call when the kernel is oopsing and
+    /// all code running on other cores has already been killed.
+    #[doc(hidden)]
+    pub unsafe fn force_unlock(&mut self) {
+        BUFFER.force_unlock();
+    }
 }
 
 impl fmt::Write for Writer {
