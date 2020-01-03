@@ -72,10 +72,53 @@ pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
     mycelium_kernel::kernel_main(&bootinfo);
 }
 
-#[panic_handler]
+#[cold]
 #[cfg(target_os = "none")]
-fn panic(info: &core::panic::PanicInfo) -> ! {
+pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
+    use core::fmt::Write;
+
+    unsafe { asm!("cli" :::: "volatile") }
     let mut vga = vga::writer();
-    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::Black));
-    mycelium_kernel::handle_panic(&mut vga, info)
+    unsafe {
+        // forcibly unlock the mutex around the VGA buffer, to avoid deadlocking
+        // if it was already held when we oopsed.
+        //
+        // TODO(eliza): when we are capable of multiprocessing, we shouldn't do
+        // this until other cores that might be holding the lock are already
+        // killed.
+        vga.force_unlock();
+    }
+    const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
+    vga.set_color(RED_BG);
+    vga.clear();
+    let _ = vga.write_str("\n  ");
+    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
+    let _ = vga.write_str("OOPSIE WOOPSIE");
+    vga.set_color(RED_BG);
+    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n\n{:2>}", cause);
+    let rflags: u64;
+    let cr0: u64;
+    let cr3: u64;
+    unsafe {
+        asm!("
+            pushfq
+            popq $0
+            mov %cr0, $1
+            mov %cr3, $2
+            "
+            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory"
+        );
+    };
+    let _ = writeln!(
+        vga,
+        "\n  cr0: {:#032b}\n  cr3: {:#032b}\n  rflags: {:#064b}",
+        cr0, cr3, rflags
+    );
+    let _ = vga.write_str("\n\n  it will never be safe to turn off your computer.");
+
+    loop {
+        unsafe {
+            asm!("hlt" :::: "volatile");
+        }
+    }
 }
