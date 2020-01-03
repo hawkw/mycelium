@@ -6,8 +6,9 @@
 
 pub mod arch;
 
-#[panic_handler]
 #[cfg(target_os = "none")]
+#[panic_handler]
+#[cold]
 fn panic(panic: &core::panic::PanicInfo) -> ! {
     use core::fmt;
 

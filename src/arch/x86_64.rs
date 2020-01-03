@@ -72,6 +72,7 @@ pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
     mycelium_kernel::kernel_main(&bootinfo);
 }
 
+#[cold]
 pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
     use core::fmt::Write;
 
