@@ -73,6 +73,7 @@ pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
 }
 
 #[cold]
+#[cfg(target_os = "none")]
 pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
     use core::fmt::Write;
 
