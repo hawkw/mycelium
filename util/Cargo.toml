@@ -11,6 +11,8 @@ alloc = []
 
 [dependencies]
 loom = { version = "0.2.14", optional = true }
+mycelium-util-macros = { path = "../util-macros" }
+tracing = { version = "0.1", default_features = false }
 
 [dev-dependencies]
 loom = "0.2.14"

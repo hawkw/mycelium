@@ -2,6 +2,7 @@
 members = [
     "alloc",
     "util",
+    "util-macros",
     "hal-core",
     "hal-x86_64",
 ]
@@ -12,12 +13,10 @@ version = "0.0.1"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
 edition = "2018"
 
-[lib]
-name = "mycelium_kernel"
-
 [dependencies]
 hal-core = { path = "hal-core" }
 mycelium-alloc = { path = "alloc" }
+mycelium-util = { path = "util" }
 tracing = { version = "0.1", default_features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
@@ -35,6 +34,11 @@ wat = "1.0"
 
 [package.metadata.bootimage]
 default-target = "x86_64-mycelium.json"
+test-success-exit-code = 33  # (0x10 << 1) | 1
+test-args = [
+    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
+    "-serial", "stdio", "-display", "none"
+]
 
 [package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
 memcpy = true
