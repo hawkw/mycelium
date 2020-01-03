@@ -24,6 +24,12 @@ tracing = { version = "0.1", default_features = false }
 bootloader = "0.8.0"
 hal-x86_64 = { path = "hal-x86_64" }
 
+[dependencies.wasmi]
+git = "https://github.com/mystor/wasmi"
+branch = "mycelium"
+default-features = false
+features = ["core"]
+
 [package.metadata.bootimage]
 default-target = "x86_64-mycelium.json"
 
