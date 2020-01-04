@@ -1,4 +1,4 @@
-use crate::{Address, PAddr};
+use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, marker::PhantomData, ops, slice};
 
 pub trait Size: Copy + PartialEq + Eq {
@@ -53,6 +53,43 @@ pub unsafe trait Alloc<S: Size> {
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
 }
 
+pub trait Map<S: Size> {
+    /// Map the virtual memory page represented by `virt` to the physical page
+    /// represented bt `phys`.
+    ///
+    /// # Panics
+    ///
+    /// - If the physical address is invalid.
+    /// - If the page is already mapped.
+    fn map<A>(&mut self, virt: Page<VAddr, S>, phys: Page<PAddr, S>, frame_alloc: &mut A)
+    where
+        A: Alloc<S>;
+
+    /// Unmap the provided virtual page, returning the physical page it was
+    /// previously mapped to.
+    ///
+    /// This does not deallocate any page frames.
+    ///
+    /// # Panics
+    ///
+    /// - If the virtual page was not mapped.
+    fn unmap(&mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
+
+    /// Identity map the provided physical page to the virtual page with the
+    /// same address.
+    fn identity_map<A>(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A)
+    where
+        A: Alloc<S>,
+    {
+        let page = Page::containing(VAddr::from_usize(phys.base_addr().as_usize()));
+        self.map(page, phys, frame_alloc)
+    }
+}
+
+pub trait Translate<S: Size> {
+    fn translate_page(&self, virt: Page<VAddr, S>) -> Result<Page<PAddr, S>, TranslateError<S>>;
+}
+
 /// A memory page.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
@@ -75,6 +112,13 @@ pub struct NotAligned<S> {
 pub struct AllocErr {
     // TODO: eliza
     _p: (),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum TranslateError<S: Size> {
+    NotMapped,
+    WrongSize(PhantomData<S>),
+    Other(&'static str),
 }
 
 // === impl Page ===
