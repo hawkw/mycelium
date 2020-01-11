@@ -53,7 +53,11 @@ pub unsafe trait Alloc<S: Size> {
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
 }
 
-pub trait Map<S: Size> {
+pub trait Map<S, A>
+where
+    S: Size,
+    A: Alloc<R, S>,
+{
     type Flags: PageFlags;
     type Handle: PageHandle<S, Flags = Self::Flags>;
     /// Map the virtual memory page represented by `virt` to the physical page
@@ -63,16 +67,14 @@ pub trait Map<S: Size> {
     ///
     /// - If the physical address is invalid.
     /// - If the page is already mapped.
-    fn map<A>(
+    fn map(
         &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
         frame_alloc: &mut A,
-    ) -> Self::Handle
-    where
-        A: Alloc<S>;
+    ) -> Self::Handle;
 
-    fn set_flags<A>(&mut self, virt: Page<VAddr, S>, flags: Self::Flags);
+    fn set_flags(&mut self, virt: Page<VAddr, S>, flags: Self::Flags);
 
     /// Unmap the provided virtual page, returning the physical page it was
     /// previously mapped to.
@@ -87,8 +89,6 @@ pub trait Map<S: Size> {
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
     fn identity_map<A>(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle
-    where
-        A: Alloc<S>;
     // {
     //     let virt = Page::containing(phys.base_address().as_usize());
     //     self.map(virt, phys, flags, frame_alloc)
