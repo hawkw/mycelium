@@ -2,7 +2,7 @@ use bootloader::bootinfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, Address, PAddr};
 use hal_x86_64::vga;
-pub use hal_x86_64::{interrupt, NAME};
+pub use hal_x86_64::{interrupt, mm, NAME};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
@@ -62,6 +62,13 @@ impl BootInfo for RustbootBootInfo {
 
     fn bootloader_name(&self) -> &str {
         "rust-bootloader"
+    }
+
+    fn phys_mem_offset(&self) -> VAddr {
+        let phys_offset = VAddr::from_u64(self.inner.physical_memory_offset);
+        let recursive_table = VAddr::from_u64(self.inner.recursive_page_table_addr);
+        tracing::info!(?phys_offset, ?recursive_table);
+        phys_offset
     }
 }
 

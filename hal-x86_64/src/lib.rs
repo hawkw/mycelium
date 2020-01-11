@@ -7,9 +7,13 @@
 // inadvertantly copied.
 #![allow(clippy::trivially_copy_pass_by_ref)]
 
+use core::{fmt, ops};
 pub(crate) use hal_core::{PAddr, VAddr};
+
+pub mod control_regs;
 pub mod cpu;
 pub mod interrupt;
+pub mod mm;
 pub mod segment;
 pub mod serial;
 pub mod tracing;

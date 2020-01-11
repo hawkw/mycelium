@@ -61,6 +61,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     }
 
     arch::interrupt::init::<arch::InterruptHandlers>();
+    arch::mm::init_paging(bootinfo.phys_mem_offset());
 
     {
         let span = tracing::info_span!("alloc test");

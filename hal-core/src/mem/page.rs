@@ -1,7 +1,7 @@
 use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, marker::PhantomData, ops, slice};
 
-pub trait Size: Copy + PartialEq + Eq {
+pub trait Size: Copy + Eq + PartialEq {
     /// The size (in bits) of this page.
     const SIZE: usize;
 }
@@ -54,6 +54,8 @@ pub unsafe trait Alloc<S: Size> {
 }
 
 pub trait Map<S: Size> {
+    type Flags: PageFlags;
+    type Handle: PageHandle<S, Flags = Self::Flags>;
     /// Map the virtual memory page represented by `virt` to the physical page
     /// represented bt `phys`.
     ///
@@ -61,9 +63,16 @@ pub trait Map<S: Size> {
     ///
     /// - If the physical address is invalid.
     /// - If the page is already mapped.
-    fn map<A>(&mut self, virt: Page<VAddr, S>, phys: Page<PAddr, S>, frame_alloc: &mut A)
+    fn map<A>(
+        &mut self,
+        virt: Page<VAddr, S>,
+        phys: Page<PAddr, S>,
+        frame_alloc: &mut A,
+    ) -> Self::Handle
     where
         A: Alloc<S>;
+
+    fn set_flags<A>(&mut self, virt: Page<VAddr, S>, flags: Self::Flags);
 
     /// Unmap the provided virtual page, returning the physical page it was
     /// previously mapped to.
@@ -77,17 +86,36 @@ pub trait Map<S: Size> {
 
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
-    fn identity_map<A>(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A)
+    fn identity_map<A>(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle
     where
-        A: Alloc<S>,
-    {
-        let page = Page::containing(VAddr::from_usize(phys.base_addr().as_usize()));
-        self.map(page, phys, frame_alloc)
-    }
+        A: Alloc<S>;
+    // {
+    //     let virt = Page::containing(phys.base_address().as_usize());
+    //     self.map(virt, phys, flags, frame_alloc)
+    // }
 }
 
 pub trait Translate<S: Size> {
     fn translate_page(&self, virt: Page<VAddr, S>) -> Result<Page<PAddr, S>, TranslateError<S>>;
+}
+
+pub trait PageHandle<S: Size> {
+    type Flags: PageFlags;
+
+    fn flags(&self) -> &Self::Flags;
+    fn flags_mut(&mut self) -> &mut Self::Flags;
+
+    fn commit(self) -> Page<VAddr, S>;
+}
+
+pub trait PageFlags {
+    fn set_writable(&mut self, writable: bool) -> &mut Self;
+    fn set_executable(&mut self, executable: bool) -> &mut Self;
+    // fn set_present(&mut self, present: bool) -> &mut Self;
+
+    fn is_writable(&self) -> bool;
+    fn is_executable(&self) -> bool;
+    // fn is_present(&self) -> bool;
 }
 
 /// A memory page.
@@ -184,7 +212,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// When calling this method, ensure that the page will not be read or mutated
     /// concurrently, including by user code.
     pub unsafe fn as_slice_mut(&mut self) -> &mut [u8] {
-        let start = self.base.as_ptr() as *mut u8;
+        let start = self.base.as_ptr::<u8>() as *mut _;
         slice::from_raw_parts_mut::<u8>(start, S::SIZE)
     }
 }
@@ -261,5 +289,15 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
         let next = self.start;
         self.start = self.start + 1;
         Some(next)
+    }
+}
+
+// === impl NotAligned ===
+
+impl<S: Size> fmt::Debug for NotAligned<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NotAligned")
+            .field("size", &S::SIZE)
+            .finish()
     }
 }
