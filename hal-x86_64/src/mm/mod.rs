@@ -56,7 +56,9 @@ impl PageTable<level::Pml4> {
 }
 
 impl<S: Size> Translate<X64, S> for PageTable<level::Pml4> {
-    fn translate_page(&self, virt: Page<VAddr, S>) -> Result<Page<PAddr, S>, TranslateError<S>> {}
+    fn translate_page(&self, virt: Page<VAddr, S>) -> Result<Page<PAddr, S>, TranslateError<S>> {
+        unimplemented!()
+    }
 }
 
 impl<R: RecursiveLevel> PageTable<R> {
