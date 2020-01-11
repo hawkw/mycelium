@@ -209,10 +209,17 @@ pub trait RecursiveLevel: Level {
 pub mod level {
     use super::Level;
     pub enum Pml4 {}
+    pub enum Pdpt {}
 
     impl Level for Pml4 {
         const ADDR_MASK: u64 = 0x000fffff_fffff000;
         const NAME: &'static str = "PML4";
         const SUBLEVELS: usize = 3;
+    }
+
+    impl Level for Pdpt {
+        const ADDR_MASK: u64 = 0xdead;
+        const NAME: &'static str = "PDPT";
+        const SUBLEVELS: usize = 2;
     }
 }
