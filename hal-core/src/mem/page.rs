@@ -4,8 +4,10 @@ use core::{cmp, fmt, marker::PhantomData, ops, slice};
 pub trait Size: Copy + Eq + PartialEq {
     /// The size (in bits) of this page.
     const SIZE: usize;
+    const PRETTY_NAME: &'static str;
 }
 
+pub type TranslateResult<A, S> = Result<Page<A, S>, TranslateError<S>>;
 /// An allocator for physical pages of a given size.
 ///
 /// # Safety
@@ -88,18 +90,23 @@ where
 
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
-    fn identity_map<A>(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle
+    fn identity_map(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle
     // {
     //     let virt = Page::containing(phys.base_address().as_usize());
     //     self.map(virt, phys, flags, frame_alloc)
     // }
 }
 
-pub trait Translate<S: Size> {
-    fn translate_page(&self, virt: Page<VAddr, S>) -> Result<Page<PAddr, S>, TranslateError<S>>;
+pub trait TranslatePage<R: Architecture, S: Size> {
+    fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S>;
+}
+
+pub trait TranslateAddr {
+    fn translate_addr(&self, addr: VAddr) -> Option<PAddr>;
 }
 
 pub trait PageHandle<S: Size> {
+    type Arch: Architecture;
     type Flags: PageFlags;
 
     fn flags(&self) -> &Self::Flags;
@@ -142,7 +149,8 @@ pub struct AllocErr {
     _p: (),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum TranslateError<S: Size> {
     NotMapped,
     WrongSize(PhantomData<S>),
@@ -301,3 +309,48 @@ impl<S: Size> fmt::Debug for NotAligned<S> {
             .finish()
     }
 }
+
+// === impl TranslateError ===
+
+impl<S: Size> From<&'static str> for TranslateError<S> {
+    fn from(msg: &'static str) -> Self {
+        TranslateError::Other(msg)
+    }
+}
+
+impl<S: Size> From<core::option::NoneError> for TranslateError<S> {
+    fn from(_err: core::option::NoneError) -> Self {
+        TranslateError::NotMapped
+    }
+}
+
+impl<S: Size> fmt::Debug for TranslateError<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            TranslateError::Other(msg) => {
+                f.debug_tuple("TranslateError::Other").field(&msg).finish()
+            }
+            TranslateError::NotMapped => f.debug_tuple("TranslateError::NotMapped").finish(),
+            TranslateError::WrongSize(_) => f
+                .debug_tuple("TranslateError::WrongSize")
+                .field(&S::PRETTY_NAME)
+                .finish(),
+        }
+    }
+}
+
+impl<S: Size> fmt::Display for TranslateError<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            TranslateError::Other(msg) => write!(f, "error translating page/address: {}", msg),
+            TranslateError::NotMapped => f.pad("error translating page/address: not mapped"),
+            TranslateError::WrongSize(_) => write!(
+                f,
+                "error translating page: mapped page is a different size ({})",
+                core::any::type_name::<S>()
+            ),
+        }
+    }
+}
+
+impl<S: Size> mycelium_util::error::Error for TranslateError<S> {}

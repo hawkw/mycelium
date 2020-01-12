@@ -1,3 +1,4 @@
+use self::size::*;
 use crate::{PAddr, VAddr, X64};
 use core::{
     fmt,
@@ -6,7 +7,7 @@ use core::{
     ptr::{self, NonNull},
 };
 use hal_core::{
-    mem::page::{Page, Size, Translate},
+    mem::page::{Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult},
     Address,
 };
 
@@ -55,13 +56,66 @@ impl PageTable<level::Pml4> {
     }
 }
 
-impl<S: Size> Translate<X64, S> for PageTable<level::Pml4> {
-    fn translate_page(&self, virt: Page<VAddr, S>) -> Result<Page<PAddr, S>, TranslateError<S>> {
+impl<S> TranslatePage<X64, S> for PageTable<level::Pml4>
+where
+    S: Size,
+    PageTable<level::Pdpt>: TranslatePage<X64, S>,
+{
+    fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S> {
+        self.next_table(virt.base_address())?.translate_page(virt)
+    }
+}
+
+impl TranslatePage<X64, Size1Gb> for PageTable<level::Pdpt> {
+    fn translate_page(&self, virt: Page<VAddr, Size1Gb>) -> TranslateResult<PAddr, Size1Gb> {
+        self[&virt].phys_page()
+    }
+}
+
+impl TranslatePage<X64, Size2Mb> for PageTable<level::Pdpt> {
+    fn translate_page(&self, virt: Page<VAddr, Size2Mb>) -> TranslateResult<PAddr, Size2Mb> {
+        self.next_table(virt.base_address())?.translate_page(virt)
+    }
+}
+
+impl TranslatePage<X64, Size4Kb> for PageTable<level::Pdpt> {
+    fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
+        self.next_table(virt.base_address())?.translate_page(virt)
+    }
+}
+
+impl TranslatePage<X64, Size2Mb> for PageTable<level::Pd> {
+    fn translate_page(&self, virt: Page<VAddr, Size2Mb>) -> TranslateResult<PAddr, Size2Mb> {
+        self[&virt].phys_page()
+    }
+}
+
+impl TranslatePage<X64, Size4Kb> for PageTable<level::Pd> {
+    fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
+        self.next_table(virt.base_address())?.translate_page(virt)
+    }
+}
+
+impl TranslatePage<X64, Size4Kb> for PageTable<level::Pt> {
+    fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
+        self[&virt].phys_page()
+    }
+}
+
+impl TranslateAddr<X64> for PageTable<level::Pml4> {
+    fn translate_addr(&self, virt: VAddr) -> Option<PAddr> {
+        let pdpt = self.next_table(virt)?;
+        pdpt.translate_addr(virt)
+    }
+}
+
+impl TranslateAddr<X64> for PageTable<level::Pdpt> {
+    fn translate_addr(&self, virt: VAddr) -> Option<PAddr> {
         unimplemented!()
     }
 }
 
-impl<R: RecursiveLevel> PageTable<R> {
+impl<R: level::Recursive> PageTable<R> {
     fn next_table_ptr(&self, idx: usize) -> Option<NonNull<PageTable<R::Next>>> {
         if !self.entries[idx].is_present() {
             return None;
@@ -70,54 +124,79 @@ impl<R: RecursiveLevel> PageTable<R> {
         let my_addr = self as *const _ as usize;
         let next_addr = (my_addr << 9) | (idx << 12);
         unsafe {
-            let ptr = next_addr as *const _;
+            let ptr = next_addr as *mut _;
             // we constructed this address & know it won't be null.
             Some(NonNull::new_unchecked(ptr))
         }
     }
 
-    fn next_table(&self, idx: usize) -> Option<&PageTable<R::Next>> {
-        self.next_table_ptr(idx).map(|ptr| unsafe { ptr.as_ref() })
+    fn next_table<'a>(&'a self, idx: VAddr) -> Option<&'a PageTable<R::Next>> {
+        self.next_table_ptr(R::index_of(idx))
+            .map(|ptr| unsafe { &*ptr.as_ptr() })
     }
 
-    fn next_table_mut(&mut self, idx: usize) -> Option<&mut PageTable<R::Next>> {
-        self.next_table_ptr(idx).map(|ptr| unsafe { ptr.as_mut() })
+    fn next_table_mut(&mut self, idx: VAddr) -> Option<&mut PageTable<R::Next>> {
+        self.next_table_ptr(R::index_of(idx))
+            .map(|ptr| unsafe { &mut *ptr.as_ptr() })
     }
 }
 
 impl<L: Level> ops::Index<VAddr> for PageTable<L> {
     type Output = Entry<L>;
     fn index(&self, addr: VAddr) -> &Self::Output {
-        self.entries[L::index_of(addr)]
+        &self.entries[L::index_of(addr)]
     }
 }
 
 impl<L: Level> ops::IndexMut<VAddr> for PageTable<L> {
     fn index_mut(&mut self, addr: VAddr) -> &mut Self::Output {
-        self.entries[L::index_of(addr)]
+        &mut self.entries[L::index_of(addr)]
     }
 }
 
 impl<L, S> ops::Index<VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    L: HoldsSize<S>,
+    L: level::HoldsSize<S>,
     S: Size,
 {
     type Output = Entry<L>;
     fn index(&self, pg: VirtPage<S>) -> &Self::Output {
-        &self[pg.base_addr()]
+        &self[pg.base_address()]
     }
 }
 
 impl<L, S> ops::IndexMut<VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    L: HoldsSize<S>,
+    L: level::HoldsSize<S>,
     S: Size,
 {
-    fn index_mut(&mut self, addr: VAddr) -> &mut Self::Output {
-        &mut self.entries[pg.base_addr()]
+    fn index_mut(&mut self, pg: VirtPage<S>) -> &mut Self::Output {
+        &mut self[pg.base_address()]
+    }
+}
+
+impl<'a, L, S> ops::Index<&'a VirtPage<S>> for PageTable<L>
+where
+    L: Level,
+    L: level::HoldsSize<S>,
+    S: Size,
+{
+    type Output = Entry<L>;
+    fn index(&self, pg: &'a VirtPage<S>) -> &Self::Output {
+        &self[pg.base_address()]
+    }
+}
+
+impl<'a, L, S> ops::IndexMut<&'a VirtPage<S>> for PageTable<L>
+where
+    L: Level,
+    L: level::HoldsSize<S>,
+    S: Size,
+{
+    fn index_mut(&mut self, pg: &'a VirtPage<S>) -> &mut Self::Output {
+        &mut self[pg.base_address()]
     }
 }
 
@@ -134,11 +213,28 @@ impl<L> Entry<L> {
     fn is_present(&self) -> bool {
         self.entry & Self::PRESENT != 0
     }
+
+    fn is_huge(&self) -> bool {
+        self.entry & Self::HUGE != 0
+    }
+
+    fn phys_addr(&self) -> PAddr {
+        const ADDR_MASK: u64 = 0x000f_ffff_ffff_f000;
+        PAddr::from_u64(self.entry & ADDR_MASK)
+    }
 }
 
-impl<L: Level> Entry<L> {
-    pub fn phys_addr(&self) -> PAddr {
-        PAddr::from_u64(self.entry & L::ADDR_MASK)
+impl<L: level::PointsToPage> Entry<L> {
+    fn phys_page(&self) -> TranslateResult<PAddr, L::Size> {
+        if !self.is_present() {
+            return Err(TranslateError::NotMapped);
+        }
+
+        if self.is_huge() != L::IS_HUGE {
+            return Err(TranslateError::WrongSize(PhantomData));
+        }
+
+        Ok(Page::starting_at(self.phys_addr()).expect("page addr must be aligned"))
     }
 }
 
@@ -181,45 +277,122 @@ impl<L: Level> fmt::Debug for Entry<L> {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum Size4K {}
+pub mod size {
+    use super::Size;
 
-impl Size for Size4K {
-    const SIZE: usize = 4 * 1024;
-}
+    #[derive(Copy, Clone, Eq, PartialEq)]
+    pub enum Size4Kb {}
 
-pub trait Level {
-    const ADDR_MASK: u64;
-    const NAME: &'static str;
-    const SUBLEVELS: usize;
+    impl Size for Size4Kb {
+        const SIZE: usize = 4 * 1024;
+        const PRETTY_NAME: &'static str = "4KB";
+    }
 
-    fn index_of(v: VAddr) -> usize {
-        const INDEX_SHIFT: usize = 12 + (9 * Self::SUBLEVELS);
-        const INDEX_MASK: usize = 0o777;
-        (v.as_usize() >> INDEX_SHIFT) & INDEX_MASK
+    #[derive(Copy, Clone, Eq, PartialEq)]
+    pub enum Size2Mb {}
+
+    impl Size for Size2Mb {
+        const SIZE: usize = Size4Kb::SIZE * 512;
+        const PRETTY_NAME: &'static str = "2MB";
+    }
+
+    #[derive(Copy, Clone, Eq, PartialEq)]
+    pub enum Size1Gb {}
+
+    impl Size for Size1Gb {
+        const SIZE: usize = Size2Mb::SIZE * 512;
+
+        const PRETTY_NAME: &'static str = "1GB";
     }
 }
 
-pub trait HoldsSize<S: hal_core::mem::page::Size>: Level {}
+pub trait Level {
+    const NAME: &'static str;
+    const SUBLEVELS: usize;
 
-pub trait RecursiveLevel: Level {
-    type Next: Level;
+    const INDEX_SHIFT: usize = 12 + (9 * Self::SUBLEVELS);
+
+    fn index_of(v: VAddr) -> usize {
+        const INDEX_MASK: usize = 0o777;
+        (v.as_usize() >> Self::INDEX_SHIFT) & INDEX_MASK
+    }
 }
 
 pub mod level {
-    use super::Level;
+    use super::{size::*, Level, Size};
+
+    pub trait PointsToPage: Level {
+        type Size: Size;
+        const IS_HUGE: bool;
+    }
+
+    pub trait Recursive: Level {
+        type Next: Level;
+        const SUBLEVELS: usize = 3;
+    }
+
+    pub trait HoldsSize<S: Size>: Level {}
+
     pub enum Pml4 {}
     pub enum Pdpt {}
 
     impl Level for Pml4 {
-        const ADDR_MASK: u64 = 0x000fffff_fffff000;
-        const NAME: &'static str = "PML4";
         const SUBLEVELS: usize = 3;
+        const NAME: &'static str = "PML4";
     }
+    impl HoldsSize<Size1Gb> for Pml4 {}
+    impl HoldsSize<Size2Mb> for Pml4 {}
+    impl HoldsSize<Size4Kb> for Pml4 {}
 
     impl Level for Pdpt {
-        const ADDR_MASK: u64 = 0xdead;
-        const NAME: &'static str = "PDPT";
         const SUBLEVELS: usize = 2;
+        const NAME: &'static str = "PDPT";
     }
+    impl HoldsSize<Size1Gb> for Pdpt {}
+    impl HoldsSize<Size2Mb> for Pdpt {}
+    impl HoldsSize<Size4Kb> for Pdpt {}
+
+    impl Recursive for Pml4 {
+        type Next = Pdpt;
+    }
+
+    impl PointsToPage for Pdpt {
+        type Size = Size1Gb;
+        const IS_HUGE: bool = true;
+    }
+
+    impl Recursive for Pdpt {
+        type Next = Pd;
+    }
+
+    pub enum Pd {}
+
+    impl Level for Pd {
+        const NAME: &'static str = "PD";
+        const SUBLEVELS: usize = 1;
+    }
+
+    impl Recursive for Pd {
+        type Next = Pt;
+    }
+
+    impl PointsToPage for Pd {
+        type Size = Size2Mb;
+        const IS_HUGE: bool = true;
+    }
+    impl HoldsSize<Size2Mb> for Pd {}
+    impl HoldsSize<Size4Kb> for Pd {}
+
+    pub enum Pt {}
+
+    impl Level for Pt {
+        const NAME: &'static str = "PT";
+        const SUBLEVELS: usize = 0;
+    }
+
+    impl PointsToPage for Pt {
+        type Size = Size4Kb;
+        const IS_HUGE: bool = false;
+    }
+    impl HoldsSize<Size4Kb> for Pt {}
 }
