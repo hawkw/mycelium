@@ -8,6 +8,10 @@ use hal_core::{boot::BootInfo, mem, Architecture};
 
 use alloc::vec::Vec;
 
+mod wasm;
+
+const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+
 pub fn kernel_main<A>(bootinfo: &impl BootInfo<Arch = A>) -> !
 where
     A: Architecture,
@@ -71,6 +75,16 @@ where
         tracing::info!(vec=?v, vec.addr=?v.as_ptr());
         assert_eq!(v.pop(), Some(10));
         assert_eq!(v.pop(), Some(5));
+    }
+
+    {
+        let span = tracing::info_span!("wasm test");
+        let _enter = span.enter();
+
+        match wasm::run_wasm(HELLOWORLD_WASM) {
+            Ok(()) => tracing::info!("wasm test Ok!"),
+            Err(err) => tracing::error!(?err, "wasm test Err"),
+        }
     }
 
     // if this function returns we would boot loop. Hang, instead, so the debug
