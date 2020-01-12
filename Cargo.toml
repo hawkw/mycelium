@@ -30,6 +30,9 @@ branch = "mycelium"
 default-features = false
 features = ["core"]
 
+[build-dependencies]
+wat = "1.0"
+
 [package.metadata.bootimage]
 default-target = "x86_64-mycelium.json"
 

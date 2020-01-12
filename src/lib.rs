@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 mod wasm;
 
-const HELLOWORLD_WASM: &[u8] = include_bytes!("helloworld.wasm");
+const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
 
 pub fn kernel_main<A>(bootinfo: &impl BootInfo<Arch = A>) -> !
 where
