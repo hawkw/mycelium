@@ -114,6 +114,11 @@ impl TranslateAddr<X64> for PageTable<level::Pdpt> {
         unimplemented!()
     }
 }
+// this is factored out so we can unit test it using `usize`s without having to
+// construct page tables in memory.
+fn next_table_addr(my_addr: usize, idx: usize) -> usize {
+    (my_addr << 9) | (idx << 12)
+}
 
 impl<R: level::Recursive> PageTable<R> {
     fn next_table_ptr(&self, idx: usize) -> Option<NonNull<PageTable<R::Next>>> {
@@ -122,7 +127,7 @@ impl<R: level::Recursive> PageTable<R> {
         }
 
         let my_addr = self as *const _ as usize;
-        let next_addr = (my_addr << 9) | (idx << 12);
+        let next_addr = next_table_addr(my_addr, idx);
         unsafe {
             let ptr = next_addr as *mut _;
             // we constructed this address & know it won't be null.
@@ -395,4 +400,24 @@ pub mod level {
         const IS_HUGE: bool = false;
     }
     impl HoldsSize<Size4Kb> for Pt {}
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn next_table_addr_calc() {
+        let pml4_addr = 0o177777_777_777_777_777_0000;
+        let pml4_idx = 0o111;
+        let pdpt_addr = next_table_addr(pml4_addr, pml4_idx);
+        assert_eq!(pdpt_addr, 0o177777_777_777_777_111_0000);
+
+        let pdpt_idx = 0o222;
+        let pd_addr = next_table_addr(pdpt_addr, pdpt_idx);
+        assert_eq!(pd_addr, 0o177777_777_777_111_222_0000);
+
+        let pt_idx = 0o333;
+        let pt_addr = next_table_addr(pd_addr, pt_idx);
+        assert_eq!(pt_addr, 0o177777_777_111_222_333_0000);
+    }
 }
