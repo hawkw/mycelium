@@ -8,7 +8,7 @@ use hal_core::{boot::BootInfo, mem, Architecture};
 
 use alloc::vec::Vec;
 
-pub fn kernel_main<A>(bootinfo: &impl BootInfo<Arch = A>) -> !
+pub fn kernel_main<A>(bootinfo: &impl BootInfo) -> !
 where
     A: Architecture,
 {

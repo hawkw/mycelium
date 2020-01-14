@@ -1,6 +1,6 @@
 use bootloader::bootinfo;
-use hal_core::{boot::BootInfo, mem, Address};
-use hal_x86_64::{vga, PAddr, X64};
+use hal_core::{boot::BootInfo, mem, Address, PAddr};
+use hal_x86_64::{vga, X64};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
@@ -10,10 +10,8 @@ pub struct RustbootBootInfo {
 type MemRegionIter = core::slice::Iter<'static, bootinfo::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
-    type Arch = X64;
     // TODO(eliza): implement
-    type MemoryMap =
-        core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region<X64>>;
+    type MemoryMap = core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
 
@@ -35,7 +33,7 @@ impl BootInfo for RustbootBootInfo {
             }
         }
 
-        fn convert_region(region: &bootinfo::MemoryRegion) -> mem::Region<X64> {
+        fn convert_region(region: &bootinfo::MemoryRegion) -> mem::Region {
             let start = PAddr::from_u64(region.range.start_addr());
             let size = {
                 let end = PAddr::from_u64(region.range.end_addr()).offset(1);

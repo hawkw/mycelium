@@ -1,8 +1,7 @@
-use crate::Architecture;
+use crate::VAddr;
 use core::fmt;
 
 pub trait Context {
-    type Arch: Architecture;
     // TODO(eliza): Registers trait
     type Registers: fmt::Debug;
 
@@ -11,14 +10,14 @@ pub trait Context {
 }
 
 pub trait PageFault: Context {
-    fn fault_vaddr(&self) -> <<Self as Context>::Arch as Architecture>::VAddr;
+    fn fault_vaddr(&self) -> VAddr;
 
     // TODO(eliza): more
 }
 
 pub trait CodeFault: Context {
     fn is_user_mode(&self) -> bool;
-    fn instruction_ptr(&self) -> <<Self as Context>::Arch as Architecture>::VAddr;
+    fn instruction_ptr(&self) -> VAddr;
 }
 
 #[non_exhaustive]
