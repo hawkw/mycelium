@@ -11,6 +11,8 @@ pub use pic::CascadedPic;
 
 use hal_core::interrupt::{ctx, Handlers};
 
+pub type Control = &'static mut Idt;
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct Context<'a, T = ()> {
@@ -107,7 +109,7 @@ impl Handlers for TestHandlersImpl {
     }
 }
 
-pub fn init(bootinfo: &impl hal_core::boot::BootInfo) -> &'static mut idt::Idt {
+pub fn init(bootinfo: &impl hal_core::boot::BootInfo) -> Control {
     use hal_core::interrupt::Control;
 
     let span = tracing::info_span!("interrupts::init");

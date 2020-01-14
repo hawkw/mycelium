@@ -1,6 +1,7 @@
 use bootloader::bootinfo;
 use hal_core::{boot::BootInfo, mem, Address, PAddr};
-use hal_x86_64::{vga, X64};
+use hal_x86_64::vga;
+pub use hal_x86_64::{interrupt, NAME};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
@@ -67,12 +68,12 @@ impl BootInfo for RustbootBootInfo {
 #[cfg(target_os = "none")]
 pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
     let bootinfo = RustbootBootInfo { inner: info };
-    mycelium_kernel::kernel_main(&bootinfo);
+    crate::kernel_main(&bootinfo);
 }
 
 #[cold]
 #[cfg(target_os = "none")]
-pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
+pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     use core::fmt::Write;
 
     unsafe { asm!("cli" :::: "volatile") }
