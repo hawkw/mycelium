@@ -38,6 +38,8 @@ mycotest = { path = "mycotest" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 hal-x86_64 = { path = "hal-x86_64" }
+yaxpeax-x86 = { version = "0.0.13", default-features = false }
+yaxpeax-arch = { version = "0.0.4", default-features = false }
 
 [dependencies.tracing]
 version = "0.1"
