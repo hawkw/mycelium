@@ -1,5 +1,4 @@
 #![cfg_attr(target_os = "none", no_std)]
-#![cfg_attr(target_os = "none", no_main)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![cfg_attr(target_os = "none", feature(asm))]
 extern crate alloc;
@@ -57,7 +56,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         );
     }
 
-    arch::interrupt::init(bootinfo);
+    arch::interrupt::init::<arch::InterruptHandlers>();
 
     {
         let span = tracing::info_span!("alloc test");

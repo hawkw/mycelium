@@ -49,67 +49,8 @@ pub struct Registers {
 
 static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
-static TIMER: AtomicUsize = AtomicUsize::new(0);
 
-struct TestHandlersImpl;
-
-impl Handlers for TestHandlersImpl {
-    #[inline(never)]
-    fn page_fault<C>(cx: C)
-    where
-        C: ctx::Context + ctx::PageFault,
-    {
-        tracing::error!(registers = ?cx.registers(), "page fault");
-    }
-
-    #[inline(never)]
-    fn code_fault<C>(cx: C)
-    where
-        C: ctx::Context + ctx::CodeFault,
-    {
-        tracing::error!(registers = ?cx.registers(), "code fault");
-        loop {}
-    }
-
-    #[inline(never)]
-    fn double_fault<C>(cx: C)
-    where
-        C: ctx::Context + ctx::CodeFault,
-    {
-        tracing::error!(registers = ?cx.registers(), "double fault",);
-        loop {}
-    }
-
-    #[inline(never)]
-    fn timer_tick() {
-        TIMER.fetch_add(1, Ordering::Relaxed);
-    }
-
-    #[inline(never)]
-    fn keyboard_controller() {
-        // load-bearing read - if we don't read from the keyboard controller it won't
-        // send another interrupt on later keystrokes.
-        //
-        // 0x60 is a magic PC/AT number.
-        let scancode = unsafe { cpu::Port::at(0x60).readb() };
-        tracing::info!(
-            // for now
-            "got scancode {}. the time is now: {}",
-            scancode,
-            TIMER.load(Ordering::Relaxed)
-        );
-    }
-
-    #[inline(never)]
-    fn test_interrupt<C>(cx: C)
-    where
-        C: ctx::Context,
-    {
-        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
-    }
-}
-
-pub fn init(bootinfo: &impl hal_core::boot::BootInfo) -> Control {
+pub fn init<H: Handlers>() -> Control {
     use hal_core::interrupt::Control;
 
     let span = tracing::info_span!("interrupts::init");
@@ -127,7 +68,7 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo) -> Control {
     tracing::info!("intializing IDT...");
 
     unsafe {
-        IDT.register_handlers::<TestHandlersImpl>().unwrap();
+        IDT.register_handlers::<H>().unwrap();
         IDT.load();
         IDT.enable();
     }

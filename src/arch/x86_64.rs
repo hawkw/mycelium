@@ -1,4 +1,5 @@
 use bootloader::bootinfo;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, Address, PAddr};
 use hal_x86_64::vga;
 pub use hal_x86_64::{interrupt, NAME};
@@ -61,6 +62,60 @@ impl BootInfo for RustbootBootInfo {
 
     fn bootloader_name(&self) -> &str {
         "rust-bootloader"
+    }
+}
+
+pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) struct InterruptHandlers;
+
+impl hal_core::interrupt::Handlers for InterruptHandlers {
+    fn page_fault<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::PageFault,
+    {
+        tracing::error!(registers = ?cx.registers(), "page fault");
+    }
+
+    fn code_fault<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
+    {
+        tracing::error!(registers = ?cx.registers(), "code fault");
+        loop {}
+    }
+
+    fn double_fault<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
+    {
+        tracing::error!(registers = ?cx.registers(), "double fault",);
+        loop {}
+    }
+
+    fn timer_tick() {
+        TIMER.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn keyboard_controller() {
+        // load-bearing read - if we don't read from the keyboard controller it won't
+        // send another interrupt on later keystrokes.
+        //
+        // 0x60 is a magic PC/AT number.
+        let scancode = unsafe { hal_x86_64::cpu::Port::at(0x60).readb() };
+        tracing::info!(
+            // for now
+            "got scancode {}. the time is now: {}",
+            scancode,
+            TIMER.load(Ordering::Relaxed)
+        );
+    }
+
+    fn test_interrupt<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context,
+    {
+        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
     }
 }
 
