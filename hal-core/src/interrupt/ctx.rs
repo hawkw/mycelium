@@ -3,7 +3,7 @@ use core::fmt;
 
 pub trait Context {
     // TODO(eliza): Registers trait
-    type Registers: fmt::Debug;
+    type Registers: fmt::Debug + fmt::Display;
 
     fn registers(&self) -> &Self::Registers;
     unsafe fn registers_mut(&mut self) -> &mut Self::Registers;

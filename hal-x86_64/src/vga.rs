@@ -1,4 +1,4 @@
-use core::{cmp, fmt, ptr};
+use core::{fmt, ptr};
 use mycelium_util::{io, sync::spin};
 
 lazy_static::lazy_static! {

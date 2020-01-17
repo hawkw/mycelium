@@ -205,6 +205,17 @@ impl fmt::Debug for Registers {
     }
 }
 
+impl fmt::Display for Registers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "  rip:   {:?}", self.instruction_ptr)?;
+        writeln!(f, "  cs:    {:?}", self.code_segment)?;
+        writeln!(f, "  flags: {:#b}", self.cpu_flags)?;
+        writeln!(f, "  rsp:   {:?}", self.stack_ptr)?;
+        writeln!(f, "  ss:    {:?}", self.stack_segment)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

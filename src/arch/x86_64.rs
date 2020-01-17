@@ -75,6 +75,7 @@ impl hal_core::interrupt::Handlers for InterruptHandlers {
         C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::PageFault,
     {
         tracing::error!(registers = ?cx.registers(), "page fault");
+        oops(&format_args!("  PAGE FAULT\n\n{}", cx.registers()))
     }
 
     fn code_fault<C>(cx: C)
@@ -82,7 +83,7 @@ impl hal_core::interrupt::Handlers for InterruptHandlers {
         C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
     {
         tracing::error!(registers = ?cx.registers(), "code fault");
-        loop {}
+        oops(&format_args!("  CODE FAULT\n\n{}", cx.registers()))
     }
 
     fn double_fault<C>(cx: C)
@@ -90,7 +91,7 @@ impl hal_core::interrupt::Handlers for InterruptHandlers {
         C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
     {
         tracing::error!(registers = ?cx.registers(), "double fault",);
-        loop {}
+        oops(&format_args!("  DOUBLE FAULT\n\n{}", cx.registers()))
     }
 
     fn timer_tick() {
@@ -149,26 +150,8 @@ pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
     let _ = vga.write_str("OOPSIE WOOPSIE");
     vga.set_color(RED_BG);
-    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n\n{:2>}", cause);
-    let rflags: u64;
-    let cr0: u64;
-    let cr3: u64;
-    unsafe {
-        asm!("
-            pushfq
-            popq $0
-            mov %cr0, $1
-            mov %cr3, $2
-            "
-            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory"
-        );
-    };
-    let _ = writeln!(
-        vga,
-        "\n  cr0: {:#032b}\n  cr3: {:#032b}\n  rflags: {:#064b}",
-        cr0, cr3, rflags
-    );
-    let _ = vga.write_str("\n\n  it will never be safe to turn off your computer.");
+    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
+    let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
     loop {
         unsafe {
