@@ -14,6 +14,7 @@ mod wasm;
 
 const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
 
+pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
         &mut writer,
