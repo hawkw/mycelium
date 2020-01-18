@@ -7,7 +7,7 @@ use core::{
     ptr::{self, NonNull},
 };
 use hal_core::{
-    mem::page::{Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult},
+    mem::page::{self, Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult},
     Address,
 };
 
@@ -27,7 +27,7 @@ pub struct PageTable<L> {
 #[repr(transparent)]
 pub struct Entry<L> {
     entry: u64,
-    _level: PhantomData<fn(L)>,
+    _level: PhantomData<L>,
 }
 
 pub fn init_paging(phys_offset: VAddr) {
@@ -144,6 +144,25 @@ impl<R: level::Recursive> PageTable<R> {
         self.next_table_ptr(R::index_of(idx))
             .map(|ptr| unsafe { &mut *ptr.as_ptr() })
     }
+
+    fn create_next_table(
+        &mut self,
+        idx: VAddr,
+        alloc: &mut impl page::Alloc<X64, Size4Kb>,
+    ) -> &mut PageTable<R::Next> {
+        if let Some(next) = self.next_table_mut(idx) {
+            return next;
+        }
+        unimplemented!()
+    }
+}
+
+impl<L> PageTable<L> {
+    pub fn zero(&mut self) {
+        for e in &mut self.entries[..] {
+            *e = Entry::none();
+        }
+    }
 }
 
 impl<L: Level> ops::Index<VAddr> for PageTable<L> {
@@ -214,6 +233,13 @@ impl<L> Entry<L> {
     const DIRTY: u64 = 1 << 6;
     const HUGE: u64 = 1 << 7;
     const GLOBAL: u64 = 1 << 8;
+
+    const fn none() -> Self {
+        Self {
+            entry: 0,
+            _level: PhantomData,
+        }
+    }
 
     fn is_present(&self) -> bool {
         self.entry & Self::PRESENT != 0
