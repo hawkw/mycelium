@@ -1,6 +1,6 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
-#![cfg_attr(target_os = "none", feature(asm))]
+#![feature(asm)]
 extern crate alloc;
 
 pub mod arch;
