@@ -10,7 +10,10 @@ use hal_core::{boot::BootInfo, mem};
 
 use alloc::vec::Vec;
 
-pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
+mod wasm;
+
+const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+
     let mut writer = bootinfo.writer();
     writeln!(
         &mut writer,
@@ -72,7 +75,15 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         assert_eq!(v.pop(), Some(5));
     }
 
-    unsafe { asm!("int $$0") }
+    {
+        let span = tracing::info_span!("wasm test");
+        let _enter = span.enter();
+
+        match wasm::run_wasm(HELLOWORLD_WASM) {
+            Ok(()) => tracing::info!("wasm test Ok!"),
+            Err(err) => tracing::error!(?err, "wasm test Err"),
+        }
+    }
 
     // if this function returns we would boot loop. Hang, instead, so the debug
     // output can be read.
