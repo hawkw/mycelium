@@ -25,8 +25,13 @@ pub trait Address:
     fn align_up<A: Into<usize>>(self, align: A) -> Self {
         let align = align.into();
         assert!(align.is_power_of_two());
-        let aligned = self.as_usize() & !(align - 1);
-        Self::from_usize(aligned)
+        let mask = align - 1;
+        let u = self.as_usize();
+        if u & mask == 0 {
+            return self;
+        }
+        let aligned = (u | mask) + 1;
+        Self::from_usize(aligned as usize)
     }
 
     /// Aligns `self` down to `align`.
@@ -39,13 +44,8 @@ pub trait Address:
     fn align_down<A: Into<usize>>(self, align: A) -> Self {
         let align = align.into();
         assert!(align.is_power_of_two());
-        let mask = align - 1;
-        let u = self.as_usize();
-        if u & mask == 0 {
-            return self;
-        }
-        let aligned = (u | mask) + 1;
-        Self::from_usize(aligned as usize)
+        let aligned = self.as_usize() & !(align - 1);
+        Self::from_usize(aligned)
     }
 
     /// Offsets this address by `offset`.
