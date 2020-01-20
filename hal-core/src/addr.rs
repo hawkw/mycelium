@@ -73,7 +73,20 @@ pub trait Address:
         self.align_down(align) == self
     }
 
-    fn as_ptr(&self) -> *const ();
+    /// Returns `true` if `self` is aligned on the alignment of the specified
+    /// type.
+    #[inline]
+    fn is_aligned_for<T>(self) -> bool {
+        self.is_aligned(core::mem::align_of::<T>())
+    }
+
+    /// # Panics
+    ///
+    /// - If `self` is not aligned for a `T`-typed value.
+    fn as_ptr<T>(self) -> *mut T {
+        assert!(self.is_aligned_for::<T>());
+        self.as_usize() as *mut T
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
