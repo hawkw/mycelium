@@ -286,3 +286,39 @@ impl fmt::Debug for VAddr {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn align_up_1_aligned() {
+        // TODO(eliza): eventually, this could be a QuickCheck test that asserts
+        // that _all_ addresses align up by 1 to themselves.
+        assert_eq!(
+            PAddr::from_usize(0x0).align_up(1usize),
+            PAddr::from_usize(0x0)
+        );
+        assert_eq!(
+            PAddr::from_usize(0xDEADFACE).align_up(1usize),
+            PAddr::from_usize(0xDEADFACE)
+        );
+        assert_eq!(
+            PAddr::from_usize(0x000_F_FFFF_FFFF_FFFF).align_up(1usize),
+            PAddr::from_usize(0x000_F_FFFF_FFFF_FFFF)
+        );
+    }
+
+    #[test]
+    fn align_up() {
+        assert_eq!(PAddr::from_usize(2).align_up(2usize), PAddr::from_usize(2));
+        assert_eq!(
+            PAddr::from_usize(123).align_up(2usize),
+            PAddr::from_usize(124)
+        );
+        assert_eq!(
+            PAddr::from_usize(0x5555).align_up(16usize),
+            PAddr::from_usize(0x5560)
+        );
+    }
+}
