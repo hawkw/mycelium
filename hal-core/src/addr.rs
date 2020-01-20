@@ -321,4 +321,23 @@ mod tests {
             PAddr::from_usize(0x5560)
         );
     }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn sign_extend_vaddr() {
+        let actual = VAddr::from_usize(123 | (1 << 47)).as_usize();
+        let expected = (0xFFFFF << 47) | 123;
+        assert_eq!(
+            actual, expected,
+            "\n  left: `{:064b}`\n right: `{:064b}`",
+            actual, expected
+        );
+        let actual = VAddr::from_usize(123 | (1010 << 47)).as_usize();
+        let expected = 123;
+        assert_eq!(
+            actual, expected,
+            "\n  left: `{:064b}`\n right: `{:064b}`",
+            actual, expected
+        );
+    }
 }
