@@ -13,16 +13,39 @@ pub trait Address:
     + fmt::Debug
 {
     fn as_usize(self) -> usize;
+    fn from_usize(u: usize) -> Self;
 
     /// Aligns `self` up to `align`.
     ///
     /// The specified alignment must be a power of two.
-    fn align_up<A: Into<usize>>(self, align: A) -> Self;
+    ///
+    /// # Panics
+    ///
+    /// - If `align` is not a power of two.
+    fn align_up<A: Into<usize>>(self, align: A) -> Self {
+        let align = align.into();
+        assert!(align.is_power_of_two());
+        let aligned = self.as_usize() & !(align - 1);
+        Self::from_usize(aligned)
+    }
 
     /// Aligns `self` down to `align`.
     ///
     /// The specified alignment must be a power of two.
-    fn align_down<A: Into<usize>>(self, align: A) -> Self;
+    ///
+    /// # Panics
+    ///
+    /// - If `align` is not a power of two.
+    fn align_down<A: Into<usize>>(self, align: A) -> Self {
+        let align = align.into();
+        assert!(align.is_power_of_two());
+        let mask = align - 1;
+        let u = self.as_usize();
+        if u & mask == 0 {
+            return self;
+        }
+        Self::from((u | mask) + 1)
+    }
 
     /// Offsets this address by `offset`.
     ///
@@ -132,24 +155,9 @@ impl Address for PAddr {
         self.0 as usize
     }
 
-    fn align_up<A: Into<usize>>(self, _align: A) -> Self {
-        unimplemented!("eliza")
-    }
-
-    /// Aligns `self` down to `align`.
-    ///
-    /// The specified alignment must be a power of two.
-    fn align_down<A: Into<usize>>(self, _align: A) -> Self {
-        unimplemented!("eliza")
-    }
-
-    /// Returns `true` if `self` is aligned on the specified alignment.
-    fn is_aligned<A: Into<usize>>(self, _align: A) -> bool {
-        unimplemented!("eliza")
-    }
-
-    fn as_ptr(&self) -> *const () {
-        unimplemented!("eliza")
+    #[inline]
+    fn from_usize(u: usize) -> usize {
+        Self(0)
     }
 }
 
@@ -157,7 +165,7 @@ impl PAddr {
     #[cfg(target_pointer_width = "64")]
     pub fn from_u64(u: u64) -> Self {
         // TODO(eliza): ensure that this is a valid physical address?
-        PAddr(u as usize)
+        Self::from_usize(u as usize)
     }
 }
 
@@ -218,24 +226,9 @@ impl Address for VAddr {
         self.0 as usize
     }
 
-    fn align_up<A: Into<usize>>(self, _align: A) -> Self {
-        unimplemented!("eliza")
-    }
-
-    /// Aligns `self` down to `align`.
-    ///
-    /// The specified alignment must be a power of two.
-    fn align_down<A: Into<usize>>(self, _align: A) -> Self {
-        unimplemented!("eliza")
-    }
-
-    /// Returns `true` if `self` is aligned on the specified alignment.
-    fn is_aligned<A: Into<usize>>(self, _align: A) -> bool {
-        unimplemented!("eliza")
-    }
-
-    fn as_ptr(&self) -> *const () {
-        unimplemented!("eliza")
+    #[inline]
+    fn from_usize(u: usize) -> usize {
+        Self(0)
     }
 }
 
@@ -243,7 +236,7 @@ impl VAddr {
     #[cfg(target_pointer_width = "64")]
     pub fn from_u64(u: u64) -> Self {
         // TODO(eliza): ensure that this is a valid virtual address?
-        VAddr(u as usize)
+        Self::from_usize(u as usize)
     }
 }
 
