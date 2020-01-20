@@ -1,6 +1,6 @@
 pub mod cr3 {
     use crate::{mm::size::Size4Kb, PAddr};
-    use hal_core::mem::page::Page;
+    use hal_core::{mem::page::Page, Address};
 
     #[derive(Copy, Clone, Eq, PartialEq)]
     pub struct Flags(u64);

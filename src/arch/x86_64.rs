@@ -1,6 +1,6 @@
 use bootloader::bootinfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use hal_core::{boot::BootInfo, mem, Address, PAddr};
+use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
 use hal_x86_64::vga;
 pub use hal_x86_64::{interrupt, mm, NAME};
 

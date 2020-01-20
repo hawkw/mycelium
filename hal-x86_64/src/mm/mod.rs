@@ -1,5 +1,5 @@
 use self::size::*;
-use crate::{PAddr, VAddr, X64};
+use crate::{PAddr, VAddr};
 use core::{
     fmt,
     marker::PhantomData,
@@ -31,7 +31,7 @@ pub struct Entry<L> {
 }
 #[must_use = "page table updates will not be reflected until the changed pages are flushed from the TLB"]
 pub struct PageHandle {
-    entry: *mut Entry
+    entry: *mut u64,
 }
 
 pub fn init_paging(phys_offset: VAddr) {
@@ -60,60 +60,60 @@ impl PageTable<level::Pml4> {
     }
 }
 
-impl<S> TranslatePage<X64, S> for PageTable<level::Pml4>
+impl<S> TranslatePage<S> for PageTable<level::Pml4>
 where
     S: Size,
-    PageTable<level::Pdpt>: TranslatePage<X64, S>,
+    PageTable<level::Pdpt>: TranslatePage<S>,
 {
     fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S> {
         self.next_table(virt.base_address())?.translate_page(virt)
     }
 }
 
-impl TranslatePage<X64, Size1Gb> for PageTable<level::Pdpt> {
+impl TranslatePage<Size1Gb> for PageTable<level::Pdpt> {
     fn translate_page(&self, virt: Page<VAddr, Size1Gb>) -> TranslateResult<PAddr, Size1Gb> {
         self[&virt].phys_page()
     }
 }
 
-impl TranslatePage<X64, Size2Mb> for PageTable<level::Pdpt> {
+impl TranslatePage<Size2Mb> for PageTable<level::Pdpt> {
     fn translate_page(&self, virt: Page<VAddr, Size2Mb>) -> TranslateResult<PAddr, Size2Mb> {
         self.next_table(virt.base_address())?.translate_page(virt)
     }
 }
 
-impl TranslatePage<X64, Size4Kb> for PageTable<level::Pdpt> {
+impl TranslatePage<Size4Kb> for PageTable<level::Pdpt> {
     fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
         self.next_table(virt.base_address())?.translate_page(virt)
     }
 }
 
-impl TranslatePage<X64, Size2Mb> for PageTable<level::Pd> {
+impl TranslatePage<Size2Mb> for PageTable<level::Pd> {
     fn translate_page(&self, virt: Page<VAddr, Size2Mb>) -> TranslateResult<PAddr, Size2Mb> {
         self[&virt].phys_page()
     }
 }
 
-impl TranslatePage<X64, Size4Kb> for PageTable<level::Pd> {
+impl TranslatePage<Size4Kb> for PageTable<level::Pd> {
     fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
         self.next_table(virt.base_address())?.translate_page(virt)
     }
 }
 
-impl TranslatePage<X64, Size4Kb> for PageTable<level::Pt> {
+impl TranslatePage<Size4Kb> for PageTable<level::Pt> {
     fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
         self[&virt].phys_page()
     }
 }
 
-impl TranslateAddr<X64> for PageTable<level::Pml4> {
+impl TranslateAddr for PageTable<level::Pml4> {
     fn translate_addr(&self, virt: VAddr) -> Option<PAddr> {
         let pdpt = self.next_table(virt)?;
         pdpt.translate_addr(virt)
     }
 }
 
-impl TranslateAddr<X64> for PageTable<level::Pdpt> {
+impl TranslateAddr for PageTable<level::Pdpt> {
     fn translate_addr(&self, virt: VAddr) -> Option<PAddr> {
         unimplemented!()
     }
@@ -152,41 +152,46 @@ impl<R: level::Recursive> PageTable<R> {
     fn create_next_table(
         &mut self,
         idx: VAddr,
-        alloc: &mut impl page::Alloc<X64, Size4Kb>,
+        alloc: &mut impl page::Alloc<Size4Kb>,
     ) -> &mut PageTable<R::Next> {
         let span = tracing::trace_span!("create_next_table", ?idx, level = %<R::Next>::NAME);
         let _e = span.enter();
 
-        if let Some(next) = self.next_table_mut(idx) {
+        if self.next_table(idx).is_some() {
             tracing::trace!("next table already exists");
-            return next;
+            self.next_table_mut(idx)
+                .expect("if next_table().is_some(), the next table exists!")
+        } else {
+            let entry = &mut self[idx];
+            if entry.is_huge() {
+                panic!(
+                    "cannot create {} table for {:?}: the corresponding entry is huge!\n{:#?}",
+                    <R::Next>::NAME,
+                    idx,
+                    entry
+                );
+            }
+
+            let frame = match alloc.alloc() {
+                Ok(frame) => frame,
+                Err(e) => panic!(
+                    "cannot create {} table for {:?}: allocation failed!",
+                    <R::Next>::NAME,
+                    idx,
+                ),
+            };
+
+            tracing::trace!(?frame, "allocated page table frame");
+
+            let table = PageTable::<R::Next>::new(frame);
+            entry
+                .set_next_table(table)
+                .set_present(true)
+                .set_writable(true);
+            tracing::trace!("set entry to point at new page table");
+            // TODO(eliza): do we need to invlpg???
+            unsafe { &mut *table }
         }
-
-        if self[i].is_huge() {
-            panic!(
-                "cannot create {} table for {:?}: the corresponding entry is huge!\n{:#?}",
-                <R::Next>::NAME,
-                idx,
-                self[i]
-            );
-        }
-
-        let frame = match alloc.alloc() {
-            Ok(frame) => frame,
-            Err(e) => panic!(
-                "cannot create {} table for {:?}: allocation failed!",
-                <R::Next>::NAME,
-                idx,
-            ),
-        };
-
-        tracing::trace!(?frame, "allocated page table frame");
-
-        let table = PageTable<R::Next>::new(frame);
-        self[i].set_next_table(table).set_present(true).set_writable(true);
-        tracing::trace!("set entry to point at new page table");
-        // TODO(eliza): do we need to invlpg???
-        unsafe { &mut *ptr.as_ptr() }
     }
 }
 
@@ -198,7 +203,7 @@ impl<L: Level> PageTable<L> {
     }
 
     fn new(frame: Page<PAddr, Size4Kb>) -> *mut Self {
-        let this = frame.base_address().as_ptr();
+        let this = frame.base_address().as_ptr::<Self>();
         unsafe {
             (*this).zero();
         }
@@ -323,9 +328,10 @@ impl<L> Entry<L> {
         self
     }
 
-    fn set_phys_addr(&mut self, paddr: PAddr) -> PAddr {
+    fn set_phys_addr(&mut self, paddr: PAddr) -> &mut Self {
+        let paddr = paddr.as_usize() as u64;
         assert_eq!(paddr & !Self::ADDR_MASK, 0);
-        self.entry = (self.entry & !Self::ADDR_MASK) | paddr.as_usize() as u64;
+        self.entry = (self.entry & !Self::ADDR_MASK) | paddr;
         self
     }
 
@@ -337,8 +343,12 @@ impl<L> Entry<L> {
         self.entry & Self::HUGE != 0
     }
 
-    fn is_executable(&self, writable: bool) -> &bool {
+    fn is_executable(&self) -> bool {
         self.entry & Self::NOEXEC == 0
+    }
+
+    fn is_writable(&self) -> bool {
+        self.entry & Self::WRITABLE != 0
     }
 
     fn phys_addr(&self) -> PAddr {
@@ -360,14 +370,14 @@ impl<L: level::PointsToPage> Entry<L> {
     }
 
     fn set_phys_page(&mut self, page: Page<PAddr, L::Size>) -> &mut Self {
-        self.set_phys_addr(page.base_address())
+        self.set_phys_addr(page.base_address());
+        self
     }
 }
 
 impl<L: level::Recursive> Entry<L> {
-    fn set_next_table(&mut self, table: *mut PageTable<R::Next>) -> &mut Self {
-        self.set_phys_addr(PAddr::from_u64(table as u64));
-        self
+    fn set_next_table(&mut self, table: *mut PageTable<L::Next>) -> &mut Self {
+        self.set_phys_addr(PAddr::from_u64(table as u64))
     }
 }
 
@@ -430,8 +440,6 @@ impl<L: Level> fmt::Debug for Entry<L> {
             .finish()
     }
 }
-
-unsafe fn invlpg(addr: )
 
 pub mod size {
     use super::Size;
@@ -555,6 +563,8 @@ pub mod level {
 
 pub(crate) mod tlb {
     use crate::control_regs::cr3;
+    use crate::VAddr;
+    use hal_core::Address;
 
     pub(crate) unsafe fn flush_all() {
         let (pml4_paddr, flags) = cr3::read();
@@ -565,7 +575,7 @@ pub(crate) mod tlb {
     // XXX(eliza): can/should this be feature flagged? do we care at all about
     // supporting 80386s from 1985?
     pub(crate) unsafe fn flush_page(addr: VAddr) {
-        asm!("invlpg [$0]" :: "r"(vaddr.as_u64()) : "memory" : "intel")
+        asm!("invlpg [$0]" :: "r"(addr.as_usize() as u64) : "memory" : "intel")
     }
 }
 
