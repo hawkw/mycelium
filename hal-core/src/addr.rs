@@ -255,7 +255,7 @@ impl Address for VAddr {
     #[cfg(target_arch = "x86_64")]
     fn from_usize(u: usize) -> Self {
         // sign extend bit 47
-        let value = ((u as i64) << 16) as u64 >> 16;
+        let value = ((u << 16) as i64 >> 16) as u64;
         Self(value as usize)
     }
 
