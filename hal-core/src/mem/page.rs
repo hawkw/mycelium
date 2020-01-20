@@ -58,7 +58,7 @@ pub unsafe trait Alloc<S: Size> {
 pub trait Map<S, A>
 where
     S: Size,
-    A: Alloc<R, S>,
+    A: Alloc<S>,
 {
     type Flags: PageFlags;
     type Handle: PageHandle<S, Flags = Self::Flags>;
@@ -90,14 +90,14 @@ where
 
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
-    fn identity_map(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle
+    fn identity_map(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle;
     // {
     //     let virt = Page::containing(phys.base_address().as_usize());
     //     self.map(virt, phys, flags, frame_alloc)
     // }
 }
 
-pub trait TranslatePage<R: Architecture, S: Size> {
+pub trait TranslatePage<S: Size> {
     fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S>;
 }
 
@@ -106,7 +106,6 @@ pub trait TranslateAddr {
 }
 
 pub trait PageHandle<S: Size> {
-    type Arch: Architecture;
     type Flags: PageFlags;
 
     fn flags(&self) -> &Self::Flags;
