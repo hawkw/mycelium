@@ -21,12 +21,12 @@ impl Port {
 
     pub unsafe fn readb(&self) -> u8 {
         let result: u8;
-        asm!("inb al, dx" : "={al}"(result) : "{dx}"(self.num) :: "volatile", "intel");
+        asm!("in al, dx" : "={al}"(result) : "{dx}"(self.num) :: "volatile", "intel");
         result
     }
 
     pub unsafe fn writeb(&self, value: u8) {
-        asm!("outb dx, al" :: "{dx}"(self.num), "{al}"(value) :: "volatile", "intel");
+        asm!("out dx, al" :: "{dx}"(self.num), "{al}"(value) :: "volatile", "intel");
     }
     // TODO(ixi): anything wider than a byte lol
 }

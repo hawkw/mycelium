@@ -106,7 +106,7 @@ pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
             mov $1, cr0
             mov $2, cr3
             "
-            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory", "intel"
+            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory" : "intel"
         );
     };
     let _ = writeln!(
