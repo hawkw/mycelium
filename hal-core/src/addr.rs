@@ -182,7 +182,7 @@ impl Address for PAddr {
 
     #[cfg(not(target_arch = "x86_64"))]
     fn from_usize(u: usize) -> Self {
-        Self(0)
+        Self(u)
     }
 }
 
@@ -261,7 +261,7 @@ impl Address for VAddr {
 
     #[cfg(not(target_arch = "x86_64"))]
     fn from_usize(u: usize) -> Self {
-        Self(0)
+        Self(u)
     }
 }
 
