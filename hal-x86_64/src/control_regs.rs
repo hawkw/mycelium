@@ -15,4 +15,10 @@ pub mod cr3 {
             Page::starting_at(addr).expect("PML4 physical addr not aligned! this is very bad");
         (pml4_page, Flags(val))
     }
+
+    pub unsafe fn write(pml4: Page<PAddr, Size4Kb>, flags: Flags) {
+        let addr = pml4.base_address().as_usize() as u64;
+        let val = addr | flags.0;
+        asm!("mov $0, %cr3" :: "r"(val) : "memory");
+    }
 }

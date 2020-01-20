@@ -29,6 +29,10 @@ pub struct Entry<L> {
     entry: u64,
     _level: PhantomData<L>,
 }
+#[must_use = "page table updates will not be reflected until the changed pages are flushed from the TLB"]
+pub struct PageHandle {
+    entry: *mut Entry
+}
 
 pub fn init_paging(phys_offset: VAddr) {
     let span = tracing::info_span!("paging::init", ?phys_offset);
@@ -150,18 +154,55 @@ impl<R: level::Recursive> PageTable<R> {
         idx: VAddr,
         alloc: &mut impl page::Alloc<X64, Size4Kb>,
     ) -> &mut PageTable<R::Next> {
+        let span = tracing::trace_span!("create_next_table", ?idx, level = %<R::Next>::NAME);
+        let _e = span.enter();
+
         if let Some(next) = self.next_table_mut(idx) {
+            tracing::trace!("next table already exists");
             return next;
         }
-        unimplemented!()
+
+        if self[i].is_huge() {
+            panic!(
+                "cannot create {} table for {:?}: the corresponding entry is huge!\n{:#?}",
+                <R::Next>::NAME,
+                idx,
+                self[i]
+            );
+        }
+
+        let frame = match alloc.alloc() {
+            Ok(frame) => frame,
+            Err(e) => panic!(
+                "cannot create {} table for {:?}: allocation failed!",
+                <R::Next>::NAME,
+                idx,
+            ),
+        };
+
+        tracing::trace!(?frame, "allocated page table frame");
+
+        let table = PageTable<R::Next>::new(frame);
+        self[i].set_next_table(table).set_present(true).set_writable(true);
+        tracing::trace!("set entry to point at new page table");
+        // TODO(eliza): do we need to invlpg???
+        unsafe { &mut *ptr.as_ptr() }
     }
 }
 
-impl<L> PageTable<L> {
+impl<L: Level> PageTable<L> {
     pub fn zero(&mut self) {
         for e in &mut self.entries[..] {
             *e = Entry::none();
         }
+    }
+
+    fn new(frame: Page<PAddr, Size4Kb>) -> *mut Self {
+        let this = frame.base_address().as_ptr();
+        unsafe {
+            (*this).zero();
+        }
+        this
     }
 }
 
@@ -233,12 +274,59 @@ impl<L> Entry<L> {
     const DIRTY: u64 = 1 << 6;
     const HUGE: u64 = 1 << 7;
     const GLOBAL: u64 = 1 << 8;
+    const NOEXEC: u64 = 1 << 63;
+
+    const ADDR_MASK: u64 = 0x000f_ffff_ffff_f000;
 
     const fn none() -> Self {
         Self {
             entry: 0,
             _level: PhantomData,
         }
+    }
+
+    fn set_present(&mut self, present: bool) -> &mut Self {
+        if present {
+            self.entry |= Self::PRESENT;
+        } else {
+            self.entry &= !Self::PRESENT;
+        }
+        self
+    }
+
+    fn set_writable(&mut self, writable: bool) -> &mut Self {
+        if writable {
+            self.entry |= Self::WRITABLE;
+        } else {
+            self.entry &= !Self::WRITABLE;
+        }
+        self
+    }
+
+    /// Note that this can only be used if the appropriate feature bit is
+    /// enabled in the EFER MSR.
+    fn set_executable(&mut self, executable: bool) -> &mut Self {
+        if executable {
+            self.entry &= !Self::NOEXEC;
+        } else {
+            self.entry |= Self::NOEXEC;
+        }
+        self
+    }
+
+    fn set_huge(&mut self, huge: bool) -> &mut Self {
+        if huge {
+            self.entry |= Self::HUGE;
+        } else {
+            self.entry &= !Self::HUGE;
+        }
+        self
+    }
+
+    fn set_phys_addr(&mut self, paddr: PAddr) -> PAddr {
+        assert_eq!(paddr & !Self::ADDR_MASK, 0);
+        self.entry = (self.entry & !Self::ADDR_MASK) | paddr.as_usize() as u64;
+        self
     }
 
     fn is_present(&self) -> bool {
@@ -249,9 +337,12 @@ impl<L> Entry<L> {
         self.entry & Self::HUGE != 0
     }
 
+    fn is_executable(&self, writable: bool) -> &bool {
+        self.entry & Self::NOEXEC == 0
+    }
+
     fn phys_addr(&self) -> PAddr {
-        const ADDR_MASK: u64 = 0x000f_ffff_ffff_f000;
-        PAddr::from_u64(self.entry & ADDR_MASK)
+        PAddr::from_u64(self.entry & Self::ADDR_MASK)
     }
 }
 
@@ -266,6 +357,38 @@ impl<L: level::PointsToPage> Entry<L> {
         }
 
         Ok(Page::starting_at(self.phys_addr()).expect("page addr must be aligned"))
+    }
+
+    fn set_phys_page(&mut self, page: Page<PAddr, L::Size>) -> &mut Self {
+        self.set_phys_addr(page.base_address())
+    }
+}
+
+impl<L: level::Recursive> Entry<L> {
+    fn set_next_table(&mut self, table: *mut PageTable<R::Next>) -> &mut Self {
+        self.set_phys_addr(PAddr::from_u64(table as u64));
+        self
+    }
+}
+
+impl<L: Level> page::PageFlags for Entry<L> {
+    #[inline]
+    fn is_writable(&self) -> bool {
+        Entry::is_writable(self)
+    }
+    #[inline]
+    fn set_writable(&mut self, writable: bool) -> &mut Self {
+        Entry::set_writable(self, writable)
+    }
+
+    #[inline]
+    fn is_executable(&self) -> bool {
+        Entry::is_executable(self)
+    }
+
+    #[inline]
+    fn set_executable(&mut self, executable: bool) -> &mut Self {
+        Entry::set_executable(self, executable)
     }
 }
 
@@ -307,6 +430,8 @@ impl<L: Level> fmt::Debug for Entry<L> {
             .finish()
     }
 }
+
+unsafe fn invlpg(addr: )
 
 pub mod size {
     use super::Size;
@@ -426,6 +551,22 @@ pub mod level {
         const IS_HUGE: bool = false;
     }
     impl HoldsSize<Size4Kb> for Pt {}
+}
+
+pub(crate) mod tlb {
+    use crate::control_regs::cr3;
+
+    pub(crate) unsafe fn flush_all() {
+        let (pml4_paddr, flags) = cr3::read();
+        cr3::write(pml4_paddr, flags);
+    }
+
+    /// Note: this is not available on i386 and earlier.
+    // XXX(eliza): can/should this be feature flagged? do we care at all about
+    // supporting 80386s from 1985?
+    pub(crate) unsafe fn flush_page(addr: VAddr) {
+        asm!("invlpg [$0]" :: "r"(vaddr.as_u64()) : "memory" : "intel")
+    }
 }
 
 #[cfg(test)]
