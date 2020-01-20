@@ -102,11 +102,11 @@ pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
     unsafe {
         asm!("
             pushfq
-            popq $0
-            mov %cr0, $1
-            mov %cr3, $2
+            pop $0
+            mov $1, cr0
+            mov $2, cr3
             "
-            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory"
+            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory", "intel"
         );
     };
     let _ = writeln!(
