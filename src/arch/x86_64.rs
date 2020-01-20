@@ -1,6 +1,8 @@
 use bootloader::bootinfo;
-use hal_core::{boot::BootInfo, mem, Address};
-use hal_x86_64::{vga, PAddr, X64};
+use core::sync::atomic::{AtomicUsize, Ordering};
+use hal_core::{boot::BootInfo, mem, Address, PAddr};
+use hal_x86_64::vga;
+pub use hal_x86_64::{interrupt, NAME};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
@@ -10,10 +12,8 @@ pub struct RustbootBootInfo {
 type MemRegionIter = core::slice::Iter<'static, bootinfo::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
-    type Arch = X64;
     // TODO(eliza): implement
-    type MemoryMap =
-        core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region<X64>>;
+    type MemoryMap = core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
 
@@ -35,7 +35,7 @@ impl BootInfo for RustbootBootInfo {
             }
         }
 
-        fn convert_region(region: &bootinfo::MemoryRegion) -> mem::Region<X64> {
+        fn convert_region(region: &bootinfo::MemoryRegion) -> mem::Region {
             let start = PAddr::from_u64(region.range.start_addr());
             let size = {
                 let end = PAddr::from_u64(region.range.end_addr()).offset(1);
@@ -65,16 +65,70 @@ impl BootInfo for RustbootBootInfo {
     }
 }
 
+pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) struct InterruptHandlers;
+
+impl hal_core::interrupt::Handlers for InterruptHandlers {
+    fn page_fault<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::PageFault,
+    {
+        tracing::error!(registers = ?cx.registers(), "page fault");
+        oops(&format_args!("  PAGE FAULT\n\n{}", cx.registers()))
+    }
+
+    fn code_fault<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
+    {
+        tracing::error!(registers = ?cx.registers(), "code fault");
+        oops(&format_args!("  CODE FAULT\n\n{}", cx.registers()))
+    }
+
+    fn double_fault<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
+    {
+        tracing::error!(registers = ?cx.registers(), "double fault",);
+        oops(&format_args!("  DOUBLE FAULT\n\n{}", cx.registers()))
+    }
+
+    fn timer_tick() {
+        TIMER.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn keyboard_controller() {
+        // load-bearing read - if we don't read from the keyboard controller it won't
+        // send another interrupt on later keystrokes.
+        //
+        // 0x60 is a magic PC/AT number.
+        let scancode = unsafe { hal_x86_64::cpu::Port::at(0x60).readb() };
+        tracing::info!(
+            // for now
+            "got scancode {}. the time is now: {}",
+            scancode,
+            TIMER.load(Ordering::Relaxed)
+        );
+    }
+
+    fn test_interrupt<C>(cx: C)
+    where
+        C: hal_core::interrupt::ctx::Context,
+    {
+        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
+    }
+}
+
 #[no_mangle]
 #[cfg(target_os = "none")]
 pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
     let bootinfo = RustbootBootInfo { inner: info };
-    mycelium_kernel::kernel_main(&bootinfo);
+    crate::kernel_main(&bootinfo);
 }
 
 #[cold]
-#[cfg(target_os = "none")]
-pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
+pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     use core::fmt::Write;
 
     unsafe { asm!("cli" :::: "volatile") }
@@ -95,26 +149,8 @@ pub(crate) fn oops(cause: &dyn core::fmt::Display) -> ! {
     vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
     let _ = vga.write_str("OOPSIE WOOPSIE");
     vga.set_color(RED_BG);
-    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n\n{:2>}", cause);
-    let rflags: u64;
-    let cr0: u64;
-    let cr3: u64;
-    unsafe {
-        asm!("
-            pushfq
-            popq $0
-            mov %cr0, $1
-            mov %cr3, $2
-            "
-            : "=r"(rflags), "=r"(cr0), "=r"(cr3) :: "memory"
-        );
-    };
-    let _ = writeln!(
-        vga,
-        "\n  cr0: {:#032b}\n  cr3: {:#032b}\n  rflags: {:#064b}",
-        cr0, cr3, rflags
-    );
-    let _ = vga.write_str("\n\n  it will never be safe to turn off your computer.");
+    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
+    let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
     loop {
         unsafe {

@@ -1,11 +1,11 @@
-use crate::Architecture;
+use crate::Address;
 use core::fmt;
 pub mod page;
 
 /// A cross-platform representation of a memory region.
 #[derive(Clone)]
-pub struct Region<A: Architecture> {
-    base: A::PAddr,
+pub struct Region<A = crate::PAddr> {
+    base: A,
     // TODO(eliza): should regions be stored as (start -> end) or as
     // (base + offset)?
     size: usize,
@@ -46,13 +46,13 @@ enum KindInner {
     PageTable,
 }
 
-impl<A: Architecture> Region<A> {
-    pub fn new(base: A::PAddr, size: usize, kind: RegionKind) -> Self {
+impl<A: Address> Region<A> {
+    pub fn new(base: A, size: usize, kind: RegionKind) -> Self {
         Self { base, size, kind }
     }
 
     /// Returns the base address of the memory region
-    pub fn base_addr(&self) -> A::PAddr {
+    pub fn base_addr(&self) -> A {
         self.base
     }
 
@@ -62,13 +62,13 @@ impl<A: Architecture> Region<A> {
     }
 
     /// Returns `true` if `self` contains the specified address.
-    pub fn contains(&self, addr: impl Into<A::PAddr>) -> bool {
+    pub fn contains(&self, addr: impl Into<A>) -> bool {
         let addr = addr.into();
         addr > self.base && addr < self.end_addr()
     }
 
     /// Returns the end address of the memory region.
-    pub fn end_addr(&self) -> A::PAddr {
+    pub fn end_addr(&self) -> A {
         self.base + self.size
     }
 
@@ -76,14 +76,14 @@ impl<A: Architecture> Region<A> {
         self.kind
     }
 
-    pub fn page_range<S: page::Size>(&self) -> page::PageRange<A::PAddr, S> {
+    pub fn page_range<S: page::Size>(&self) -> page::PageRange<A, S> {
         unimplemented!("eliza")
     }
 }
 
-impl<A: Architecture> fmt::Debug for Region<A>
+impl<A> fmt::Debug for Region<A>
 where
-    A::PAddr: fmt::Debug,
+    A: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Region")

@@ -11,6 +11,8 @@ pub use pic::CascadedPic;
 
 use hal_core::interrupt::{ctx, Handlers};
 
+pub type Control = &'static mut Idt;
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct Context<'a, T = ()> {
@@ -47,67 +49,8 @@ pub struct Registers {
 
 static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
-static TIMER: AtomicUsize = AtomicUsize::new(0);
 
-struct TestHandlersImpl;
-
-impl Handlers<crate::X64> for TestHandlersImpl {
-    #[inline(never)]
-    fn page_fault<C>(cx: C)
-    where
-        C: ctx::Context<Arch = crate::X64> + ctx::PageFault,
-    {
-        tracing::error!(registers = ?cx.registers(), "page fault");
-    }
-
-    #[inline(never)]
-    fn code_fault<C>(cx: C)
-    where
-        C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
-    {
-        tracing::error!(registers = ?cx.registers(), "code fault");
-        loop {}
-    }
-
-    #[inline(never)]
-    fn double_fault<C>(cx: C)
-    where
-        C: ctx::Context<Arch = crate::X64> + ctx::CodeFault,
-    {
-        tracing::error!(registers = ?cx.registers(), "double fault",);
-        loop {}
-    }
-
-    #[inline(never)]
-    fn timer_tick() {
-        TIMER.fetch_add(1, Ordering::Relaxed);
-    }
-
-    #[inline(never)]
-    fn keyboard_controller() {
-        // load-bearing read - if we don't read from the keyboard controller it won't
-        // send another interrupt on later keystrokes.
-        //
-        // 0x60 is a magic PC/AT number.
-        let scancode = unsafe { cpu::Port::at(0x60).readb() };
-        tracing::info!(
-            // for now
-            "got scancode {}. the time is now: {}",
-            scancode,
-            TIMER.load(Ordering::Relaxed)
-        );
-    }
-
-    #[inline(never)]
-    fn test_interrupt<C>(cx: C)
-    where
-        C: ctx::Context<Arch = crate::X64>,
-    {
-        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
-    }
-}
-
-pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'static mut idt::Idt {
+pub fn init<H: Handlers>() -> Control {
     use hal_core::interrupt::Control;
 
     let span = tracing::info_span!("interrupts::init");
@@ -125,7 +68,7 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
     tracing::info!("intializing IDT...");
 
     unsafe {
-        IDT.register_handlers::<TestHandlersImpl>().unwrap();
+        IDT.register_handlers::<H>().unwrap();
         IDT.load();
         IDT.enable();
     }
@@ -141,7 +84,6 @@ pub fn init(bootinfo: &impl hal_core::boot::BootInfo<Arch = crate::X64>) -> &'st
 }
 
 impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
-    type Arch = crate::X64;
     type Registers = Registers;
 
     fn registers(&self) -> &Registers {
@@ -186,7 +128,6 @@ impl<'a> Context<'a, PageFaultCode> {
 }
 
 impl hal_core::interrupt::Control for Idt {
-    type Arch = crate::X64;
     // type Vector = u8;
 
     unsafe fn disable(&mut self) {
@@ -203,40 +144,40 @@ impl hal_core::interrupt::Control for Idt {
 
     fn register_handlers<H>(&mut self) -> Result<(), hal_core::interrupt::RegistrationError>
     where
-        H: Handlers<Self::Arch>,
+        H: Handlers,
     {
         let span = tracing::debug_span!("Idt::register_handlers");
         let _enter = span.enter();
 
-        extern "x86-interrupt" fn page_fault_isr<H: Handlers<crate::X64>>(
+        extern "x86-interrupt" fn page_fault_isr<H: Handlers>(
             registers: &mut Registers,
             code: PageFaultCode,
         ) {
             H::page_fault(Context { registers, code });
         }
 
-        extern "x86-interrupt" fn double_fault_isr<H: Handlers<crate::X64>>(
+        extern "x86-interrupt" fn double_fault_isr<H: Handlers>(
             registers: &mut Registers,
             code: u64,
         ) {
             H::double_fault(Context { registers, code });
         }
 
-        extern "x86-interrupt" fn timer_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
+        extern "x86-interrupt" fn timer_isr<H: Handlers>(_regs: &mut Registers) {
             H::timer_tick();
             unsafe {
                 PIC.end_interrupt(0x20);
             }
         }
 
-        extern "x86-interrupt" fn keyboard_isr<H: Handlers<crate::X64>>(_regs: &mut Registers) {
+        extern "x86-interrupt" fn keyboard_isr<H: Handlers>(_regs: &mut Registers) {
             H::keyboard_controller();
             unsafe {
                 PIC.end_interrupt(0x21);
             }
         }
 
-        extern "x86-interrupt" fn test_isr<H: Handlers<crate::X64>>(registers: &mut Registers) {
+        extern "x86-interrupt" fn test_isr<H: Handlers>(registers: &mut Registers) {
             H::test_interrupt(Context {
                 registers,
                 code: (),
@@ -261,6 +202,17 @@ impl fmt::Debug for Registers {
             .field("stack_ptr", &self.stack_ptr)
             .field("stack_segment", &self.stack_segment)
             .finish()
+    }
+}
+
+impl fmt::Display for Registers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "  rip:   {:?}", self.instruction_ptr)?;
+        writeln!(f, "  cs:    {:?}", self.code_segment)?;
+        writeln!(f, "  flags: {:#b}", self.cpu_flags)?;
+        writeln!(f, "  rsp:   {:?}", self.stack_ptr)?;
+        writeln!(f, "  ss:    {:?}", self.stack_segment)?;
+        Ok(())
     }
 }
 

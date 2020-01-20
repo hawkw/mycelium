@@ -1,23 +1,17 @@
 use core::marker::PhantomData;
-use hal_core::{
-    interrupt::{self, ctx},
-    Architecture,
-};
+use hal_core::interrupt::{self, ctx};
 
-pub struct Handlers<A> {
-    _p: PhantomData<A>,
+pub struct Handlers {
+    _p: (),
 }
 
 // TODO(eliza): ag.
 static mut TIMER: usize = 0;
 
-impl<A> interrupt::Handlers<A> for Handlers<A>
-where
-    A: Architecture,
-{
+impl interrupt::Handlers for Handlers {
     fn page_fault<C>(cx: C)
     where
-        C: ctx::Context<Arch = A> + ctx::PageFault,
+        C: ctx::Context + ctx::PageFault,
     {
         tracing::error!(registers = ?cx.registers(), "page fault");
         loop {}
@@ -25,7 +19,7 @@ where
 
     fn code_fault<C>(cx: C)
     where
-        C: ctx::Context<Arch = A> + ctx::CodeFault,
+        C: ctx::Context + ctx::CodeFault,
     {
         tracing::error!(kind = ?cx.kind(), registers = ?cx.registers(), "code fault");
         loop {}
@@ -59,7 +53,7 @@ where
 
     fn test_interrupt<C>(cx: C)
     where
-        C: ctx::Context<Arch = A>,
+        C: ctx::Context,
     {
         tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
     }

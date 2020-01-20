@@ -48,11 +48,9 @@ impl CascadedPic {
 }
 
 impl hal_core::interrupt::Control for CascadedPic {
-    type Arch = crate::X64;
-
     fn register_handlers<H>(&mut self) -> Result<(), hal_core::interrupt::RegistrationError>
     where
-        H: Handlers<Self::Arch>,
+        H: Handlers,
     {
         Err(RegistrationError::other(
             "x86_64 handlers must be registered via the IDT, not to the PIC interrupt component",
@@ -82,7 +80,7 @@ impl CascadedPic {
         // machines". it is not entirely clear what "older machines" exactly means, or where this
         // is or is not necessary precisely. this code happens to work in qemu without `iowait()`,
         // but is largely untested on real hardware where this may be a concern.
-        let iowait = || { cpu::Port::at(0x80).writeb(0) };
+        let iowait = || cpu::Port::at(0x80).writeb(0);
 
         let primary_mask = self.primary.data.readb();
         let secondary_mask = self.secondary.data.readb();

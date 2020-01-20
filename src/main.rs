@@ -3,8 +3,7 @@
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![cfg_attr(target_os = "none", feature(asm))]
 #![cfg_attr(target_os = "none", feature(panic_info_message, track_caller))]
-
-pub mod arch;
+use mycelium_kernel::arch;
 
 #[cfg(target_os = "none")]
 #[panic_handler]
