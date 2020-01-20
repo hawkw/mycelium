@@ -44,7 +44,8 @@ pub trait Address:
         if u & mask == 0 {
             return self;
         }
-        Self::from((u | mask) + 1)
+        let aligned = (u | mask) + 1;
+        Self::from_usize(aligned as usize)
     }
 
     /// Offsets this address by `offset`.
@@ -169,7 +170,18 @@ impl Address for PAddr {
     }
 
     #[inline]
-    fn from_usize(u: usize) -> usize {
+    #[cfg(target_arch = "x86_64")]
+    fn from_usize(u: usize) -> Self {
+        const MASK: usize = 0xFFF0_0000_0000_0000;
+        debug_assert!(
+            u & MASK == 0,
+            "x86_64 physical addresses may not have the 12 most significant bits set!"
+        );
+        Self(u & !MASK)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    fn from_usize(u: usize) -> Self {
         Self(0)
     }
 }
@@ -240,7 +252,15 @@ impl Address for VAddr {
     }
 
     #[inline]
-    fn from_usize(u: usize) -> usize {
+    #[cfg(target_arch = "x86_64")]
+    fn from_usize(u: usize) -> Self {
+        // sign extend bit 47
+        let value = ((u as i64) << 16) as u64 >> 16;
+        Self(value as usize)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    fn from_usize(u: usize) -> Self {
         Self(0)
     }
 }
