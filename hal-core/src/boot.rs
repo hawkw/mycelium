@@ -1,9 +1,8 @@
-use crate::{mem, Architecture};
+use crate::mem;
 use core::iter::Iterator;
 
 pub trait BootInfo {
-    type Arch: Architecture;
-    type MemoryMap: Iterator<Item = mem::Region<Self::Arch>>;
+    type MemoryMap: Iterator<Item = mem::Region>;
     type Writer: core::fmt::Write;
 
     /// Returns the boot info's memory map.

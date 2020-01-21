@@ -1,4 +1,3 @@
-use crate::Architecture;
 use core::fmt;
 use core::marker::PhantomData;
 
@@ -7,7 +6,6 @@ pub use self::ctx::Context;
 
 /// An interrupt controller for a platform.
 pub trait Control {
-    type Arch: Architecture;
     /// Disable all interrupts.
     ///
     /// # Safety
@@ -30,7 +28,7 @@ pub trait Control {
 
     fn register_handlers<H>(&mut self) -> Result<(), RegistrationError>
     where
-        H: Handlers<Self::Arch>;
+        H: Handlers;
 
     /// Enter a critical section, returning a guard.
     fn enter_critical(&mut self) -> CriticalGuard<'_, Self> {
@@ -41,19 +39,19 @@ pub trait Control {
     }
 }
 
-pub trait Handlers<A: Architecture> {
+pub trait Handlers {
     fn page_fault<C>(cx: C)
     where
-        C: ctx::Context<Arch = A> + ctx::PageFault;
+        C: ctx::Context + ctx::PageFault;
 
     fn code_fault<C>(cx: C)
     where
-        C: ctx::Context<Arch = A> + ctx::CodeFault;
+        C: ctx::Context + ctx::CodeFault;
 
     #[inline(always)]
     fn double_fault<C>(cx: C)
     where
-        C: ctx::Context<Arch = A> + ctx::CodeFault,
+        C: ctx::Context + ctx::CodeFault,
     {
         Self::code_fault(cx)
     }
@@ -64,7 +62,7 @@ pub trait Handlers<A: Architecture> {
 
     fn test_interrupt<C>(cx: C)
     where
-        C: ctx::Context<Arch = A>,
+        C: ctx::Context,
     {
         // nop
     }

@@ -1,10 +1,12 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
-
+#![feature(asm)]
 extern crate alloc;
 
+pub mod arch;
+
 use core::fmt::Write;
-use hal_core::{boot::BootInfo, mem, Architecture};
+use hal_core::{boot::BootInfo, mem};
 
 use alloc::vec::Vec;
 
@@ -12,16 +14,13 @@ mod wasm;
 
 const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
 
-pub fn kernel_main<A>(bootinfo: &impl BootInfo<Arch = A>) -> !
-where
-    A: Architecture,
-{
+pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
         &mut writer,
         "hello from mycelium {} (on {})",
         env!("CARGO_PKG_VERSION"),
-        A::NAME
+        arch::NAME
     )
     .unwrap();
     writeln!(&mut writer, "booting via {}", bootinfo.bootloader_name()).unwrap();
@@ -61,7 +60,7 @@ where
         );
     }
 
-    A::init_interrupts(bootinfo);
+    arch::interrupt::init::<arch::InterruptHandlers>();
 
     {
         let span = tracing::info_span!("alloc test");
