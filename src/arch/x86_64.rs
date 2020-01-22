@@ -149,6 +149,7 @@ pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
     let _ = vga.write_str("OOPSIE WOOPSIE");
     vga.set_color(RED_BG);
+
     let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 

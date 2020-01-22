@@ -184,7 +184,7 @@ impl Idt {
 
     pub fn load(&'static self) {
         let ptr = crate::cpu::DtablePtr::new(self);
-        unsafe { asm!("lidt ($0)" :: "r" (&ptr) : "memory") }
+        unsafe { asm!("lidt [$0]" :: "r" (&ptr) : "memory" : "intel") }
     }
 }
 

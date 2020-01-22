@@ -1,5 +1,5 @@
-use core::mem;
 use core::fmt;
+use core::mem;
 
 #[repr(transparent)]
 pub struct Port {
@@ -21,12 +21,12 @@ impl Port {
 
     pub unsafe fn readb(&self) -> u8 {
         let result: u8;
-        asm!("inb %dx, %al" : "={al}"(result) : "{dx}"(self.num) :: "volatile");
+        asm!("in al, dx" : "={al}"(result) : "{dx}"(self.num) :: "volatile", "intel");
         result
     }
 
     pub unsafe fn writeb(&self, value: u8) {
-        asm!("outb %al, %dx" :: "{dx}"(self.num), "{al}"(value) :: "volatile");
+        asm!("out dx, al" :: "{dx}"(self.num), "{al}"(value) :: "volatile", "intel");
     }
     // TODO(ixi): anything wider than a byte lol
 }
