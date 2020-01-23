@@ -172,12 +172,11 @@ impl Address for PAddr {
     #[inline]
     #[cfg(target_arch = "x86_64")]
     fn from_usize(u: usize) -> Self {
-        const MASK: usize = 0xFFF0_0000_0000_0000;
         debug_assert!(
             u & MASK == 0,
             "x86_64 physical addresses may not have the 12 most significant bits set!"
         );
-        Self(u & !MASK)
+        Self(u)
     }
 
     #[cfg(not(target_arch = "x86_64"))]
@@ -254,9 +253,12 @@ impl Address for VAddr {
     #[inline]
     #[cfg(target_arch = "x86_64")]
     fn from_usize(u: usize) -> Self {
-        // sign extend bit 47
-        let value = ((u << 16) as i64 >> 16) as u64;
-        Self(value as usize)
+        debug_assert!(
+            Vaddr(u),
+            Vaddr(((u << 16) as i64 >> 16) as usize), // sign extend bit 47
+            "x86_64 vaddr must be in canonical form"
+        );
+        Self(u)
     }
 
     #[cfg(not(target_arch = "x86_64"))]
@@ -322,22 +324,22 @@ mod tests {
         );
     }
 
-    #[cfg(target_arch = "x86_64")]
-    #[test]
-    fn sign_extend_vaddr() {
-        let actual = VAddr::from_usize(123 | (1 << 47)).as_usize();
-        let expected = (0xFFFFF << 47) | 123;
-        assert_eq!(
-            actual, expected,
-            "\n  left: `{:064b}`\n right: `{:064b}`",
-            actual, expected
-        );
-        let actual = VAddr::from_usize(123 | (1010 << 47)).as_usize();
-        let expected = 123;
-        assert_eq!(
-            actual, expected,
-            "\n  left: `{:064b}`\n right: `{:064b}`",
-            actual, expected
-        );
-    }
+    // #[cfg(target_arch = "x86_64")]
+    // #[test]
+    // fn sign_extend_vaddr() {
+    //     let actual = VAddr::from_usize(123 | (1 << 47)).as_usize();
+    //     let expected = (0xFFFFF << 47) | 123;
+    //     assert_eq!(
+    //         actual, expected,
+    //         "\n  left: `{:064b}`\n right: `{:064b}`",
+    //         actual, expected
+    //     );
+    //     let actual = VAddr::from_usize(123 | (1010 << 47)).as_usize();
+    //     let expected = 123;
+    //     assert_eq!(
+    //         actual, expected,
+    //         "\n  left: `{:064b}`\n right: `{:064b}`",
+    //         actual, expected
+    //     );
+    // }
 }
