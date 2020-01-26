@@ -85,6 +85,8 @@ pub trait Address:
     ///
     /// - If `self` is not aligned for a `T`-typed value.
     fn as_ptr<T>(self) -> *mut T {
+        // Some architectures permit unaligned reads, but Rust considers
+        // dereferencing a pointer that isn't type-aligned to be UB.
         assert!(self.is_aligned_for::<T>());
         self.as_usize() as *mut T
     }
@@ -170,8 +172,8 @@ impl Address for PAddr {
     }
 
     #[inline]
-    #[cfg(target_arch = "x86_64")]
     fn from_usize(u: usize) -> Self {
+        #[cfg(target_arch = "x86_64")]
         debug_assert!(
             u & MASK == 0,
             "x86_64 physical addresses may not have the 12 most significant bits set!"
@@ -179,7 +181,6 @@ impl Address for PAddr {
         Self(u)
     }
 
-    #[cfg(not(target_arch = "x86_64"))]
     fn from_usize(u: usize) -> Self {
         Self(u)
     }
@@ -251,18 +252,13 @@ impl Address for VAddr {
     }
 
     #[inline]
-    #[cfg(target_arch = "x86_64")]
     fn from_usize(u: usize) -> Self {
+        #[cfg(target_arch = "x86_64")]
         debug_assert!(
             Vaddr(u),
             Vaddr(((u << 16) as i64 >> 16) as usize), // sign extend bit 47
-            "x86_64 vaddr must be in canonical form"
+            "x86_64 virtual addresses must be in canonical form"
         );
-        Self(u)
-    }
-
-    #[cfg(not(target_arch = "x86_64"))]
-    fn from_usize(u: usize) -> Self {
         Self(u)
     }
 }
@@ -323,23 +319,4 @@ mod tests {
             PAddr::from_usize(0x5560)
         );
     }
-
-    // #[cfg(target_arch = "x86_64")]
-    // #[test]
-    // fn sign_extend_vaddr() {
-    //     let actual = VAddr::from_usize(123 | (1 << 47)).as_usize();
-    //     let expected = (0xFFFFF << 47) | 123;
-    //     assert_eq!(
-    //         actual, expected,
-    //         "\n  left: `{:064b}`\n right: `{:064b}`",
-    //         actual, expected
-    //     );
-    //     let actual = VAddr::from_usize(123 | (1010 << 47)).as_usize();
-    //     let expected = 123;
-    //     assert_eq!(
-    //         actual, expected,
-    //         "\n  left: `{:064b}`\n right: `{:064b}`",
-    //         actual, expected
-    //     );
-    // }
 }
