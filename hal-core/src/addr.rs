@@ -1,4 +1,5 @@
 use core::{fmt, ops};
+use mycelium_util::error::Error;
 
 pub trait Address:
     Copy
@@ -34,6 +35,20 @@ pub trait Address:
         Self::from_usize(aligned as usize)
     }
 
+    /// Align `self` up to the required alignment for a value of type `T`.
+    ///
+    /// This is equivalent to
+    /// ```rust
+    /// # use hal_core::Address;
+    /// # fn doc<A: Address>(addr: A) -> A {
+    /// addr.align_up(core::mem::align_of::<T>())
+    /// # }
+    /// ````
+    #[inline]
+    fn align_up_for<T>(self) -> Self {
+        self.align_up(core::mem::align_of::<T>())
+    }
+
     /// Aligns `self` down to `align`.
     ///
     /// The specified alignment must be a power of two.
@@ -46,6 +61,20 @@ pub trait Address:
         assert!(align.is_power_of_two());
         let aligned = self.as_usize() & !(align - 1);
         Self::from_usize(aligned)
+    }
+
+    /// Align `self` down to the required alignment for a value of type `T`.
+    ///
+    /// This is equivalent to
+    /// ```rust
+    /// # use hal_core::Address;
+    /// # fn doc<A: Address>(addr: A) -> A {
+    /// addr.align_down(core::mem::align_of::<T>())
+    /// # }
+    /// ````
+    #[inline]
+    fn align_down_for<T>(self) -> Self {
+        self.align_down(core::mem::align_of::<T>())
     }
 
     /// Offsets this address by `offset`.
@@ -100,6 +129,12 @@ pub struct PAddr(usize);
 #[repr(transparent)]
 pub struct VAddr(usize);
 
+#[derive(Clone, Debug)]
+pub struct InvalidAddress {
+    msg: &'static str,
+    addr: usize,
+}
+
 macro_rules! impl_addrs {
     ($(impl Address for $name:ty {})+) => {
         $(
@@ -119,6 +154,19 @@ macro_rules! impl_addrs {
 
             impl ops::Add<usize> for $name {
                 type Output = Self;
+                /// Offset `self` up by `rhs`.
+                ///
+                /// # Notes
+                ///
+                /// * The address will be offset by the minimum addressable unit
+                ///   of the target architecture (i.e. probably bytes), *not* by
+                ///   by units of a Rust type like `{*const T, *mut T}::add`.
+                /// * Therefore, resulting address may have a different
+                ///   alignment from the input address.
+                ///
+                /// # Panics
+                ///
+                /// * If the resulting address is invalid.
                 fn add(self, rhs: usize) -> Self {
                     Self::from_usize(self.0 + rhs)
                 }
@@ -126,6 +174,10 @@ macro_rules! impl_addrs {
 
             impl ops::Add for $name {
                 type Output = Self;
+                /// Add `rhs` **bytes** to this this address.
+                ///
+                /// Note that the resulting address may differ in alignment from
+                /// the input address!
                 fn add(self, rhs: Self) -> Self {
                     Self::from_usize(self.0 + rhs.0)
                 }
@@ -174,18 +226,34 @@ macro_rules! impl_addrs {
                     self.0 as usize
                 }
 
+                /// # Panics
+                ///
+                /// * If debug assertions are enabled and the address is not
+                ///   valid for the target architecture.
                 #[inline]
                 fn from_usize(u: usize) -> Self {
-                    Self::from_usize_checked(u)
+                    if cfg!(debug_assertions) {
+                        Self::from_usize_checked(u).unwrap()
+                    } else {
+                        Self(u)
+                    }
                 }
             }
 
             impl $name {
+                /// # Panics
+                ///
+                /// * If debug assertions are enabled and the address is not
+                ///   valid for the target architecture.
                 #[cfg(target_pointer_width = "64")]
                 pub fn from_u64(u: u64) -> Self {
                     Self::from_usize(u as usize)
                 }
 
+                /// # Panics
+                ///
+                /// * If debug assertions are enabled and the address is not
+                ///   valid for the target architecture.
                 #[cfg(target_pointer_width = "u32")]
                 pub fn from_u32(u: u32) -> Self {
                     Self::from_usize(u as usize)
@@ -197,7 +265,9 @@ macro_rules! impl_addrs {
                 ///
                 /// # Panics
                 ///
-                /// - If `align` is not a power of two.
+                /// * If `align` is not a power of two.
+                /// * If debug assertions are enabled and the aligned address is
+                ///   not valid for the target architecture.
                 #[inline]
                 pub fn align_up<A: Into<usize>>(self, align: A) -> Self {
                     Address::align_up(self, align)
@@ -209,7 +279,9 @@ macro_rules! impl_addrs {
                 ///
                 /// # Panics
                 ///
-                /// - If `align` is not a power of two.
+                /// * If `align` is not a power of two.
+                /// * If debug assertions are enabled and the aligned address is
+                ///   not valid for the target architecture.
                 #[inline]
                 pub fn align_down<A: Into<usize>>(self, align: A) -> Self {
                     Address::align_down(self, align)
@@ -256,30 +328,38 @@ macro_rules! impl_addrs {
 
 impl PAddr {
     #[inline]
-    fn from_usize_checked(u: usize) -> Self {
+    pub fn from_usize_checked(u: usize) -> Result<Self, InvalidAddress> {
         #[cfg(target_arch = "x86_64")]
-        const MASK: usize = 0xFFF0_0000_0000_0000;
+        {
+            const MASK: usize = 0xFFF0_0000_0000_0000;
+            if u & MASK != 0 {
+                return Err(InvalidAddress::new(
+                    u,
+                    "x86_64 physical addresses may not have the 12 most significant bits set!",
+                ));
+            }
+        }
 
-        #[cfg(target_arch = "x86_64")]
-        debug_assert_eq!(
-            u & MASK,
-            0,
-            "x86_64 physical addresses may not have the 12 most significant bits set!"
-        );
-        Self(u)
+        Ok(Self(u))
     }
 }
 
 impl VAddr {
     #[inline]
-    fn from_usize_checked(u: usize) -> Self {
+    pub fn from_usize_checked(u: usize) -> Result<Self, InvalidAddress> {
         #[cfg(target_arch = "x86_64")]
-        debug_assert_eq!(
-            VAddr(u),
-            VAddr(((u << 16) as i64 >> 16) as usize), // sign extend bit 47
-            "x86_64 virtual addresses must be in canonical form"
-        );
-        Self(u)
+        {
+            // sign extend 47th bit
+            let s_extend = ((u << 16) as i64 >> 16) as usize;
+            if u != s_extend {
+                return Err(InvalidAddress::new(
+                    u,
+                    "x86_64 virtual addresses must be in canonical form",
+                ));
+            }
+        }
+
+        Ok(Self(u))
     }
 }
 
@@ -287,6 +367,24 @@ impl_addrs! {
     impl Address for PAddr {}
     impl Address for VAddr {}
 }
+
+impl InvalidAddress {
+    fn new(addr: usize, msg: &'static str) -> Self {
+        Self { addr, msg }
+    }
+}
+impl fmt::Display for InvalidAddress {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "address {:#x} not valid for target architecture: {}",
+            self.addr, self.msg
+        )
+    }
+}
+
+impl Error for InvalidAddress {}
 
 #[cfg(test)]
 mod tests {
@@ -320,6 +418,64 @@ mod tests {
         assert_eq!(
             PAddr::from_usize(0x5555).align_up(16usize),
             PAddr::from_usize(0x5560)
+        );
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn x86_64_vaddr_validation() {
+        let addr = (0xFFFFF << 47) | 123;
+        assert!(
+            VAddr::from_usize_checked(addr).is_ok(),
+            "{:#016x} is valid",
+            addr
+        );
+        let addr = 123;
+        assert!(
+            VAddr::from_usize_checked(addr).is_ok(),
+            "{:#016x} is valid",
+            addr
+        );
+        let addr = 123 | (1 << 47);
+        assert!(
+            VAddr::from_usize_checked(addr).is_err(),
+            "{:#016x} is invalid",
+            addr
+        );
+        let addr = (0x10101 << 47) | 123;
+        assert!(
+            VAddr::from_usize_checked(addr).is_err(),
+            "{:#016x} is invalid",
+            addr
+        );
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn x86_64_paddr_validation() {
+        let addr = 123;
+        assert!(
+            PAddr::from_usize_checked(addr).is_ok(),
+            "{:#016x} is valid",
+            addr
+        );
+        let addr = 0xFFF0_0000_0000_0000 | 123;
+        assert!(
+            PAddr::from_usize_checked(addr).is_err(),
+            "{:#016x} is invalid",
+            addr
+        );
+        let addr = 0x1000_0000_0000_0000 | 123;
+        assert!(
+            PAddr::from_usize_checked(addr).is_err(),
+            "{:#016x} is invalid",
+            addr
+        );
+        let addr = 0x0010_0000_0000_0000 | 123;
+        assert!(
+            PAddr::from_usize_checked(addr).is_err(),
+            "{:#016x} is invalid",
+            addr
         );
     }
 }
