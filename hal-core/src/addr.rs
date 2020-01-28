@@ -180,10 +180,6 @@ impl Address for PAddr {
         );
         Self(u)
     }
-
-    fn from_usize(u: usize) -> Self {
-        Self(u)
-    }
 }
 
 impl PAddr {
