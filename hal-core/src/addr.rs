@@ -187,6 +187,11 @@ impl PAddr {
     pub fn from_u64(u: u64) -> Self {
         Self::from_usize(u as usize)
     }
+
+    #[cfg(target_pointer_width = "u32")]
+    pub fn from_u32(u: u32) -> Self {
+        Self::from_usize(u as usize)
+    }
 }
 
 impl ops::Add<usize> for VAddr {
@@ -261,6 +266,11 @@ impl Address for VAddr {
 impl VAddr {
     #[cfg(target_pointer_width = "64")]
     pub fn from_u64(u: u64) -> Self {
+        Self::from_usize(u as usize)
+    }
+
+    #[cfg(target_pointer_width = "u32")]
+    pub fn from_u32(u: u32) -> Self {
         Self::from_usize(u as usize)
     }
 }
