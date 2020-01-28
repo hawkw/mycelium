@@ -7,7 +7,9 @@ use core::{
     ptr::{self, NonNull},
 };
 use hal_core::{
-    mem::page::{self, Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult},
+    mem::page::{
+        self, Map, Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult,
+    },
     Address,
 };
 
@@ -15,6 +17,16 @@ const ENTRIES: usize = 512;
 
 type VirtPage<S> = Page<VAddr, S>;
 type PhysPage<S> = Page<PAddr, S>;
+
+pub struct PageCtrl {
+    pml4: NonNull<PageTable<level::Pml4>>,
+}
+
+#[must_use = "page table changes must be flushed"]
+pub struct Handle<'a, L, S> {
+    page: Page<VAddr, S>,
+    flags: &'a mut Entry<L>,
+}
 
 /// An x86_64 page table.
 #[repr(align(4096))]
@@ -57,6 +69,81 @@ impl PageTable<level::Pml4> {
         let virt = phys_offset + phys;
         tracing::trace!(current_pml4_vaddr = ?virt);
         &mut *(virt.as_ptr::<Self>() as *mut _)
+    }
+}
+
+impl<A> Map<Size4Kb, A> for PageCtrl
+where
+    A: page::Alloc<Size4Kb>,
+{
+    type Handle = Handle<S, level::Pt>;
+    // type Handle =
+    /// Map the virtual memory page represented by `virt` to the physical page
+    /// represented bt `phys`.
+    ///
+    /// # Panics
+    ///
+    /// - If the physical address is invalid.
+    /// - If the page is already mapped.
+    fn map(
+        &mut self,
+        virt: Page<VAddr, Size4Kb>,
+        phys: Page<PAddr, Size4Kb>,
+        frame_alloc: &mut A,
+    ) -> Self::Handle {
+        let span = tracing::debug_span!("map_page", ?virt, ?phys);
+        let _e = span.enter();
+        let mut pml4 = unsafe { self.pml4.as_mut() };
+
+        let vaddr = virt.base_address();
+        tracing::trace!(?vaddr);
+
+        let mut page_table = pml4
+            .create_next_table(vaddr)
+            .create_next_table(vaddr)
+            .create_next_table(vaddr);
+        tracing::debug!(?page_table);
+
+        let mut entry = page_table[vaddr];
+        assert!(
+            !entry.is_present(),
+            "mapped page table entry already in use"
+        );
+        assert!(!entry.is_huge(), "huge bit should not be set for 4KB entry");
+        let flags = entry.set_phys_page(phys).set_present(true);
+        Handle { flags, page: virt }
+    }
+
+    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Self::Handle {
+        unimplemented!()
+    }
+
+    /// Unmap the provided virtual page, returning the physical page it was
+    /// previously mapped to.
+    ///
+    /// This does not deallocate any page frames.
+    ///
+    /// # Panics
+    ///
+    /// - If the virtual page was not mapped.
+    fn unmap(&mut self, virt: Page<VAddr, S>) -> Page<PAddr, S> {
+        unimplemented!()
+    }
+
+    /// Identity map the provided physical page to the virtual page with the
+    /// same address.
+    fn identity_map(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
+        unimplemented!()
+    }
+}
+
+impl<S> TranslatePage<S> for PageCtrl
+where
+    S: Size,
+    PageTable<level::Pml4>: TranslatePage<S>,
+{
+    fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S> {
+        unsafe { self.pml4.as_ref() }.translate_page(virt)
     }
 }
 
@@ -381,24 +468,31 @@ impl<L: level::Recursive> Entry<L> {
     }
 }
 
-impl<L: Level> page::PageFlags for Entry<L> {
+impl<'a, S: Size, L: Level> page::PageHandle<S> for Handle<'a, L, S> {
     #[inline]
     fn is_writable(&self) -> bool {
-        Entry::is_writable(self)
+        self.entry.is_writable()
     }
     #[inline]
     fn set_writable(&mut self, writable: bool) -> &mut Self {
-        Entry::set_writable(self, writable)
+        self.entry.set_writable(set_writable)
     }
 
     #[inline]
     fn is_executable(&self) -> bool {
-        Entry::is_executable(self)
+        self.entry.is_executable()
     }
 
     #[inline]
     fn set_executable(&mut self, executable: bool) -> &mut Self {
-        Entry::set_executable(self, executable)
+        self.entry.set_executable(executable)
+    }
+
+    fn commit(self) -> Page<VAddr, S> {
+        unsafe {
+            tlb::flush_page(self.page.base_address());
+        }
+        self.page
     }
 }
 

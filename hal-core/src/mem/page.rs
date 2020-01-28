@@ -60,8 +60,7 @@ where
     S: Size,
     A: Alloc<S>,
 {
-    type Flags: PageFlags;
-    type Handle: PageHandle<S, Flags = Self::Flags>;
+    type Handle: PageHandle<S>;
     /// Map the virtual memory page represented by `virt` to the physical page
     /// represented bt `phys`.
     ///
@@ -76,7 +75,9 @@ where
         frame_alloc: &mut A,
     ) -> Self::Handle;
 
-    fn set_flags(&mut self, virt: Page<VAddr, S>, flags: Self::Flags);
+    unsafe fn flush(page: Page<VAddr, S>)
+
+    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Self::Handle;
 
     /// Unmap the provided virtual page, returning the physical page it was
     /// previously mapped to.
@@ -105,13 +106,12 @@ pub trait TranslateAddr {
     fn translate_addr(&self, addr: VAddr) -> Option<PAddr>;
 }
 
-pub trait PageHandle<S: Size> {
-    type Flags: PageFlags;
+pub trait PageFlags {
+    fn set_writable(&mut self, writable: bool) -> &mut Self;
+    fn set_executable(&mut self, executable: bool) -> &mut Self;
 
-    fn flags(&self) -> &Self::Flags;
-    fn flags_mut(&mut self) -> &mut Self::Flags;
-
-    fn commit(self) -> Page<VAddr, S>;
+    fn is_writable(&self) -> bool;
+    fn is_executable(&self) -> bool;
 }
 
 pub trait PageFlags {
