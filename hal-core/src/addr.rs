@@ -185,7 +185,6 @@ impl Address for PAddr {
 impl PAddr {
     #[cfg(target_pointer_width = "64")]
     pub fn from_u64(u: u64) -> Self {
-        // TODO(eliza): ensure that this is a valid physical address?
         Self::from_usize(u as usize)
     }
 }
@@ -262,7 +261,6 @@ impl Address for VAddr {
 impl VAddr {
     #[cfg(target_pointer_width = "64")]
     pub fn from_u64(u: u64) -> Self {
-        // TODO(eliza): ensure that this is a valid virtual address?
         Self::from_usize(u as usize)
     }
 }
