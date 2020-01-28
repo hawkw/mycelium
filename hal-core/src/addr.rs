@@ -100,79 +100,104 @@ pub struct PAddr(usize);
 #[repr(transparent)]
 pub struct VAddr(usize);
 
-impl fmt::Debug for PAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(width) = f.width() {
-            f.debug_tuple("PAddr")
-                .field(&format_args!("{:#0width$x}", self.0, width = width))
-                .finish()
-        } else {
-            f.debug_tuple("PAddr")
-                .field(&format_args!("{:#x}", self.0,))
-                .finish()
-        }
+macro_rules! impl_addrs {
+    ($(impl Address for $name:ty {})+) => {
+        $(
+            impl fmt::Debug for $name {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    if let Some(width) = f.width() {
+                        f.debug_tuple(stringify!($name))
+                            .field(&format_args!("{:#0width$x}", self.0, width = width))
+                            .finish()
+                    } else {
+                        f.debug_tuple(stringify!($name))
+                            .field(&format_args!("{:#x}", self.0,))
+                            .finish()
+                    }
+                }
+            }
+
+            impl ops::Add<usize> for $name {
+                type Output = Self;
+                fn add(self, rhs: usize) -> Self {
+                    Self::from_usize(self.0 + rhs)
+                }
+            }
+
+            impl ops::Add for $name {
+                type Output = Self;
+                fn add(self, rhs: Self) -> Self {
+                    Self::from_usize(self.0 + rhs.0)
+                }
+            }
+
+            impl ops::AddAssign for $name {
+                fn add_assign(&mut self, rhs: Self) {
+                    self.0 += rhs.0;
+                }
+            }
+
+            impl ops::AddAssign<usize> for $name {
+                fn add_assign(&mut self, rhs: usize) {
+                    self.0 += rhs;
+                }
+            }
+
+            impl ops::Sub<usize> for $name {
+                type Output = Self;
+                fn sub(self, rhs: usize) -> Self {
+                    Self::from_usize(self.0 - rhs)
+                }
+            }
+
+            impl ops::Sub for $name {
+                type Output = Self;
+                fn sub(self, rhs: Self) -> Self {
+                    Self::from_usize(self.0 - rhs.0)
+                }
+            }
+
+            impl ops::SubAssign for $name {
+                fn sub_assign(&mut self, rhs: Self) {
+                    self.0 -= rhs.0;
+                }
+            }
+
+            impl ops::SubAssign<usize> for $name {
+                fn sub_assign(&mut self, rhs: usize) {
+                    self.0 -= rhs;
+                }
+            }
+
+            impl Address for $name {
+                fn as_usize(self) -> usize {
+                    self.0 as usize
+                }
+
+                #[inline]
+                fn from_usize(u: usize) -> Self {
+                    Self::from_usize_checked(u)
+                }
+            }
+
+            impl $name {
+                #[cfg(target_pointer_width = "64")]
+                pub fn from_u64(u: u64) -> Self {
+                    Self::from_usize(u as usize)
+                }
+
+                #[cfg(target_pointer_width = "u32")]
+                pub fn from_u32(u: u32) -> Self {
+                    Self::from_usize(u as usize)
+                }
+            }
+        )+
     }
 }
 
-impl ops::Add<usize> for PAddr {
-    type Output = Self;
-    fn add(self, rhs: usize) -> Self {
-        PAddr(self.0 + rhs)
-    }
-}
-
-impl ops::Add for PAddr {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        PAddr(self.0 + rhs.0)
-    }
-}
-
-impl ops::AddAssign for PAddr {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl ops::AddAssign<usize> for PAddr {
-    fn add_assign(&mut self, rhs: usize) {
-        self.0 += rhs;
-    }
-}
-
-impl ops::Sub<usize> for PAddr {
-    type Output = Self;
-    fn sub(self, rhs: usize) -> Self {
-        PAddr(self.0 - rhs)
-    }
-}
-
-impl ops::Sub for PAddr {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        PAddr(self.0 - rhs.0)
-    }
-}
-
-impl ops::SubAssign for PAddr {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0;
-    }
-}
-
-impl ops::SubAssign<usize> for PAddr {
-    fn sub_assign(&mut self, rhs: usize) {
-        self.0 -= rhs;
-    }
-}
-
-impl Address for PAddr {
-    fn as_usize(self) -> usize {
-        self.0 as usize
-    }
-
+impl PAddr {
     #[inline]
-    fn from_usize(u: usize) -> Self {
+    fn from_usize_checked(u: usize) -> Self {
         #[cfg(target_arch = "x86_64")]
         const MASK: usize = 0xFFF0_0000_0000_0000;
 
@@ -186,77 +211,9 @@ impl Address for PAddr {
     }
 }
 
-impl PAddr {
-    #[cfg(target_pointer_width = "64")]
-    pub fn from_u64(u: u64) -> Self {
-        Self::from_usize(u as usize)
-    }
-
-    #[cfg(target_pointer_width = "u32")]
-    pub fn from_u32(u: u32) -> Self {
-        Self::from_usize(u as usize)
-    }
-}
-
-impl ops::Add<usize> for VAddr {
-    type Output = Self;
-    fn add(self, rhs: usize) -> Self {
-        VAddr(self.0 + rhs)
-    }
-}
-
-impl ops::Add for VAddr {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        VAddr(self.0 + rhs.0)
-    }
-}
-
-impl ops::AddAssign for VAddr {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl ops::AddAssign<usize> for VAddr {
-    fn add_assign(&mut self, rhs: usize) {
-        self.0 += rhs;
-    }
-}
-
-impl ops::Sub<usize> for VAddr {
-    type Output = Self;
-    fn sub(self, rhs: usize) -> Self {
-        VAddr(self.0 - rhs)
-    }
-}
-
-impl ops::Sub for VAddr {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        VAddr(self.0 - rhs.0)
-    }
-}
-
-impl ops::SubAssign for VAddr {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0;
-    }
-}
-
-impl ops::SubAssign<usize> for VAddr {
-    fn sub_assign(&mut self, rhs: usize) {
-        self.0 -= rhs;
-    }
-}
-
-impl Address for VAddr {
-    fn as_usize(self) -> usize {
-        self.0 as usize
-    }
-
+impl VAddr {
     #[inline]
-    fn from_usize(u: usize) -> Self {
+    fn from_usize_checked(u: usize) -> Self {
         #[cfg(target_arch = "x86_64")]
         debug_assert_eq!(
             VAddr(u),
@@ -267,30 +224,9 @@ impl Address for VAddr {
     }
 }
 
-impl VAddr {
-    #[cfg(target_pointer_width = "64")]
-    pub fn from_u64(u: u64) -> Self {
-        Self::from_usize(u as usize)
-    }
-
-    #[cfg(target_pointer_width = "u32")]
-    pub fn from_u32(u: u32) -> Self {
-        Self::from_usize(u as usize)
-    }
-}
-
-impl fmt::Debug for VAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(width) = f.width() {
-            f.debug_tuple("VAddr")
-                .field(&format_args!("{:#0width$x}", self.0, width = width))
-                .finish()
-        } else {
-            f.debug_tuple("VAddr")
-                .field(&format_args!("{:#x}", self.0,))
-                .finish()
-        }
-    }
+impl_addrs! {
+    impl Address for PAddr {}
+    impl Address for VAddr {}
 }
 
 #[cfg(test)]
