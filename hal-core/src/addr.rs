@@ -174,8 +174,12 @@ impl Address for PAddr {
     #[inline]
     fn from_usize(u: usize) -> Self {
         #[cfg(target_arch = "x86_64")]
-        debug_assert!(
-            u & MASK == 0,
+        const MASK: usize = 0xFFF0_0000_0000_0000;
+
+        #[cfg(target_arch = "x86_64")]
+        debug_assert_eq!(
+            u & MASK,
+            0,
             "x86_64 physical addresses may not have the 12 most significant bits set!"
         );
         Self(u)
@@ -254,9 +258,9 @@ impl Address for VAddr {
     #[inline]
     fn from_usize(u: usize) -> Self {
         #[cfg(target_arch = "x86_64")]
-        debug_assert!(
-            Vaddr(u),
-            Vaddr(((u << 16) as i64 >> 16) as usize), // sign extend bit 47
+        debug_assert_eq!(
+            VAddr(u),
+            VAddr(((u << 16) as i64 >> 16) as usize), // sign extend bit 47
             "x86_64 virtual addresses must be in canonical form"
         );
         Self(u)
