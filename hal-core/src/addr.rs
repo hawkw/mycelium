@@ -190,6 +190,65 @@ macro_rules! impl_addrs {
                 pub fn from_u32(u: u32) -> Self {
                     Self::from_usize(u as usize)
                 }
+
+                /// Aligns `self` up to `align`.
+                ///
+                /// The specified alignment must be a power of two.
+                ///
+                /// # Panics
+                ///
+                /// - If `align` is not a power of two.
+                #[inline]
+                pub fn align_up<A: Into<usize>>(self, align: A) -> Self {
+                    Address::align_up(self, align)
+                }
+
+                /// Aligns `self` down to `align`.
+                ///
+                /// The specified alignment must be a power of two.
+                ///
+                /// # Panics
+                ///
+                /// - If `align` is not a power of two.
+                #[inline]
+                pub fn align_down<A: Into<usize>>(self, align: A) -> Self {
+                    Address::align_down(self, align)
+                }
+
+                /// Offsets this address by `offset`.
+                ///
+                /// If the specified offset would overflow, this function saturates instead.
+                #[inline]
+                pub fn offset(self, offset: i32) -> Self {
+                    Address::offset(self, offset)
+                }
+
+                /// Returns the difference between `self` and `other`.
+                #[inline]
+                pub fn difference(self, other: Self) -> isize {
+                    Address::difference(self, other)
+                }
+
+                /// Returns `true` if `self` is aligned on the specified alignment.
+                #[inline]
+                pub fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
+                    Address::is_aligned(self, align)
+                }
+
+                /// Returns `true` if `self` is aligned on the alignment of the specified
+                /// type.
+                #[inline]
+                pub fn is_aligned_for<T>(self) -> bool {
+                    Address::is_aligned_for::<T>(self)
+                }
+
+                /// # Panics
+                ///
+                /// - If `self` is not aligned for a `T`-typed value.
+                #[inline]
+                pub fn as_ptr<T>(self) -> *mut T {
+                    Address::as_ptr(self)
+                }
             }
         )+
     }
