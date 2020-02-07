@@ -159,3 +159,22 @@ pub fn oops(cause: &dyn core::fmt::Display) -> ! {
         }
     }
 }
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub(crate) enum QemuExitCode {
+    Success = 0x10,
+    Failed = 0x11,
+}
+
+/// Exit using `isa-debug-exit`, for use in tests.
+///
+/// NOTE: This is a temporary mechanism until we get proper shutdown implemented.
+#[cfg(test)]
+pub(crate) fn qemu_exit(exit_code: QemuExitCode) {
+    let code = exit_code as u32;
+    unsafe {
+        asm!("out 0xf4, eax" :: "{eax}"(code) :: "intel","volatile");
+    }
+}
