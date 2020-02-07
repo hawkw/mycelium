@@ -153,6 +153,10 @@ pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
+    #[cfg(test)]
+    qemu_exit(QemuExitCode::Failed);
+
+    #[cfg(not(test))]
     loop {
         unsafe {
             asm!("hlt" :::: "volatile");
@@ -172,9 +176,15 @@ pub(crate) enum QemuExitCode {
 ///
 /// NOTE: This is a temporary mechanism until we get proper shutdown implemented.
 #[cfg(test)]
-pub(crate) fn qemu_exit(exit_code: QemuExitCode) {
+pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
     let code = exit_code as u32;
     unsafe {
         asm!("out 0xf4, eax" :: "{eax}"(code) :: "intel","volatile");
+
+        // If the previous line didn't immediately trigger shutdown, hang.
+        asm!("cli" :::: "volatile");
+        loop {
+            asm!("hlt" :::: "volatile");
+        }
     }
 }
