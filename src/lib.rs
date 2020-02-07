@@ -1,8 +1,9 @@
-#![cfg_attr(test, no_main)]
+#![cfg_attr(all(target_os = "none", test), no_main)]
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![cfg_attr(target_os = "none", feature(panic_info_message, track_caller))]
 #![feature(asm)]
+
 extern crate alloc;
 
 pub mod arch;
@@ -10,11 +11,7 @@ pub mod arch;
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 
-use alloc::vec::Vec;
-
 mod wasm;
-
-const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -101,6 +98,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
 mycelium_util::decl_test! {
     fn basic_alloc() {
         // Let's allocate something, for funsies
+        use alloc::vec::Vec;
         let mut v = Vec::new();
         tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
         v.push(5u64);
@@ -114,6 +112,7 @@ mycelium_util::decl_test! {
 
 mycelium_util::decl_test! {
     fn wasm_hello_world() -> Result<(), wasmi::Error> {
+        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
         wasm::run_wasm(HELLOWORLD_WASM)
     }
 }
@@ -163,4 +162,9 @@ fn panic(panic: &core::panic::PanicInfo) -> ! {
     tracing::error!(%panic, ?caller);
     let pp = PrettyPanic(panic);
     arch::oops(&pp)
+}
+
+#[cfg(all(test, not(target_os = "none")))]
+pub fn main() {
+    /* no host-platform tests in this crate */
 }

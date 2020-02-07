@@ -85,7 +85,7 @@ mod test {
         assert_eq!(p0.align_offset(mem::align_of::<u32>()), 0);
         assert_eq!(p1.align_offset(mem::align_of::<u32>()), 0);
 
-        assert_eq!((p1 as usize) - (p0 as usize), 4);
+        assert_eq!((p0 as usize) - (p1 as usize), 4);
     }
 
     #[test]
@@ -99,8 +99,8 @@ mod test {
         let p2 = unsafe { alloc(Layout::new::<u32>()) };
         assert!(!p2.is_null());
 
-        assert_eq!((p1 as usize) - (p0 as usize), 1);
-        assert!((p2 as usize) - (p1 as usize) > 0);
+        assert_eq!((p0 as usize) - (p1 as usize), 1);
+        assert!((p1 as usize) - (p2 as usize) > 0);
 
         assert_eq!(p2.align_offset(mem::align_of::<u32>()), 0);
     }
