@@ -2,7 +2,8 @@ use core::fmt;
 use core::mem;
 use core::slice;
 
-/// Internal definition type used for a test.
+/// Test descriptor created by `decl_test!`. Describes and allows running an
+/// individual test.
 pub struct Test {
     pub module: &'static str,
     pub name: &'static str,
@@ -67,7 +68,7 @@ extern "C" {
     static __stop_MyceliumTests: ();
 }
 
-/// Get a list of test objects.
+/// Get a list of `Test` objects.
 pub fn all_tests() -> &'static [Test] {
     unsafe {
         // FIXME: These should probably be `&raw const __start_*`.
