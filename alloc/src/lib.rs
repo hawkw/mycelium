@@ -2,7 +2,7 @@
 //! Allocates into a "large" static array.
 #![no_std]
 
-use core::alloc::{Layout, GlobalAlloc};
+use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -14,7 +14,7 @@ macro_rules! try_null {
             Some(x) => x,
             None => return ptr::null_mut(),
         }
-    }
+    };
 }
 
 // 640k is enough for anyone

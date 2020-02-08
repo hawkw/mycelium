@@ -77,8 +77,10 @@ pub fn all_tests() -> &'static [Test] {
 
         let len_bytes = (stop as usize) - (start as usize);
         let len = len_bytes / mem::size_of::<Test>();
-        assert!(len_bytes % mem::size_of::<Test>() == 0,
-                "Section should contain a whole number of `Test`s");
+        assert!(
+            len_bytes % mem::size_of::<Test>() == 0,
+            "Section should contain a whole number of `Test`s"
+        );
 
         if len > 0 {
             slice::from_raw_parts(start as *const Test, len)
