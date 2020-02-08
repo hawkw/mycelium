@@ -72,7 +72,7 @@ jobs:
     - name: install xargo
       uses: actions-rs/cargo@v1
       with:
-        command: install cargo-xbuild
+        command: dev-env
     - name: use cargo-xclippy
       run: echo "::set-env name=CARGO_ALIAS_clippy::xclippy"
     - name: rust-clippy-check
