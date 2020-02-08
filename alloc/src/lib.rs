@@ -31,6 +31,10 @@ static FREE: AtomicUsize = AtomicUsize::new(HEAP_SIZE);
 /// NOTABLE INVARIANTS:
 ///  * `Layout` is non-zero sized (enforced by `GlobalAlloc`)
 ///  * `align` is a power of two (enforced by `Layout::from_size_align`)
+///
+/// # Safety
+///
+/// See [`GlobalAlloc::alloc`]
 pub unsafe fn alloc(layout: Layout) -> *mut u8 {
     let heap = HEAP.0.get() as *mut u8;
 
@@ -53,6 +57,11 @@ pub unsafe fn alloc(layout: Layout) -> *mut u8 {
     }
 }
 
+/// Does nothing, because freeing is hard.
+///
+/// # Safety
+///
+/// See [`GlobalAlloc::dealloc`]
 pub unsafe fn dealloc(_ptr: *mut u8, _layout: Layout) {
     // lol
 }

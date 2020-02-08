@@ -6,6 +6,11 @@ pub trait Context {
     type Registers: fmt::Debug + fmt::Display;
 
     fn registers(&self) -> &Self::Registers;
+
+    /// # Safety
+    ///
+    /// Mutating the value of saved interrupt registers can cause
+    /// undefined behavior.
     unsafe fn registers_mut(&mut self) -> &mut Self::Registers;
 }
 

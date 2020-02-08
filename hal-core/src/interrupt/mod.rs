@@ -1,5 +1,4 @@
 use core::fmt;
-use core::marker::PhantomData;
 
 pub mod ctx;
 pub use self::ctx::Context;
@@ -60,7 +59,7 @@ pub trait Handlers {
 
     fn keyboard_controller();
 
-    fn test_interrupt<C>(cx: C)
+    fn test_interrupt<C>(_cx: C)
     where
         C: ctx::Context,
     {

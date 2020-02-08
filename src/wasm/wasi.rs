@@ -49,7 +49,8 @@ fn mem_write<T: wasmi::LittleEndianConvert>(
     let slice = mem
         .get_mut(addr as usize..addr_after as usize)
         .ok_or(wasmi::TrapKind::MemoryAccessOutOfBounds)?;
-    Ok(T::into_little_endian(value, slice))
+    T::into_little_endian(value, slice);
+    Ok(())
 }
 
 /// Reference to a subslice of memory.

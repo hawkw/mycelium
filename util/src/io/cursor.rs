@@ -1,7 +1,10 @@
 use crate::io::prelude::*;
 use crate::io::{self, Error, ErrorKind, Initializer, SeekFrom};
 
-use core::{cmp, convert::TryInto};
+use core::cmp;
+
+#[cfg(feature = "alloc")]
+use core::convert::TryInto;
 
 #[cfg(feature = "alloc")]
 use alloc::{boxed::Box, vec::Vec};
@@ -38,7 +41,7 @@ impl<T> Cursor<T> {
     pub fn new(inner: T) -> Cursor<T> {
         Cursor {
             pos: 0,
-            inner: inner,
+            inner,
         }
     }
 

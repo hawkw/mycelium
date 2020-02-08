@@ -64,6 +64,7 @@ pub struct Nonblocking {
 }
 
 impl Port {
+    #[allow(clippy::unreadable_literal)]
     pub const MAX_BAUD_RATE: usize = 115200;
 
     pub fn new(port: u16) -> io::Result<Self> {
@@ -329,11 +330,6 @@ impl<'a> LockInner<'a> {
     #[inline(always)]
     fn is_write_ready(&self) -> bool {
         self.inner.is_write_ready()
-    }
-
-    #[inline(always)]
-    fn is_read_ready(&self) -> bool {
-        self.inner.is_read_ready()
     }
 
     #[inline(always)]

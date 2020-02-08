@@ -92,6 +92,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     //
     // eventually we'll call into a kernel main loop here...
     #[allow(clippy::empty_loop)]
+    #[allow(unreachable_code)]
     loop {}
 }
 
