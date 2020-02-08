@@ -67,10 +67,16 @@ jobs:
       with:
         profile: minimal
         toolchain: nightly
-        components: clippy
+        components: clippy, rust-src, llvm-tools-preview
     - uses: actions/checkout@v1
+    - name: install xargo
+      uses: actions-rs/cargo@v1
+      with:
+        command: install cargo-xbuild
+    - name: use cargo-xclippy
+      run: echo "::set-env name=CARGO_ALIAS_clippy::xclippy"
     - name: rust-clippy-check
       uses: actions-rs/clippy-check@v1.0.5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-features
+        args: --all-features --target=x86_64-mycelium.json
