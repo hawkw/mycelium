@@ -74,7 +74,7 @@ jobs:
       with:
         command: dev-env
     - name: use cargo-xclippy
-      run: echo "::set-env name=CARGO_ALIAS_clippy::xclippy"
+      run: echo "::set-env name=CARGO_ALIAS_CLIPPY::xclippy"
     - name: rust-clippy-check
       uses: actions-rs/clippy-check@v1.0.5
       with:
