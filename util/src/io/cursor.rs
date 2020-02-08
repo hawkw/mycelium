@@ -242,26 +242,18 @@ mod tests {
     use alloc::{boxed::Box, vec, vec::Vec};
 
     #[test]
+    #[cfg(feature = "alloc")]
     fn test_vec_writer() {
         let mut writer = Vec::new();
         assert_eq!(writer.write(&[0]).unwrap(), 1);
         assert_eq!(writer.write(&[1, 2, 3]).unwrap(), 3);
         assert_eq!(writer.write(&[4, 5, 6, 7]).unwrap(), 4);
-        assert_eq!(
-            writer
-                .write_vectored(&[
-                    IoSlice::new(&[]),
-                    IoSlice::new(&[8, 9]),
-                    IoSlice::new(&[10])
-                ],)
-                .unwrap(),
-            3
-        );
-        let b: &[_] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let b: &[_] = &[0, 1, 2, 3, 4, 5, 6, 7];
         assert_eq!(writer, b);
     }
 
     #[test]
+    #[cfg(feature = "alloc")]
     fn test_mem_writer() {
         let mut writer = Cursor::new(Vec::new());
         assert_eq!(writer.write(&[0]).unwrap(), 1);
@@ -272,6 +264,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "alloc")]
     fn test_mem_mut_writer() {
         let mut vec = Vec::new();
         let mut writer = Cursor::new(&mut vec);
@@ -283,6 +276,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "alloc")]
     fn test_box_slice_writer() {
         let mut writer = Cursor::new(vec![0u8; 9].into_boxed_slice());
         assert_eq!(writer.position(), 0);
@@ -359,6 +353,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "alloc")]
     fn test_mem_reader() {
         let mut reader = Cursor::new(vec![0, 1, 2, 3, 4, 5, 6, 7]);
         let mut buf = [];
@@ -494,9 +489,12 @@ mod tests {
         assert_eq!(r.seek(SeekFrom::Start(10)).unwrap(), 10);
         assert_eq!(r.write(&[3]).unwrap(), 0);
 
-        let mut r = Cursor::new(vec![10].into_boxed_slice());
-        assert_eq!(r.seek(SeekFrom::Start(10)).unwrap(), 10);
-        assert_eq!(r.write(&[3]).unwrap(), 0);
+        #[cfg(feature = "alloc")]
+        {
+            let mut r = Cursor::new(vec![10].into_boxed_slice());
+            assert_eq!(r.seek(SeekFrom::Start(10)).unwrap(), 10);
+            assert_eq!(r.write(&[3]).unwrap(), 0);
+        }
     }
 
     #[test]
