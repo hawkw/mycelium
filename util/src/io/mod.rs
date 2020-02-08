@@ -292,10 +292,7 @@ pub trait Read {
     where
         Self: Sized,
     {
-        Take {
-            inner: self,
-            limit,
-        }
+        Take { inner: self, limit }
     }
 }
 

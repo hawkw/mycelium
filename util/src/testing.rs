@@ -1,7 +1,7 @@
+use core::ffi;
 use core::fmt;
 use core::mem;
 use core::slice;
-use core::ffi;
 
 /// Test descriptor created by `decl_test!`. Describes and allows running an
 /// individual test.
