@@ -68,7 +68,7 @@ jobs:
     - name: install rust
       run: |
         rustup set profile minimal
-        rustup toolchain install nightly --component rust-src,llvm-tools-preview,clippy
+        rustup toolchain install nightly --component rust-src --component llvm-tools-preview --component clippy
     # - uses: actions-rs/toolchain@v1
     #   with:
     #     profile: minimal
