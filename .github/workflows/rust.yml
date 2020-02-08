@@ -65,11 +65,15 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - run: rustup self update
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-        components: clippy
+    - name: install rust
+      run: |
+        rustup set profile minimal
+        rustup toolchain install nightly --components rust-src, llvm-tools-preview, clippy
+    # - uses: actions-rs/toolchain@v1
+    #   with:
+    #     profile: minimal
+    #     toolchain: nightly
+    #     components: clippy
     - name: rust-clippy-check
       uses: actions-rs/clippy-check@v1.0.5
       with:
