@@ -52,6 +52,7 @@ jobs:
       with:
         command: dev-env
         args: --root=_devtools
+    - run: echo "::add-path::_devtools/bin"
     - name: install qemu
       run: sudo apt-get update && sudo apt-get install qemu
     - name: run tests
