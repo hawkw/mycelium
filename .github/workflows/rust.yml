@@ -13,10 +13,18 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview
     - uses: actions/checkout@v2
+    - uses: actions/cache@v1
+      id: toolcache
+      with:
+        path: _devtools
+        key: devtools-${{ runner.os }}-v0
     - name: install dev env
+      if: steps.toolcache.outputs.cache-hit != 'true'
       uses: actions-rs/cargo@v1.0.1
       with:
         command: dev-env
+        args: --root=_devtools
+    - run: echo "::add-path::_devtools/bin"
     - name: x86_64 boot image
       uses: actions-rs/cargo@v1.0.1
       with:
@@ -33,10 +41,17 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview
     - uses: actions/checkout@v2
+    - uses: actions/cache@v1
+      id: toolcache
+      with:
+        path: _devtools
+        key: devtools-${{ runner.os }}-v0
     - name: install dev env
+      if: steps.toolcache.outputs.cache-hit != 'true'
       uses: actions-rs/cargo@v1.0.1
       with:
         command: dev-env
+        args: --root=_devtools
     - name: install qemu
       run: sudo apt-get update && sudo apt-get install qemu
     - name: run tests
