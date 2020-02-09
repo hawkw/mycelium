@@ -1056,31 +1056,32 @@ where
 }
 
 #[cfg(feature = "alloc")]
-fn read_until<R: BufRead + ?Sized>(_r: &mut R, _delim: u8, _buf: &mut Vec<u8>) -> Result<usize> {
-    unimplemented!("eliza: figure out memchr!!!!")
-    // let mut read = 0;
-    // loop {
-    //     let (done, used) = {
-    //         let available = match r.fill_buf() {
-    //             Ok(n) => n,
-    //             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-    //             Err(e) => return Err(e),
-    //         };
-    //         match memchr::memchr(delim, available) {
-    //             Some(i) => {
-    //                 buf.extend_from_slice(&available[..=i]);
-    //                 (true, i + 1)
-    //             }
-    //             None => {
-    //                 buf.extend_from_slice(available);
-    //                 (false, available.len())
-    //             }
-    //         }
-    //     };
-    //     r.consume(used);
-    //     read += used;
-    //     if done || used == 0 {
-    //         return Ok(read);
-    //     }
-    // }
+fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>) -> Result<usize> {
+    let mut read = 0;
+    loop {
+        let (done, used) = {
+            let available = match r.fill_buf() {
+                Ok(n) => n,
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            };
+            // This is intentionally simple. We may improve upon it in the future with a
+            // proper `memchr` implementation if it proves to be necessary.
+            match available.iter().position(|&c| c == delim) {
+                Some(i) => {
+                    buf.extend_from_slice(&available[..=i]);
+                    (true, i + 1)
+                }
+                None => {
+                    buf.extend_from_slice(available);
+                    (false, available.len())
+                }
+            }
+        };
+        r.consume(used);
+        read += used;
+        if done || used == 0 {
+            return Ok(read);
+        }
+    }
 }
