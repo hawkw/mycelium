@@ -64,8 +64,7 @@ pub struct Nonblocking {
 }
 
 impl Port {
-    #[allow(clippy::unreadable_literal)]
-    pub const MAX_BAUD_RATE: usize = 115200;
+    pub const MAX_BAUD_RATE: usize = 115_200;
 
     pub fn new(port: u16) -> io::Result<Self> {
         let scratch_test = unsafe {
