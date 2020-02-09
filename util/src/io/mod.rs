@@ -292,10 +292,7 @@ pub trait Read {
     where
         Self: Sized,
     {
-        Take {
-            inner: self,
-            limit: limit,
-        }
+        Take { inner: self, limit }
     }
 }
 
@@ -922,9 +919,9 @@ impl<B: BufRead> Iterator for Lines<B> {
         match self.buf.read_line(&mut buf) {
             Ok(0) => None,
             Ok(_n) => {
-                if buf.ends_with("\n") {
+                if buf.ends_with('\n') {
                     buf.pop();
-                    if buf.ends_with("\r") {
+                    if buf.ends_with('\r') {
                         buf.pop();
                     }
                 }
@@ -962,7 +959,7 @@ where
     let start_len = buf.len();
     let mut g = Guard {
         len: buf.len(),
-        buf: buf,
+        buf,
     };
     let ret;
     loop {
@@ -1059,7 +1056,7 @@ where
 }
 
 #[cfg(feature = "alloc")]
-fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>) -> Result<usize> {
+fn read_until<R: BufRead + ?Sized>(_r: &mut R, _delim: u8, _buf: &mut Vec<u8>) -> Result<usize> {
     unimplemented!("eliza: figure out memchr!!!!")
     // let mut read = 0;
     // loop {

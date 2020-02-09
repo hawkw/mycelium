@@ -35,7 +35,7 @@ impl Default for Subscriber {
 
 const SERIAL_BIT: u64 = 1 << 62;
 const VGA_BIT: u64 = 1 << 63;
-const ACTUAL_ID_BITS: u64 = !(SERIAL_BIT | VGA_BIT);
+const _ACTUAL_ID_BITS: u64 = !(SERIAL_BIT | VGA_BIT);
 
 impl Subscriber {
     pub const fn vga_only(vga_max_level: LevelFilter) -> Self {
@@ -219,13 +219,11 @@ impl<'a, W: Write> field::Visit for Visitor<'a, W> {
                 let _ = write!(self.writer, "{:?}", val);
                 self.seen = true;
             }
+        } else if self.seen {
+            let _ = write!(self.writer, ", {}={:?}", field, val);
         } else {
-            if self.seen {
-                let _ = write!(self.writer, ", {}={:?}", field, val);
-            } else {
-                let _ = write!(self.writer, "{}={:?}", field, val);
-                self.seen = true;
-            }
+            let _ = write!(self.writer, "{}={:?}", field, val);
+            self.seen = true;
         }
     }
 }
@@ -262,22 +260,22 @@ impl tracing::Subscriber for Subscriber {
 
         if self.vga_enabled(level) {
             // mark that this span should be written to the VGA buffer.
-            id = id | VGA_BIT;
+            id |= VGA_BIT;
         }
 
         if self.serial_enabled(level) {
             // mark that this span should be written to the serial port buffer.
-            id = id | SERIAL_BIT;
+            id |= SERIAL_BIT;
         }
         let _ = writer.write_str("\n");
         span::Id::from_u64(id)
     }
 
-    fn record(&self, span: &span::Id, values: &span::Record) {
+    fn record(&self, _span: &span::Id, _values: &span::Record) {
         // nop for now
     }
 
-    fn record_follows_from(&self, span: &span::Id, follows: &span::Id) {
+    fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {
         // nop for now
     }
 

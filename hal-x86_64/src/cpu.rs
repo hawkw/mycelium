@@ -19,12 +19,18 @@ impl Port {
         Port { num: address }
     }
 
+    /// # Safety
+    ///
+    /// Reading from a CPU port is unsafe.
     pub unsafe fn readb(&self) -> u8 {
         let result: u8;
         asm!("in al, dx" : "={al}"(result) : "{dx}"(self.num) :: "volatile", "intel");
         result
     }
 
+    /// # Safety
+    ///
+    /// Writing to a CPU port is unsafe.
     pub unsafe fn writeb(&self, value: u8) {
         asm!("out dx, al" :: "{dx}"(self.num), "{al}"(value) :: "volatile", "intel");
     }

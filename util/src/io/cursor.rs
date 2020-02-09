@@ -1,7 +1,10 @@
 use crate::io::prelude::*;
 use crate::io::{self, Error, ErrorKind, Initializer, SeekFrom};
 
-use core::{cmp, convert::TryInto};
+use core::cmp;
+
+#[cfg(feature = "alloc")]
+use core::convert::TryInto;
 
 #[cfg(feature = "alloc")]
 use alloc::{boxed::Box, vec::Vec};
@@ -36,10 +39,7 @@ impl<T> Cursor<T> {
     /// is not empty. So writing to cursor starts with overwriting `Vec`
     /// content, not with appending to it.
     pub fn new(inner: T) -> Cursor<T> {
-        Cursor {
-            pos: 0,
-            inner: inner,
-        }
+        Cursor { pos: 0, inner }
     }
 
     /// Consumes this cursor, returning the underlying value.

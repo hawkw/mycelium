@@ -64,7 +64,7 @@ pub struct Nonblocking {
 }
 
 impl Port {
-    pub const MAX_BAUD_RATE: usize = 115200;
+    pub const MAX_BAUD_RATE: usize = 115_200;
 
     pub fn new(port: u16) -> io::Result<Self> {
         let scratch_test = unsafe {
@@ -329,11 +329,6 @@ impl<'a> LockInner<'a> {
     #[inline(always)]
     fn is_write_ready(&self) -> bool {
         self.inner.is_write_ready()
-    }
-
-    #[inline(always)]
-    fn is_read_ready(&self) -> bool {
-        self.inner.is_read_ready()
     }
 
     #[inline(always)]

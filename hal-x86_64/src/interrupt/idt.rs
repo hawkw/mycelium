@@ -147,7 +147,7 @@ impl Idt {
 
     /// On modern CPUs, this interrupt is reserved; this error fires a general
     /// protection fault instead.
-    const COPROCESSOR_SEGMENT_OVERRUN: usize = 9;
+    pub const COPROCESSOR_SEGMENT_OVERRUN: usize = 9;
 
     pub const INVALID_TSS: usize = 10;
 

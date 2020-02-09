@@ -115,8 +115,8 @@ impl<E: error::Error + 'static> fmt::Display for Error<E> {
 }
 
 impl ErrorKind {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match *self {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
             ErrorKind::NotFound => "entity not found",
             ErrorKind::PermissionDenied => "permission denied",
             ErrorKind::ConnectionRefused => "connection refused",

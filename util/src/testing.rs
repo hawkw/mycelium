@@ -1,3 +1,4 @@
+use core::ffi;
 use core::fmt;
 use core::mem;
 use core::slice;
@@ -64,16 +65,16 @@ macro_rules! decl_test {
 // The memory region between the two symbols will contain an array of `Test`
 // instances.
 extern "C" {
-    static __start_MyceliumTests: ();
-    static __stop_MyceliumTests: ();
+    static __start_MyceliumTests: ffi::c_void;
+    static __stop_MyceliumTests: ffi::c_void;
 }
 
 /// Get a list of `Test` objects.
 pub fn all_tests() -> &'static [Test] {
     unsafe {
         // FIXME: These should probably be `&raw const __start_*`.
-        let start: *const () = &__start_MyceliumTests;
-        let stop: *const () = &__stop_MyceliumTests;
+        let start: *const ffi::c_void = &__start_MyceliumTests;
+        let stop: *const ffi::c_void = &__stop_MyceliumTests;
 
         let len_bytes = (stop as usize) - (start as usize);
         let len = len_bytes / mem::size_of::<Test>();
