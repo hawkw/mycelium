@@ -90,3 +90,31 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         args: --all-features
+
+  xclippy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rust-src, llvm-tools-preview, clippy
+    - uses: actions/checkout@v2
+    - uses: actions/cache@v1
+      id: toolcache
+      with:
+        path: _devtools
+        key: devtools-${{ runner.os }}-v0
+    - name: install dev env
+      if: steps.toolcache.outputs.cache-hit != 'true'
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: dev-env
+        args: --root=_devtools
+    - run: echo "::add-path::_devtools/bin"
+    - name: cargo-xclippy
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: xclippy
+        args: --target=x86_64-mycelium.json
