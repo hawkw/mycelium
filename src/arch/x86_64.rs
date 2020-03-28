@@ -137,7 +137,7 @@ pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
 #[cold]
 pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     use core::fmt::Write;
-
+    tracing::error!(%cause, "oopsing");
     unsafe { asm!("cli" :::: "volatile") }
     let mut vga = vga::writer();
     unsafe {

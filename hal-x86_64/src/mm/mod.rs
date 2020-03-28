@@ -9,7 +9,8 @@ use core::{
 };
 use hal_core::{
     mem::page::{
-        self, Map, Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult,
+        self, Map, Page, PageFlags, Size, TranslateAddr, TranslateError, TranslatePage,
+        TranslateResult,
     },
     Address,
 };
@@ -109,12 +110,12 @@ where
         tracing::trace!(?vaddr);
 
         let page_table = pml4
-            .create_next_table(vaddr, frame_alloc)
-            .create_next_table(vaddr, frame_alloc)
-            .create_next_table(vaddr, frame_alloc);
+            .create_next_table(virt, frame_alloc)
+            .create_next_table(virt, frame_alloc)
+            .create_next_table(virt, frame_alloc);
         tracing::debug!(?page_table);
 
-        let entry = &mut page_table[vaddr];
+        let entry = &mut page_table[virt];
         assert!(
             !entry.is_present(),
             "mapped page table entry already in use"
@@ -173,7 +174,7 @@ where
     PageTable<level::Pdpt>: TranslatePage<S>,
 {
     fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S> {
-        self.next_table(virt.base_address())?.translate_page(virt)
+        self.next_table(virt)?.translate_page(virt)
     }
 }
 
@@ -185,13 +186,13 @@ impl TranslatePage<Size1Gb> for PageTable<level::Pdpt> {
 
 impl TranslatePage<Size2Mb> for PageTable<level::Pdpt> {
     fn translate_page(&self, virt: Page<VAddr, Size2Mb>) -> TranslateResult<PAddr, Size2Mb> {
-        self.next_table(virt.base_address())?.translate_page(virt)
+        self.next_table(virt)?.translate_page(virt)
     }
 }
 
 impl TranslatePage<Size4Kb> for PageTable<level::Pdpt> {
     fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
-        self.next_table(virt.base_address())?.translate_page(virt)
+        self.next_table(virt)?.translate_page(virt)
     }
 }
 
@@ -203,7 +204,7 @@ impl TranslatePage<Size2Mb> for PageTable<level::Pd> {
 
 impl TranslatePage<Size4Kb> for PageTable<level::Pd> {
     fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
-        self.next_table(virt.base_address())?.translate_page(virt)
+        self.next_table(virt)?.translate_page(virt)
     }
 }
 
@@ -215,8 +216,7 @@ impl TranslatePage<Size4Kb> for PageTable<level::Pt> {
 
 impl TranslateAddr for PageTable<level::Pml4> {
     fn translate_addr(&self, virt: VAddr) -> Option<PAddr> {
-        let pdpt = self.next_table(virt)?;
-        pdpt.translate_addr(virt)
+        unimplemented!()
     }
 }
 
@@ -227,18 +227,23 @@ impl TranslateAddr for PageTable<level::Pdpt> {
 }
 // this is factored out so we can unit test it using `usize`s without having to
 // construct page tables in memory.
+#[inline(always)]
 fn next_table_addr(my_addr: usize, idx: usize) -> usize {
     (my_addr << 9) | (idx << 12)
 }
 
 impl<R: level::Recursive> PageTable<R> {
     fn next_table_ptr(&self, idx: usize) -> Option<NonNull<PageTable<R::Next>>> {
+        tracing::trace!(idx, "trying to get entry for next table");
         if !self.entries[idx].is_present() {
+            tracing::trace!("entry not preset");
             return None;
         }
 
         let my_addr = self as *const _ as usize;
         let next_addr = next_table_addr(my_addr, idx);
+
+        tracing::trace!(my_addr=%format_args!("{:x}", my_addr), next_addr=%format_args!("{:x}", next_addr));
         unsafe {
             let ptr = next_addr as *mut _;
             // we constructed this address & know it won't be null.
@@ -246,19 +251,25 @@ impl<R: level::Recursive> PageTable<R> {
         }
     }
 
-    fn next_table<'a>(&'a self, idx: VAddr) -> Option<&'a PageTable<R::Next>> {
-        self.next_table_ptr(R::index_of(idx))
-            .map(|ptr| unsafe { &*ptr.as_ptr() })
+    #[inline]
+    #[tracing::instrument(skip(self))]
+    fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
+        let ptr = self.next_table_ptr(R::index_of(idx))?;
+        tracing::trace!(?ptr, "found next table pointer");
+        Some(unsafe { &*ptr.as_ptr() })
     }
 
-    fn next_table_mut(&mut self, idx: VAddr) -> Option<&mut PageTable<R::Next>> {
-        self.next_table_ptr(R::index_of(idx))
-            .map(|ptr| unsafe { &mut *ptr.as_ptr() })
+    #[inline]
+    #[tracing::instrument(skip(self))]
+    fn next_table_mut<S: Size>(&mut self, idx: VirtPage<S>) -> Option<&mut PageTable<R::Next>> {
+        let ptr = self.next_table_ptr(R::index_of(idx))?;
+        tracing::trace!(?ptr, "found next table pointer");
+        Some(unsafe { &mut *ptr.as_ptr() })
     }
 
-    fn create_next_table(
+    fn create_next_table<S: Size>(
         &mut self,
-        idx: VAddr,
+        idx: VirtPage<S>,
         alloc: &mut impl page::Alloc<Size4Kb>,
     ) -> &mut PageTable<R::Next> {
         let span = tracing::trace_span!("create_next_table", ?idx, level = %<R::Next>::NAME);
@@ -266,39 +277,41 @@ impl<R: level::Recursive> PageTable<R> {
 
         if self.next_table(idx).is_some() {
             tracing::trace!("next table already exists");
-            self.next_table_mut(idx)
-                .expect("if next_table().is_some(), the next table exists!")
-        } else {
-            let entry = &mut self[idx];
-            if entry.is_huge() {
-                panic!(
-                    "cannot create {} table for {:?}: the corresponding entry is huge!\n{:#?}",
-                    <R::Next>::NAME,
-                    idx,
-                    entry
-                );
-            }
-
-            let frame = match alloc.alloc() {
-                Ok(frame) => frame,
-                Err(e) => panic!(
-                    "cannot create {} table for {:?}: allocation failed!",
-                    <R::Next>::NAME,
-                    idx,
-                ),
-            };
-
-            tracing::trace!(?frame, "allocated page table frame");
-
-            let table = PageTable::<R::Next>::new(frame);
-            entry
-                .set_next_table(table)
-                .set_present(true)
-                .set_writable(true);
-            tracing::trace!("set entry to point at new page table");
-            // TODO(eliza): do we need to invlpg???
-            unsafe { &mut *table }
+            return self
+                .next_table_mut(idx)
+                .expect("if next_table().is_some(), the next table exists!");
         }
+
+        tracing::trace!("no next table exists");
+        let entry = &mut self[idx];
+        if entry.is_huge() {
+            panic!(
+                "cannot create {} table for {:?}: the corresponding entry is huge!\n{:#?}",
+                <R::Next>::NAME,
+                idx,
+                entry
+            );
+        }
+
+        tracing::trace!("trying to allocate page table frame...");
+        let frame = match alloc.alloc() {
+            Ok(frame) => frame,
+            Err(e) => panic!(
+                "cannot create {} table for {:?}: allocation failed!",
+                <R::Next>::NAME,
+                idx,
+            ),
+        };
+
+        tracing::trace!(?frame, "allocated page table frame");
+
+        let table = PageTable::<R::Next>::new(frame);
+        entry
+            .set_next_table(table)
+            .set_present(true)
+            .set_writable(true);
+        tracing::trace!("set entry to point at new page table");
+        unsafe { &mut *table }
     }
 }
 
@@ -318,51 +331,38 @@ impl<L: Level> PageTable<L> {
     }
 }
 
-impl<L: Level> ops::Index<VAddr> for PageTable<L> {
-    type Output = Entry<L>;
-    fn index(&self, addr: VAddr) -> &Self::Output {
-        &self.entries[L::index_of(addr)]
-    }
-}
-
-impl<L: Level> ops::IndexMut<VAddr> for PageTable<L> {
-    fn index_mut(&mut self, addr: VAddr) -> &mut Self::Output {
-        &mut self.entries[L::index_of(addr)]
-    }
-}
-
 impl<L, S> ops::Index<VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    L: level::HoldsSize<S>,
+    // L: level::HoldsSize<S>,
     S: Size,
 {
     type Output = Entry<L>;
-    fn index(&self, pg: VirtPage<S>) -> &Self::Output {
-        &self[pg.base_address()]
+    fn index(&self, page: VirtPage<S>) -> &Self::Output {
+        &self.entries[L::index_of(page)]
     }
 }
 
 impl<L, S> ops::IndexMut<VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    L: level::HoldsSize<S>,
+    // L: level::HoldsSize<S>,
     S: Size,
 {
-    fn index_mut(&mut self, pg: VirtPage<S>) -> &mut Self::Output {
-        &mut self[pg.base_address()]
+    fn index_mut(&mut self, page: VirtPage<S>) -> &mut Self::Output {
+        &mut self.entries[L::index_of(page)]
     }
 }
 
 impl<'a, L, S> ops::Index<&'a VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    L: level::HoldsSize<S>,
+    // L: level::HoldsSize<S>,
     S: Size,
 {
     type Output = Entry<L>;
     fn index(&self, pg: &'a VirtPage<S>) -> &Self::Output {
-        &self[pg.base_address()]
+        &self[pg.clone()]
     }
 }
 
@@ -373,7 +373,7 @@ where
     S: Size,
 {
     fn index_mut(&mut self, pg: &'a VirtPage<S>) -> &mut Self::Output {
-        &mut self[pg.base_address()]
+        &mut self[pg.clone()]
     }
 }
 
@@ -592,9 +592,9 @@ pub trait Level {
 
     const INDEX_SHIFT: usize = 12 + (9 * Self::SUBLEVELS);
 
-    fn index_of(v: VAddr) -> usize {
+    fn index_of<S: Size>(v: Page<VAddr, S>) -> usize {
         const INDEX_MASK: usize = 0o777;
-        (v.as_usize() >> Self::INDEX_SHIFT) & INDEX_MASK
+        (v.base_address().as_usize() >> Self::INDEX_SHIFT) % 512
     }
 }
 
@@ -618,7 +618,6 @@ pub mod level {
 
     pub trait Recursive: Level {
         type Next: Level;
-        const SUBLEVELS: usize = 3;
     }
 
     pub trait HoldsSize<S: Size>: Level {}
