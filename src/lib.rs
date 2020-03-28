@@ -1,6 +1,9 @@
+#![cfg_attr(all(target_os = "none", test), no_main)]
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
+#![cfg_attr(target_os = "none", feature(panic_info_message, track_caller))]
 #![feature(asm)]
+
 extern crate alloc;
 
 pub mod arch;
@@ -8,11 +11,7 @@ pub mod arch;
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 
-use alloc::vec::Vec;
-
 mod wasm;
-
-const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -63,10 +62,45 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     arch::interrupt::init::<arch::InterruptHandlers>();
     arch::mm::init_paging(bootinfo.phys_mem_offset());
 
+    #[cfg(test)]
     {
-        let span = tracing::info_span!("alloc test");
+        let span = tracing::info_span!("run tests");
         let _enter = span.enter();
+
+        let mut passed = 0;
+        let mut failed = 0;
+        for test in mycelium_util::testing::all_tests() {
+            let span = tracing::info_span!("test", test.name, test.module);
+            let _enter = span.enter();
+
+            if (test.run)() {
+                passed += 1;
+            } else {
+                failed += 1;
+            }
+        }
+
+        tracing::warn!("{} passed | {} failed", passed, failed);
+        if failed == 0 {
+            arch::qemu_exit(arch::QemuExitCode::Success);
+        } else {
+            arch::qemu_exit(arch::QemuExitCode::Failed);
+        }
+    }
+
+    // if this function returns we would boot loop. Hang, instead, so the debug
+    // output can be read.
+    //
+    // eventually we'll call into a kernel main loop here...
+    #[allow(clippy::empty_loop)]
+    #[allow(unreachable_code)]
+    loop {}
+}
+
+mycelium_util::decl_test! {
+    fn basic_alloc() {
         // Let's allocate something, for funsies
+        use alloc::vec::Vec;
         let mut v = Vec::new();
         tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
         v.push(5u64);
@@ -76,23 +110,13 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         assert_eq!(v.pop(), Some(10));
         assert_eq!(v.pop(), Some(5));
     }
+}
 
-    {
-        let span = tracing::info_span!("wasm test");
-        let _enter = span.enter();
-
-        match wasm::run_wasm(HELLOWORLD_WASM) {
-            Ok(()) => tracing::info!("wasm test Ok!"),
-            Err(err) => tracing::error!(?err, "wasm test Err"),
-        }
+mycelium_util::decl_test! {
+    fn wasm_hello_world() -> Result<(), wasmi::Error> {
+        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+        wasm::run_wasm(HELLOWORLD_WASM)
     }
-
-    // if this function returns we would boot loop. Hang, instead, so the debug
-    // output can be read.
-    //
-    // eventually we'll call into a kernel main loop here...
-    #[allow(clippy::empty_loop)]
-    loop {}
 }
 
 #[global_allocator]
@@ -103,4 +127,46 @@ pub static GLOBAL: mycelium_alloc::Alloc = mycelium_alloc::Alloc;
 #[cfg(target_os = "none")]
 fn alloc_error(layout: core::alloc::Layout) -> ! {
     panic!("alloc error: {:?}", layout);
+}
+
+#[cfg(target_os = "none")]
+#[panic_handler]
+#[cold]
+fn panic(panic: &core::panic::PanicInfo) -> ! {
+    use core::fmt;
+
+    struct PrettyPanic<'a>(&'a core::panic::PanicInfo<'a>);
+    impl<'a> fmt::Display for PrettyPanic<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let message = self.0.message();
+            let location = self.0.location();
+            let caller = core::panic::Location::caller();
+            if let Some(message) = message {
+                writeln!(f, "  mycelium panicked: {}", message)?;
+                if let Some(loc) = location {
+                    writeln!(f, "  at: {}:{}:{}", loc.file(), loc.line(), loc.column(),)?;
+                }
+            } else {
+                writeln!(f, "  mycelium panicked: {}", self.0)?;
+            }
+            writeln!(
+                f,
+                "  in: {}:{}:{}",
+                caller.file(),
+                caller.line(),
+                caller.column()
+            )?;
+            Ok(())
+        }
+    }
+
+    let caller = core::panic::Location::caller();
+    tracing::error!(%panic, ?caller);
+    let pp = PrettyPanic(panic);
+    arch::oops(&pp)
+}
+
+#[cfg(all(test, not(target_os = "none")))]
+pub fn main() {
+    /* no host-platform tests in this crate */
 }

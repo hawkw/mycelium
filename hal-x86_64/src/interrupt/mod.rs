@@ -1,11 +1,7 @@
 pub mod idt;
 pub mod pic;
-use crate::{cpu, segment, vga, VAddr};
-use core::{
-    fmt::{self, Write},
-    marker::PhantomData,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use crate::{segment, VAddr};
+use core::{fmt, marker::PhantomData};
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
@@ -99,13 +95,13 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
     }
 }
 
-impl<'a> hal_core::interrupt::ctx::PageFault for Context<'a, PageFaultCode> {
+impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
     fn fault_vaddr(&self) -> crate::VAddr {
         unimplemented!("eliza")
     }
 }
 
-impl<'a> hal_core::interrupt::ctx::CodeFault for Context<'a, ErrorCode> {
+impl<'a> ctx::CodeFault for Context<'a, ErrorCode> {
     fn is_user_mode(&self) -> bool {
         false // TODO(eliza)
     }

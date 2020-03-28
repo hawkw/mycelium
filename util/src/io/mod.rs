@@ -292,10 +292,7 @@ pub trait Read {
     where
         Self: Sized,
     {
-        Take {
-            inner: self,
-            limit: limit,
-        }
+        Take { inner: self, limit }
     }
 }
 
@@ -922,9 +919,9 @@ impl<B: BufRead> Iterator for Lines<B> {
         match self.buf.read_line(&mut buf) {
             Ok(0) => None,
             Ok(_n) => {
-                if buf.ends_with("\n") {
+                if buf.ends_with('\n') {
                     buf.pop();
-                    if buf.ends_with("\r") {
+                    if buf.ends_with('\r') {
                         buf.pop();
                     }
                 }
@@ -962,7 +959,7 @@ where
     let start_len = buf.len();
     let mut g = Guard {
         len: buf.len(),
-        buf: buf,
+        buf,
     };
     let ret;
     loop {
@@ -1060,30 +1057,31 @@ where
 
 #[cfg(feature = "alloc")]
 fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>) -> Result<usize> {
-    unimplemented!("eliza: figure out memchr!!!!")
-    // let mut read = 0;
-    // loop {
-    //     let (done, used) = {
-    //         let available = match r.fill_buf() {
-    //             Ok(n) => n,
-    //             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-    //             Err(e) => return Err(e),
-    //         };
-    //         match memchr::memchr(delim, available) {
-    //             Some(i) => {
-    //                 buf.extend_from_slice(&available[..=i]);
-    //                 (true, i + 1)
-    //             }
-    //             None => {
-    //                 buf.extend_from_slice(available);
-    //                 (false, available.len())
-    //             }
-    //         }
-    //     };
-    //     r.consume(used);
-    //     read += used;
-    //     if done || used == 0 {
-    //         return Ok(read);
-    //     }
-    // }
+    let mut read = 0;
+    loop {
+        let (done, used) = {
+            let available = match r.fill_buf() {
+                Ok(n) => n,
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            };
+            // This is intentionally simple. We may improve upon it in the future with a
+            // proper `memchr` implementation if it proves to be necessary.
+            match available.iter().position(|&c| c == delim) {
+                Some(i) => {
+                    buf.extend_from_slice(&available[..=i]);
+                    (true, i + 1)
+                }
+                None => {
+                    buf.extend_from_slice(available);
+                    (false, available.len())
+                }
+            }
+        };
+        r.consume(used);
+        read += used;
+        if done || used == 0 {
+            return Ok(read);
+        }
+    }
 }

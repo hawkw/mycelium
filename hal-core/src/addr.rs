@@ -40,7 +40,7 @@ pub trait Address:
     /// This is equivalent to
     /// ```rust
     /// # use hal_core::Address;
-    /// # fn doc<A: Address>(addr: A) -> A {
+    /// # fn doc<T: Address>(addr: T) -> T {
     /// addr.align_up(core::mem::align_of::<T>())
     /// # }
     /// ````
@@ -68,7 +68,7 @@ pub trait Address:
     /// This is equivalent to
     /// ```rust
     /// # use hal_core::Address;
-    /// # fn doc<A: Address>(addr: A) -> A {
+    /// # fn doc<T: Address>(addr: T) -> T {
     /// addr.align_down(core::mem::align_of::<T>())
     /// # }
     /// ````

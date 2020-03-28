@@ -9,3 +9,4 @@ pub mod cell;
 pub mod error;
 pub mod io;
 pub mod sync;
+pub mod testing;
