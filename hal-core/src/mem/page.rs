@@ -68,7 +68,7 @@ where
     ///
     /// - If the physical address is invalid.
     /// - If the page is already mapped.
-    fn map(
+    fn map_page(
         &'mapper mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
@@ -92,7 +92,7 @@ where
     fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
         let base_paddr = phys.base_address().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr));
-        self.map(virt, phys, frame_alloc)
+        self.map_page(virt, phys, frame_alloc)
     }
 }
 
@@ -132,6 +132,10 @@ pub struct PageRange<A: Address, S: Size> {
     end: Page<A, S>,
 }
 
+#[derive(Debug, Default)]
+pub struct EmptyAlloc {
+    _p: (),
+}
 pub struct NotAligned<S> {
     _size: PhantomData<S>,
 }
@@ -289,6 +293,16 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
         let next = self.start;
         self.start = self.start + 1;
         Some(next)
+    }
+}
+
+unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
+    fn alloc_range(&mut self, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
+        Err(AllocErr { _p: () })
+    }
+
+    fn dealloc_range(&self, _range: PageRange<PAddr, S>) -> Result<(), AllocErr> {
+        Err(AllocErr { _p: () })
     }
 }
 

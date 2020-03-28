@@ -5,6 +5,7 @@ use core::{
     marker::PhantomData,
     ops,
     ptr::{self, NonNull},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 use hal_core::{
     mem::page::{
@@ -46,12 +47,13 @@ pub struct PageHandle {
     entry: *mut u64,
 }
 
-pub fn init_paging(phys_offset: VAddr) {
-    let span = tracing::info_span!("paging::init", ?phys_offset);
+pub fn init_paging(vm_offset: VAddr) {
+    let span = tracing::info_span!("paging::init", ?vm_offset);
     let _e = span.enter();
+    VM_OFFSET.store(vm_offset.as_usize(), Ordering::Release);
 
     tracing::info!("initializing paging...");
-    let pml4 = unsafe { PageTable::<level::Pml4>::current(phys_offset) };
+    let pml4 = PageTable::<level::Pml4>::current(vm_offset);
     let mut present_entries = 0;
     for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
         if entry.is_present() {
@@ -62,13 +64,21 @@ pub fn init_paging(phys_offset: VAddr) {
     tracing::info!(present_entries);
 }
 
+/// This value should only be set once, early in the kernel boot process before
+/// we have access to multiple cores. So, technically, it could be a `static
+/// mut`. But, using an atomic is safe, even though it's not strictly necessary.
+static VM_OFFSET: AtomicUsize = AtomicUsize::new(core::usize::MAX);
+
 impl PageTable<level::Pml4> {
-    pub unsafe fn current(phys_offset: VAddr) -> &'static mut Self {
+    fn current(vm_offset: VAddr) -> &'static mut Self {
         let (phys, _) = crate::control_regs::cr3::read();
-        let phys = phys.base_address().as_usize();
-        let virt = phys_offset + phys;
-        tracing::trace!(current_pml4_vaddr = ?virt);
-        &mut *(virt.as_ptr::<Self>() as *mut _)
+        let pml4_paddr = phys.base_address();
+
+        tracing::trace!(?pml4_paddr, ?vm_offset);
+
+        let virt = vm_offset + VAddr::from_usize(pml4_paddr.as_usize());
+        tracing::debug!(current_pml4_vaddr = ?virt);
+        unsafe { &mut *(virt.as_ptr::<Self>() as *mut _) }
     }
 }
 
@@ -85,7 +95,7 @@ where
     ///
     /// - If the physical address is invalid.
     /// - If the page is already mapped.
-    fn map(
+    fn map_page(
         &'mapper mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
@@ -138,6 +148,22 @@ where
 {
     fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S> {
         unsafe { self.pml4.as_ref() }.translate_page(virt)
+    }
+}
+
+impl PageCtrl {
+    pub fn current() -> Self {
+        let vm_offset = VM_OFFSET.load(Ordering::Acquire);
+        assert_ne!(
+            vm_offset,
+            core::usize::MAX,
+            "`init_paging` must be called before calling `PageTable::current`!"
+        );
+        let vm_offset = VAddr::from_usize(vm_offset);
+        let pml4 = PageTable::current(vm_offset);
+        Self {
+            pml4: NonNull::from(pml4),
+        }
     }
 }
 
@@ -676,6 +702,30 @@ pub(crate) mod tlb {
     // supporting 80386s from 1985?
     pub(crate) unsafe fn flush_page(addr: VAddr) {
         asm!("invlpg [$0]" :: "r"(addr.as_usize() as u64) : "memory" : "intel")
+    }
+}
+
+mycelium_util::decl_test! {
+    fn basic_map() -> Result<(), ()> {
+        use hal_core::mem::page::PageFlags;
+        let mut ctrl = PageCtrl::current();
+        // We shouldn't need to allocate page frames for this test.
+        let mut frame_alloc = page::EmptyAlloc::default();
+
+        let frame = Page::containing(PAddr::from_usize(0xb8000));
+        let page = Page::containing(VAddr::from_usize(0));
+
+        let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
+        flags.set_writable(true);
+        let page = flags.commit();
+        tracing::info!(?page, "page mapped!");
+
+        let page_ptr = page.base_address().as_ptr::<u64>();
+        unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
+
+        tracing::info!("wow, it didn't fault");
+
+        Ok(())
     }
 }
 
