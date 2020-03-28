@@ -23,9 +23,9 @@ pub struct PageCtrl {
 }
 
 #[must_use = "page table changes must be flushed"]
-pub struct Handle<'a, L, S> {
-    page: Page<VAddr, S>,
-    flags: &'a mut Entry<L>,
+pub struct Handle<'a, L: level::PointsToPage> {
+    page: Page<VAddr, L::Size>,
+    entry: &'a mut Entry<L>,
 }
 
 /// An x86_64 page table.
@@ -72,11 +72,11 @@ impl PageTable<level::Pml4> {
     }
 }
 
-impl<A> Map<Size4Kb, A> for PageCtrl
+impl<'mapper, A> Map<'mapper, Size4Kb, A> for PageCtrl
 where
     A: page::Alloc<Size4Kb>,
 {
-    type Handle = Handle<S, level::Pt>;
+    type Handle = Handle<'mapper, level::Pt>;
     // type Handle =
     /// Map the virtual memory page represented by `virt` to the physical page
     /// represented bt `phys`.
@@ -86,35 +86,35 @@ where
     /// - If the physical address is invalid.
     /// - If the page is already mapped.
     fn map(
-        &mut self,
+        &'mapper mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
         frame_alloc: &mut A,
     ) -> Self::Handle {
         let span = tracing::debug_span!("map_page", ?virt, ?phys);
         let _e = span.enter();
-        let mut pml4 = unsafe { self.pml4.as_mut() };
+        let pml4 = unsafe { self.pml4.as_mut() };
 
         let vaddr = virt.base_address();
         tracing::trace!(?vaddr);
 
-        let mut page_table = pml4
-            .create_next_table(vaddr)
-            .create_next_table(vaddr)
-            .create_next_table(vaddr);
+        let page_table = pml4
+            .create_next_table(vaddr, frame_alloc)
+            .create_next_table(vaddr, frame_alloc)
+            .create_next_table(vaddr, frame_alloc);
         tracing::debug!(?page_table);
 
-        let mut entry = page_table[vaddr];
+        let entry = &mut page_table[vaddr];
         assert!(
             !entry.is_present(),
             "mapped page table entry already in use"
         );
         assert!(!entry.is_huge(), "huge bit should not be set for 4KB entry");
-        let flags = entry.set_phys_page(phys).set_present(true);
-        Handle { flags, page: virt }
+        let entry = entry.set_phys_page(phys).set_present(true);
+        Handle { entry, page: virt }
     }
 
-    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Self::Handle {
+    fn flags_mut(&'mapper mut self, virt: Page<VAddr, Size4Kb>) -> Self::Handle {
         unimplemented!()
     }
 
@@ -126,13 +126,7 @@ where
     /// # Panics
     ///
     /// - If the virtual page was not mapped.
-    fn unmap(&mut self, virt: Page<VAddr, S>) -> Page<PAddr, S> {
-        unimplemented!()
-    }
-
-    /// Identity map the provided physical page to the virtual page with the
-    /// same address.
-    fn identity_map(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
+    fn unmap(&'mapper mut self, virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
         unimplemented!()
     }
 }
@@ -468,14 +462,15 @@ impl<L: level::Recursive> Entry<L> {
     }
 }
 
-impl<'a, S: Size, L: Level> page::PageHandle<S> for Handle<'a, L, S> {
+impl<'a, L: level::PointsToPage> page::PageFlags<L::Size> for Handle<'a, L> {
     #[inline]
     fn is_writable(&self) -> bool {
         self.entry.is_writable()
     }
     #[inline]
     fn set_writable(&mut self, writable: bool) -> &mut Self {
-        self.entry.set_writable(set_writable)
+        self.entry.set_writable(writable);
+        self
     }
 
     #[inline]
@@ -485,10 +480,11 @@ impl<'a, S: Size, L: Level> page::PageHandle<S> for Handle<'a, L, S> {
 
     #[inline]
     fn set_executable(&mut self, executable: bool) -> &mut Self {
-        self.entry.set_executable(executable)
+        self.entry.set_executable(executable);
+        self
     }
 
-    fn commit(self) -> Page<VAddr, S> {
+    fn commit(self) -> Page<VAddr, L::Size> {
         unsafe {
             tlb::flush_page(self.page.base_address());
         }
@@ -573,6 +569,16 @@ pub trait Level {
     fn index_of(v: VAddr) -> usize {
         const INDEX_MASK: usize = 0o777;
         (v.as_usize() >> Self::INDEX_SHIFT) & INDEX_MASK
+    }
+}
+
+impl<L: Level> fmt::Debug for PageTable<L> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("PageTable")
+            .field("level", &format_args!("{}", L::NAME))
+            .field("addr", &format_args!("{:p}", self))
+            // .field("entries", &self.entries)
+            .finish()
     }
 }
 

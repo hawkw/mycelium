@@ -55,12 +55,12 @@ pub unsafe trait Alloc<S: Size> {
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
 }
 
-pub trait Map<S, A>
+pub trait Map<'mapper, S, A>
 where
     S: Size,
     A: Alloc<S>,
 {
-    type Handle: PageHandle<S>;
+    type Handle: PageFlags<S>;
     /// Map the virtual memory page represented by `virt` to the physical page
     /// represented bt `phys`.
     ///
@@ -69,15 +69,13 @@ where
     /// - If the physical address is invalid.
     /// - If the page is already mapped.
     fn map(
-        &mut self,
+        &'mapper mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
         frame_alloc: &mut A,
     ) -> Self::Handle;
 
-    unsafe fn flush(page: Page<VAddr, S>)
-
-    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Self::Handle;
+    fn flags_mut(&'mapper mut self, virt: Page<VAddr, S>) -> Self::Handle;
 
     /// Unmap the provided virtual page, returning the physical page it was
     /// previously mapped to.
@@ -87,15 +85,15 @@ where
     /// # Panics
     ///
     /// - If the virtual page was not mapped.
-    fn unmap(&mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
+    fn unmap(&'mapper mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
 
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
-    fn identity_map(&mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle;
-    // {
-    //     let virt = Page::containing(phys.base_address().as_usize());
-    //     self.map(virt, phys, flags, frame_alloc)
-    // }
+    fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
+        let base_paddr = phys.base_address().as_usize();
+        let virt = Page::containing(VAddr::from_usize(base_paddr));
+        self.map(virt, phys, frame_alloc)
+    }
 }
 
 pub trait TranslatePage<S: Size> {
@@ -106,22 +104,17 @@ pub trait TranslateAddr {
     fn translate_addr(&self, addr: VAddr) -> Option<PAddr>;
 }
 
-pub trait PageFlags {
+pub trait PageFlags<S: Size> {
     fn set_writable(&mut self, writable: bool) -> &mut Self;
     fn set_executable(&mut self, executable: bool) -> &mut Self;
 
-    fn is_writable(&self) -> bool;
-    fn is_executable(&self) -> bool;
-}
-
-pub trait PageFlags {
-    fn set_writable(&mut self, writable: bool) -> &mut Self;
-    fn set_executable(&mut self, executable: bool) -> &mut Self;
     // fn set_present(&mut self, present: bool) -> &mut Self;
 
     fn is_writable(&self) -> bool;
     fn is_executable(&self) -> bool;
     // fn is_present(&self) -> bool;
+
+    fn commit(self) -> Page<VAddr, S>;
 }
 
 /// A memory page.
