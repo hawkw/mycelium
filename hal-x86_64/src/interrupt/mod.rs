@@ -46,7 +46,7 @@ pub struct Registers {
 static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
 
-pub fn init<H: Handlers>() -> Control {
+pub fn init<H: Handlers<Registers>>() -> Control {
     use hal_core::interrupt::Control;
 
     let span = tracing::info_span!("interrupts::init");
@@ -125,6 +125,7 @@ impl<'a> Context<'a, PageFaultCode> {
 
 impl hal_core::interrupt::Control for Idt {
     // type Vector = u8;
+    type Registers = Registers;
 
     unsafe fn disable(&mut self) {
         asm!("cli" :::: "volatile");
@@ -140,48 +141,59 @@ impl hal_core::interrupt::Control for Idt {
 
     fn register_handlers<H>(&mut self) -> Result<(), hal_core::interrupt::RegistrationError>
     where
-        H: Handlers,
+        H: Handlers<Registers>,
     {
         let span = tracing::debug_span!("Idt::register_handlers");
         let _enter = span.enter();
 
-        extern "x86-interrupt" fn page_fault_isr<H: Handlers>(
+        extern "x86-interrupt" fn page_fault_isr<H: Handlers<Registers>>(
             registers: &mut Registers,
             code: PageFaultCode,
         ) {
             H::page_fault(Context { registers, code });
         }
 
-        extern "x86-interrupt" fn double_fault_isr<H: Handlers>(
+        extern "x86-interrupt" fn double_fault_isr<H: Handlers<Registers>>(
             registers: &mut Registers,
             code: u64,
         ) {
             H::double_fault(Context { registers, code });
         }
 
-        extern "x86-interrupt" fn timer_isr<H: Handlers>(_regs: &mut Registers) {
+        extern "x86-interrupt" fn timer_isr<H: Handlers<Registers>>(_regs: &mut Registers) {
             H::timer_tick();
             unsafe {
                 PIC.end_interrupt(0x20);
             }
         }
 
-        extern "x86-interrupt" fn keyboard_isr<H: Handlers>(_regs: &mut Registers) {
+        extern "x86-interrupt" fn keyboard_isr<H: Handlers<Registers>>(_regs: &mut Registers) {
             H::keyboard_controller();
             unsafe {
                 PIC.end_interrupt(0x21);
             }
         }
 
-        extern "x86-interrupt" fn test_isr<H: Handlers>(registers: &mut Registers) {
+        extern "x86-interrupt" fn test_isr<H: Handlers<Registers>>(registers: &mut Registers) {
             H::test_interrupt(Context {
                 registers,
                 code: (),
             });
         }
 
-        extern "x86-interrupt" fn gpf_isr<H: Handlers>(registers: &mut Registers, code: u64) {
-            tracing::error!("lmao, a general protection fault is happening");
+        extern "x86-interrupt" fn gpf_isr<H: Handlers<Registers>>(
+            registers: &mut Registers,
+            code: u64,
+        ) {
+            unsafe {
+                // Safety: who cares!
+
+                crate::vga::writer().force_unlock();
+                if let Some(com1) = crate::serial::com1() {
+                    com1.force_unlock();
+                }
+            }
+            tracing::error!(code = ?&format_args!("{:x}", code), "lmao, a general protection fault is happening");
             H::code_fault(Context { registers, code });
         }
 

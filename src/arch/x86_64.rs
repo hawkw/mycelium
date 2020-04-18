@@ -1,8 +1,8 @@
 use bootloader::bootinfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
-use hal_x86_64::vga;
 pub use hal_x86_64::{interrupt, mm, NAME};
+use hal_x86_64::{interrupt::Registers as X64Registers, serial, vga};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
@@ -83,32 +83,37 @@ impl RustbootBootInfo {
 }
 
 pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
-
 pub(crate) struct InterruptHandlers;
 
-impl hal_core::interrupt::Handlers for InterruptHandlers {
+/// Forcibly unlock the IOs we write to in an oops (VGA buffer and COM1 serial
+/// port) to prevent deadlocks if the oops occured while either was locked.
+///
+/// # Safety
+///
+///  /!\ only call this when oopsing!!! /!\
+impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
     fn page_fault<C>(cx: C)
     where
-        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::PageFault,
+        C: hal_core::interrupt::Context<Registers = X64Registers>
+            + hal_core::interrupt::ctx::PageFault,
     {
-        tracing::error!(registers = ?cx.registers(), "page fault");
-        oops(&format_args!("  PAGE FAULT\n\n{}", cx.registers()))
+        oops(&"PAGE FAULT", Some(&cx));
     }
 
     fn code_fault<C>(cx: C)
     where
-        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
+        C: hal_core::interrupt::Context<Registers = X64Registers>
+            + hal_core::interrupt::ctx::CodeFault,
     {
-        tracing::error!(registers = ?cx.registers(), "code fault");
-        oops(&format_args!("  CODE FAULT\n\n{}", cx.registers()))
+        oops(&"CODE FAULT", Some(&cx));
     }
 
     fn double_fault<C>(cx: C)
     where
-        C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
+        C: hal_core::interrupt::Context<Registers = X64Registers>
+            + hal_core::interrupt::ctx::CodeFault,
     {
-        tracing::error!(registers = ?cx.registers(), "double fault",);
-        oops(&format_args!("  DOUBLE FAULT\n\n{}", cx.registers()))
+        oops(&"DOUBLE FAULT", Some(&cx))
     }
 
     fn timer_tick() {
@@ -131,7 +136,7 @@ impl hal_core::interrupt::Handlers for InterruptHandlers {
 
     fn test_interrupt<C>(cx: C)
     where
-        C: hal_core::interrupt::ctx::Context,
+        C: hal_core::interrupt::ctx::Context<Registers = X64Registers>,
     {
         tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
     }
@@ -145,20 +150,38 @@ pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
 }
 
 #[cold]
-pub fn oops(cause: &dyn core::fmt::Display) -> ! {
+pub fn oops(
+    cause: &dyn core::fmt::Display,
+    fault: Option<&dyn hal_core::interrupt::ctx::Context<Registers = X64Registers>>,
+) -> ! {
     use core::fmt::Write;
-    tracing::error!(%cause, "oopsing");
-    unsafe { asm!("cli" :::: "volatile") }
     let mut vga = vga::writer();
+    // /!\ disable all interrupts, unlock everything to prevent deadlock /!\
+    //
+    // Safety: it is okay to do this because we are oopsing and everything
+    // is going to die anyway.
     unsafe {
-        // forcibly unlock the mutex around the VGA buffer, to avoid deadlocking
-        // if it was already held when we oopsed.
-        //
-        // TODO(eliza): when we are capable of multiprocessing, we shouldn't do
-        // this until other cores that might be holding the lock are already
-        // killed.
+        // disable all interrupts.
+        asm!("cli" :::: "volatile");
+
+        // If the system has a COM1, unlock it.
+        if let Some(com1) = serial::com1() {
+            com1.force_unlock();
+        }
+
+        // unlock the VGA buffer.
         vga.force_unlock();
     }
+
+    let registers = if let Some(fault) = fault {
+        let registers = fault.registers();
+        tracing::error!(message = "OOPS! a CPU fault occurred", %cause, ?registers);
+        Some(registers)
+    } else {
+        tracing::error!(message = "OOPS! a panic occurred", %cause);
+        None
+    };
+
     const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
     vga.set_color(RED_BG);
     vga.clear();
@@ -168,6 +191,9 @@ pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     vga.set_color(RED_BG);
 
     let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
+    if let Some(registers) = registers {
+        let _ = writeln!(vga, "\n{}\n", registers);
+    }
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
     #[cfg(test)]
