@@ -122,6 +122,10 @@ impl Port {
             _is_blocking: PhantomData,
         }
     }
+
+    pub unsafe fn force_unlock(&self) {
+        self.inner.force_unlock();
+    }
 }
 
 impl Registers {

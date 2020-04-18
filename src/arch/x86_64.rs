@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr};
 use hal_x86_64::vga;
 pub use hal_x86_64::{interrupt, NAME};
+use hal_x86_64::{serial, vga};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
@@ -66,14 +67,35 @@ impl BootInfo for RustbootBootInfo {
 }
 
 pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
-
 pub(crate) struct InterruptHandlers;
+
+/// Forcibly unlock the IOs we write to in an oops (VGA buffer and COM1 serial
+/// port) to prevent deadlocks if the oops occured while either was locked.
+///
+/// # Safety
+///
+///  /!\ only call this when oopsing!!! /!\
+///
+// TODO(eliza): when we are capable of multiprocessing, we shouldn't do
+// this until other cores that might be holding the lock are already
+// killed.
+#[inline(always)]
+unsafe fn force_unlock_writers() {
+    // If the system has a COM1, unlock it.
+    if let Some(com1) = serial::com1() {
+        com1.force_unlock();
+    }
+    // Unlock the VGA buffer.
+    vga::writer().force_unlock();
+}
 
 impl hal_core::interrupt::Handlers for InterruptHandlers {
     fn page_fault<C>(cx: C)
     where
         C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::PageFault,
     {
+        // Safety: we are crashing. Don't worry about it..
+        unsafe { force_unlock_writers() }
         tracing::error!(registers = ?cx.registers(), "page fault");
         oops(&format_args!("  PAGE FAULT\n\n{}", cx.registers()))
     }
@@ -82,6 +104,8 @@ impl hal_core::interrupt::Handlers for InterruptHandlers {
     where
         C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
     {
+        // Safety: we are crashing. Don't worry about it.
+        unsafe { force_unlock_writers() }
         tracing::error!(registers = ?cx.registers(), "code fault");
         oops(&format_args!("  CODE FAULT\n\n{}", cx.registers()))
     }
@@ -90,6 +114,8 @@ impl hal_core::interrupt::Handlers for InterruptHandlers {
     where
         C: hal_core::interrupt::ctx::Context + hal_core::interrupt::ctx::CodeFault,
     {
+        // Safety: we are crashing. Don't worry about it.
+        unsafe { force_unlock_writers() }
         tracing::error!(registers = ?cx.registers(), "double fault",);
         oops(&format_args!("  DOUBLE FAULT\n\n{}", cx.registers()))
     }
@@ -130,18 +156,14 @@ pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
 #[cold]
 pub fn oops(cause: &dyn core::fmt::Display) -> ! {
     use core::fmt::Write;
+    // Safety: we are oopsing. Don't worry about it.
+    // We may unlock writers twice, if we oopsed from an ISR, but...who cares.
+    unsafe { force_unlock_writers() }
 
+    tracing::error!(%cause, "oopsing");
     unsafe { asm!("cli" :::: "volatile") }
     let mut vga = vga::writer();
-    unsafe {
-        // forcibly unlock the mutex around the VGA buffer, to avoid deadlocking
-        // if it was already held when we oopsed.
-        //
-        // TODO(eliza): when we are capable of multiprocessing, we shouldn't do
-        // this until other cores that might be holding the lock are already
-        // killed.
-        vga.force_unlock();
-    }
+
     const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
     vga.set_color(RED_BG);
     vga.clear();
