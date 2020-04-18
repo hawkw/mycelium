@@ -180,10 +180,17 @@ impl hal_core::interrupt::Control for Idt {
             });
         }
 
+        extern "x86-interrupt" fn gpf_isr<H: Handlers>(registers: &mut Registers, code: u64) {
+            tracing::error!("lmao, a general protection fault is happening");
+            H::code_fault(Context { registers, code });
+        }
+
         self.set_isr(0x20, timer_isr::<H> as *const ());
         self.set_isr(0x21, keyboard_isr::<H> as *const ());
         self.set_isr(69, test_isr::<H> as *const ());
         self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
+
+        self.set_isr(Self::GENERAL_PROTECTION_FAULT, gpf_isr::<H> as *const ());
         self.set_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
         Ok(())
     }

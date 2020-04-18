@@ -21,4 +21,12 @@ pub mod cr3 {
         let val = addr | flags.0;
         asm!("mov $0, %cr3" :: "r"(val) : "memory");
     }
+
+    impl core::fmt::Debug for Flags {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.debug_tuple("cr3::Flags")
+                .field(&format_args!("{:#b}", self.0))
+                .finish()
+        }
+    }
 }

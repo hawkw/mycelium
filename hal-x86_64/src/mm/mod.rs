@@ -48,12 +48,15 @@ pub struct PageHandle {
     entry: *mut u64,
 }
 
+#[tracing::instrument(level = "info")]
 pub fn init_paging(vm_offset: VAddr) {
-    let span = tracing::info_span!("paging::init", ?vm_offset);
-    let _e = span.enter();
     VM_OFFSET.store(vm_offset.as_usize(), Ordering::Release);
 
     tracing::info!("initializing paging...");
+
+    let (pml4_page, flags) = crate::control_regs::cr3::read();
+    tracing::debug!(?pml4_page, ?flags);
+    tracing::trace!("old PML4:");
     let pml4 = PageTable::<level::Pml4>::current(vm_offset);
     let mut present_entries = 0;
     for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
@@ -62,6 +65,21 @@ pub fn init_paging(vm_offset: VAddr) {
             present_entries += 1;
         }
     }
+    // tracing::trace!(present_entries);
+    // let pml4_page = Page::starting_at(pml4_paddr).expect("PML4 not aligned, what the hell!");
+    // unsafe {
+    //     crate::control_regs::cr3::write(pml4_page, flags);
+    // }
+
+    // tracing::info!("new PML4 set");
+    // let pml4 = PageTable::<level::Pml4>::current(vm_offset);
+    // let mut present_entries = 0;
+    // for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
+    //     if entry.is_present() {
+    //         tracing::trace!(idx, ?entry);
+    //         present_entries += 1;
+    //     }
+    // }
     tracing::info!(present_entries);
 }
 
@@ -73,13 +91,16 @@ static VM_OFFSET: AtomicUsize = AtomicUsize::new(core::usize::MAX);
 impl PageTable<level::Pml4> {
     fn current(vm_offset: VAddr) -> &'static mut Self {
         let (phys, _) = crate::control_regs::cr3::read();
-        let pml4_paddr = phys.base_address();
+        unsafe { Self::from_pml4_page(vm_offset, phys) }
+    }
 
+    unsafe fn from_pml4_page(vm_offset: VAddr, page: Page<PAddr, Size4Kb>) -> &'static mut Self {
+        let pml4_paddr = page.base_address();
         tracing::trace!(?pml4_paddr, ?vm_offset);
 
         let virt = vm_offset + VAddr::from_usize(pml4_paddr.as_usize());
         tracing::debug!(current_pml4_vaddr = ?virt);
-        unsafe { &mut *(virt.as_ptr::<Self>() as *mut _) }
+        &mut *(virt.as_ptr::<Self>() as *mut _)
     }
 }
 
@@ -239,7 +260,7 @@ impl<R: level::Recursive> PageTable<R> {
             tracing::trace!("entry not preset");
             return None;
         }
-
+        tracing::trace!(entry=?&self.entries[idx]);
         let my_addr = self as *const _ as usize;
         let next_addr = next_table_addr(my_addr, idx);
 
@@ -252,9 +273,22 @@ impl<R: level::Recursive> PageTable<R> {
     }
 
     #[inline]
-    #[tracing::instrument(skip(self))]
+    // #[tracing::instrument(skip(self))]
     fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
-        let ptr = self.next_table_ptr(R::index_of(idx))?;
+        let span = tracing::trace_span!("next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
+        let _e = span.enter();
+        let entry = &self[idx];
+        tracing::trace!(?entry);
+        // if !entry.is_present() {
+        //     tracing::debug!("entry not present!");
+        //     return None;
+        // }
+        // if entry.is_huge() {
+        //     tracing::debug!("page is hudge!");
+        //     return None;
+        // }
+        // let ptr = self.next_table_ptr(R::index_of(idx.base_address()))?;
+        let ptr = R::Next::table_addr(idx.base_address());
         tracing::trace!(?ptr, "found next table pointer");
         Some(unsafe { &*ptr.as_ptr() })
     }
@@ -262,7 +296,11 @@ impl<R: level::Recursive> PageTable<R> {
     #[inline]
     #[tracing::instrument(skip(self))]
     fn next_table_mut<S: Size>(&mut self, idx: VirtPage<S>) -> Option<&mut PageTable<R::Next>> {
-        let ptr = self.next_table_ptr(R::index_of(idx))?;
+        let span = tracing::trace_span!("next_table_mut", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
+        let _e = span.enter();
+        // let ptr = self.next_table_ptr(R::index_of(idx.base_address()))?;
+
+        let ptr = R::Next::table_addr(idx.base_address());
         tracing::trace!(?ptr, "found next table pointer");
         Some(unsafe { &mut *ptr.as_ptr() })
     }
@@ -272,9 +310,13 @@ impl<R: level::Recursive> PageTable<R> {
         idx: VirtPage<S>,
         alloc: &mut impl page::Alloc<Size4Kb>,
     ) -> &mut PageTable<R::Next> {
-        let span = tracing::trace_span!("create_next_table", ?idx, level = %<R::Next>::NAME);
+        let span = tracing::trace_span!("create_next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
         let _e = span.enter();
-
+        for (idx, entry) in (&self.entries[..]).iter().enumerate() {
+            if entry.is_present() {
+                tracing::trace!(idx, ?entry);
+            }
+        }
         if self.next_table(idx).is_some() {
             tracing::trace!("next table already exists");
             return self
@@ -339,7 +381,7 @@ where
 {
     type Output = Entry<L>;
     fn index(&self, page: VirtPage<S>) -> &Self::Output {
-        &self.entries[L::index_of(page)]
+        &self.entries[L::index_of(page.base_address())]
     }
 }
 
@@ -350,7 +392,7 @@ where
     S: Size,
 {
     fn index_mut(&mut self, page: VirtPage<S>) -> &mut Self::Output {
-        &mut self.entries[L::index_of(page)]
+        &mut self.entries[L::index_of(page.base_address())]
     }
 }
 
@@ -522,6 +564,7 @@ impl<L: Level> fmt::Debug for Entry<L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct FmtFlags<'a, L>(&'a Entry<L>);
         impl<'a, L> fmt::Debug for FmtFlags<'a, L> {
+            #[inline(always)]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 macro_rules! write_flags {
                     ($f:expr, $e:expr, $($bit:ident),+) => {
@@ -586,16 +629,19 @@ pub mod size {
     }
 }
 
+const RECURSIVE_INDEX: usize = 0o777;
+const SIGN: usize = 0o177777 << 48;
 pub trait Level {
     const NAME: &'static str;
     const SUBLEVELS: usize;
 
     const INDEX_SHIFT: usize = 12 + (9 * Self::SUBLEVELS);
 
-    fn index_of<S: Size>(v: Page<VAddr, S>) -> usize {
-        const INDEX_MASK: usize = 0o777;
-        (v.base_address().as_usize() >> Self::INDEX_SHIFT) % 512
+    fn index_of(v: VAddr) -> usize {
+        (v.as_usize() >> Self::INDEX_SHIFT) & RECURSIVE_INDEX
     }
+
+    fn table_addr(v: VAddr) -> VAddr;
 }
 
 impl<L: Level> fmt::Debug for PageTable<L> {
@@ -609,7 +655,9 @@ impl<L: Level> fmt::Debug for PageTable<L> {
 }
 
 pub mod level {
-    use super::{size::*, Level, Size};
+    use super::{size::*, Level, Size, RECURSIVE_INDEX, SIGN};
+    use crate::VAddr;
+    use hal_core::Address;
 
     pub trait PointsToPage: Level {
         type Size: Size;
@@ -628,7 +676,16 @@ pub mod level {
     impl Level for Pml4 {
         const SUBLEVELS: usize = 3;
         const NAME: &'static str = "PML4";
+        fn table_addr(v: VAddr) -> VAddr {
+            let addr = SIGN
+                | (RECURSIVE_INDEX << 39)
+                | (RECURSIVE_INDEX << 30)
+                | (RECURSIVE_INDEX << 21)
+                | (RECURSIVE_INDEX << 12);
+            VAddr::from_usize(addr)
+        }
     }
+
     impl HoldsSize<Size1Gb> for Pml4 {}
     impl HoldsSize<Size2Mb> for Pml4 {}
     impl HoldsSize<Size4Kb> for Pml4 {}
@@ -636,6 +693,15 @@ pub mod level {
     impl Level for Pdpt {
         const SUBLEVELS: usize = 2;
         const NAME: &'static str = "PDPT";
+        fn table_addr(v: VAddr) -> VAddr {
+            let pml4_idx = Pml4::index_of(v);
+            let addr = SIGN
+                | (RECURSIVE_INDEX << 39)
+                | (RECURSIVE_INDEX << 30)
+                | (RECURSIVE_INDEX << 21)
+                | (pml4_idx << 12);
+            VAddr::from_usize(addr)
+        }
     }
     impl HoldsSize<Size1Gb> for Pdpt {}
     impl HoldsSize<Size2Mb> for Pdpt {}
@@ -659,6 +725,16 @@ pub mod level {
     impl Level for Pd {
         const NAME: &'static str = "PD";
         const SUBLEVELS: usize = 1;
+        fn table_addr(v: VAddr) -> VAddr {
+            let pml4_idx = Pml4::index_of(v);
+            let pdpt_idx = Pdpt::index_of(v);
+            let addr = SIGN
+                | (RECURSIVE_INDEX << 39)
+                | (RECURSIVE_INDEX << 30)
+                | (pml4_idx << 21)
+                | (pdpt_idx << 12);
+            VAddr::from_usize(addr)
+        }
     }
 
     impl Recursive for Pd {
@@ -677,6 +753,18 @@ pub mod level {
     impl Level for Pt {
         const NAME: &'static str = "PT";
         const SUBLEVELS: usize = 0;
+
+        fn table_addr(v: VAddr) -> VAddr {
+            let pml4_idx = Pml4::index_of(v);
+            let pdpt_idx = Pdpt::index_of(v);
+            let pd_idx = Pt::index_of(v);
+            let addr = SIGN
+                | (RECURSIVE_INDEX << 39)
+                | (pml4_idx << 30)
+                | (pdpt_idx << 21)
+                | (pd_idx << 12);
+            VAddr::from_usize(addr)
+        }
     }
 
     impl PointsToPage for Pt {
@@ -704,26 +792,39 @@ pub(crate) mod tlb {
     }
 }
 
+// mycelium_util::decl_test! {
+//     fn basic_map() -> Result<(), ()> {
+//         use hal_core::mem::page::PageFlags;
+//         let mut ctrl = PageCtrl::current();
+//         // We shouldn't need to allocate page frames for this test.
+//         let mut frame_alloc = page::EmptyAlloc::default();
+
+//         let frame = Page::containing(PAddr::from_usize(0xb8000));
+//         let page = Page::containing(VAddr::from_usize(0));
+
+//         let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
+//         flags.set_writable(true);
+//         let page = flags.commit();
+//         tracing::info!(?page, "page mapped!");
+
+//         let page_ptr = page.base_address().as_ptr::<u64>();
+//         unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
+
+//         tracing::info!("wow, it didn't fault");
+
+//         Ok(())
+//     }
+// }
+
 mycelium_util::decl_test! {
-    fn basic_map() -> Result<(), ()> {
-        use hal_core::mem::page::PageFlags;
-        let mut ctrl = PageCtrl::current();
-        // We shouldn't need to allocate page frames for this test.
-        let mut frame_alloc = page::EmptyAlloc::default();
+    fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
+        let ctrl = PageCtrl::current();
 
-        let frame = Page::containing(PAddr::from_usize(0xb8000));
-        let page = Page::containing(VAddr::from_usize(0));
+        let page = VirtPage::<Size4Kb>::containing(VAddr::from_usize(0xb8000));
 
-        let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
-        flags.set_writable(true);
-        let page = flags.commit();
-        tracing::info!(?page, "page mapped!");
-
-        let page_ptr = page.base_address().as_ptr::<u64>();
-        unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
-
-        tracing::info!("wow, it didn't fault");
-
+        let frame = ctrl.translate_page(page).expect("translate");
+        tracing::info!(?page, ?frame, "translated");
+        assert_eq!(frame.base_address().as_usize(), 0x0);
         Ok(())
     }
 }

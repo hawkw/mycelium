@@ -64,11 +64,21 @@ impl BootInfo for RustbootBootInfo {
         "rust-bootloader"
     }
 
-    fn phys_mem_offset(&self) -> VAddr {
-        let phys_offset = VAddr::from_u64(self.inner.physical_memory_offset);
-        let recursive_table = VAddr::from_u64(self.inner.recursive_page_table_addr);
-        tracing::info!(?phys_offset, ?recursive_table);
-        phys_offset
+    fn init_paging(&self) {
+        mm::init_paging(self.vm_offset())
+    }
+}
+
+impl RustbootBootInfo {
+    fn vm_offset(&self) -> VAddr {
+        let vm_offset = VAddr::from_u64(self.inner.physical_memory_offset);
+        // let recursive_table = VAddr::from_u64(self.inner.recursive_page_table_addr);
+        // tracing::info!(?phys_offset, ?recursive_table);
+        vm_offset
+    }
+
+    fn pml4_paddr(&self) -> PAddr {
+        PAddr::from_u64(self.inner.recursive_page_table_addr)
     }
 }
 
