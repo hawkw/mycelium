@@ -123,6 +123,12 @@ impl Port {
         }
     }
 
+    /// Forcibly unlock the serial port, releasing any locks held by other cores
+    /// or in other functions.
+    ///
+    /// # Safety
+    ///
+    /// Don't.
     pub unsafe fn force_unlock(&self) {
         self.inner.force_unlock();
     }
