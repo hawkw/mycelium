@@ -65,7 +65,7 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn init_paging(&self) {
-        mm::init_paging(self.vm_offset())
+        mm::init_paging(self.vm_offset(), self.pml4_vaddr())
     }
 }
 
@@ -77,8 +77,8 @@ impl RustbootBootInfo {
         vm_offset
     }
 
-    fn pml4_paddr(&self) -> PAddr {
-        PAddr::from_u64(self.inner.recursive_page_table_addr)
+    fn pml4_vaddr(&self) -> VAddr {
+        VAddr::from_u64(self.inner.recursive_page_table_addr)
     }
 }
 

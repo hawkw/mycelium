@@ -49,7 +49,7 @@ pub struct PageHandle {
 }
 
 #[tracing::instrument(level = "info")]
-pub fn init_paging(vm_offset: VAddr) {
+pub fn init_paging(vm_offset: VAddr, recursive_addr: VAddr) {
     VM_OFFSET.store(vm_offset.as_usize(), Ordering::Release);
 
     tracing::info!("initializing paging...");
@@ -65,22 +65,27 @@ pub fn init_paging(vm_offset: VAddr) {
             present_entries += 1;
         }
     }
-    // tracing::trace!(present_entries);
-    // let pml4_page = Page::starting_at(pml4_paddr).expect("PML4 not aligned, what the hell!");
-    // unsafe {
-    //     crate::control_regs::cr3::write(pml4_page, flags);
-    // }
+    tracing::trace!(present_entries);
+    let pml4_paddr = PAddr::from_usize((vm_offset - recursive_addr).as_usize());
+    tracing::debug!(?pml4_paddr);
 
-    // tracing::info!("new PML4 set");
-    // let pml4 = PageTable::<level::Pml4>::current(vm_offset);
-    // let mut present_entries = 0;
-    // for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
-    //     if entry.is_present() {
-    //         tracing::trace!(idx, ?entry);
-    //         present_entries += 1;
-    //     }
-    // }
+    let pml4_page =
+        Page::<PAddr, Size4Kb>::starting_at(pml4_paddr).expect("PML4 not aligned, what the hell!");
+    let pml4_2 = unsafe { &mut *recursive_addr.as_ptr::<PageTable<level::Pml4>>() };
+    tracing::debug!("dereferenced pml4");
+    let mut present_entries = 0;
+    for (idx, entry) in (&pml4_2.entries[..]).iter().enumerate() {
+        // if entry.is_present() {
+        tracing::trace!(idx, ?entry);
+        //     present_entries += 1;
+        // }
+    }
     tracing::info!(present_entries);
+    unsafe {
+        crate::control_regs::cr3::write(pml4_page, flags);
+    }
+
+    tracing::info!("new PML4 set");
 }
 
 /// This value should only be set once, early in the kernel boot process before
@@ -93,7 +98,6 @@ impl PageTable<level::Pml4> {
         let (phys, _) = crate::control_regs::cr3::read();
         unsafe { Self::from_pml4_page(vm_offset, phys) }
     }
-
     unsafe fn from_pml4_page(vm_offset: VAddr, page: Page<PAddr, Size4Kb>) -> &'static mut Self {
         let pml4_paddr = page.base_address();
         tracing::trace!(?pml4_paddr, ?vm_offset);

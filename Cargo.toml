@@ -27,7 +27,7 @@ mycelium-alloc = { path = "alloc" }
 mycelium-util = { path = "util" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-bootloader = {version = "0.9.0", features = ["map_physical_memory", "recursive_page_table"] }
+bootloader = {version = "0.9.1", features = ["map_physical_memory", "recursive_page_table"] }
 hal-x86_64 = { path = "hal-x86_64" }
 
 [dependencies.tracing]
