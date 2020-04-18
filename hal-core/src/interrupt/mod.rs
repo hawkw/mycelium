@@ -5,6 +5,8 @@ pub use self::ctx::Context;
 
 /// An interrupt controller for a platform.
 pub trait Control {
+    type Registers: fmt::Debug + fmt::Display;
+
     /// Disable all interrupts.
     ///
     /// # Safety
@@ -27,7 +29,7 @@ pub trait Control {
 
     fn register_handlers<H>(&mut self) -> Result<(), RegistrationError>
     where
-        H: Handlers;
+        H: Handlers<Self::Registers>;
 
     /// Enter a critical section, returning a guard.
     fn enter_critical(&mut self) -> CriticalGuard<'_, Self> {
@@ -38,19 +40,19 @@ pub trait Control {
     }
 }
 
-pub trait Handlers {
+pub trait Handlers<R: fmt::Debug + fmt::Display> {
     fn page_fault<C>(cx: C)
     where
-        C: ctx::Context + ctx::PageFault;
+        C: ctx::Context<Registers = R> + ctx::PageFault;
 
     fn code_fault<C>(cx: C)
     where
-        C: ctx::Context + ctx::CodeFault;
+        C: ctx::Context<Registers = R> + ctx::CodeFault;
 
     #[inline(always)]
     fn double_fault<C>(cx: C)
     where
-        C: ctx::Context + ctx::CodeFault,
+        C: ctx::Context<Registers = R> + ctx::CodeFault,
     {
         Self::code_fault(cx)
     }
@@ -61,7 +63,7 @@ pub trait Handlers {
 
     fn test_interrupt<C>(_cx: C)
     where
-        C: ctx::Context,
+        C: ctx::Context<Registers = R>,
     {
         // nop
     }
