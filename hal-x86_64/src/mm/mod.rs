@@ -49,7 +49,7 @@ pub struct PageHandle {
 }
 
 #[tracing::instrument(level = "info")]
-pub fn init_paging(vm_offset: VAddr, recursive_addr: VAddr) {
+pub fn init_paging(vm_offset: VAddr) {
     VM_OFFSET.store(vm_offset.as_usize(), Ordering::Release);
 
     tracing::info!("initializing paging...");
@@ -58,6 +58,8 @@ pub fn init_paging(vm_offset: VAddr, recursive_addr: VAddr) {
     tracing::debug!(?pml4_page, ?flags);
     tracing::trace!("old PML4:");
     let pml4 = PageTable::<level::Pml4>::current(vm_offset);
+
+    // Log out some details about our starting page table.
     let mut present_entries = 0;
     for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
         if entry.is_present() {
@@ -66,26 +68,33 @@ pub fn init_paging(vm_offset: VAddr, recursive_addr: VAddr) {
         }
     }
     tracing::trace!(present_entries);
-    let pml4_paddr = PAddr::from_usize((vm_offset - recursive_addr).as_usize());
-    tracing::debug!(?pml4_paddr);
 
-    let pml4_page =
-        Page::<PAddr, Size4Kb>::starting_at(pml4_paddr).expect("PML4 not aligned, what the hell!");
-    let pml4_2 = unsafe { &mut *recursive_addr.as_ptr::<PageTable<level::Pml4>>() };
-    tracing::debug!("dereferenced pml4");
-    let mut present_entries = 0;
-    for (idx, entry) in (&pml4_2.entries[..]).iter().enumerate() {
-        // if entry.is_present() {
-        tracing::trace!(idx, ?entry);
-        //     present_entries += 1;
-        // }
-    }
-    tracing::info!(present_entries);
+    // Create the recursive pagetable entry.
+    assert!(
+        !pml4.entries[RECURSIVE_INDEX].is_present(),
+        "bootloader must not have used entry 511"
+    );
+    pml4.entries[RECURSIVE_INDEX]
+        .set_present(true)
+        .set_writable(true)
+        .set_phys_addr(pml4_page.base_address());
+    tracing::info!("recursive entry created");
+
+    // Forcibly flush the entire TLB by resetting cr3.
     unsafe {
         crate::control_regs::cr3::write(pml4_page, flags);
     }
-
     tracing::info!("new PML4 set");
+
+    // Log out some details about our starting page table.
+    let mut present_entries = 0;
+    for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
+        if entry.is_present() {
+            tracing::trace!(idx, ?entry);
+            present_entries += 1;
+        }
+    }
+    tracing::trace!(present_entries);
 }
 
 /// This value should only be set once, early in the kernel boot process before
@@ -280,17 +289,18 @@ impl<R: level::Recursive> PageTable<R> {
     // #[tracing::instrument(skip(self))]
     fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
         let span = tracing::trace_span!("next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
+        tracing::trace!("self = {:?}", &self as *const _);
         let _e = span.enter();
         let entry = &self[idx];
         tracing::trace!(?entry);
-        // if !entry.is_present() {
-        //     tracing::debug!("entry not present!");
-        //     return None;
-        // }
-        // if entry.is_huge() {
-        //     tracing::debug!("page is hudge!");
-        //     return None;
-        // }
+        if !entry.is_present() {
+            tracing::debug!("entry not present!");
+            return None;
+        }
+        if entry.is_huge() {
+            tracing::debug!("page is hudge!");
+            return None;
+        }
         // let ptr = self.next_table_ptr(R::index_of(idx.base_address()))?;
         let ptr = R::Next::table_addr(idx.base_address());
         tracing::trace!(?ptr, "found next table pointer");
@@ -686,6 +696,7 @@ pub mod level {
                 | (RECURSIVE_INDEX << 30)
                 | (RECURSIVE_INDEX << 21)
                 | (RECURSIVE_INDEX << 12);
+            tracing::trace!(?v);
             VAddr::from_usize(addr)
         }
     }
@@ -704,6 +715,7 @@ pub mod level {
                 | (RECURSIVE_INDEX << 30)
                 | (RECURSIVE_INDEX << 21)
                 | (pml4_idx << 12);
+            tracing::trace!(?v, ?pml4_idx);
             VAddr::from_usize(addr)
         }
     }
@@ -737,6 +749,7 @@ pub mod level {
                 | (RECURSIVE_INDEX << 30)
                 | (pml4_idx << 21)
                 | (pdpt_idx << 12);
+            tracing::trace!(?v, ?pml4_idx, ?pdpt_idx);
             VAddr::from_usize(addr)
         }
     }
@@ -767,6 +780,7 @@ pub mod level {
                 | (pml4_idx << 30)
                 | (pdpt_idx << 21)
                 | (pd_idx << 12);
+            tracing::trace!(?v, ?pml4_idx, ?pdpt_idx, ?pd_idx);
             VAddr::from_usize(addr)
         }
     }
