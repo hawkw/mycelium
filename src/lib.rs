@@ -162,7 +162,7 @@ fn panic(panic: &core::panic::PanicInfo) -> ! {
     let caller = core::panic::Location::caller();
     tracing::error!(%panic, ?caller);
     let pp = PrettyPanic(panic);
-    arch::oops(&pp)
+    arch::oops(&pp, None)
 }
 
 #[cfg(all(test, not(target_os = "none")))]

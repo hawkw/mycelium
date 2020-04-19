@@ -48,9 +48,10 @@ impl CascadedPic {
 }
 
 impl hal_core::interrupt::Control for CascadedPic {
+    type Registers = super::Registers;
     fn register_handlers<H>(&mut self) -> Result<(), hal_core::interrupt::RegistrationError>
     where
-        H: Handlers,
+        H: Handlers<super::Registers>,
     {
         Err(RegistrationError::other(
             "x86_64 handlers must be registered via the IDT, not to the PIC interrupt component",
