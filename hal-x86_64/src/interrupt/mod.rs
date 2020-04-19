@@ -18,6 +18,13 @@ pub struct Context<'a, T = ()> {
 
 pub type ErrorCode = u64;
 
+pub struct CodeFault {
+    pub name: &'static str,
+    pub mnemonic: &'static str,
+    pub kind: ctx::CodeFaultKind,
+    _p: (),
+}
+
 /// An interrupt service routine.
 pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 
@@ -109,6 +116,28 @@ impl<'a> ctx::CodeFault for Context<'a, ErrorCode> {
     fn instruction_ptr(&self) -> crate::VAddr {
         self.registers.instruction_ptr
     }
+
+    fn kind(&self) -> ctx::CodeFaultKind {
+        ctx::CodeFaultKind::Other("TODO(eliza): fix me")
+    }
+}
+
+impl<'a> ctx::CodeFault for Context<'a, &'static CodeFault> {
+    fn is_user_mode(&self) -> bool {
+        false // TODO(eliza)
+    }
+
+    fn instruction_ptr(&self) -> crate::VAddr {
+        self.registers.instruction_ptr
+    }
+
+    fn details(&self) -> Option<&dyn fmt::Display> {
+        Some(&self.code)
+    }
+
+    fn kind(&self) -> ctx::CodeFaultKind {
+        self.code.kind
+    }
 }
 
 impl<'a> Context<'a, ErrorCode> {
@@ -146,6 +175,22 @@ impl hal_core::interrupt::Control for Idt {
         let span = tracing::debug_span!("Idt::register_handlers");
         let _enter = span.enter();
 
+        macro_rules! code_faults {
+            ($($isr:ident { name: $name:expr, mnemonic: $mn:expr, kind: $kind:expr $(,)? });+ $(;)?) => {
+                $(
+                    extern "x86-interrupt" fn $isr<H: Handlers<Registers>>(registers: &mut Registers) {
+                        static FAULT_DETAILS: CodeFault = CodeFault {
+                            name: $name,
+                            mnemonic: $mn,
+                            kind: $kind,
+                            _p: (),
+                        };
+                        H::code_fault(Context { registers, code: &FAULT_DETAILS })
+                    }
+                )+
+            }
+        }
+
         extern "x86-interrupt" fn page_fault_isr<H: Handlers<Registers>>(
             registers: &mut Registers,
             code: PageFaultCode,
@@ -181,11 +226,47 @@ impl hal_core::interrupt::Control for Idt {
             });
         }
 
+        code_faults! {
+            div_zero_isr {
+                name: "Divide-by-zero Error",
+                mnemonic: "#DE",
+                kind: ctx::CodeFaultKind::Division,
+            };
+            overflow_isr {
+                name: "Overflow",
+                mnemonic: "#OF",
+                kind: ctx::CodeFaultKind::Overflow,
+            };
+            invalid_opcode_isr {
+                name: "Invalid Opcode",
+                mnemonic: "#UD",
+                kind: ctx::CodeFaultKind::InvalidInstruction,
+            };
+            bound_exceeded_isr {
+                name: "Bound Range Exceeded",
+                mnemonic: "#BR",
+                kind: ctx::CodeFaultKind::Other("index out of bounds"),
+            };
+            alignment_check_isr {
+                name: "Alignment Check",
+                mnemonic: "#AC",
+                kind: ctx::CodeFaultKind::Alignment,
+            };
+        }
+
         self.set_isr(0x20, timer_isr::<H> as *const ());
         self.set_isr(0x21, keyboard_isr::<H> as *const ());
         self.set_isr(69, test_isr::<H> as *const ());
         self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
         self.set_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
+        self.set_isr(Self::DIVIDE_BY_ZERO, div_zero_isr::<H> as *const ());
+        self.set_isr(Self::INVALID_OPCODE, invalid_opcode_isr::<H> as *const ());
+        self.set_isr(Self::OVERFLOW, overflow_isr::<H> as *const ());
+        self.set_isr(
+            Self::BOUND_RANGE_EXCEEDED,
+            bound_exceeded_isr::<H> as *const (),
+        );
+        self.set_isr(Self::ALIGNMENT_CHECK, alignment_check_isr::<H> as *const ());
         Ok(())
     }
 }
@@ -210,6 +291,22 @@ impl fmt::Display for Registers {
         writeln!(f, "  rsp:   {:?}", self.stack_ptr)?;
         writeln!(f, "  ss:    {:?}", self.stack_segment)?;
         Ok(())
+    }
+}
+
+impl fmt::Debug for CodeFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CodeFault")
+            .field("kind", &self.kind)
+            .field("name", &self.name)
+            .field("fault", &format_args!("{}", self.mnemonic))
+            .finish()
+    }
+}
+
+impl fmt::Display for CodeFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.name, f)
     }
 }
 

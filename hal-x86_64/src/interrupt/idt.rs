@@ -246,8 +246,6 @@ mod tests {
 
     #[test]
     fn idt_entry_is_correct() {
-        use core::mem::size_of;
-
         let mut idt_entry = Descriptor::null();
         idt_entry.set_handler(0x12348765_abcdfdec as *const ());
 

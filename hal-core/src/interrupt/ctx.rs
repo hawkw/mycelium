@@ -23,8 +23,13 @@ pub trait PageFault: Context {
 pub trait CodeFault: Context {
     fn is_user_mode(&self) -> bool;
     fn instruction_ptr(&self) -> VAddr;
+    fn details(&self) -> Option<&dyn fmt::Display> {
+        None
+    }
+    fn kind(&self) -> CodeFaultKind;
 }
 
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
 #[non_exhaustive]
 pub enum CodeFaultKind {
     /// The code fault was a division by zero.
