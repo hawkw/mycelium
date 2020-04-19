@@ -810,29 +810,29 @@ pub(crate) mod tlb {
     }
 }
 
-// mycelium_util::decl_test! {
-//     fn basic_map() -> Result<(), ()> {
-//         use hal_core::mem::page::PageFlags;
-//         let mut ctrl = PageCtrl::current();
-//         // We shouldn't need to allocate page frames for this test.
-//         let mut frame_alloc = page::EmptyAlloc::default();
+mycelium_util::decl_test! {
+    fn basic_map() -> Result<(), ()> {
+        use hal_core::mem::page::PageFlags;
+        let mut ctrl = PageCtrl::current();
+        // We shouldn't need to allocate page frames for this test.
+        let mut frame_alloc = page::EmptyAlloc::default();
 
-//         let frame = Page::containing(PAddr::from_usize(0xb8000));
-//         let page = Page::containing(VAddr::from_usize(0));
+        let frame = Page::containing(PAddr::from_usize(0xb8000));
+        let page = Page::containing(VAddr::from_usize(0));
 
-//         let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
-//         flags.set_writable(true);
-//         let page = flags.commit();
-//         tracing::info!(?page, "page mapped!");
+        let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
+        flags.set_writable(true);
+        let page = flags.commit();
+        tracing::info!(?page, "page mapped!");
 
-//         let page_ptr = page.base_address().as_ptr::<u64>();
-//         unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
+        let page_ptr = page.base_address().as_ptr::<u64>();
+        unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
 
-//         tracing::info!("wow, it didn't fault");
+        tracing::info!("wow, it didn't fault");
 
-//         Ok(())
-//     }
-// }
+        Ok(())
+    }
+}
 
 mycelium_util::decl_test! {
     fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
