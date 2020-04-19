@@ -774,7 +774,7 @@ pub mod level {
         fn table_addr(v: VAddr) -> VAddr {
             let pml4_idx = Pml4::index_of(v);
             let pdpt_idx = Pdpt::index_of(v);
-            let pd_idx = Pt::index_of(v);
+            let pd_idx = Pd::index_of(v);
             let addr = SIGN
                 | (RECURSIVE_INDEX << 39)
                 | (pml4_idx << 30)
