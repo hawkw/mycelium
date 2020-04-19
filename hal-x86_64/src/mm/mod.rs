@@ -841,8 +841,9 @@ mycelium_util::decl_test! {
         let page = VirtPage::<Size4Kb>::containing(VAddr::from_usize(0xb8000));
 
         let frame = ctrl.translate_page(page).expect("translate");
+        let actual_frame = PhysPage::<Size4Kb>::containing(PAddr::from_usize(0xb8000));
         tracing::info!(?page, ?frame, "translated");
-        assert_eq!(frame.base_address().as_usize(), 0x0);
+        assert_eq!(frame, actual_frame, "identity mapped address should translate to itself");
         Ok(())
     }
 }
