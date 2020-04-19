@@ -4,13 +4,12 @@ use core::{
     fmt,
     marker::PhantomData,
     ops,
-    ptr::{self, NonNull},
+    ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
 use hal_core::{
     mem::page::{
-        self, Map, Page, PageFlags, Size, TranslateAddr, TranslateError, TranslatePage,
-        TranslateResult,
+        self, Map, Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult,
     },
     Address,
 };
@@ -24,7 +23,7 @@ pub struct PageCtrl {
     pml4: NonNull<PageTable<level::Pml4>>,
 }
 
-#[must_use = "page table changes must be flushed"]
+#[must_use = "page table updates will not be reflected until the changed pages are flushed from the TLB"]
 pub struct Handle<'a, L: level::PointsToPage> {
     page: Page<VAddr, L::Size>,
     entry: &'a mut Entry<L>,
@@ -42,10 +41,6 @@ pub struct PageTable<L> {
 pub struct Entry<L> {
     entry: u64,
     _level: PhantomData<L>,
-}
-#[must_use = "page table updates will not be reflected until the changed pages are flushed from the TLB"]
-pub struct PageHandle {
-    entry: *mut u64,
 }
 
 #[tracing::instrument(level = "info")]
@@ -159,7 +154,7 @@ where
         Handle { entry, page: virt }
     }
 
-    fn flags_mut(&'mapper mut self, virt: Page<VAddr, Size4Kb>) -> Self::Handle {
+    fn flags_mut(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Self::Handle {
         unimplemented!()
     }
 
@@ -171,7 +166,7 @@ where
     /// # Panics
     ///
     /// - If the virtual page was not mapped.
-    fn unmap(&'mapper mut self, virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
+    fn unmap(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
         unimplemented!()
     }
 }
@@ -249,47 +244,33 @@ impl TranslatePage<Size4Kb> for PageTable<level::Pt> {
 }
 
 impl TranslateAddr for PageTable<level::Pml4> {
-    fn translate_addr(&self, virt: VAddr) -> Option<PAddr> {
+    fn translate_addr(&self, _virt: VAddr) -> Option<PAddr> {
         unimplemented!()
     }
 }
 
 impl TranslateAddr for PageTable<level::Pdpt> {
-    fn translate_addr(&self, virt: VAddr) -> Option<PAddr> {
+    fn translate_addr(&self, _virt: VAddr) -> Option<PAddr> {
         unimplemented!()
     }
 }
-// this is factored out so we can unit test it using `usize`s without having to
-// construct page tables in memory.
-#[inline(always)]
-fn next_table_addr(my_addr: usize, idx: usize) -> usize {
-    (my_addr << 9) | (idx << 12)
-}
+// // this is factored out so we can unit test it using `usize`s without having to
+// // construct page tables in memory.
+// #[inline(always)]
+// fn next_table_addr(my_addr: usize, idx: usize) -> usize {
+//     (my_addr << 9) | (idx << 12)
+// }
 
 impl<R: level::Recursive> PageTable<R> {
-    fn next_table_ptr(&self, idx: usize) -> Option<NonNull<PageTable<R::Next>>> {
-        tracing::trace!(idx, "trying to get entry for next table");
-        if !self.entries[idx].is_present() {
-            tracing::trace!("entry not preset");
-            return None;
-        }
-        tracing::trace!(entry=?&self.entries[idx]);
-        let my_addr = self as *const _ as usize;
-        let next_addr = next_table_addr(my_addr, idx);
-
-        tracing::trace!(my_addr=%format_args!("{:x}", my_addr), next_addr=%format_args!("{:x}", next_addr));
-        unsafe {
-            let ptr = next_addr as *mut _;
-            // we constructed this address & know it won't be null.
-            Some(NonNull::new_unchecked(ptr))
-        }
-    }
-
-    #[inline]
-    // #[tracing::instrument(skip(self))]
-    fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
-        let span = tracing::trace_span!("next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
-        tracing::trace!("self = {:?}", &self as *const _);
+    #[inline(always)]
+    fn next_table_ptr<S: Size>(&self, idx: VirtPage<S>) -> Option<NonNull<PageTable<R::Next>>> {
+        let span = tracing::debug_span!(
+            "next_table_ptr",
+            ?idx,
+            self.level = %R::NAME,
+            next.level = %<R::Next>::NAME,
+            self.addr = ?&self as *const _,
+        );
         let _e = span.enter();
         let entry = &self[idx];
         tracing::trace!(?entry);
@@ -297,26 +278,30 @@ impl<R: level::Recursive> PageTable<R> {
             tracing::debug!("entry not present!");
             return None;
         }
+        // XXX(eliza): should we have a different return type to distinguish
+        // between "the entry is huge, so you stop the page table walk" and "the entry is not
+        // present"? we definitely should...
         if entry.is_huge() {
             tracing::debug!("page is hudge!");
             return None;
         }
-        // let ptr = self.next_table_ptr(R::index_of(idx.base_address()))?;
-        let ptr = R::Next::table_addr(idx.base_address());
-        tracing::trace!(?ptr, "found next table pointer");
-        Some(unsafe { &*ptr.as_ptr() })
+        let vaddr = R::Next::table_addr(idx.base_address());
+        tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
+        // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
+        // all this, the next table address is null...we're probably pretty fucked!
+        NonNull::new(vaddr.as_ptr())
+    }
+
+    #[inline]
+    // #[tracing::instrument(skip(self))]
+    fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
+        Some(unsafe { &*self.next_table_ptr(idx)?.as_ptr() })
     }
 
     #[inline]
     #[tracing::instrument(skip(self))]
     fn next_table_mut<S: Size>(&mut self, idx: VirtPage<S>) -> Option<&mut PageTable<R::Next>> {
-        let span = tracing::trace_span!("next_table_mut", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
-        let _e = span.enter();
-        // let ptr = self.next_table_ptr(R::index_of(idx.base_address()))?;
-
-        let ptr = R::Next::table_addr(idx.base_address());
-        tracing::trace!(?ptr, "found next table pointer");
-        Some(unsafe { &mut *ptr.as_ptr() })
+        Some(unsafe { &mut *self.next_table_ptr(idx)?.as_ptr() })
     }
 
     fn create_next_table<S: Size>(
@@ -352,7 +337,7 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!("trying to allocate page table frame...");
         let frame = match alloc.alloc() {
             Ok(frame) => frame,
-            Err(e) => panic!(
+            Err(_) => panic!(
                 "cannot create {} table for {:?}: allocation failed!",
                 <R::Next>::NAME,
                 idx,
@@ -390,7 +375,6 @@ impl<L: Level> PageTable<L> {
 impl<L, S> ops::Index<VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    // L: level::HoldsSize<S>,
     S: Size,
 {
     type Output = Entry<L>;
@@ -402,7 +386,6 @@ where
 impl<L, S> ops::IndexMut<VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    // L: level::HoldsSize<S>,
     S: Size,
 {
     fn index_mut(&mut self, page: VirtPage<S>) -> &mut Self::Output {
@@ -413,7 +396,6 @@ where
 impl<'a, L, S> ops::Index<&'a VirtPage<S>> for PageTable<L>
 where
     L: Level,
-    // L: level::HoldsSize<S>,
     S: Size,
 {
     type Output = Entry<L>;
@@ -482,6 +464,7 @@ impl<L> Entry<L> {
         self
     }
 
+    #[allow(dead_code)] // we'll need this later
     fn set_huge(&mut self, huge: bool) -> &mut Self {
         if huge {
             self.entry |= Self::HUGE;
@@ -586,7 +569,11 @@ impl<L: Level> fmt::Debug for Entry<L> {
                         $(
                             if $e & Entry::<L>::$bit != 0 {
                                 write!($f, "{}{}", if wrote_any { " | " } else { "" }, stringify!($bit))?;
-                                wrote_any = true;
+                                // the last one is not used but we can't tell the macro that easily.
+                                #[allow(unused_assignments)]
+                                {
+                                    wrote_any = true;
+                                }
                             }
                         )+
                     }
@@ -797,6 +784,7 @@ pub(crate) mod tlb {
     use crate::VAddr;
     use hal_core::Address;
 
+    #[allow(dead_code)] // we'll need this later
     pub(crate) unsafe fn flush_all() {
         let (pml4_paddr, flags) = cr3::read();
         cr3::write(pml4_paddr, flags);
@@ -848,22 +836,22 @@ mycelium_util::decl_test! {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    #[test]
-    fn next_table_addr_calc() {
-        let pml4_addr = 0o177777_777_777_777_777_0000;
-        let pml4_idx = 0o111;
-        let pdpt_addr = next_table_addr(pml4_addr, pml4_idx);
-        assert_eq!(pdpt_addr, 0o177777_777_777_777_111_0000);
+// #[cfg(test)]
+// mod test {
+//     use super::*;
+//     #[test]
+//     fn next_table_addr_calc() {
+//         let pml4_addr = 0o177777_777_777_777_777_0000;
+//         let pml4_idx = 0o111;
+//         let pdpt_addr = next_table_addr(pml4_addr, pml4_idx);
+//         assert_eq!(pdpt_addr, 0o177777_777_777_777_111_0000);
 
-        let pdpt_idx = 0o222;
-        let pd_addr = next_table_addr(pdpt_addr, pdpt_idx);
-        assert_eq!(pd_addr, 0o177777_777_777_111_222_0000);
+//         let pdpt_idx = 0o222;
+//         let pd_addr = next_table_addr(pdpt_addr, pdpt_idx);
+//         assert_eq!(pd_addr, 0o177777_777_777_111_222_0000);
 
-        let pt_idx = 0o333;
-        let pt_addr = next_table_addr(pd_addr, pt_idx);
-        assert_eq!(pt_addr, 0o177777_777_111_222_333_0000);
-    }
-}
+//         let pt_idx = 0o333;
+//         let pt_addr = next_table_addr(pd_addr, pt_idx);
+//         assert_eq!(pt_addr, 0o177777_777_111_222_333_0000);
+//     }
+// }
