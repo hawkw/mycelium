@@ -190,7 +190,9 @@ where
     PageTable<level::Pdpt>: TranslatePage<S>,
 {
     fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S> {
-        self.next_table(virt)?.translate_page(virt)
+        self.next_table(virt)
+            .ok_or(TranslateError::NotMapped)?
+            .translate_page(virt)
     }
 }
 
@@ -202,13 +204,17 @@ impl TranslatePage<Size1Gb> for PageTable<level::Pdpt> {
 
 impl TranslatePage<Size2Mb> for PageTable<level::Pdpt> {
     fn translate_page(&self, virt: Page<VAddr, Size2Mb>) -> TranslateResult<PAddr, Size2Mb> {
-        self.next_table(virt)?.translate_page(virt)
+        self.next_table(virt)
+            .ok_or(TranslateError::NotMapped)?
+            .translate_page(virt)
     }
 }
 
 impl TranslatePage<Size4Kb> for PageTable<level::Pdpt> {
     fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
-        self.next_table(virt)?.translate_page(virt)
+        self.next_table(virt)
+            .ok_or(TranslateError::NotMapped)?
+            .translate_page(virt)
     }
 }
 
@@ -220,7 +226,9 @@ impl TranslatePage<Size2Mb> for PageTable<level::Pd> {
 
 impl TranslatePage<Size4Kb> for PageTable<level::Pd> {
     fn translate_page(&self, virt: Page<VAddr, Size4Kb>) -> TranslateResult<PAddr, Size4Kb> {
-        self.next_table(virt)?.translate_page(virt)
+        self.next_table(virt)
+            .ok_or(TranslateError::NotMapped)?
+            .translate_page(virt)
     }
 }
 

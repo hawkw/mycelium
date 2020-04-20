@@ -369,12 +369,6 @@ impl<S: Size> From<&'static str> for TranslateError<S> {
     }
 }
 
-impl<S: Size> From<core::option::NoneError> for TranslateError<S> {
-    fn from(_err: core::option::NoneError) -> Self {
-        TranslateError::NotMapped
-    }
-}
-
 impl<S: Size> fmt::Debug for TranslateError<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
