@@ -71,10 +71,7 @@ impl BootInfo for RustbootBootInfo {
 
 impl RustbootBootInfo {
     fn vm_offset(&self) -> VAddr {
-        let vm_offset = VAddr::from_u64(self.inner.physical_memory_offset);
-        // let recursive_table = VAddr::from_u64(self.inner.recursive_page_table_addr);
-        // tracing::info!(?phys_offset, ?recursive_table);
-        vm_offset
+        VAddr::from_u64(self.inner.physical_memory_offset)
     }
 }
 
