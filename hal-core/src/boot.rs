@@ -22,8 +22,6 @@ pub trait BootInfo {
     }
 
     fn init_paging(&self);
-    // XXX(eliza): is this generic enough???
-    // fn phys_mem_offset(&self) -> crate::VAddr;
 
     // TODO(eliza): figure out a non-bad way to represent boot command lines (is
     // it reasonable to convert them to rust strs when we barely have an operating

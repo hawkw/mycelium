@@ -117,7 +117,6 @@ where
     A: page::Alloc<Size4Kb>,
 {
     type Handle = Handle<'mapper, level::Pt>;
-    // type Handle =
     /// Map the virtual memory page represented by `virt` to the physical page
     /// represented bt `phys`.
     ///
@@ -543,6 +542,17 @@ impl<'a, L: level::PointsToPage> page::PageFlags<L::Size> for Handle<'a, L> {
         self
     }
 
+    #[inline]
+    fn is_present(&self) -> bool {
+        self.entry.is_present()
+    }
+
+    #[inline]
+    fn set_present(&mut self, present: bool) -> &mut Self {
+        self.entry.set_present(present);
+        self
+    }
+
     fn commit(self) -> Page<VAddr, L::Size> {
         unsafe {
             tlb::flush_page(self.page.base_address());
@@ -644,7 +654,6 @@ impl<L: Level> fmt::Debug for PageTable<L> {
         f.debug_struct("PageTable")
             .field("level", &format_args!("{}", L::NAME))
             .field("addr", &format_args!("{:p}", self))
-            // .field("entries", &self.entries)
             .finish()
     }
 }

@@ -107,12 +107,11 @@ pub trait TranslateAddr {
 pub trait PageFlags<S: Size> {
     fn set_writable(&mut self, writable: bool) -> &mut Self;
     fn set_executable(&mut self, executable: bool) -> &mut Self;
-
-    // fn set_present(&mut self, present: bool) -> &mut Self;
+    fn set_present(&mut self, present: bool) -> &mut Self;
 
     fn is_writable(&self) -> bool;
     fn is_executable(&self) -> bool;
-    // fn is_present(&self) -> bool;
+    fn is_present(&self) -> bool;
 
     fn commit(self) -> Page<VAddr, S>;
 }
