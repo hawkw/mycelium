@@ -68,7 +68,24 @@ where
     ///
     /// - If the physical address is invalid.
     /// - If the page is already mapped.
-    fn map_page(
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page mappings may be used to violate Rust invariants
+    /// in a variety of exciting ways. For example, aliasing a physical page by
+    /// mapping multiple virtual pages to it and setting one or more of those
+    /// virtual pages as writable may result in undefined behavior.
+    ///
+    /// Some rules of thumb:
+    ///
+    /// - Ensure that the writable XOR executable rule is not violated (by
+    ///   making a page both writable and executable).
+    /// - Don't alias stack pages onto the heap or vice versa.
+    /// - If loading arbitrary code into executable pages, ensure that this code
+    ///   is trusted and will not violate the kernel's invariants.
+    ///
+    /// Good luck and have fun!
+    unsafe fn map_page(
         &'mapper mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
@@ -85,14 +102,19 @@ where
     /// # Panics
     ///
     /// - If the virtual page was not mapped.
-    fn unmap(&'mapper mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page mappings may be used to violate Rust invariants
+    /// in a variety of exciting ways.
+    unsafe fn unmap(&'mapper mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
 
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
     fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
         let base_paddr = phys.base_address().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr));
-        self.map_page(virt, phys, frame_alloc)
+        unsafe { self.map_page(virt, phys, frame_alloc) }
     }
 }
 
@@ -105,9 +127,33 @@ pub trait TranslateAddr {
 }
 
 pub trait PageFlags<S: Size> {
-    fn set_writable(&mut self, writable: bool) -> &mut Self;
-    fn set_executable(&mut self, executable: bool) -> &mut Self;
-    fn set_present(&mut self, present: bool) -> &mut Self;
+    /// Set whether or not this page is writable.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    /// Using `set_writable` to make memory that the Rust compiler expects to be
+    /// read-only may cause undefined behavior. Making a page which is aliased
+    /// page table (i.e. it has multiple page table entries pointing to it) may
+    /// also cause undefined behavior.
+    unsafe fn set_writable(&mut self, writable: bool) -> &mut Self;
+
+    /// Set whether or not this page is executable.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    /// Using `set_executable` to make writable memory executable may cause
+    /// undefined behavior. Also, this can be used to execute the contents of
+    /// arbitrary memory, which (of course) is wildly unsafe.
+    unsafe fn set_executable(&mut self, executable: bool) -> &mut Self;
+
+    /// Set whether or not this page is present.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    unsafe fn set_present(&mut self, present: bool) -> &mut Self;
 
     fn is_writable(&self) -> bool;
     fn is_executable(&self) -> bool;

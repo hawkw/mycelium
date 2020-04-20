@@ -117,22 +117,18 @@ where
     A: page::Alloc<Size4Kb>,
 {
     type Handle = Handle<'mapper, level::Pt>;
-    /// Map the virtual memory page represented by `virt` to the physical page
-    /// represented bt `phys`.
-    ///
-    /// # Panics
-    ///
-    /// - If the physical address is invalid.
-    /// - If the page is already mapped.
-    fn map_page(
+
+    unsafe fn map_page(
         &'mapper mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
         frame_alloc: &mut A,
     ) -> Self::Handle {
+        // XXX(eliza): most of this fn is *internally* safe and should be
+        // factored out into a safe function...
         let span = tracing::debug_span!("map_page", ?virt, ?phys);
         let _e = span.enter();
-        let pml4 = unsafe { self.pml4.as_mut() };
+        let pml4 = self.pml4.as_mut();
 
         let vaddr = virt.base_address();
         tracing::trace!(?vaddr);
@@ -157,15 +153,7 @@ where
         unimplemented!()
     }
 
-    /// Unmap the provided virtual page, returning the physical page it was
-    /// previously mapped to.
-    ///
-    /// This does not deallocate any page frames.
-    ///
-    /// # Panics
-    ///
-    /// - If the virtual page was not mapped.
-    fn unmap(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
+    unsafe fn unmap(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
         unimplemented!()
     }
 }
@@ -525,8 +513,9 @@ impl<'a, L: level::PointsToPage> page::PageFlags<L::Size> for Handle<'a, L> {
     fn is_writable(&self) -> bool {
         self.entry.is_writable()
     }
+
     #[inline]
-    fn set_writable(&mut self, writable: bool) -> &mut Self {
+    unsafe fn set_writable(&mut self, writable: bool) -> &mut Self {
         self.entry.set_writable(writable);
         self
     }
@@ -537,7 +526,7 @@ impl<'a, L: level::PointsToPage> page::PageFlags<L::Size> for Handle<'a, L> {
     }
 
     #[inline]
-    fn set_executable(&mut self, executable: bool) -> &mut Self {
+    unsafe fn set_executable(&mut self, executable: bool) -> &mut Self {
         self.entry.set_executable(executable);
         self
     }
@@ -548,7 +537,7 @@ impl<'a, L: level::PointsToPage> page::PageFlags<L::Size> for Handle<'a, L> {
     }
 
     #[inline]
-    fn set_present(&mut self, present: bool) -> &mut Self {
+    unsafe fn set_present(&mut self, present: bool) -> &mut Self {
         self.entry.set_present(present);
         self
     }
@@ -811,9 +800,11 @@ mycelium_util::decl_test! {
         let frame = Page::containing(PAddr::from_usize(0xb8000));
         let page = Page::containing(VAddr::from_usize(0));
 
-        let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
-        flags.set_writable(true);
-        let page = flags.commit();
+        let page = unsafe {
+            let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
+            flags.set_writable(true);
+            flags.commit()
+        };
         tracing::info!(?page, "page mapped!");
 
         let page_ptr = page.base_address().as_ptr::<u64>();
