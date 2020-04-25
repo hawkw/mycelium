@@ -21,6 +21,8 @@ pub trait BootInfo {
         None
     }
 
+    fn init_paging(&self);
+
     // TODO(eliza): figure out a non-bad way to represent boot command lines (is
     // it reasonable to convert them to rust strs when we barely have an operating
     // system???)

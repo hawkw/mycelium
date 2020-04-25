@@ -1,7 +1,7 @@
 use bootloader::bootinfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use hal_core::{boot::BootInfo, mem, PAddr};
-pub use hal_x86_64::{interrupt, NAME};
+use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
+pub use hal_x86_64::{interrupt, mm, NAME};
 use hal_x86_64::{interrupt::Registers as X64Registers, serial, vga};
 
 #[derive(Debug)]
@@ -62,6 +62,16 @@ impl BootInfo for RustbootBootInfo {
 
     fn bootloader_name(&self) -> &str {
         "rust-bootloader"
+    }
+
+    fn init_paging(&self) {
+        mm::init_paging(self.vm_offset())
+    }
+}
+
+impl RustbootBootInfo {
+    fn vm_offset(&self) -> VAddr {
+        VAddr::from_u64(self.inner.physical_memory_offset)
     }
 }
 

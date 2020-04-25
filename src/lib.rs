@@ -60,6 +60,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     }
 
     arch::interrupt::init::<arch::InterruptHandlers>();
+    bootinfo.init_paging();
 
     #[cfg(test)]
     {

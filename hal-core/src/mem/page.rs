@@ -1,11 +1,13 @@
-use crate::{Address, PAddr};
+use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, marker::PhantomData, ops, slice};
 
-pub trait Size: Copy + PartialEq + Eq {
+pub trait Size: Copy + Eq + PartialEq {
     /// The size (in bits) of this page.
     const SIZE: usize;
+    const PRETTY_NAME: &'static str;
 }
 
+pub type TranslateResult<A, S> = Result<Page<A, S>, TranslateError<S>>;
 /// An allocator for physical pages of a given size.
 ///
 /// # Safety
@@ -53,6 +55,113 @@ pub unsafe trait Alloc<S: Size> {
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
 }
 
+pub trait Map<'mapper, S, A>
+where
+    S: Size,
+    A: Alloc<S>,
+{
+    type Handle: PageFlags<S>;
+    /// Map the virtual memory page represented by `virt` to the physical page
+    /// represented bt `phys`.
+    ///
+    /// # Panics
+    ///
+    /// - If the physical address is invalid.
+    /// - If the page is already mapped.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page mappings may be used to violate Rust invariants
+    /// in a variety of exciting ways. For example, aliasing a physical page by
+    /// mapping multiple virtual pages to it and setting one or more of those
+    /// virtual pages as writable may result in undefined behavior.
+    ///
+    /// Some rules of thumb:
+    ///
+    /// - Ensure that the writable XOR executable rule is not violated (by
+    ///   making a page both writable and executable).
+    /// - Don't alias stack pages onto the heap or vice versa.
+    /// - If loading arbitrary code into executable pages, ensure that this code
+    ///   is trusted and will not violate the kernel's invariants.
+    ///
+    /// Good luck and have fun!
+    unsafe fn map_page(
+        &'mapper mut self,
+        virt: Page<VAddr, S>,
+        phys: Page<PAddr, S>,
+        frame_alloc: &mut A,
+    ) -> Self::Handle;
+
+    fn flags_mut(&'mapper mut self, virt: Page<VAddr, S>) -> Self::Handle;
+
+    /// Unmap the provided virtual page, returning the physical page it was
+    /// previously mapped to.
+    ///
+    /// This does not deallocate any page frames.
+    ///
+    /// # Panics
+    ///
+    /// - If the virtual page was not mapped.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page mappings may be used to violate Rust invariants
+    /// in a variety of exciting ways.
+    unsafe fn unmap(&'mapper mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
+
+    /// Identity map the provided physical page to the virtual page with the
+    /// same address.
+    fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
+        let base_paddr = phys.base_address().as_usize();
+        let virt = Page::containing(VAddr::from_usize(base_paddr));
+        unsafe { self.map_page(virt, phys, frame_alloc) }
+    }
+}
+
+pub trait TranslatePage<S: Size> {
+    fn translate_page(&self, virt: Page<VAddr, S>) -> TranslateResult<PAddr, S>;
+}
+
+pub trait TranslateAddr {
+    fn translate_addr(&self, addr: VAddr) -> Option<PAddr>;
+}
+
+pub trait PageFlags<S: Size> {
+    /// Set whether or not this page is writable.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    /// Using `set_writable` to make memory that the Rust compiler expects to be
+    /// read-only may cause undefined behavior. Making a page which is aliased
+    /// page table (i.e. it has multiple page table entries pointing to it) may
+    /// also cause undefined behavior.
+    unsafe fn set_writable(&mut self, writable: bool) -> &mut Self;
+
+    /// Set whether or not this page is executable.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    /// Using `set_executable` to make writable memory executable may cause
+    /// undefined behavior. Also, this can be used to execute the contents of
+    /// arbitrary memory, which (of course) is wildly unsafe.
+    unsafe fn set_executable(&mut self, executable: bool) -> &mut Self;
+
+    /// Set whether or not this page is present.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    unsafe fn set_present(&mut self, present: bool) -> &mut Self;
+
+    fn is_writable(&self) -> bool;
+    fn is_executable(&self) -> bool;
+    fn is_present(&self) -> bool;
+
+    fn commit(self) -> Page<VAddr, S>;
+}
+
 /// A memory page.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
@@ -68,6 +177,10 @@ pub struct PageRange<A: Address, S: Size> {
     end: Page<A, S>,
 }
 
+#[derive(Debug, Default)]
+pub struct EmptyAlloc {
+    _p: (),
+}
 pub struct NotAligned<S> {
     _size: PhantomData<S>,
 }
@@ -75,6 +188,14 @@ pub struct NotAligned<S> {
 pub struct AllocErr {
     // TODO: eliza
     _p: (),
+}
+
+#[derive(Clone, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TranslateError<S: Size> {
+    NotMapped,
+    WrongSize(PhantomData<S>),
+    Other(&'static str),
 }
 
 // === impl Page ===
@@ -140,7 +261,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// When calling this method, ensure that the page will not be read or mutated
     /// concurrently, including by user code.
     pub unsafe fn as_slice_mut(&mut self) -> &mut [u8] {
-        let start = self.base.as_ptr() as *mut u8;
+        let start = self.base.as_ptr::<u8>() as *mut _;
         slice::from_raw_parts_mut::<u8>(start, S::SIZE)
     }
 }
@@ -219,3 +340,62 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
         Some(next)
     }
 }
+
+unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
+    fn alloc_range(&mut self, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
+        Err(AllocErr { _p: () })
+    }
+
+    fn dealloc_range(&self, _range: PageRange<PAddr, S>) -> Result<(), AllocErr> {
+        Err(AllocErr { _p: () })
+    }
+}
+
+// === impl NotAligned ===
+
+impl<S: Size> fmt::Debug for NotAligned<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NotAligned")
+            .field("size", &S::SIZE)
+            .finish()
+    }
+}
+
+// === impl TranslateError ===
+
+impl<S: Size> From<&'static str> for TranslateError<S> {
+    fn from(msg: &'static str) -> Self {
+        TranslateError::Other(msg)
+    }
+}
+
+impl<S: Size> fmt::Debug for TranslateError<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            TranslateError::Other(msg) => {
+                f.debug_tuple("TranslateError::Other").field(&msg).finish()
+            }
+            TranslateError::NotMapped => f.debug_tuple("TranslateError::NotMapped").finish(),
+            TranslateError::WrongSize(_) => f
+                .debug_tuple("TranslateError::WrongSize")
+                .field(&S::PRETTY_NAME)
+                .finish(),
+        }
+    }
+}
+
+impl<S: Size> fmt::Display for TranslateError<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            TranslateError::Other(msg) => write!(f, "error translating page/address: {}", msg),
+            TranslateError::NotMapped => f.pad("error translating page/address: not mapped"),
+            TranslateError::WrongSize(_) => write!(
+                f,
+                "error translating page: mapped page is a different size ({})",
+                core::any::type_name::<S>()
+            ),
+        }
+    }
+}
+
+impl<S: Size> mycelium_util::error::Error for TranslateError<S> {}

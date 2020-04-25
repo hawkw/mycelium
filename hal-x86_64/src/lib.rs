@@ -10,9 +10,12 @@
 // causes this lint to complain about relatively simple methods.
 #![allow(clippy::cognitive_complexity)]
 
-pub(crate) use hal_core::VAddr;
+pub(crate) use hal_core::{PAddr, VAddr};
+
+pub mod control_regs;
 pub mod cpu;
 pub mod interrupt;
+pub mod mm;
 pub mod segment;
 pub mod serial;
 pub mod tracing;
