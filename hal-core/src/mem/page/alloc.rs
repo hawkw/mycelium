@@ -13,6 +13,7 @@ use mycelium_util::sync::atomic::{
 pub struct MemMapAlloc<M> {
     map: M,
     curr: Option<Region>,
+    free: Option<ptr::NonNull<Free>>,
 }
 
 struct Free {
@@ -62,10 +63,16 @@ where
                 } else {
                     // The region is not big enough to contain the requested
                     // number of pages, or it is not aligned for this size of page.
-                    // XXX(eliza): We are about to throw it away! It needs to go
-                    // on a free list eventually.
+                    if let Some(free) = self.free {
+                        unsafe {
+                            free.as_ref().push(Free::new(curr));
+                        }
+                    } else {
+                        self.free = Some(unsafe { Free::new(curr) });
+                    }
                 }
             }
+            // TODO(eliza): use the free list...
             self.curr = Some(self.next_region()?);
         }
     }
