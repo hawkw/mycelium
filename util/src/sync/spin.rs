@@ -33,9 +33,10 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
+        let mut boff = super::Backoff::default();
         while self.locked.compare_and_swap(false, true, Ordering::Acquire) {
             while self.locked.load(Ordering::Relaxed) {
-                spin_loop_hint();
+                boff.spin();
             }
         }
         MutexGuard { mutex: self }
