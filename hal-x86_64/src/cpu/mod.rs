@@ -41,7 +41,7 @@ impl Port {
     ///
     /// Writing to a CPU port is unsafe.
     pub unsafe fn writel(&self, value: u32) {
-        llvm_asm!("out dx, eal" :: "{dx}"(self.num), "{eax}"(value) :: "volatile", "intel")
+        llvm_asm!("out dx, eax" :: "{dx}"(self.num), "{eax}"(value) :: "volatile", "intel")
     }
 }
 
@@ -50,7 +50,6 @@ impl Port {
 pub enum Ring {
     Ring0 = 0b00,
     Ring1 = 0b01,
-    Ring2 = 0b10,
     Ring3 = 0b11,
 }
 
