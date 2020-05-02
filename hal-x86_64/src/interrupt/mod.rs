@@ -127,12 +127,14 @@ impl hal_core::interrupt::Control for Idt {
     // type Vector = u8;
     type Registers = Registers;
 
+    #[inline]
     unsafe fn disable(&mut self) {
-        llvm_asm!("cli" :::: "volatile");
+        crate::cpu::intrinsics::cli();
     }
 
+    #[inline]
     unsafe fn enable(&mut self) {
-        llvm_asm!("sti" :::: "volatile");
+        crate::cpu::intrinsics::sti();
     }
 
     fn is_enabled(&self) -> bool {

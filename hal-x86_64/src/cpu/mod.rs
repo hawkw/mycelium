@@ -1,6 +1,8 @@
 use core::fmt;
 use core::mem;
 
+pub mod intrinsics;
+
 #[repr(transparent)]
 pub struct Port {
     num: u16,
@@ -76,5 +78,21 @@ impl DtablePtr {
         let base = t as *const _ as *const ();
 
         Self { limit, base }
+    }
+}
+
+/// Halt the CPU.
+///
+/// This disables interrupts and performs the `hlt` instruction in a loop,
+/// forever.
+///
+/// # Safety
+///
+/// This halts the CPU.
+#[inline(always)]
+pub unsafe fn halt() -> ! {
+    intrinsics::cli();
+    loop {
+        intrinsics::hlt();
     }
 }

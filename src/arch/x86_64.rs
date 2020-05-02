@@ -155,7 +155,7 @@ pub fn oops(
     // is going to die anyway.
     unsafe {
         // disable all interrupts.
-        llvm_asm!("cli" :::: "volatile");
+        cpu::intrinsics::cli();
 
         // If the system has a COM1, unlock it.
         if let Some(com1) = serial::com1() {
@@ -193,10 +193,8 @@ pub fn oops(
     qemu_exit(QemuExitCode::Failed);
 
     #[cfg(not(test))]
-    loop {
-        unsafe {
-            llvm_asm!("hlt" :::: "volatile");
-        }
+    unsafe {
+        cpu::halt();
     }
 }
 
@@ -215,12 +213,9 @@ pub(crate) enum QemuExitCode {
 pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
     let code = exit_code as u32;
     unsafe {
-        llvm_asm!("out 0xf4, eax" :: "{eax}"(code) :: "intel","volatile");
+        cpu::Port::at(0xf4).writel(code);
 
         // If the previous line didn't immediately trigger shutdown, hang.
-        llvm_asm!("cli" :::: "volatile");
-        loop {
-            llvm_asm!("hlt" :::: "volatile");
-        }
+        cpu::halt()
     }
 }
