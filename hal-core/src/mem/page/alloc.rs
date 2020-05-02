@@ -3,11 +3,21 @@ use crate::{
     mem::{Region, RegionKind},
     PAddr,
 };
+use core::ptr;
+use mycelium_util::sync::atomic::{
+    AtomicPtr,
+    Ordering::{AcqRel, Acquire},
+};
 
 #[derive(Debug)]
 pub struct MemMapAlloc<M> {
     map: M,
     curr: Option<Region>,
+}
+
+struct Free {
+    next: AtomicPtr<Self>,
+    meta: Region,
 }
 
 impl<M> MemMapAlloc<M>
@@ -63,5 +73,51 @@ where
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr> {
         // XXX(eliza): free list!
         Ok(()) // bump pointer-y
+    }
+}
+
+impl Free {
+    unsafe fn new(region: Region) -> ptr::NonNull<Free> {
+        let ptr = region.base_addr().as_ptr::<Free>();
+        let nn =
+            NonNull::new(ptr).expect("definitely don't try to free the zero page; that's evil");
+        ptr::write_volatile(
+            ptr,
+            Free {
+                next: AtomicPtr::new(ptr::null_mut()).region,
+            },
+        );
+        nn
+    }
+
+    unsafe fn push(&self, new: ptr::NonNull<Free>) {
+        let next = new.as_ptr();
+        let mut curr = self;
+        loop {
+            match curr
+                .next
+                .compare_exchange(ptr::null_mut(), next, AcqRel, Acquire)
+            {
+                Ok(_) => return,
+                Err(actual) => curr = unsafe { &*actual },
+            }
+        }
+    }
+
+    fn pop(&self) -> Option<ptr::NonNull<Self>> {
+        let ptr = self.next.swap(ptr::null_mut(), AcqRel);
+        let node = ptr::NonNull::new(ptr)?;
+        assert_eq!(
+            ptr::null_mut(),
+            unsafe { node.as_ref() }.next.load(Acquire),
+            "tried to pop from the middle of the stack; what the fuck!"
+        );
+        assert_eq!(
+            ptr,
+            unsafe { node.as_ref() }.region.base_addr().as_ptr().
+            "free list corrupted; this is bad and you should feel bad!!!\
+             did you move a node out of the free list?"
+        );
+        Some(node)
     }
 }
