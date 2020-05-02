@@ -19,13 +19,16 @@ impl Backoff {
     pub(crate) const DEFAULT_MAX_EXPONENT: u8 = 8;
 
     pub(crate) const fn new() -> Self {
-        Self { exp: 0, max: 8 }
+        Self {
+            exp: 0,
+            max: Self::DEFAULT_MAX_EXPONENT,
+        }
     }
 
     /// Returns a new exponential backoff with the provided max exponent.
     #[allow(dead_code)]
     pub(crate) fn with_max_exponent(max: u8) -> Self {
-        assert!(max <= 8);
+        assert!(max <= Self::DEFAULT_MAX_EXPONENT);
         Self { exp: 0, max }
     }
 
