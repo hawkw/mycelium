@@ -2,7 +2,7 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![cfg_attr(target_os = "none", feature(panic_info_message, track_caller))]
-#![feature(asm)]
+#![feature(llvm_asm)]
 
 extern crate alloc;
 

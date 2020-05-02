@@ -71,7 +71,7 @@ pub fn init<H: Handlers<Registers>>() -> Control {
 
     tracing::debug!("testing interrupts...");
     unsafe {
-        asm!("int $0" :: "i"(69) :: "volatile");
+        llvm_asm!("int $0" :: "i"(69) :: "volatile");
     }
     // loop {}
     tracing::debug!("it worked");
@@ -128,11 +128,11 @@ impl hal_core::interrupt::Control for Idt {
     type Registers = Registers;
 
     unsafe fn disable(&mut self) {
-        asm!("cli" :::: "volatile");
+        llvm_asm!("cli" :::: "volatile");
     }
 
     unsafe fn enable(&mut self) {
-        asm!("sti" :::: "volatile");
+        llvm_asm!("sti" :::: "volatile");
     }
 
     fn is_enabled(&self) -> bool {
