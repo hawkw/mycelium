@@ -41,7 +41,7 @@ impl Port {
     ///
     /// Writing to a CPU port is unsafe.
     pub unsafe fn writel(&self, value: u32) {
-        llvm_asm!("out dx, eal" :: "{dx}"(self.num), "{eal}"(value) :: "volatile", "intel")
+        llvm_asm!("out dx, eal" :: "{dx}"(self.num), "{eax}"(value) :: "volatile", "intel")
     }
 }
 
