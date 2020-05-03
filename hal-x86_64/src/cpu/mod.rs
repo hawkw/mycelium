@@ -1,6 +1,8 @@
 use core::fmt;
 use core::mem;
 
+pub mod intrinsics;
+
 #[repr(transparent)]
 pub struct Port {
     num: u16,
@@ -24,7 +26,7 @@ impl Port {
     /// Reading from a CPU port is unsafe.
     pub unsafe fn readb(&self) -> u8 {
         let result: u8;
-        asm!("in al, dx" : "={al}"(result) : "{dx}"(self.num) :: "volatile", "intel");
+        llvm_asm!("in al, dx" : "={al}"(result) : "{dx}"(self.num) :: "volatile", "intel");
         result
     }
 
@@ -32,9 +34,15 @@ impl Port {
     ///
     /// Writing to a CPU port is unsafe.
     pub unsafe fn writeb(&self, value: u8) {
-        asm!("out dx, al" :: "{dx}"(self.num), "{al}"(value) :: "volatile", "intel");
+        llvm_asm!("out dx, al" :: "{dx}"(self.num), "{al}"(value) :: "volatile", "intel");
     }
-    // TODO(ixi): anything wider than a byte lol
+
+    /// # Safety
+    ///
+    /// Writing to a CPU port is unsafe.
+    pub unsafe fn writel(&self, value: u32) {
+        llvm_asm!("out dx, eax" :: "{dx}"(self.num), "{eax}"(value) :: "volatile", "intel")
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -70,5 +78,21 @@ impl DtablePtr {
         let base = t as *const _ as *const ();
 
         Self { limit, base }
+    }
+}
+
+/// Halt the CPU.
+///
+/// This disables interrupts and performs the `hlt` instruction in a loop,
+/// forever.
+///
+/// # Safety
+///
+/// This halts the CPU.
+#[inline(always)]
+pub unsafe fn halt() -> ! {
+    intrinsics::cli();
+    loop {
+        intrinsics::hlt();
     }
 }

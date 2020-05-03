@@ -8,7 +8,7 @@ pub mod cr3 {
     pub fn read() -> (Page<PAddr, Size4Kb>, Flags) {
         let val: u64;
         unsafe {
-            asm!("mov %cr3, $0" : "=r"(val));
+            llvm_asm!("mov %cr3, $0" : "=r"(val));
         };
         let addr = PAddr::from_u64(val);
         let pml4_page =
@@ -19,7 +19,7 @@ pub mod cr3 {
     pub unsafe fn write(pml4: Page<PAddr, Size4Kb>, flags: Flags) {
         let addr = pml4.base_address().as_usize() as u64;
         let val = addr | flags.0;
-        asm!("mov $0, %cr3" :: "r"(val) : "memory");
+        llvm_asm!("mov $0, %cr3" :: "r"(val) : "memory");
     }
 
     impl core::fmt::Debug for Flags {

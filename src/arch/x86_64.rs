@@ -1,8 +1,8 @@
 use bootloader::bootinfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
+use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
-use hal_x86_64::{interrupt::Registers as X64Registers, serial, vga};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
@@ -155,7 +155,7 @@ pub fn oops(
     // is going to die anyway.
     unsafe {
         // disable all interrupts.
-        asm!("cli" :::: "volatile");
+        cpu::intrinsics::cli();
 
         // If the system has a COM1, unlock it.
         if let Some(com1) = serial::com1() {
@@ -193,10 +193,8 @@ pub fn oops(
     qemu_exit(QemuExitCode::Failed);
 
     #[cfg(not(test))]
-    loop {
-        unsafe {
-            asm!("hlt" :::: "volatile");
-        }
+    unsafe {
+        cpu::halt();
     }
 }
 
@@ -215,12 +213,9 @@ pub(crate) enum QemuExitCode {
 pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
     let code = exit_code as u32;
     unsafe {
-        asm!("out 0xf4, eax" :: "{eax}"(code) :: "intel","volatile");
+        cpu::Port::at(0xf4).writel(code);
 
         // If the previous line didn't immediately trigger shutdown, hang.
-        asm!("cli" :::: "volatile");
-        loop {
-            asm!("hlt" :::: "volatile");
-        }
+        cpu::halt()
     }
 }

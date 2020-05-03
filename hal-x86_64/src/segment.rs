@@ -7,7 +7,7 @@ pub struct Selector(u16);
 /// Returns the current code segment selector in `%cs`.
 pub fn code_segment() -> Selector {
     let value: u16;
-    unsafe { asm!("mov $0, cs"  : "=r" (value) ::: "intel") };
+    unsafe { llvm_asm!("mov $0, cs"  : "=r" (value) ::: "intel") };
     Selector(value)
 }
 
