@@ -1,5 +1,4 @@
 use crate::Address;
-use core::cmp;
 use core::fmt;
 
 pub mod page;
@@ -94,7 +93,7 @@ impl<A: Address> Region<A> {
         self.size -= size;
 
         Some(Self {
-            base: self.base,
+            base,
             size,
             kind: self.kind,
         })

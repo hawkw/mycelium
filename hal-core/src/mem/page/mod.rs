@@ -372,6 +372,16 @@ impl<A: Address, S: Size> PageRange<A, S> {
     pub fn len(&self) -> usize {
         unimplemented!("eliza")
     }
+
+    /// Returns the size in bytes of the page range.
+    pub fn size(&self) -> usize {
+        let diff = self.end.end_addr().difference(self.start.base_addr());
+        debug_assert!(
+            diff >= (self.page_size().as_usize() as isize),
+            "page range must be at least one page; base addr must be less than end addr"
+        );
+        diff as usize
+    }
 }
 
 impl<A: Address, S: Size> Iterator for PageRange<A, S> {
