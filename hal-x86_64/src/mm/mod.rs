@@ -9,7 +9,8 @@ use core::{
 };
 use hal_core::{
     mem::page::{
-        self, Map, Page, Size, TranslateAddr, TranslateError, TranslatePage, TranslateResult,
+        self, Map, Page, Size, StaticSize, TranslateAddr, TranslateError, TranslatePage,
+        TranslateResult,
     },
     Address,
 };
@@ -498,10 +499,10 @@ impl<L: level::PointsToPage> Entry<L> {
         }
 
         if self.is_huge() != L::IS_HUGE {
-            return Err(TranslateError::WrongSize(PhantomData));
+            return Err(TranslateError::WrongSize(L::Size::INSTANCE));
         }
 
-        Ok(Page::starting_at(self.phys_addr()).expect("page addr must be aligned"))
+        Ok(Page::starting_at_fixed(self.phys_addr()).expect("page addr must be aligned"))
     }
 
     fn set_phys_page(&mut self, page: Page<PAddr, L::Size>) -> &mut Self {
@@ -603,31 +604,52 @@ impl<L: Level> fmt::Debug for Entry<L> {
 }
 
 pub mod size {
-    use super::Size;
+    use core::fmt;
+    use hal_core::mem::page::StaticSize;
 
     #[derive(Copy, Clone, Eq, PartialEq)]
-    pub enum Size4Kb {}
+    pub struct Size4Kb;
 
-    impl Size for Size4Kb {
+    impl StaticSize for Size4Kb {
         const SIZE: usize = 4 * 1024;
         const PRETTY_NAME: &'static str = "4KB";
+        const INSTANCE: Self = Size4Kb;
+    }
+
+    impl fmt::Display for Size4Kb {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.pad(Self::PRETTY_NAME)
+        }
     }
 
     #[derive(Copy, Clone, Eq, PartialEq)]
-    pub enum Size2Mb {}
+    pub struct Size2Mb;
 
-    impl Size for Size2Mb {
+    impl StaticSize for Size2Mb {
         const SIZE: usize = Size4Kb::SIZE * 512;
         const PRETTY_NAME: &'static str = "2MB";
+        const INSTANCE: Self = Size2Mb;
+    }
+
+    impl fmt::Display for Size2Mb {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.pad(Self::PRETTY_NAME)
+        }
     }
 
     #[derive(Copy, Clone, Eq, PartialEq)]
-    pub enum Size1Gb {}
+    pub struct Size1Gb;
 
-    impl Size for Size1Gb {
+    impl StaticSize for Size1Gb {
         const SIZE: usize = Size2Mb::SIZE * 512;
-
         const PRETTY_NAME: &'static str = "1GB";
+        const INSTANCE: Self = Size1Gb;
+    }
+
+    impl fmt::Display for Size1Gb {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.pad(Self::PRETTY_NAME)
+        }
     }
 }
 
@@ -656,12 +678,14 @@ impl<L: Level> fmt::Debug for PageTable<L> {
 }
 
 pub mod level {
-    use super::{size::*, Level, Size, RECURSIVE_INDEX, SIGN};
+    use super::{size::*, Level, RECURSIVE_INDEX, SIGN};
     use crate::VAddr;
+    use core::fmt;
+    use hal_core::mem::page::{Size, StaticSize};
     use hal_core::Address;
 
     pub trait PointsToPage: Level {
-        type Size: Size;
+        type Size: StaticSize + fmt::Display;
         const IS_HUGE: bool;
     }
 
@@ -805,8 +829,8 @@ mycelium_util::decl_test! {
         // We shouldn't need to allocate page frames for this test.
         let mut frame_alloc = page::EmptyAlloc::default();
 
-        let frame = Page::containing(PAddr::from_usize(0xb8000));
-        let page = Page::containing(VAddr::from_usize(0));
+        let frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
+        let page = Page::containing_fixed(VAddr::from_usize(0));
 
         let page = unsafe {
             let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
@@ -828,10 +852,10 @@ mycelium_util::decl_test! {
     fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
         let ctrl = PageCtrl::current();
 
-        let page = VirtPage::<Size4Kb>::containing(VAddr::from_usize(0xb8000));
+        let page = VirtPage::<Size4Kb>::containing_fixed(VAddr::from_usize(0xb8000));
 
         let frame = ctrl.translate_page(page).expect("translate");
-        let actual_frame = PhysPage::<Size4Kb>::containing(PAddr::from_usize(0xb8000));
+        let actual_frame = PhysPage::<Size4Kb>::containing_fixed(PAddr::from_usize(0xb8000));
         tracing::info!(?page, ?frame, "translated");
         assert_eq!(frame, actual_frame, "identity mapped address should translate to itself");
         Ok(())
