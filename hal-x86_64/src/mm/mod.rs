@@ -605,7 +605,7 @@ impl<L: Level> fmt::Debug for Entry<L> {
 
 pub mod size {
     use core::fmt;
-    use hal_core::mem::page::StaticSize;
+    use hal_core::mem::page::{Size, StaticSize};
 
     #[derive(Copy, Clone, Eq, PartialEq)]
     pub struct Size4Kb;
@@ -649,6 +649,36 @@ pub mod size {
     impl fmt::Display for Size1Gb {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.pad(Self::PRETTY_NAME)
+        }
+    }
+
+    #[derive(Copy, Clone, Debug, Eq)]
+    #[repr(usize)]
+    pub enum AnySize {
+        Size4Kb = Size4Kb::SIZE,
+        Size2Mb = Size2Mb::SIZE,
+        Size1Gb = Size1Gb::SIZE,
+    }
+
+    impl<S: Size> PartialEq<S> for AnySize {
+        fn eq(&self, other: &S) -> bool {
+            *self as usize == other.size()
+        }
+    }
+
+    impl fmt::Display for AnySize {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                AnySize::Size4Kb => f.pad(Size4Kb::PRETTY_NAME),
+                AnySize::Size2Mb => f.pad(Size2Mb::PRETTY_NAME),
+                AnySize::Size1Gb => f.pad(Size1Gb::PRETTY_NAME),
+            }
+        }
+    }
+
+    impl Size for AnySize {
+        fn size(&self) -> usize {
+            *self as usize
         }
     }
 }
