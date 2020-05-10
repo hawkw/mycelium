@@ -1,10 +1,17 @@
 use crate::{Address, PAddr, VAddr};
-use core::{cmp, fmt, marker::PhantomData, ops, slice};
+use core::{cmp, fmt, ops, slice};
 
-pub trait Size: Copy + Eq + PartialEq {
+pub trait Size: Copy + Eq + PartialEq + fmt::Display {
+    /// The size (in bits) of this page.
+    fn size(&self) -> usize;
+}
+
+/// A statically known page size.
+pub trait StaticSize: Copy + Eq + PartialEq + fmt::Display {
     /// The size (in bits) of this page.
     const SIZE: usize;
     const PRETTY_NAME: &'static str;
+    const INSTANCE: Self;
 }
 
 pub type TranslateResult<A, S> = Result<Page<A, S>, TranslateError<S>>;
@@ -113,7 +120,7 @@ where
     /// same address.
     fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
         let base_paddr = phys.base_address().as_usize();
-        let virt = Page::containing(VAddr::from_usize(base_paddr));
+        let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
         unsafe { self.map_page(virt, phys, frame_alloc) }
     }
 }
@@ -167,11 +174,11 @@ pub trait PageFlags<S: Size> {
 #[repr(C)]
 pub struct Page<A, S: Size> {
     base: A,
-    _size: PhantomData<S>,
+    size: S,
 }
 
 /// A range of memory pages of the same size.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct PageRange<A: Address, S: Size> {
     start: Page<A, S>,
     end: Page<A, S>,
@@ -182,7 +189,7 @@ pub struct EmptyAlloc {
     _p: (),
 }
 pub struct NotAligned<S> {
-    _size: PhantomData<S>,
+    size: S,
 }
 
 pub struct AllocErr {
@@ -194,29 +201,38 @@ pub struct AllocErr {
 #[non_exhaustive]
 pub enum TranslateError<S: Size> {
     NotMapped,
-    WrongSize(PhantomData<S>),
+    WrongSize(S),
     Other(&'static str),
 }
 
 // === impl Page ===
 
-impl<A: Address, S: Size> Page<A, S> {
+impl<A: Address, S: StaticSize> Page<A, S> {
     /// Returns a page starting at the given address.
-    pub fn starting_at(addr: impl Into<A>) -> Result<Self, NotAligned<S>> {
-        let addr = addr.into();
-        if !addr.is_aligned(S::SIZE) {
-            return Err(NotAligned { _size: PhantomData });
-        }
-        Ok(Self::containing(addr))
+    pub fn starting_at_fixed(addr: impl Into<A>) -> Result<Self, NotAligned<S>> {
+        Self::starting_at(addr, S::INSTANCE)
     }
 
     /// Returns the page that contains the given address.
-    pub fn containing(addr: impl Into<A>) -> Self {
-        let base = addr.into().align_down(S::SIZE);
-        Self {
-            base,
-            _size: PhantomData,
+    pub fn containing_fixed(addr: impl Into<A>) -> Self {
+        Self::containing(addr, S::INSTANCE)
+    }
+}
+
+impl<A: Address, S: Size> Page<A, S> {
+    /// Returns a page starting at the given address.
+    pub fn starting_at(addr: impl Into<A>, size: S) -> Result<Self, NotAligned<S>> {
+        let addr = addr.into();
+        if !addr.is_aligned(size.size()) {
+            return Err(NotAligned { size });
         }
+        Ok(Self::containing(addr, size))
+    }
+
+    /// Returns the page that contains the given address.
+    pub fn containing(addr: impl Into<A>, size: S) -> Self {
+        let base = addr.into().align_down(size.size());
+        Self { base, size }
     }
 
     pub fn base_address(&self) -> A {
@@ -224,7 +240,11 @@ impl<A: Address, S: Size> Page<A, S> {
     }
 
     pub fn end_address(&self) -> A {
-        self.base + S::SIZE
+        self.base + self.size.size()
+    }
+
+    pub fn size(&self) -> S {
+        self.size
     }
 
     pub fn contains(&self, addr: impl Into<A>) -> bool {
@@ -251,7 +271,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// concurrently, including by user code.
     pub unsafe fn as_slice(&self) -> &[u8] {
         let start = self.base.as_ptr() as *const u8;
-        slice::from_raw_parts::<u8>(start, S::SIZE)
+        slice::from_raw_parts::<u8>(start, self.size.size())
     }
 
     /// Returns the entire contents of the page as a mutable slice.
@@ -262,7 +282,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// concurrently, including by user code.
     pub unsafe fn as_slice_mut(&mut self) -> &mut [u8] {
         let start = self.base.as_ptr::<u8>() as *mut _;
-        slice::from_raw_parts_mut::<u8>(start, S::SIZE)
+        slice::from_raw_parts_mut::<u8>(start, self.size.size())
     }
 }
 
@@ -270,8 +290,8 @@ impl<A: Address, S: Size> ops::Add<usize> for Page<A, S> {
     type Output = Self;
     fn add(self, rhs: usize) -> Self {
         Page {
-            base: self.base + (S::SIZE * rhs),
-            _size: PhantomData,
+            base: self.base + (self.size.size() * rhs),
+            ..self
         }
     }
 }
@@ -280,33 +300,34 @@ impl<A: Address, S: Size> ops::Sub<usize> for Page<A, S> {
     type Output = Self;
     fn sub(self, rhs: usize) -> Self {
         Page {
-            base: self.base - (S::SIZE * rhs),
-            _size: PhantomData,
+            base: self.base - (self.size.size() * rhs),
+            ..self
         }
     }
 }
 
 impl<A: Address, S: Size> cmp::PartialOrd for Page<A, S> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        // Since the pages are guaranteed by the type system to be the same
-        // we can simply compare the base addresses.
-        self.base.partial_cmp(&other.base)
+        if self.size == other.size {
+            self.base.partial_cmp(&other.base)
+        } else {
+            // XXX(eliza): does it make sense to compare pages of different sizes?
+            None
+        }
     }
 }
 
-impl<A: Address, S: Size> cmp::Ord for Page<A, S> {
+impl<A: Address, S: StaticSize> cmp::Ord for Page<A, S> {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        // Since the pages are guaranteed by the type system to be the same
-        // we can simply compare the base addresses.
         self.base.cmp(&other.base)
     }
 }
 
-impl<A: fmt::Debug, S: Size> fmt::Debug for Page<A, S> {
+impl<A: fmt::Debug, S: Size + fmt::Display> fmt::Debug for Page<A, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Page")
             .field("base", &self.base)
-            .field("size", &S::SIZE)
+            .field("size", &format_args!("{}", self.size))
             .finish()
     }
 }
@@ -353,10 +374,10 @@ unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
 
 // === impl NotAligned ===
 
-impl<S: Size> fmt::Debug for NotAligned<S> {
+impl<S: Size + fmt::Display> fmt::Debug for NotAligned<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NotAligned")
-            .field("size", &S::SIZE)
+            .field("size", &format_args!("{}", self.size))
             .finish()
     }
 }
@@ -369,16 +390,16 @@ impl<S: Size> From<&'static str> for TranslateError<S> {
     }
 }
 
-impl<S: Size> fmt::Debug for TranslateError<S> {
+impl<S: Size + fmt::Display> fmt::Debug for TranslateError<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             TranslateError::Other(msg) => {
                 f.debug_tuple("TranslateError::Other").field(&msg).finish()
             }
             TranslateError::NotMapped => f.debug_tuple("TranslateError::NotMapped").finish(),
-            TranslateError::WrongSize(_) => f
+            TranslateError::WrongSize(s) => f
                 .debug_tuple("TranslateError::WrongSize")
-                .field(&S::PRETTY_NAME)
+                .field(&format_args!("{}", s))
                 .finish(),
         }
     }
@@ -399,3 +420,12 @@ impl<S: Size> fmt::Display for TranslateError<S> {
 }
 
 impl<S: Size> mycelium_util::error::Error for TranslateError<S> {}
+
+impl<S> Size for S
+where
+    S: StaticSize,
+{
+    fn size(&self) -> usize {
+        Self::SIZE
+    }
+}

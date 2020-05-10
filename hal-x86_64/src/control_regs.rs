@@ -11,8 +11,8 @@ pub mod cr3 {
             llvm_asm!("mov %cr3, $0" : "=r"(val));
         };
         let addr = PAddr::from_u64(val);
-        let pml4_page =
-            Page::starting_at(addr).expect("PML4 physical addr not aligned! this is very bad");
+        let pml4_page = Page::starting_at_fixed(addr)
+            .expect("PML4 physical addr not aligned! this is very bad");
         (pml4_page, Flags(val))
     }
 
