@@ -328,7 +328,7 @@ impl<R: level::Recursive> PageTable<R> {
         }
 
         tracing::trace!("trying to allocate page table frame...");
-        let frame = match alloc.alloc() {
+        let frame = match alloc.alloc(Size4Kb) {
             Ok(frame) => frame,
             Err(_) => panic!(
                 "cannot create {} table for {:?}: allocation failed!",

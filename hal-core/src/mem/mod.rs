@@ -1,5 +1,7 @@
 use crate::Address;
+use core::cmp;
 use core::fmt;
+
 pub mod page;
 
 /// A cross-platform representation of a memory region.
@@ -61,6 +63,10 @@ impl<A: Address> Region<A> {
         self.size
     }
 
+    pub fn is_aligned(&self, align: impl Into<usize>) -> bool {
+        self.base.is_aligned(align)
+    }
+
     /// Returns `true` if `self` contains the specified address.
     pub fn contains(&self, addr: impl Into<A>) -> bool {
         let addr = addr.into();
@@ -71,11 +77,27 @@ impl<A: Address> Region<A> {
     ///
     /// This is the start address of the next memory region.
     pub fn end_addr(&self) -> A {
-        self.base + self.size
+        self.base + (self.size - 1)
     }
 
     pub fn kind(&self) -> RegionKind {
         self.kind
+    }
+
+    pub fn split_front(&mut self, size: usize) -> Option<Self> {
+        assert!(size <= core::i32::MAX as usize);
+        if size > self.size {
+            return None;
+        }
+        let base = self.base;
+        self.base = self.base.offset(size as i32);
+        self.size -= size;
+
+        Some(Self {
+            base: self.base,
+            size,
+            kind: self.kind,
+        })
     }
 
     pub fn page_range<S: page::Size>(
@@ -83,7 +105,7 @@ impl<A: Address> Region<A> {
         size: S,
     ) -> Result<page::PageRange<A, S>, page::NotAligned<S>> {
         let start = page::Page::starting_at(self.base, size)?;
-        let end = page::Page::starting_at(self.end_addr(), size)?;
+        let end = page::Page::starting_at(self.end_addr() + 1, size)?;
         Ok(start.range_to(end))
     }
 

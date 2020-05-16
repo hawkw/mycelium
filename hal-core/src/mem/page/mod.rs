@@ -1,6 +1,8 @@
 use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, ops, slice};
 
+mod alloc;
+
 pub trait Size: Copy + Eq + PartialEq + fmt::Display {
     /// Returns the size (in bytes) of this page.
     fn as_usize(&self) -> usize;
@@ -31,8 +33,8 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(Page)` if a page was successfully allocated.
     /// - `Err` if no more pages can be allocated by this allocator.
-    fn alloc(&mut self) -> Result<Page<PAddr, S>, AllocErr> {
-        self.alloc_range(1).map(|r| r.start())
+    fn alloc(&mut self, size: S) -> Result<Page<PAddr, S>, AllocErr> {
+        self.alloc_range(size, 1).map(|r| r.start())
     }
 
     /// Allocate a range of `len` pages.
@@ -40,7 +42,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&mut self, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
+    fn alloc_range(&mut self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
 
     /// Deallocate a single page.
     ///
@@ -385,7 +387,7 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
 }
 
 unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
-    fn alloc_range(&mut self, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
+    fn alloc_range(&mut self, s: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
         Err(AllocErr { _p: () })
     }
 
@@ -438,6 +440,14 @@ impl<S: Size> fmt::Display for TranslateError<S> {
                 core::any::type_name::<S>()
             ),
         }
+    }
+}
+
+// === impl AllocErr ===
+
+impl AllocErr {
+    pub fn oom() -> Self {
+        Self { _p: () }
     }
 }
 
