@@ -461,6 +461,12 @@ impl AllocErr {
     }
 }
 
+impl<S: Size> From<NotAligned<S>> for AllocErr {
+    fn from(_na: NotAligned<S>) -> Self {
+        Self { _p: () } // TODO(eliza)
+    }
+}
+
 impl<S: Size> mycelium_util::error::Error for TranslateError<S> {}
 
 impl<S> Size for S

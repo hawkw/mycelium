@@ -4,166 +4,182 @@ use crate::{
     PAddr,
 };
 use core::ptr;
+use mycelium_util::intrusive::{list, List};
+use mycelium_util::math::Log2;
 use mycelium_util::sync::{
     atomic::{
-        AtomicPtr,
+        AtomicUsize,
         Ordering::{AcqRel, Acquire, Relaxed},
     },
     spin,
 };
 
 #[derive(Debug)]
-pub struct BuddyAlloc {
-    freelists: [FreeList; 32],
+pub struct BuddyAlloc<L = [spin::Mutex<List<Free>>; 32]> {
+    /// Minimum allocateable size in bytes.
+    pub min_size: usize,
+
+    base_addr: *const (),
+
+    /// Cache this so we don't have to re-evaluate it.
+    min_size_log2: usize,
+
+    heap_size: AtomicUsize,
+
+    free_lists: L,
 }
 
-pub struct FreeList {
-    head: Option<ptr::NonNull<Free>>,
-}
-
+pub type Result<T> = core::result::Result<T, AllocErr>;
 #[derive(Debug)]
 pub struct Free {
-    next: Option<ptr::NonNull<Self>>,
-    prev: Option<ptr::NonNull<Self>>,
+    links: list::Links<Self>,
     meta: Region,
 }
 
-impl<M> MemMapAlloc<M>
-where
-    M: Iterator<Item = Region>,
-{
-    pub fn new(map: M) -> Self {
-        Self {
-            map,
-            curr: None,
-            free: FreeList::new(),
+// ==== impl BuddyAlloc ===
+impl<L> BuddyAlloc<L> {
+    fn size_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
+        let size = size.size() * len;
+
+        // Round up to the heap's minimum allocateable size.
+        let size = usize::max(size, self.min_size);
+
+        let size = size.next_power_of_two();
+
+        let available = self.heap_size.load(Acquire);
+
+        if size > available {
+            tracing::error!(size, available, "out of memory!");
+            return Err(AllocErr::oom());
         }
+
+        Ok(size)
     }
 
-    fn next_region(&mut self) -> Result<Region, AllocErr> {
-        unsafe { self.free.pop().map(|ptr| Ok(ptr.as_ref().region())) }
-            .unwrap_or_else(|| self.next_map())
+    fn order_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
+        self.size_for(size, len)
+            .map(|size| self.order_for_size(size))
     }
 
-    fn next_map(&mut self) -> Result<Region, AllocErr> {
-        loop {
-            match self.map.next() {
-                Some(region) if region.kind() == RegionKind::FREE => return Ok(region),
-                // The region was not free. Let's look at the next one.
-                Some(_) => continue,
-                // The memory map is empty. We cannot allocate any more pages.
-                None => return Err(AllocErr::oom()),
-            }
+    fn order_for_size(&self, size: usize) -> usize {
+        size.log2() - self.min_size_log2
+    }
+}
+
+impl<L> BuddyAlloc<L>
+where
+    L: AsRef<[spin::Mutex<List<Free>>]>,
+{
+    unsafe fn push_block(&self, block: ptr::NonNull<Free>) {
+        let order = self.order_for_size(block.as_ref().size());
+        let free_lists = self.free_lists.as_ref();
+        if order > free_lists.len() {
+            todo!("(eliza): choppity chop chop down the block!");
+        }
+        free_lists[order].lock().push_front(block);
+    }
+
+    /// Returns `block`'s buddy, if one exists.
+    unsafe fn buddy_for(
+        &self,
+        block: ptr::NonNull<Free>,
+        order: usize,
+    ) -> Option<ptr::NonNull<Free>> {
+        let size = 1 << (self.min_size_log2 + order);
+        let rel_offset = self.base_addr as usize - block.as_ptr() as usize;
+        let buddy_offset = rel_offset ^ size;
+        let buddy = self.base_addr.offset(buddy_offset as isize);
+        Some(ptr::NonNull::new_unchecked(buddy as *mut _))
+    }
+
+    fn split_down(&self, block: &mut Free, order: usize, target_order: usize) {
+        let mut size = block.size();
+        let free_lists = self.free_lists.as_ref();
+        for order in (order..target_order).rev() {
+            size >>= 1;
+            let new_block = block.split_front(size).expect("block too small to split!");
+            &free_lists[order].lock().push_front(new_block);
         }
     }
 }
 
-unsafe impl<S, M> Alloc<S> for MemMapAlloc<M>
+unsafe impl<S: Size, L> Alloc<S> for BuddyAlloc<L>
 where
-    S: Size,
-    M: Iterator<Item = Region>,
+    L: AsRef<[spin::Mutex<List<Free>>]>,
 {
     /// Allocate a range of `len` pages.
     ///
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&mut self, s: S, len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
-        let sz = len * s.size();
-        loop {
-            if let Some(mut curr) = self.curr.take() {
-                if let Some(range) = curr
-                    .split_front(sz)
-                    .and_then(|range| range.page_range(s).ok())
-                {
-                    if curr.size() > 0 {
-                        self.curr = Some(curr);
-                        return Ok(range);
-                    }
-                } else {
-                    // The region is not big enough to contain the requested
-                    // number of pages, or it is not aligned for this size of
-                    // page.
-                    unsafe {
-                        self.free.push(Free::new(curr));
-                    }
+    fn alloc_range(&mut self, size: S, len: usize) -> Result<PageRange<PAddr, S>> {
+        let order = self.order_for(size, len)?;
+        for (curr_order, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
+            // Is there an available block on this free list?
+            if let Some(block) = free_list.lock().pop_back() {
+                // If the block is larger than the desired size, split it.
+                let block = unsafe { block.as_mut() };
+                if curr_order > order {
+                    self.split_down(block, curr_order, order);
                 }
+                let range = block.region().page_range(size)?;
+                return Ok(range);
             }
-            // TODO(eliza): use the free list...
-            self.curr = Some(self.next_region()?);
         }
+        Err(AllocErr::oom())
     }
 
-    fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr> {
-        let region = Region::new(range.start().base_address(), range.size(), RegionKind::FREE);
-        unsafe {
-            self.free.push(Free::new(region));
-        }
-        Ok(())
+    /// Deallocate a range of pages.
+    ///
+    /// # Returns
+    /// - `Ok(())` if a range of pages was successfully deallocated
+    /// - `Err` if the requested range could not be deallocated.
+    fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<()> {
+        unimplemented!()
     }
 }
 
-// impl FreeList {
-//     /// Returns a new empty free list.
-//     pub fn new() -> Self {
-//         Self {
-//             head: AtomicPtr::new(ptr::null_mut()),
-//         }
-//     }
+// ==== impl Free ====
 
-//     pub unsafe fn push(&self, new: ptr::NonNull<Free>) {
-//         let next = new.as_ptr();
-//         if let Some(head) = ptr::NonNull::new(self.head.swap(next, AcqRel)) {
-//             let mut head = unsafe { head.as_ref() };
-//             while let Err(actual) =
-//                 head.next
-//                     .compare_exchange(ptr::null_mut(), next, AcqRel, Acquire)
-//             {
-//                 head = unsafe { &*actual }
-//             }
-//         }
-//     }
+impl Free {
+    pub unsafe fn new(region: Region) -> ptr::NonNull<Free> {
+        let ptr = region.base_addr().as_ptr::<Free>();
+        let nn = ptr::NonNull::new(ptr)
+            .expect("definitely don't try to free the zero page; that's evil");
+        ptr::write_volatile(
+            ptr,
+            Free {
+                links: list::Links::default(),
+                meta: region,
+            },
+        );
+        nn
+    }
 
-//     pub fn pop(&self) -> Option<ptr::NonNull<Free>> {
-//         let mut head_ptr = self.head.load(Relaxed);
-//         loop {
-//             let head = ptr::NonNull::new(head_ptr)?;
-//             let next_ptr = unsafe { head.as_ref() }.next.load(Acquire);
-//             match self
-//                 .head
-//                 .compare_exchange(head_ptr, next_ptr, AcqRel, Acquire)
-//             {
-//                 Ok(_) => {
-//                     assert_eq!(
-//                         head.as_ptr(),
-//                         unsafe { head.as_ref() }.meta.base_addr().as_ptr(),
-//                         "free list corrupted; this is bad and you should feel bad!!!\
-//                          did you move a node out of the free list?"
-//                     );
-//                     return Some(head);
-//                 }
-//                 Err(actual) => head_ptr = actual,
-//             }
-//         }
-//     }
-// }
+    pub fn split_front(&mut self, size: usize) -> Option<ptr::NonNull<Self>> {
+        let new_meta = self.meta.split_front(size)?;
+        let new_free = unsafe { Self::new(new_meta) };
+        Some(new_free)
+    }
 
-// impl Free {
-//     pub unsafe fn new(region: Region) -> ptr::NonNull<Free> {
-//         let ptr = region.base_addr().as_ptr::<Free>();
-//         let nn = ptr::NonNull::new(ptr)
-//             .expect("definitely don't try to free the zero page; that's evil");
-//         ptr::write_volatile(
-//             ptr,
-//             Free {
-//                 next: AtomicPtr::new(ptr::null_mut()),
-//                 meta: region,
-//             },
-//         );
-//         nn
-//     }
+    pub fn region(&self) -> Region {
+        self.meta.clone() // XXX(eliza): `Region` should probly be `Copy`.
+    }
 
-//     pub fn region(&self) -> Region {
-//         self.meta.clone() // XXX(eliza): `Region` should probly be `Copy`.
-//     }
-// }
+    pub fn size(&self) -> usize {
+        self.meta.size()
+    }
+}
+
+unsafe impl list::Linked for Free {
+    type Handle = ptr::NonNull<Free>;
+    fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {
+        *r
+    }
+    unsafe fn as_handle(ptr: ptr::NonNull<Self>) -> Self::Handle {
+        ptr
+    }
+    unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
+        ptr::NonNull::from(&ptr.as_ref().links)
+    }
+}
