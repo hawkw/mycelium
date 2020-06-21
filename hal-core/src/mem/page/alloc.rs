@@ -4,27 +4,31 @@ use crate::{
     PAddr,
 };
 use core::ptr;
-use mycelium_util::sync::{
-    atomic::{
-        AtomicPtr,
-        Ordering::{AcqRel, Acquire, Relaxed},
-    },
-    spin,
+use mycelium_util::sync::atomic::{
+    AtomicPtr,
+    Ordering::{AcqRel, Acquire, Relaxed},
 };
+
+#[derive(Debug)]
+pub struct MemMapAlloc<M> {
+    map: M,
+    curr: Option<Region>,
+    free: FreeList,
+}
 
 #[derive(Debug)]
 pub struct BuddyAlloc {
     freelists: [FreeList; 32],
 }
 
+#[derive(Debug)]
 pub struct FreeList {
-    head: Option<ptr::NonNull<Free>>,
+    head: AtomicPtr<Free>,
 }
 
 #[derive(Debug)]
 pub struct Free {
-    next: Option<ptr::NonNull<Self>>,
-    prev: Option<ptr::NonNull<Self>>,
+    next: AtomicPtr<Self>,
     meta: Region,
 }
 
@@ -103,67 +107,67 @@ where
     }
 }
 
-// impl FreeList {
-//     /// Returns a new empty free list.
-//     pub fn new() -> Self {
-//         Self {
-//             head: AtomicPtr::new(ptr::null_mut()),
-//         }
-//     }
+impl FreeList {
+    /// Returns a new empty free list.
+    pub fn new() -> Self {
+        Self {
+            head: AtomicPtr::new(ptr::null_mut()),
+        }
+    }
 
-//     pub unsafe fn push(&self, new: ptr::NonNull<Free>) {
-//         let next = new.as_ptr();
-//         if let Some(head) = ptr::NonNull::new(self.head.swap(next, AcqRel)) {
-//             let mut head = unsafe { head.as_ref() };
-//             while let Err(actual) =
-//                 head.next
-//                     .compare_exchange(ptr::null_mut(), next, AcqRel, Acquire)
-//             {
-//                 head = unsafe { &*actual }
-//             }
-//         }
-//     }
+    pub unsafe fn push(&self, new: ptr::NonNull<Free>) {
+        let next = new.as_ptr();
+        if let Some(head) = ptr::NonNull::new(self.head.swap(next, AcqRel)) {
+            let mut head = unsafe { head.as_ref() };
+            while let Err(actual) =
+                head.next
+                    .compare_exchange(ptr::null_mut(), next, AcqRel, Acquire)
+            {
+                head = unsafe { &*actual }
+            }
+        }
+    }
 
-//     pub fn pop(&self) -> Option<ptr::NonNull<Free>> {
-//         let mut head_ptr = self.head.load(Relaxed);
-//         loop {
-//             let head = ptr::NonNull::new(head_ptr)?;
-//             let next_ptr = unsafe { head.as_ref() }.next.load(Acquire);
-//             match self
-//                 .head
-//                 .compare_exchange(head_ptr, next_ptr, AcqRel, Acquire)
-//             {
-//                 Ok(_) => {
-//                     assert_eq!(
-//                         head.as_ptr(),
-//                         unsafe { head.as_ref() }.meta.base_addr().as_ptr(),
-//                         "free list corrupted; this is bad and you should feel bad!!!\
-//                          did you move a node out of the free list?"
-//                     );
-//                     return Some(head);
-//                 }
-//                 Err(actual) => head_ptr = actual,
-//             }
-//         }
-//     }
-// }
+    pub fn pop(&self) -> Option<ptr::NonNull<Free>> {
+        let mut head_ptr = self.head.load(Relaxed);
+        loop {
+            let head = ptr::NonNull::new(head_ptr)?;
+            let next_ptr = unsafe { head.as_ref() }.next.load(Acquire);
+            match self
+                .head
+                .compare_exchange(head_ptr, next_ptr, AcqRel, Acquire)
+            {
+                Ok(_) => {
+                    assert_eq!(
+                        head.as_ptr(),
+                        unsafe { head.as_ref() }.meta.base_addr().as_ptr(),
+                        "free list corrupted; this is bad and you should feel bad!!!\
+                         did you move a node out of the free list?"
+                    );
+                    return Some(head);
+                }
+                Err(actual) => head_ptr = actual,
+            }
+        }
+    }
+}
 
-// impl Free {
-//     pub unsafe fn new(region: Region) -> ptr::NonNull<Free> {
-//         let ptr = region.base_addr().as_ptr::<Free>();
-//         let nn = ptr::NonNull::new(ptr)
-//             .expect("definitely don't try to free the zero page; that's evil");
-//         ptr::write_volatile(
-//             ptr,
-//             Free {
-//                 next: AtomicPtr::new(ptr::null_mut()),
-//                 meta: region,
-//             },
-//         );
-//         nn
-//     }
+impl Free {
+    pub unsafe fn new(region: Region) -> ptr::NonNull<Free> {
+        let ptr = region.base_addr().as_ptr::<Free>();
+        let nn = ptr::NonNull::new(ptr)
+            .expect("definitely don't try to free the zero page; that's evil");
+        ptr::write_volatile(
+            ptr,
+            Free {
+                next: AtomicPtr::new(ptr::null_mut()),
+                meta: region,
+            },
+        );
+        nn
+    }
 
-//     pub fn region(&self) -> Region {
-//         self.meta.clone() // XXX(eliza): `Region` should probly be `Copy`.
-//     }
-// }
+    pub fn region(&self) -> Region {
+        self.meta.clone() // XXX(eliza): `Region` should probly be `Copy`.
+    }
+}
