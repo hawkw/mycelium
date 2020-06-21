@@ -17,10 +17,16 @@ pub struct MemMapAlloc<M> {
 }
 
 #[derive(Debug)]
+pub struct BuddyAlloc {
+    freelists: [FreeList; 32],
+}
+
+#[derive(Debug)]
 pub struct FreeList {
     head: AtomicPtr<Free>,
 }
 
+#[derive(Debug)]
 pub struct Free {
     next: AtomicPtr<Self>,
     meta: Region,
