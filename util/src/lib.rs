@@ -11,6 +11,7 @@ pub mod error;
 pub mod intrusive;
 pub mod io;
 mod macros;
+pub mod math;
 pub mod sync;
 pub mod testing;
 pub mod trace;
