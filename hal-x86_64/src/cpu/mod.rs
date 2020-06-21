@@ -26,7 +26,7 @@ impl Port {
     /// Reading from a CPU port is unsafe.
     pub unsafe fn readb(&self) -> u8 {
         let result: u8;
-        llvm_asm!("in al, dx" : "={al}"(result) : "{dx}"(self.num) :: "volatile", "intel");
+        asm!("in al, dx", in("dx") self.num, out("al") result);
         result
     }
 
@@ -34,14 +34,14 @@ impl Port {
     ///
     /// Writing to a CPU port is unsafe.
     pub unsafe fn writeb(&self, value: u8) {
-        llvm_asm!("out dx, al" :: "{dx}"(self.num), "{al}"(value) :: "volatile", "intel");
+        asm!("out dx, al", in("dx") self.num, in("al") value)
     }
 
     /// # Safety
     ///
     /// Writing to a CPU port is unsafe.
     pub unsafe fn writel(&self, value: u32) {
-        llvm_asm!("out dx, eax" :: "{dx}"(self.num), "{eax}"(value) :: "volatile", "intel")
+        asm!("out dx, eax", in("dx") self.num, in("eax") value)
     }
 }
 
