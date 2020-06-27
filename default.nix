@@ -4,12 +4,21 @@ let
   moz_overlay = import (builtins.fetchTarball
     "https://github.com/mozilla/nixpkgs-mozilla/archive/master.tar.gz");
   pkgs = import <nixpkgs> { overlays = [ moz_overlay ]; };
-  rust_channel = pkgs.rustChannelOf { rustToolchain = ./rust-toolchain; };
-  rust_nightly = rust_channel.rust.override {
+  rustChannel = pkgs.rustChannelOf { rustToolchain = ./rust-toolchain; };
+  rustNightly = rustChannel.rust.override {
     extensions = [ "rust-src" "llvm-tools-preview" ];
   };
-in pkgs.buildEnv {
-  name = "mycelium-env";
+  cargoToml = (builtins.fromTOML (builtins.readFile ./Cargo.toml));
+in (pkgs.makeRustPlatform {
+  cargo = rustNightly;
+  rustc = rustNightly;
+  stdenv = pkgs.stdenvAdapters.makeStaticBinaries;
+
+}).buildRustPackage {
+  name = cargoToml.package.name;
+  version = cargoToml.package.version;
+
+  cargoSha256 = "1nmamh1ygrx28k8896ffm01slxsahp55lipd1f9d2w2x0qm6sfwq";
   paths = with pkgs;
     [
       zlib
@@ -38,4 +47,10 @@ in pkgs.buildEnv {
     GIT_SSL_CAINFO = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     CURL_CA_BUNDLE = "${pkgs.cacert}/etc/ca-bundle.crt";
   };
+
+  # depsBuildHost = (environment.dependencies.depsBuildHost targetPkgs);
+  depsBuildBuild = [ pkgs.buildPackages.zlib ];
+  # depsHostTarget = (environment.dependencies.depsHostTarget targetPkgs);
+  # depsHostBuild = (environment.dependencies.depsHostBuild targetPkgs);
+  # nativeBuildInputs = (environment.dependencies.nativeBuildInputs hostPkgs);
 }
