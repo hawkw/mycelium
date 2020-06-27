@@ -8,7 +8,7 @@
 /// Also...this halts the CPU.
 #[inline(always)]
 pub unsafe fn hlt() {
-    llvm_asm!("hlt" :::: "volatile")
+    asm!("hlt")
 }
 
 /// Perform one x86 `cli` instruction.
@@ -25,7 +25,7 @@ pub unsafe fn hlt() {
 /// possible.
 #[inline(always)]
 pub unsafe fn cli() {
-    llvm_asm!("cli" :::: "volatile")
+    asm!("cli")
 }
 
 /// Perform one x86 `sti` instruction.
@@ -41,5 +41,5 @@ pub unsafe fn cli() {
 /// possible.
 #[inline(always)]
 pub unsafe fn sti() {
-    llvm_asm!("sti" :::: "volatile")
+    asm!("sti")
 }

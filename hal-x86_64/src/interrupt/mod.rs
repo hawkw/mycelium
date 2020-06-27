@@ -71,7 +71,7 @@ pub fn init<H: Handlers<Registers>>() -> Control {
 
     tracing::debug!("testing interrupts...");
     unsafe {
-        llvm_asm!("int $0" :: "i"(69) :: "volatile");
+        asm!("int {0}", const 69);
     }
     // loop {}
     tracing::debug!("it worked");

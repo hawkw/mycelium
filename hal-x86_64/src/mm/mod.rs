@@ -848,7 +848,7 @@ pub(crate) mod tlb {
     // XXX(eliza): can/should this be feature flagged? do we care at all about
     // supporting 80386s from 1985?
     pub(crate) unsafe fn flush_page(addr: VAddr) {
-        llvm_asm!("invlpg [$0]" :: "r"(addr.as_usize() as u64) : "memory" : "intel")
+        asm!("invlpg [{0}]", in(reg) addr.as_usize() as u64);
     }
 }
 
