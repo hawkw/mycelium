@@ -3,7 +3,7 @@ args@{ ... }:
 let
   moz_overlay = import (builtins.fetchTarball
     "https://github.com/mozilla/nixpkgs-mozilla/archive/master.tar.gz");
-  pkgs = import <nixpkgs> { overlays = [ moz_overlay ]; };
+  pkgs = import <nixos-unstable> { overlays = [ moz_overlay ]; };
   rustChannel = pkgs.rustChannelOf { rustToolchain = ./rust-toolchain; };
   rustNightly = rustChannel.rust.override {
     extensions = [ "rust-src" "llvm-tools-preview" ];
@@ -17,6 +17,8 @@ in (pkgs.makeRustPlatform {
 }).buildRustPackage {
   name = cargoToml.package.name;
   version = cargoToml.package.version;
+  buildInputs = [ rustNightly rustChannel.cargo ];
+  nativeBuildInputs = [ pkgs.buildPackages.zlib ];
 
   cargoSha256 = "1nmamh1ygrx28k8896ffm01slxsahp55lipd1f9d2w2x0qm6sfwq";
   paths = with pkgs;
