@@ -116,7 +116,7 @@ where
         let order = self.order_for(size, len)?;
         for (curr_order, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
             // Is there an available block on this free list?
-            if let Some(block) = free_list.lock().pop_back() {
+            if let Some(mut block) = free_list.lock().pop_back() {
                 // If the block is larger than the desired size, split it.
                 let block = unsafe { block.as_mut() };
                 if curr_order > order {
@@ -135,6 +135,9 @@ where
     /// - `Ok(())` if a range of pages was successfully deallocated
     /// - `Err` if the requested range could not be deallocated.
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<()> {
+        let min_order = self.order_for(range.page_size(), range.len())?;
+
+        for (curr_order, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {}
         unimplemented!()
     }
 }
