@@ -39,7 +39,7 @@ pub struct Free {
 // ==== impl BuddyAlloc ===
 impl<L> BuddyAlloc<L> {
     fn size_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
-        let size = size.size() * len;
+        let size = size.as_usize() * len;
 
         // Round up to the heap's minimum allocateable size.
         let size = usize::max(size, self.min_size);
@@ -136,8 +136,13 @@ where
     /// - `Err` if the requested range could not be deallocated.
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<()> {
         let min_order = self.order_for(range.page_size(), range.len())?;
+        let mut block = unsafe { Free::new(Region::from_page_range(range, RegionKind::FREE)) };
 
-        for (curr_order, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {}
+        for (curr_order, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
+            if let Some(buddy) = unsafe { self.buddy_for(block, curr_order) } {
+                unimplemented!("eliza: do this part")
+            }
+        }
         unimplemented!()
     }
 }

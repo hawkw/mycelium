@@ -1,6 +1,5 @@
 use crate::Address;
 use core::fmt;
-
 pub mod page;
 
 /// A cross-platform representation of a memory region.
@@ -112,7 +111,7 @@ impl<A: Address> Region<A> {
         let base = range.start().base_addr();
         Self {
             base,
-            size: range.page_size().as_usize(),
+            size: range.size(),
             kind,
         }
     }

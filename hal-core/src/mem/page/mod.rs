@@ -370,7 +370,7 @@ impl<A: Address, S: Size> PageRange<A, S> {
     }
 
     pub fn len(&self) -> usize {
-        self.size() / self.page_size().size()
+        self.size() / self.page_size().as_usize()
     }
 
     /// Returns the size in bytes of the page range.
