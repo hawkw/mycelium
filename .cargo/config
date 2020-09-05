@@ -2,7 +2,9 @@
 runner = "bootimage runner"
 
 [alias]
-dev-env = "install cargo-xbuild bootimage"
-run-x64 = "xrun --target=x86_64-mycelium.json"
-debug-x64 = "xrun --target=x86_64-mycelium.json -- -gdb tcp::1234 -S"
-test-x64 = "xtest --target=x86_64-mycelium.json"
+dev-env = "install bootimage"
+run-x64 = "run -Z build-std=core,alloc --target=x86_64-mycelium.json"
+debug-x64 = "run -Z build-std=core,alloc --target=x86_64-mycelium.json -- -gdb tcp::1234 -S"
+test-x64 = "test -Z build-std=core,alloc --target=x86_64-mycelium.json"
+clippy-x64 = "clippy -Z build-std=core,alloc --target=x86_64-mycelium.json"
+bootimage-x64 = "bootimage -Z build-std=core,alloc --target=x86_64-mycelium.json"

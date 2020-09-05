@@ -4,6 +4,7 @@
 #![cfg_attr(target_os = "none", feature(panic_info_message, track_caller))]
 
 extern crate alloc;
+extern crate rlibc;
 
 pub mod arch;
 
