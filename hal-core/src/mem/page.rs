@@ -239,8 +239,11 @@ impl<A: Address, S: Size> Page<A, S> {
         self.base
     }
 
+    /// Returns the last address in the page, inclusive.
+    ///
+    /// `end_addr() + 1` will be the base address of the next page.
     pub fn end_addr(&self) -> A {
-        self.base + self.size.size()
+        self.base + (self.size.size() - 1)
     }
 
     pub fn size(&self) -> S {
