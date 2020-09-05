@@ -73,7 +73,7 @@ pub fn init_paging(vm_offset: VAddr) {
     pml4.entries[RECURSIVE_INDEX]
         .set_present(true)
         .set_writable(true)
-        .set_phys_addr(pml4_page.base_address());
+        .set_phys_addr(pml4_page.base_addr());
     tracing::info!("recursive entry created");
 
     // Forcibly flush the entire TLB by resetting cr3.
@@ -104,7 +104,7 @@ impl PageTable<level::Pml4> {
         unsafe { Self::from_pml4_page(vm_offset, phys) }
     }
     unsafe fn from_pml4_page(vm_offset: VAddr, page: Page<PAddr, Size4Kb>) -> &'static mut Self {
-        let pml4_paddr = page.base_address();
+        let pml4_paddr = page.base_addr();
         tracing::trace!(?pml4_paddr, ?vm_offset);
 
         let virt = vm_offset + VAddr::from_usize(pml4_paddr.as_usize());
@@ -131,7 +131,7 @@ where
         let _e = span.enter();
         let pml4 = self.pml4.as_mut();
 
-        let vaddr = virt.base_address();
+        let vaddr = virt.base_addr();
         tracing::trace!(?vaddr);
 
         let page_table = pml4
@@ -278,7 +278,7 @@ impl<R: level::Recursive> PageTable<R> {
             tracing::debug!("page is hudge!");
             return None;
         }
-        let vaddr = R::Next::table_addr(idx.base_address());
+        let vaddr = R::Next::table_addr(idx.base_addr());
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
@@ -357,7 +357,7 @@ impl<L: Level> PageTable<L> {
     }
 
     fn new(frame: Page<PAddr, Size4Kb>) -> *mut Self {
-        let this = frame.base_address().as_ptr::<Self>();
+        let this = frame.base_addr().as_ptr::<Self>();
         unsafe {
             (*this).zero();
         }
@@ -372,7 +372,7 @@ where
 {
     type Output = Entry<L>;
     fn index(&self, page: VirtPage<S>) -> &Self::Output {
-        &self.entries[L::index_of(page.base_address())]
+        &self.entries[L::index_of(page.base_addr())]
     }
 }
 
@@ -382,7 +382,7 @@ where
     S: Size,
 {
     fn index_mut(&mut self, page: VirtPage<S>) -> &mut Self::Output {
-        &mut self.entries[L::index_of(page.base_address())]
+        &mut self.entries[L::index_of(page.base_addr())]
     }
 }
 
@@ -509,7 +509,7 @@ impl<L: level::PointsToPage> Entry<L> {
     }
 
     fn set_phys_page(&mut self, page: Page<PAddr, L::Size>) -> &mut Self {
-        self.set_phys_addr(page.base_address());
+        self.set_phys_addr(page.base_addr());
         self
     }
 }
@@ -556,7 +556,7 @@ impl<'a, L: level::PointsToPage> page::PageFlags<L::Size> for Handle<'a, L> {
 
     fn commit(self) -> Page<VAddr, L::Size> {
         unsafe {
-            tlb::flush_page(self.page.base_address());
+            tlb::flush_page(self.page.base_addr());
         }
         self.page
     }
@@ -872,7 +872,7 @@ mycelium_util::decl_test! {
         };
         tracing::info!(?page, "page mapped!");
 
-        let page_ptr = page.base_address().as_ptr::<u64>();
+        let page_ptr = page.base_addr().as_ptr::<u64>();
         unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
 
         tracing::info!("wow, it didn't fault");

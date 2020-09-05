@@ -119,7 +119,7 @@ where
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
     fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
-        let base_paddr = phys.base_address().as_usize();
+        let base_paddr = phys.base_addr().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
         unsafe { self.map_page(virt, phys, frame_alloc) }
     }
@@ -235,11 +235,11 @@ impl<A: Address, S: Size> Page<A, S> {
         Self { base, size }
     }
 
-    pub fn base_address(&self) -> A {
+    pub fn base_addr(&self) -> A {
         self.base
     }
 
-    pub fn end_address(&self) -> A {
+    pub fn end_addr(&self) -> A {
         self.base + self.size.size()
     }
 
@@ -249,7 +249,7 @@ impl<A: Address, S: Size> Page<A, S> {
 
     pub fn contains(&self, addr: impl Into<A>) -> bool {
         let addr = addr.into();
-        addr >= self.base && addr <= self.end_address()
+        addr >= self.base && addr <= self.end_addr()
     }
 
     pub fn range_inclusive(self, end: Page<A, S>) -> PageRange<A, S> {
