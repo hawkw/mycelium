@@ -67,9 +67,9 @@ impl<A: Address> Region<A> {
         addr > self.base && addr < self.end_addr()
     }
 
-    /// Returns the end address of the memory region.
+    /// Returns the last address (inclusive) of the memory region.
     pub fn end_addr(&self) -> A {
-        self.base + self.size
+        self.base + (self.size - 1)
     }
 
     pub fn kind(&self) -> RegionKind {
