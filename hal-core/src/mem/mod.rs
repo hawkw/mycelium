@@ -76,8 +76,22 @@ impl<A: Address> Region<A> {
         self.kind
     }
 
-    pub fn page_range<S: page::Size>(&self) -> page::PageRange<A, S> {
-        unimplemented!("eliza")
+    pub fn page_range<S: page::Size>(
+        &self,
+        size: S,
+    ) -> Result<page::PageRange<A, S>, page::NotAligned<S>> {
+        let start = page::Page::starting_at(self.base, size)?;
+        let end = page::Page::starting_at(self.end_addr() + 1, size)?;
+        Ok(start.range_to(end))
+    }
+
+    pub fn from_page_range<S: page::Size>(range: page::PageRange<A, S>, kind: RegionKind) -> Self {
+        let base = range.start().base_addr();
+        Self {
+            base,
+            size: range.page_size().in_bytes(),
+            kind,
+        }
     }
 }
 

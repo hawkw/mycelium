@@ -348,6 +348,23 @@ impl<A: Address, S: Size> PageRange<A, S> {
         self.end
     }
 
+    /// Returns the base address of the first page in the range.
+    pub fn base_addr(&self) -> A {
+        self.start.base_addr()
+    }
+
+    /// Returns the last address on the last page in the range.
+    pub fn end_addr(&self) -> A {
+        self.end.end_addr()
+    }
+
+    /// Returns the size of the pages in the range. All pages in a page range
+    /// have the same size.
+    pub fn page_size(&self) -> S {
+        debug_assert_eq!(self.start.size().in_bytes(), self.end.size().in_bytes());
+        self.start.size()
+    }
+
     pub fn len(&self) -> usize {
         unimplemented!("eliza")
     }
