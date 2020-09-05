@@ -2,13 +2,13 @@ use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, ops, slice};
 
 pub trait Size: Copy + Eq + PartialEq + fmt::Display {
-    /// The size (in bits) of this page.
-    fn size(&self) -> usize;
+    /// Returns the size (in bytes) of this page.
+    fn in_bytes(&self) -> usize;
 }
 
 /// A statically known page size.
 pub trait StaticSize: Copy + Eq + PartialEq + fmt::Display {
-    /// The size (in bits) of this page.
+    /// The size (in bytes) of this page.
     const SIZE: usize;
     const PRETTY_NAME: &'static str;
     const INSTANCE: Self;
@@ -223,7 +223,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// Returns a page starting at the given address.
     pub fn starting_at(addr: impl Into<A>, size: S) -> Result<Self, NotAligned<S>> {
         let addr = addr.into();
-        if !addr.is_aligned(size.size()) {
+        if !addr.is_aligned(size.in_bytes()) {
             return Err(NotAligned { size });
         }
         Ok(Self::containing(addr, size))
@@ -231,7 +231,7 @@ impl<A: Address, S: Size> Page<A, S> {
 
     /// Returns the page that contains the given address.
     pub fn containing(addr: impl Into<A>, size: S) -> Self {
-        let base = addr.into().align_down(size.size());
+        let base = addr.into().align_down(size.in_bytes());
         Self { base, size }
     }
 
@@ -243,7 +243,7 @@ impl<A: Address, S: Size> Page<A, S> {
     ///
     /// `end_addr() + 1` will be the base address of the next page.
     pub fn end_addr(&self) -> A {
-        self.base + (self.size.size() - 1)
+        self.base + (self.size.in_bytes() - 1)
     }
 
     pub fn size(&self) -> S {
@@ -274,7 +274,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// concurrently, including by user code.
     pub unsafe fn as_slice(&self) -> &[u8] {
         let start = self.base.as_ptr() as *const u8;
-        slice::from_raw_parts::<u8>(start, self.size.size())
+        slice::from_raw_parts::<u8>(start, self.size.in_bytes())
     }
 
     /// Returns the entire contents of the page as a mutable slice.
@@ -285,7 +285,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// concurrently, including by user code.
     pub unsafe fn as_slice_mut(&mut self) -> &mut [u8] {
         let start = self.base.as_ptr::<u8>() as *mut _;
-        slice::from_raw_parts_mut::<u8>(start, self.size.size())
+        slice::from_raw_parts_mut::<u8>(start, self.size.in_bytes())
     }
 }
 
@@ -293,7 +293,7 @@ impl<A: Address, S: Size> ops::Add<usize> for Page<A, S> {
     type Output = Self;
     fn add(self, rhs: usize) -> Self {
         Page {
-            base: self.base + (self.size.size() * rhs),
+            base: self.base + (self.size.in_bytes() * rhs),
             ..self
         }
     }
@@ -303,7 +303,7 @@ impl<A: Address, S: Size> ops::Sub<usize> for Page<A, S> {
     type Output = Self;
     fn sub(self, rhs: usize) -> Self {
         Page {
-            base: self.base - (self.size.size() * rhs),
+            base: self.base - (self.size.in_bytes() * rhs),
             ..self
         }
     }
