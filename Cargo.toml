@@ -25,6 +25,7 @@ test = false
 hal-core = { path = "hal-core" }
 mycelium-alloc = { path = "alloc" }
 mycelium-util = { path = "util" }
+rlibc = "1.0"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 bootloader = {version = "0.9.1", features = ["map_physical_memory"] }
