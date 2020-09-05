@@ -16,6 +16,9 @@ pub mod cr3 {
         (pml4_page, Flags(val))
     }
 
+    /// # Safety
+    ///
+    /// Writing cr3 can break pretty much everything.
     pub unsafe fn write(pml4: Page<PAddr, Size4Kb>, flags: Flags) {
         let addr = pml4.base_address().as_usize() as u64;
         let val = addr | flags.0;

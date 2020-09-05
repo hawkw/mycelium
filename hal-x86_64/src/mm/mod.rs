@@ -154,6 +154,9 @@ where
         unimplemented!()
     }
 
+    /// # Safety
+    ///
+    /// Unmapping a page can break pretty much everything.
     unsafe fn unmap(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
         unimplemented!()
     }
@@ -390,7 +393,7 @@ where
 {
     type Output = Entry<L>;
     fn index(&self, pg: &'a VirtPage<S>) -> &Self::Output {
-        &self[pg.clone()]
+        &self[*pg]
     }
 }
 
@@ -401,7 +404,7 @@ where
     S: Size,
 {
     fn index_mut(&mut self, pg: &'a VirtPage<S>) -> &mut Self::Output {
-        &mut self[pg.clone()]
+        &mut self[*pg]
     }
 }
 

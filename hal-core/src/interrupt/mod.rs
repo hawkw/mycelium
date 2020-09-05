@@ -123,17 +123,11 @@ impl RegistrationError {
     }
 
     pub fn is_nonexistant(&self) -> bool {
-        match self.kind {
-            RegistrationErrorKind::Nonexistant => true,
-            _ => false,
-        }
+        matches!(self.kind, RegistrationErrorKind::Nonexistant)
     }
 
     pub fn is_already_registered(&self) -> bool {
-        match self.kind {
-            RegistrationErrorKind::AlreadyRegistered => true,
-            _ => false,
-        }
+        matches!(self.kind, RegistrationErrorKind::AlreadyRegistered)
     }
 }
 
