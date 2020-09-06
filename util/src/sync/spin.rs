@@ -1,4 +1,4 @@
-use super::atomic::{spin_loop_hint, AtomicBool, Ordering};
+use super::atomic::{AtomicBool, Ordering};
 use crate::cell::CausalCell;
 use core::{
     fmt,

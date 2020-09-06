@@ -1,7 +1,7 @@
 #![cfg_attr(all(target_os = "none", test), no_main)]
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
-#![cfg_attr(target_os = "none", feature(panic_info_message, track_caller))]
+#![cfg_attr(target_os = "none", feature(panic_info_message))]
 
 extern crate alloc;
 extern crate rlibc;
