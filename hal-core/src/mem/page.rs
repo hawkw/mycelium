@@ -445,7 +445,7 @@ impl<S> Size for S
 where
     S: StaticSize,
 {
-    fn size(&self) -> usize {
+    fn in_bytes(&self) -> usize {
         Self::SIZE
     }
 }
