@@ -665,7 +665,7 @@ pub mod size {
 
     impl<S: Size> PartialEq<S> for AnySize {
         fn eq(&self, other: &S) -> bool {
-            *self as usize == other.in_bytes()
+            *self as usize == other.as_usize()
         }
     }
 
@@ -680,7 +680,7 @@ pub mod size {
     }
 
     impl Size for AnySize {
-        fn in_bytes(&self) -> usize {
+        fn as_usize(&self) -> usize {
             *self as usize
         }
     }

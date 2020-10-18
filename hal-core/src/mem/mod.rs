@@ -91,7 +91,7 @@ impl<A: Address> Region<A> {
         let base = range.start().base_addr();
         Self {
             base,
-            size: range.page_size().in_bytes(),
+            size: range.page_size().as_usize(),
             kind,
         }
     }
