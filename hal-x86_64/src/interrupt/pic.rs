@@ -76,7 +76,7 @@ impl hal_core::interrupt::Control for CascadedPic {
 }
 
 impl CascadedPic {
-    pub(crate) unsafe fn set_irq_addres(&mut self, primary_start: u8, secondary_start: u8) {
+    pub(crate) unsafe fn set_irq_address(&mut self, primary_start: u8, secondary_start: u8) {
         // iowait and its uses below are guidance from the osdev wiki for compatibility with "older
         // machines". it is not entirely clear what "older machines" exactly means, or where this
         // is or is not necessary precisely. this code happens to work in qemu without `iowait()`,
