@@ -239,9 +239,9 @@ impl<A: Address, S: Size> Page<A, S> {
         self.base
     }
 
-    /// Returns the last address in the page, inclusive.
+    /// Returns the last address in the page, exclusive.
     ///
-    /// `end_addr() + 1` will be the base address of the next page.
+    /// The returned address will be the base address of the next page.
     pub fn end_addr(&self) -> A {
         self.base + (self.size.in_bytes() - 1)
     }
@@ -252,7 +252,7 @@ impl<A: Address, S: Size> Page<A, S> {
 
     pub fn contains(&self, addr: impl Into<A>) -> bool {
         let addr = addr.into();
-        addr >= self.base && addr <= self.end_addr()
+        addr >= self.base && addr < self.end_addr()
     }
 
     pub fn range_inclusive(self, end: Page<A, S>) -> PageRange<A, S> {
@@ -353,7 +353,9 @@ impl<A: Address, S: Size> PageRange<A, S> {
         self.start.base_addr()
     }
 
-    /// Returns the last address on the last page in the range.
+    /// Returns the end address on the last page in the range.
+    ///
+    /// This is the base address of the page immediately following this range.
     pub fn end_addr(&self) -> A {
         self.end.end_addr()
     }
