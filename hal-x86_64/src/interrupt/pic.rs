@@ -18,31 +18,44 @@ impl Pic {
 }
 
 pub struct CascadedPic {
-    primary: Pic,
-    secondary: Pic,
+    sisters: PicSisters,
 }
 
-impl CascadedPic {
+// two of them
+struct PicSisters {
+    big: Pic,
+    little: Pic,
+}
+
+impl PicSisters {
     pub(crate) const fn new() -> Self {
         Self {
             // primary and secondary PIC addresses (0 and 8) are Just How IBM Did It.
             // yes, they overlap with x86 interrupt numbers. it's not good.
             // port numbers are also magic IBM PC/AT architecture numbers.
-            primary: Pic::new(0, 0x20, 0x21),
-            secondary: Pic::new(8, 0xa0, 0xa1),
+            big: Pic::new(0, 0x20, 0x21),
+            little: Pic::new(8, 0xa0, 0xa1),
+        }
+    }
+}
+
+impl CascadedPic {
+    pub(crate) const fn new() -> Self {
+        Self {
+            sisters: PicSisters::new(),
         }
     }
 
     pub(crate) fn end_interrupt(&mut self, num: u8) {
         const END_INTERRUPT: u8 = 0x20; // from osdev wiki
-        if num >= self.secondary.address && num < self.secondary.address + 8 {
+        if num >= self.sisters.little.address && num < self.sisters.little.address + 8 {
             unsafe {
-                self.secondary.command.writeb(END_INTERRUPT);
+                self.sisters.little.command.writeb(END_INTERRUPT);
             }
         }
 
         unsafe {
-            self.primary.command.writeb(END_INTERRUPT);
+            self.sisters.big.command.writeb(END_INTERRUPT);
         }
     }
 }
@@ -59,15 +72,15 @@ impl hal_core::interrupt::Control for CascadedPic {
     }
 
     unsafe fn disable(&mut self) {
-        self.primary.data.writeb(0xff);
-        self.secondary.data.writeb(0xff);
+        self.sisters.big.data.writeb(0xff);
+        self.sisters.little.data.writeb(0xff);
     }
 
     unsafe fn enable(&mut self) {
         // TODO(ixi): confirm this?? it looks like "disable" is "write a 1 to set the line masked"
         //            so maybe it stands to reason that writing a 0 unmasks an interrupt?
-        self.primary.data.writeb(0x00);
-        self.secondary.data.writeb(0x00);
+        self.sisters.big.data.writeb(0x00);
+        self.sisters.little.data.writeb(0x00);
     }
 
     fn is_enabled(&self) -> bool {
@@ -83,34 +96,57 @@ impl CascadedPic {
         // but is largely untested on real hardware where this may be a concern.
         let iowait = || cpu::Port::at(0x80).writeb(0);
 
-        let primary_mask = self.primary.data.readb();
-        let secondary_mask = self.secondary.data.readb();
+        let primary_mask = self.sisters.big.data.readb();
+        let secondary_mask = self.sisters.little.data.readb();
 
         const EXTENDED_CONFIG: u8 = 0x01; // if present, there are four initialization control words
         const PIC_INIT: u8 = 0x10; // reinitialize the 8259 PIC
 
-        self.primary.command.writeb(PIC_INIT | EXTENDED_CONFIG);
+        self.sisters.big.command.writeb(PIC_INIT | EXTENDED_CONFIG);
         iowait();
-        self.secondary.command.writeb(PIC_INIT | EXTENDED_CONFIG);
+        self.sisters
+            .little
+            .command
+            .writeb(PIC_INIT | EXTENDED_CONFIG);
         iowait();
-        self.primary.data.writeb(primary_start);
+        self.sisters.big.data.writeb(primary_start);
         iowait();
-        self.secondary.data.writeb(secondary_start);
+        self.sisters.little.data.writeb(secondary_start);
         iowait();
-        self.primary.data.writeb(4); // magic number: secondary pic is at IRQ2 (how does 4 say this ???)
+        // magic number: secondary pic is at cascade identity 2 (how does 4 say this ???)
+        // !UPDATE! 4 says this because this word is a bitmask:
+        //
+        //   76543210
+        // 0b00000100
+        //        |
+        //        --- bit 2 set means there is another 8259 cascaded at address 2
+        //
+        // bit 0 would be set if there was only one controller in the system, in `single` mode, and
+        // is non-zero in all other modes. the exact read from the intel manual is not immediately
+        // clear:
+        // ```
+        // in sisters mode, a `1` is set for each little sister in the system.
+        // ```
+        // which means bit 1 indicates a little sister at cascade identity 1, or, as in an IBM
+        // PC/AT system, a little sister is present at cascade identity 2, indicated by bit 2 being
+        // set for a bitmask of 0b0000_0100. there is a slightly faded diagram that describes ICW3
+        // which has not been OCR'd, in the copy of the intel document you might find online.
+        self.sisters.big.data.writeb(4);
         iowait();
-        self.secondary.data.writeb(2); // magic number: secondary pic has cascade identity 2 (??)
+        // magic number: secondary pic has cascade identity 2 (??)
+        // !UPDATE! that's just how IBM PC/AT systems be
+        self.sisters.little.data.writeb(2);
         iowait();
-        self.primary.data.writeb(1); // 8086/88 (MCS-80/85) mode
+        self.sisters.big.data.writeb(1); // 8086/88 (MCS-80/85) mode
         iowait();
-        self.secondary.data.writeb(1); // 8086/88 (MCS-80/85) mode
+        self.sisters.little.data.writeb(1); // 8086/88 (MCS-80/85) mode
         iowait();
 
-        self.primary.data.writeb(primary_mask);
+        self.sisters.big.data.writeb(primary_mask);
         iowait();
-        self.secondary.data.writeb(secondary_mask);
+        self.sisters.little.data.writeb(secondary_mask);
         iowait();
-        self.primary.address = primary_start;
-        self.secondary.address = secondary_start;
+        self.sisters.big.address = primary_start;
+        self.sisters.little.address = secondary_start;
     }
 }
