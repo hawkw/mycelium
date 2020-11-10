@@ -2,13 +2,13 @@ use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, ops, slice};
 
 pub trait Size: Copy + Eq + PartialEq + fmt::Display {
-    /// The size (in bits) of this page.
-    fn size(&self) -> usize;
+    /// Returns the size (in bytes) of this page.
+    fn as_usize(&self) -> usize;
 }
 
 /// A statically known page size.
 pub trait StaticSize: Copy + Eq + PartialEq + fmt::Display {
-    /// The size (in bits) of this page.
+    /// The size (in bytes) of this page.
     const SIZE: usize;
     const PRETTY_NAME: &'static str;
     const INSTANCE: Self;
@@ -119,7 +119,7 @@ where
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
     fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
-        let base_paddr = phys.base_address().as_usize();
+        let base_paddr = phys.base_addr().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
         unsafe { self.map_page(virt, phys, frame_alloc) }
     }
@@ -223,7 +223,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// Returns a page starting at the given address.
     pub fn starting_at(addr: impl Into<A>, size: S) -> Result<Self, NotAligned<S>> {
         let addr = addr.into();
-        if !addr.is_aligned(size.size()) {
+        if !addr.is_aligned(size.as_usize()) {
             return Err(NotAligned { size });
         }
         Ok(Self::containing(addr, size))
@@ -231,16 +231,19 @@ impl<A: Address, S: Size> Page<A, S> {
 
     /// Returns the page that contains the given address.
     pub fn containing(addr: impl Into<A>, size: S) -> Self {
-        let base = addr.into().align_down(size.size());
+        let base = addr.into().align_down(size.as_usize());
         Self { base, size }
     }
 
-    pub fn base_address(&self) -> A {
+    pub fn base_addr(&self) -> A {
         self.base
     }
 
-    pub fn end_address(&self) -> A {
-        self.base + self.size.size()
+    /// Returns the last address in the page, exclusive.
+    ///
+    /// The returned address will be the base address of the next page.
+    pub fn end_addr(&self) -> A {
+        self.base + (self.size.as_usize() - 1)
     }
 
     pub fn size(&self) -> S {
@@ -249,7 +252,7 @@ impl<A: Address, S: Size> Page<A, S> {
 
     pub fn contains(&self, addr: impl Into<A>) -> bool {
         let addr = addr.into();
-        addr >= self.base && addr <= self.end_address()
+        addr >= self.base && addr < self.end_addr()
     }
 
     pub fn range_inclusive(self, end: Page<A, S>) -> PageRange<A, S> {
@@ -271,7 +274,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// concurrently, including by user code.
     pub unsafe fn as_slice(&self) -> &[u8] {
         let start = self.base.as_ptr() as *const u8;
-        slice::from_raw_parts::<u8>(start, self.size.size())
+        slice::from_raw_parts::<u8>(start, self.size.as_usize())
     }
 
     /// Returns the entire contents of the page as a mutable slice.
@@ -282,7 +285,7 @@ impl<A: Address, S: Size> Page<A, S> {
     /// concurrently, including by user code.
     pub unsafe fn as_slice_mut(&mut self) -> &mut [u8] {
         let start = self.base.as_ptr::<u8>() as *mut _;
-        slice::from_raw_parts_mut::<u8>(start, self.size.size())
+        slice::from_raw_parts_mut::<u8>(start, self.size.as_usize())
     }
 }
 
@@ -290,7 +293,7 @@ impl<A: Address, S: Size> ops::Add<usize> for Page<A, S> {
     type Output = Self;
     fn add(self, rhs: usize) -> Self {
         Page {
-            base: self.base + (self.size.size() * rhs),
+            base: self.base + (self.size.as_usize() * rhs),
             ..self
         }
     }
@@ -300,7 +303,7 @@ impl<A: Address, S: Size> ops::Sub<usize> for Page<A, S> {
     type Output = Self;
     fn sub(self, rhs: usize) -> Self {
         Page {
-            base: self.base - (self.size.size() * rhs),
+            base: self.base - (self.size.as_usize() * rhs),
             ..self
         }
     }
@@ -343,6 +346,25 @@ impl<A: Address, S: Size> PageRange<A, S> {
 
     pub fn end(&self) -> Page<A, S> {
         self.end
+    }
+
+    /// Returns the base address of the first page in the range.
+    pub fn base_addr(&self) -> A {
+        self.start.base_addr()
+    }
+
+    /// Returns the end address on the last page in the range.
+    ///
+    /// This is the base address of the page immediately following this range.
+    pub fn end_addr(&self) -> A {
+        self.end.end_addr()
+    }
+
+    /// Returns the size of the pages in the range. All pages in a page range
+    /// have the same size.
+    pub fn page_size(&self) -> S {
+        debug_assert_eq!(self.start.size().as_usize(), self.end.size().as_usize());
+        self.start.size()
     }
 
     pub fn len(&self) -> usize {
@@ -425,7 +447,7 @@ impl<S> Size for S
 where
     S: StaticSize,
 {
-    fn size(&self) -> usize {
+    fn as_usize(&self) -> usize {
         Self::SIZE
     }
 }

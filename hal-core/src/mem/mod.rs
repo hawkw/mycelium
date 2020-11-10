@@ -64,10 +64,12 @@ impl<A: Address> Region<A> {
     /// Returns `true` if `self` contains the specified address.
     pub fn contains(&self, addr: impl Into<A>) -> bool {
         let addr = addr.into();
-        addr > self.base && addr < self.end_addr()
+        addr >= self.base && addr < self.end_addr()
     }
 
-    /// Returns the end address of the memory region.
+    /// Returns the end address (exclusive) of the memory region.
+    ///
+    /// This is the start address of the next memory region.
     pub fn end_addr(&self) -> A {
         self.base + self.size
     }
@@ -76,8 +78,22 @@ impl<A: Address> Region<A> {
         self.kind
     }
 
-    pub fn page_range<S: page::Size>(&self) -> page::PageRange<A, S> {
-        unimplemented!("eliza")
+    pub fn page_range<S: page::Size>(
+        &self,
+        size: S,
+    ) -> Result<page::PageRange<A, S>, page::NotAligned<S>> {
+        let start = page::Page::starting_at(self.base, size)?;
+        let end = page::Page::starting_at(self.end_addr(), size)?;
+        Ok(start.range_to(end))
+    }
+
+    pub fn from_page_range<S: page::Size>(range: page::PageRange<A, S>, kind: RegionKind) -> Self {
+        let base = range.start().base_addr();
+        Self {
+            base,
+            size: range.page_size().as_usize(),
+            kind,
+        }
     }
 }
 

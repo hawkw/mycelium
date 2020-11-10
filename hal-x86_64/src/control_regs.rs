@@ -20,7 +20,7 @@ pub mod cr3 {
     ///
     /// Writing cr3 can break pretty much everything.
     pub unsafe fn write(pml4: Page<PAddr, Size4Kb>, flags: Flags) {
-        let addr = pml4.base_address().as_usize() as u64;
+        let addr = pml4.base_addr().as_usize() as u64;
         let val = addr | flags.0;
         asm!("mov cr3, {0}", in(reg) val);
     }
