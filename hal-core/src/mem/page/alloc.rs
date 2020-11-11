@@ -1,7 +1,7 @@
 use super::{Alloc, AllocErr, PageRange, Size};
 use crate::{
     mem::{Region, RegionKind},
-    PAddr,
+    PAddr, VAddr,
 };
 use core::ptr;
 use mycelium_util::intrusive::{list, List};
@@ -122,6 +122,22 @@ impl<L> BuddyAlloc<L> {
             free_lists,
         }
     }
+
+    pub fn set_base_addr(&self, offset: VAddr) {
+        self.base_addr
+            .compare_exchange(ptr::null_mut(), offset.as_ptr(), AcqRel, Acquire)
+            .expect("dont do this twice lol");
+    }
+
+    fn offset(&self) -> usize {
+        let addr = self.base_addr.load(Relaxed);
+        debug_assert_ne!(
+            addr,
+            ptr::null_mut(),
+            "you didn't initialize the heap yet dipshit"
+        );
+        addr as usize
+    }
 }
 
 impl<L> BuddyAlloc<L>
@@ -130,13 +146,7 @@ where
 {
     pub unsafe fn add_region(&self, region: Region) -> core::result::Result<(), ()> {
         if region.kind() == RegionKind::FREE {
-            let _ = self.base_addr.compare_exchange(
-                ptr::null_mut(),
-                region.base_addr().as_ptr(),
-                AcqRel,
-                Acquire,
-            );
-            unsafe { self.push_block(Free::new(region)) }
+            unsafe { self.push_block(Free::new(region, self.offset())) }
         }
         return Err(());
     }
@@ -185,7 +195,9 @@ where
         let free_lists = self.free_lists.as_ref();
         for order in (order..target_order).rev() {
             size >>= 1;
-            let new_block = block.split_front(size).expect("block too small to split!");
+            let new_block = block
+                .split_front(size, self.offset())
+                .expect("block too small to split!");
             &free_lists[order].lock().push_front(new_block);
         }
     }
@@ -224,7 +236,12 @@ where
     /// - `Err` if the requested range could not be deallocated.
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<()> {
         let min_order = self.order_for(range.page_size(), range.len())?;
-        let mut block = unsafe { Free::new(Region::from_page_range(range, RegionKind::FREE)) };
+        let mut block = unsafe {
+            Free::new(
+                Region::from_page_range(range, RegionKind::FREE),
+                self.offset(),
+            )
+        };
 
         for (curr_order, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
             let mut free_list = free_list.lock();
@@ -250,8 +267,9 @@ where
 impl Free {
     const MAGIC: usize = 0xF4EE_B10C; // haha lol it spells "free block"
 
-    pub unsafe fn new(region: Region) -> ptr::NonNull<Free> {
-        let ptr = region.base_addr().as_ptr::<Free>();
+    pub unsafe fn new(region: Region, offset: usize) -> ptr::NonNull<Free> {
+        tracing::trace!(?region, offset = ?format_args!("{:x}", offset));
+        let ptr = region.base_addr().as_ptr::<Free>().offset(offset as isize);
         let nn = ptr::NonNull::new(ptr)
             .expect("definitely don't try to free the zero page; that's evil");
         ptr::write_volatile(
@@ -265,10 +283,10 @@ impl Free {
         nn
     }
 
-    pub fn split_front(&mut self, size: usize) -> Option<ptr::NonNull<Self>> {
+    pub fn split_front(&mut self, size: usize, offset: usize) -> Option<ptr::NonNull<Self>> {
         debug_assert_eq!(self.magic, Self::MAGIC);
         let new_meta = self.meta.split_front(size)?;
-        let new_free = unsafe { Self::new(new_meta) };
+        let new_free = unsafe { Self::new(new_meta, offset) };
         Some(new_free)
     }
 

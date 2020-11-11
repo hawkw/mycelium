@@ -14,7 +14,7 @@ use hal_core::{
     },
     Address,
 };
-
+pub const MIN_PAGE_SIZE: usize = Size4Kb::SIZE;
 const ENTRIES: usize = 512;
 
 type VirtPage<S> = Page<VAddr, S>;
@@ -97,6 +97,17 @@ pub fn init_paging(vm_offset: VAddr) {
 /// we have access to multiple cores. So, technically, it could be a `static
 /// mut`. But, using an atomic is safe, even though it's not strictly necessary.
 static VM_OFFSET: AtomicUsize = AtomicUsize::new(core::usize::MAX);
+
+// XXX(eliza): this sucks
+pub fn vm_offset() -> VAddr {
+    let off = VM_OFFSET.load(Ordering::Acquire);
+    assert_ne!(
+        off,
+        core::usize::MAX,
+        "`init_paging` must be called before calling `vm_offset`!"
+    );
+    VAddr::from_usize(off)
+}
 
 impl PageTable<level::Pml4> {
     fn current(vm_offset: VAddr) -> &'static mut Self {

@@ -31,6 +31,12 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         tracing::dispatcher::set_global_default(subscriber).unwrap();
     }
 
+    arch::interrupt::init::<arch::InterruptHandlers>();
+    bootinfo.init_paging();
+
+    // XXX(eliza): this sucks
+    PAGE_ALLOCATOR.set_base_addr(arch::mm::vm_offset());
+
     let mut regions = 0;
     let mut free_regions = 0;
     let mut free_bytes = 0;
@@ -66,9 +72,6 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
             free_bytes,
         );
     }
-
-    arch::interrupt::init::<arch::InterruptHandlers>();
-    bootinfo.init_paging();
 
     #[cfg(test)]
     {
