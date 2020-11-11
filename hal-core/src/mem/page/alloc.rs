@@ -284,7 +284,6 @@ impl Free {
         let ptr = ((region.base_addr().as_ptr::<Free>() as usize) + offset) as *mut _;
         let nn = ptr::NonNull::new(ptr)
             .expect("definitely don't try to free the zero page; that's evil");
-        tracing::trace!(ptr = ?format_args!("{:p}", ptr));
         ptr::write_volatile(
             ptr,
             Free {
@@ -293,7 +292,6 @@ impl Free {
                 meta: region,
             },
         );
-        tracing::trace!("actually wrote to it");
         nn
     }
 

@@ -98,6 +98,21 @@ impl<A: Address> Region<A> {
         })
     }
 
+    pub fn split_back(&mut self, size: usize) -> Option<Self> {
+        assert!(size <= core::i32::MAX as usize);
+        if size > self.size {
+            return None;
+        }
+        let rem_size = self.size - size;
+        let base = self.base.offset(size as i32);
+        self.size = size;
+        Some(Self {
+            base,
+            size: rem_size,
+            kind: self.kind,
+        })
+    }
+
     pub fn page_range<S: page::Size>(
         &self,
         size: S,
