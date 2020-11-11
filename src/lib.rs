@@ -59,6 +59,16 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
                 free_bytes += size;
                 unsafe {
                     tracing::trace!(?region, "adding to page allocator");
+                    // XXX(eliza): this sucks; the page allocator should be less
+                    // stupid.
+                    let aligned_end = region.end_addr().align_down(4096usize);
+                    let aligned_size = region.base_addr().difference(aligned_end) as usize;
+                    let lost = region.size() - aligned_size;
+                    if lost > 0 {
+                        tracing::warn!("leaking {} bytes to preserve alignment", lost);
+                    }
+                    let region =
+                        mem::Region::new(region.base_addr(), aligned_size, mem::RegionKind::FREE);
                     let e = PAGE_ALLOCATOR.add_region(region);
                     tracing::trace!(added = e.is_ok());
                 }
