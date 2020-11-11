@@ -195,13 +195,14 @@ where
         let mut size = block.size();
         let free_lists = self.free_lists.as_ref();
         while order > target_order {
+            order -= 1;
             tracing::trace!(?order, ?target_order, "split at");
             size >>= 1;
             let new_block = block
                 .split_front(size, self.offset())
                 .expect("block too small to split!");
-            &free_lists[order].lock().push_front(new_block);
-            order -= 1;
+            tracing::trace!(?new_block);
+            free_lists[order].lock().push_front(new_block);
         }
     }
 }
