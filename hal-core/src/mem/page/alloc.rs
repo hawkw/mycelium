@@ -146,9 +146,10 @@ where
 {
     pub unsafe fn add_region(&self, region: Region) -> core::result::Result<(), ()> {
         if region.kind() == RegionKind::FREE {
-            unsafe { self.push_block(Free::new(region, self.offset())) }
+            unsafe { self.push_block(Free::new(region, self.offset())) };
+            return Ok(());
         }
-        return Err(());
+        Err(())
     }
 
     unsafe fn push_block(&self, block: ptr::NonNull<Free>) {
@@ -212,7 +213,7 @@ where
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&mut self, size: S, len: usize) -> Result<PageRange<PAddr, S>> {
+    fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>> {
         let order = self.order_for(size, len)?;
         for (curr_order, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
             // Is there an available block on this free list?
@@ -269,9 +270,10 @@ impl Free {
 
     pub unsafe fn new(region: Region, offset: usize) -> ptr::NonNull<Free> {
         tracing::trace!(?region, offset = ?format_args!("{:x}", offset));
-        let ptr = region.base_addr().as_ptr::<Free>().offset(offset as isize);
+        let ptr = ((region.base_addr().as_ptr::<Free>() as usize) + offset) as *mut _;
         let nn = ptr::NonNull::new(ptr)
             .expect("definitely don't try to free the zero page; that's evil");
+        tracing::trace!(ptr = ?format_args!("{:p}", ptr));
         ptr::write_volatile(
             ptr,
             Free {
@@ -280,6 +282,7 @@ impl Free {
                 meta: region,
             },
         );
+        tracing::trace!("actually wrote to it");
         nn
     }
 

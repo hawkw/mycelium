@@ -33,7 +33,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(Page)` if a page was successfully allocated.
     /// - `Err` if no more pages can be allocated by this allocator.
-    fn alloc(&mut self, size: S) -> Result<Page<PAddr, S>, AllocErr> {
+    fn alloc(&self, size: S) -> Result<Page<PAddr, S>, AllocErr> {
         self.alloc_range(size, 1).map(|r| r.start())
     }
 
@@ -42,7 +42,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&mut self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
+    fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
 
     /// Deallocate a single page.
     ///
@@ -52,7 +52,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(())` if the page was successfully deallocated.
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc(&mut self, page: Page<PAddr, S>) -> Result<(), AllocErr> {
+    fn dealloc(&self, page: Page<PAddr, S>) -> Result<(), AllocErr> {
         self.dealloc_range(page.range_inclusive(page))
     }
 
@@ -194,6 +194,7 @@ pub struct NotAligned<S> {
     size: S,
 }
 
+#[derive(Debug)]
 pub struct AllocErr {
     // TODO: eliza
     _p: (),
@@ -397,7 +398,7 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
 }
 
 unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
-    fn alloc_range(&mut self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
+    fn alloc_range(&self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
         Err(AllocErr { _p: () })
     }
 

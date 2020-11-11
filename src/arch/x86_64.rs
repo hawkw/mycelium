@@ -219,3 +219,18 @@ pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
         cpu::halt()
     }
 }
+
+mycelium_util::decl_test! {
+    fn alloc_some_pages() -> Result<(), hal_core::mem::page::AllocErr> {
+        use hal_core::mem::page::Alloc;
+        let page1 = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb)?;
+        let page2 = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb)?;
+        crate::PAGE_ALLOCATOR.dealloc(page1)?;
+        let page3 = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb)?;
+        crate::PAGE_ALLOCATOR.dealloc(page2)?;
+        let page4 = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb)?;
+        crate::PAGE_ALLOCATOR.dealloc(page3)?;
+        crate::PAGE_ALLOCATOR.dealloc(page4)?;
+        Ok(())
+    }
+}
