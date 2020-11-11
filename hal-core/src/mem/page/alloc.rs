@@ -191,22 +191,25 @@ where
         None
     }
 
-    fn split_down(&self, block: &mut Free, order: usize, target_order: usize) {
+    fn split_down(&self, block: &mut Free, mut order: usize, target_order: usize) {
         let mut size = block.size();
         let free_lists = self.free_lists.as_ref();
-        for order in (order..target_order).rev() {
+        while order > target_order {
+            tracing::trace!(?order, ?target_order, "split at");
             size >>= 1;
             let new_block = block
                 .split_front(size, self.offset())
                 .expect("block too small to split!");
             &free_lists[order].lock().push_front(new_block);
+            order -= 1;
         }
     }
 }
 
-unsafe impl<S: Size, L> Alloc<S> for BuddyAlloc<L>
+unsafe impl<S, L> Alloc<S> for BuddyAlloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
+    S: Size + core::fmt::Display,
 {
     /// Allocate a range of `len` pages.
     ///
@@ -214,17 +217,24 @@ where
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
     fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>> {
+        let span = tracing::trace_span!("alloc_range", size = size.as_usize(), len);
+        let _e = span.enter();
         let order = self.order_for(size, len)?;
+        tracing::trace!(?order);
         for (curr_order, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
+            tracing::trace!(curr_order);
             // Is there an available block on this free list?
             if let Some(mut block) = free_list.lock().pop_back() {
+                tracing::trace!(?block, "found");
                 // If the block is larger than the desired size, split it.
                 let block = unsafe { block.as_mut() };
                 if curr_order > order {
+                    tracing::trace!(?curr_order, ?order, "split down");
                     self.split_down(block, curr_order, order);
                 }
-                let range = block.region().page_range(size)?;
-                return Ok(range);
+                let range = block.region().page_range(size);
+                tracing::trace!(?range);
+                return Ok(range?);
             }
         }
         Err(AllocErr::oom())

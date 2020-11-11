@@ -75,7 +75,7 @@ impl<A: Address> Region<A> {
     ///
     /// This is the start address of the next memory region.
     pub fn end_addr(&self) -> A {
-        self.base + (self.size - 1)
+        self.base + self.size
     }
 
     pub fn kind(&self) -> RegionKind {
@@ -88,9 +88,9 @@ impl<A: Address> Region<A> {
             return None;
         }
         let base = self.base;
+        tracing::trace!(size, self.size, "splitting down by");
         self.base = self.base.offset(size as i32);
         self.size -= size;
-
         Some(Self {
             base,
             size,
@@ -102,8 +102,9 @@ impl<A: Address> Region<A> {
         &self,
         size: S,
     ) -> Result<page::PageRange<A, S>, page::NotAligned<S>> {
+        tracing::trace!(?self.base, self.size, self.end = ?self.end_addr());
         let start = page::Page::starting_at(self.base, size)?;
-        let end = page::Page::starting_at(self.end_addr() + 1, size)?;
+        let end = page::Page::starting_at(self.end_addr(), size)?;
         Ok(start.range_to(end))
     }
 

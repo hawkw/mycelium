@@ -397,6 +397,19 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
     }
 }
 
+impl<A, S> fmt::Debug for PageRange<A, S>
+where
+    A: Address + fmt::Debug,
+    S: Size + fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PageRange")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .finish()
+    }
+}
+
 unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
     fn alloc_range(&self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
         Err(AllocErr { _p: () })
