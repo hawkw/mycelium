@@ -1,6 +1,6 @@
+pub use self::alloc::BuddyAlloc;
 use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, ops, slice};
-
 mod alloc;
 
 pub trait Size: Copy + Eq + PartialEq + fmt::Display {
@@ -397,7 +397,7 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
 }
 
 unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
-    fn alloc_range(&mut self, s: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
+    fn alloc_range(&mut self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
         Err(AllocErr { _p: () })
     }
 

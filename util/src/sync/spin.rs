@@ -17,6 +17,15 @@ pub struct MutexGuard<'a, T> {
 }
 
 impl<T> Mutex<T> {
+    #[cfg(not(test))]
+    pub const fn new(data: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+            data: CausalCell::new(data),
+        }
+    }
+
+    #[cfg(test)]
     pub fn new(data: T) -> Self {
         Self {
             locked: AtomicBool::new(false),

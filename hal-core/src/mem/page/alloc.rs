@@ -8,7 +8,7 @@ use mycelium_util::intrusive::{list, List};
 use mycelium_util::math::Log2;
 use mycelium_util::sync::{
     atomic::{
-        AtomicUsize,
+        AtomicPtr, AtomicUsize,
         Ordering::{AcqRel, Acquire, Relaxed},
     },
     spin,
@@ -19,7 +19,7 @@ pub struct BuddyAlloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Minimum allocateable size in bytes.
     pub min_size: usize,
 
-    base_addr: *const (),
+    base_addr: AtomicPtr<()>,
 
     /// Cache this so we don't have to re-evaluate it.
     min_size_log2: usize,
@@ -32,6 +32,7 @@ pub struct BuddyAlloc<L = [spin::Mutex<List<Free>>; 32]> {
 pub type Result<T> = core::result::Result<T, AllocErr>;
 #[derive(Debug)]
 pub struct Free {
+    magic: usize,
     links: list::Links<Self>,
     meta: Region,
 }
@@ -66,30 +67,117 @@ impl<L> BuddyAlloc<L> {
     }
 }
 
+impl BuddyAlloc {
+    #[cfg(not(loom))]
+    pub const fn new_default(min_size: usize) -> Self {
+        Self::new(
+            min_size,
+            // haha this is cool and fun
+            [
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+                spin::Mutex::new(List::new()),
+            ],
+        )
+    }
+}
+
+impl<L> BuddyAlloc<L> {
+    #[cfg(not(loom))]
+    pub const fn new(min_size: usize, free_lists: L) -> Self {
+        Self {
+            min_size,
+            base_addr: AtomicPtr::new(ptr::null_mut()),
+            min_size_log2: mycelium_util::math::usize_const_log2(min_size),
+            heap_size: AtomicUsize::new(0),
+            free_lists,
+        }
+    }
+}
+
 impl<L> BuddyAlloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
 {
+    pub unsafe fn add_region(&self, region: Region) -> core::result::Result<(), ()> {
+        if region.kind() == RegionKind::FREE {
+            let _ = self.base_addr.compare_exchange(
+                ptr::null_mut(),
+                region.base_addr().as_ptr(),
+                AcqRel,
+                Acquire,
+            );
+            unsafe { self.push_block(Free::new(region)) }
+        }
+        return Err(());
+    }
+
     unsafe fn push_block(&self, block: ptr::NonNull<Free>) {
-        let order = self.order_for_size(block.as_ref().size());
+        let block_size = block.as_ref().size();
+        let order = self.order_for_size(block_size);
         let free_lists = self.free_lists.as_ref();
         if order > free_lists.len() {
             todo!("(eliza): choppity chop chop down the block!");
         }
         free_lists[order].lock().push_front(block);
+        let mut sz = self.heap_size.load(Acquire);
+        while let Err(actual) =
+            // TODO(eliza): if this overflows that's bad news lol...
+            self
+            .heap_size
+            .compare_exchange_weak(sz, sz + block_size, AcqRel, Acquire)
+        {
+            sz = actual;
+        }
     }
 
-    /// Returns `block`'s buddy, if one exists.
+    /// Returns `block`'s buddy, if it is free
     unsafe fn buddy_for(
         &self,
         block: ptr::NonNull<Free>,
         order: usize,
     ) -> Option<ptr::NonNull<Free>> {
         let size = 1 << (self.min_size_log2 + order);
-        let rel_offset = self.base_addr as usize - block.as_ptr() as usize;
+        let base = self.base_addr.load(Relaxed);
+        if base == ptr::null_mut() {
+            return None;
+        }
+        let rel_offset = base as usize - block.as_ptr() as usize;
         let buddy_offset = rel_offset ^ size;
-        let buddy = self.base_addr.offset(buddy_offset as isize);
-        Some(ptr::NonNull::new_unchecked(buddy as *mut _))
+        let buddy = base.offset(buddy_offset as isize).cast::<Free>();
+        if unsafe { (*buddy).magic == Free::MAGIC } {
+            return Some(ptr::NonNull::new_unchecked(buddy));
+        }
+        None
     }
 
     fn split_down(&self, block: &mut Free, order: usize, target_order: usize) {
@@ -139,17 +227,29 @@ where
         let mut block = unsafe { Free::new(Region::from_page_range(range, RegionKind::FREE)) };
 
         for (curr_order, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
+            let mut free_list = free_list.lock();
             if let Some(buddy) = unsafe { self.buddy_for(block, curr_order) } {
-                unimplemented!("eliza: do this part")
+                unsafe {
+                    let mut buddy = free_list.remove(buddy).unwrap();
+                    block.as_mut().merge(buddy.as_mut());
+                }
+                // Keep merging!
+                continue;
             }
+
+            free_list.push_front(block);
+            return Ok(());
         }
-        unimplemented!()
+
+        Ok(())
     }
 }
 
 // ==== impl Free ====
 
 impl Free {
+    const MAGIC: usize = 0xF4EE_B10C; // haha lol it spells "free block"
+
     pub unsafe fn new(region: Region) -> ptr::NonNull<Free> {
         let ptr = region.base_addr().as_ptr::<Free>();
         let nn = ptr::NonNull::new(ptr)
@@ -157,6 +257,7 @@ impl Free {
         ptr::write_volatile(
             ptr,
             Free {
+                magic: Self::MAGIC,
                 links: list::Links::default(),
                 meta: region,
             },
@@ -165,9 +266,16 @@ impl Free {
     }
 
     pub fn split_front(&mut self, size: usize) -> Option<ptr::NonNull<Self>> {
+        debug_assert_eq!(self.magic, Self::MAGIC);
         let new_meta = self.meta.split_front(size)?;
         let new_free = unsafe { Self::new(new_meta) };
         Some(new_free)
+    }
+
+    pub fn merge(&mut self, other: &mut Self) {
+        debug_assert_eq!(self.magic, Self::MAGIC);
+        debug_assert_eq!(other.magic, Self::MAGIC);
+        self.meta.merge(&mut other.meta)
     }
 
     pub fn region(&self) -> Region {

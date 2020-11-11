@@ -1,5 +1,5 @@
 use crate::Address;
-use core::fmt;
+use core::{cmp, fmt};
 pub mod page;
 
 /// A cross-platform representation of a memory region.
@@ -114,6 +114,13 @@ impl<A: Address> Region<A> {
             size: range.size(),
             kind,
         }
+    }
+
+    pub fn merge(&mut self, other: &mut Self) {
+        debug_assert_eq!(self.kind, other.kind);
+        // TOOD(eliza): assert that there's no in-between space.
+        self.base = cmp::min(self.base, other.base);
+        self.size = self.size + other.size;
     }
 }
 

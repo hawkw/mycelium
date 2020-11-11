@@ -13,6 +13,9 @@ use hal_core::{boot::BootInfo, mem};
 
 mod wasm;
 
+static PAGE_ALLOCATOR: mem::page::BuddyAlloc =
+    mem::page::BuddyAlloc::new_default(arch::mm::MIN_PAGE_SIZE);
+
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
@@ -48,6 +51,11 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
             if region.kind() == mem::RegionKind::FREE {
                 free_regions += 1;
                 free_bytes += size;
+                unsafe {
+                    tracing::trace!(?region, "adding to page allocator");
+                    let e = PAGE_ALLOCATOR.add_region(region);
+                    tracing::trace!(added = e.is_ok());
+                }
             }
         }
 
