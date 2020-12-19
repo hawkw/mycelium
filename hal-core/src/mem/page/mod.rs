@@ -365,6 +365,7 @@ impl<A: Address, S: Size> PageRange<A, S> {
 
     /// Returns the size of the pages in the range. All pages in a page range
     /// have the same size.
+    #[track_caller]
     pub fn page_size(&self) -> S {
         debug_assert_eq!(self.start.size().as_usize(), self.end.size().as_usize());
         self.start.size()
@@ -375,13 +376,23 @@ impl<A: Address, S: Size> PageRange<A, S> {
     }
 
     /// Returns the size in bytes of the page range.
+    #[track_caller]
     pub fn size(&self) -> usize {
-        let diff = self.end.end_addr().difference(self.start.base_addr());
+        let diff = self.end.end_addr().difference(self.start.base_addr()).abs() as usize;
         debug_assert!(
-            diff >= (self.page_size().as_usize() as isize),
-            "page range must be at least one page; base addr must be less than end addr"
+            diff >= self.page_size().as_usize(),
+            "page range must be at least one page; base addr must be less than end addr\n \
+            \tdifference = {}\n\
+            \t      size = {}\n\
+            \t base addr = {:?}\n\
+            \t  end addr = {:?}\n\
+            ",
+            diff,
+            self.page_size().as_usize(),
+            self.base_addr(),
+            self.end_addr(),
         );
-        diff as usize
+        diff
     }
 }
 
