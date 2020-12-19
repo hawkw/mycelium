@@ -1,14 +1,14 @@
 use super::{Alloc, AllocErr, PageRange, Size};
 use crate::{
     mem::{Region, RegionKind},
-    PAddr, VAddr,
+    Address, PAddr, VAddr,
 };
 use core::ptr;
 use mycelium_util::intrusive::{list, List};
 use mycelium_util::math::Log2;
 use mycelium_util::sync::{
     atomic::{
-        AtomicPtr, AtomicUsize,
+        AtomicUsize,
         Ordering::{AcqRel, Acquire, Relaxed},
     },
     spin,
@@ -19,7 +19,8 @@ pub struct BuddyAlloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Minimum allocateable size in bytes.
     pub min_size: usize,
 
-    base_addr: AtomicPtr<()>,
+    base_paddr: AtomicUsize,
+    vm_offset: AtomicUsize,
 
     /// Cache this so we don't have to re-evaluate it.
     min_size_log2: usize,
@@ -116,27 +117,28 @@ impl<L> BuddyAlloc<L> {
     pub const fn new(min_size: usize, free_lists: L) -> Self {
         Self {
             min_size,
-            base_addr: AtomicPtr::new(ptr::null_mut()),
+            base_paddr: AtomicUsize::new(core::usize::MAX),
+            vm_offset: AtomicUsize::new(0),
             min_size_log2: mycelium_util::math::usize_const_log2(min_size),
             heap_size: AtomicUsize::new(0),
             free_lists,
         }
     }
 
-    pub fn set_base_addr(&self, offset: VAddr) {
-        self.base_addr
-            .compare_exchange(ptr::null_mut(), offset.as_ptr(), AcqRel, Acquire)
+    pub fn set_vm_offset(&self, offset: VAddr) {
+        self.vm_offset
+            .compare_exchange(0, offset.as_usize(), AcqRel, Acquire)
             .expect("dont do this twice lol");
     }
 
     fn offset(&self) -> usize {
-        let addr = self.base_addr.load(Relaxed);
-        debug_assert_ne!(
-            addr,
-            ptr::null_mut(),
-            "you didn't initialize the heap yet dipshit"
-        );
-        addr as usize
+        let addr = self.vm_offset.load(Relaxed);
+        debug_assert_ne!(addr, 0, "you didn't initialize the heap yet dipshit");
+        addr
+    }
+
+    fn size_for_order(&self, order: usize) -> usize {
+        1 << (self.min_size_log2 as usize + order)
     }
 }
 
@@ -144,14 +146,41 @@ impl<L> BuddyAlloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
 {
-    pub unsafe fn add_region(&self, region: Region) -> core::result::Result<(), ()> {
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub unsafe fn add_region(&self, mut region: Region) -> core::result::Result<(), ()> {
         if region.kind() == RegionKind::FREE {
+            let is_aligned = region.end_addr().is_aligned(self.min_size);
+            tracing::trace!(
+                ?region,
+                region.is_aligned = is_aligned,
+                self.min_size,
+                "adding to allocator"
+            );
+            if !is_aligned {
+                let actual_end = region.end_addr();
+                let aligned_end = actual_end.align_down(self.min_size);
+                let leaked = aligned_end.difference(actual_end) as usize;
+                let size = region.size();
+                let aligned_size = size - leaked;
+                tracing::trace!(
+                    ?actual_end,
+                    ?aligned_end,
+                    leaked,
+                    size,
+                    aligned_size,
+                    "aligned down"
+                );
+                region = Region::new(region.base_addr(), aligned_size, RegionKind::FREE);
+            }
+            self.base_paddr
+                .fetch_min(region.base_addr().as_usize(), AcqRel);
             unsafe { self.push_block(Free::new(region, self.offset())) };
             return Ok(());
         }
         Err(())
     }
 
+    #[tracing::instrument(skip(self), level = "trace")]
     unsafe fn push_block(&self, block: ptr::NonNull<Free>) {
         let block_size = block.as_ref().size();
         let order = self.order_for_size(block_size);
@@ -178,28 +207,44 @@ where
         order: usize,
     ) -> Option<ptr::NonNull<Free>> {
         let size = 1 << (self.min_size_log2 + order);
-        let base = self.base_addr.load(Relaxed);
-        if base == ptr::null_mut() {
+        let base = self.base_paddr.load(Relaxed);
+        if base == 0 {
+            tracing::warn!("cannot find buddy block; heap not initialized!");
             return None;
         }
-        let rel_offset = base as usize - block.as_ptr() as usize;
+        let vm_offset = self.offset();
+        tracing::trace!(
+            "buddy for base={:x}; block={:p}; vm_offset={:x}",
+            base,
+            block,
+            vm_offset
+        );
+        let block_paddr = block.as_ptr() as usize - vm_offset;
+        let rel_offset = block_paddr - base;
         let buddy_offset = rel_offset ^ size;
-        let buddy = base.offset(buddy_offset as isize).cast::<Free>();
+        tracing::trace!("buddy_offset={:x}", buddy_offset);
+        let buddy = (base + buddy_offset + vm_offset) as *mut Free;
+        tracing::trace!("buddy_addr = {:p}", buddy);
+        if core::ptr::eq(buddy as *const _, block.as_ptr() as *const _) {
+            tracing::trace!("buddy block is the same as self");
+            return None;
+        }
         if unsafe { (*buddy).magic == Free::MAGIC } {
             return Some(ptr::NonNull::new_unchecked(buddy));
         }
         None
     }
 
+    #[tracing::instrument(skip(self), level = "trace")]
     fn split_down(&self, block: &mut Free, mut order: usize, target_order: usize) {
-        let mut size = block.size();
+        let mut size = self.size_for_order(order);
         let free_lists = self.free_lists.as_ref();
         while order > target_order {
             order -= 1;
-            tracing::trace!(?order, ?target_order, "split at");
             size >>= 1;
+            tracing::trace!(order, target_order, size, "split at");
             let new_block = block
-                .split_front(size, self.offset())
+                .split_back(size, self.offset())
                 .expect("block too small to split!");
             tracing::trace!(?new_block);
             free_lists[order].lock().push_front(new_block);
@@ -233,6 +278,21 @@ where
                     tracing::trace!(?curr_order, ?order, "split down");
                     self.split_down(block, curr_order, order);
                 }
+                // Change the block's magic to indicate that it is allocated.
+                // /!\ EXTREMELY SERIOUS WARNING /!\
+                // This is ACTUALLY LOAD BEARING. If a block is allocated and
+                // the first word isn't immediately written to, it *might* still
+                // appear to be "free" when its buddy is deallocated, and the
+                // buddy may want to merge with it. When the buddy tries to
+                // remove the block from the free list, though, it will be
+                // surprised to find that the block is not, in fact, free!
+                //
+                // Therefore, we need to clobber the block magic, even if it
+                // will *probably* be immediately overwritten by whoever
+                // allocated the block --- they *might* not overwrite it, or
+                // someone else might free the buddy of this block before the
+                // user of this block writes to it!
+                block.make_busy();
                 let range = block.region().page_range(size);
                 tracing::trace!(?range);
                 return Ok(range?);
@@ -247,7 +307,16 @@ where
     /// - `Ok(())` if a range of pages was successfully deallocated
     /// - `Err` if the requested range could not be deallocated.
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<()> {
-        let min_order = self.order_for(range.page_size(), range.len())?;
+        let span = tracing::trace_span!(
+            "dealloc_range",
+            range.base = ?range.base_addr(),
+            range.page_size = range.page_size().as_usize(),
+            range.len = range.len()
+        );
+        let _e = span.enter();
+        let min_order = self.order_for(range.page_size(), range.len());
+        tracing::trace!(min_order = ?min_order);
+        let min_order = min_order?;
         let mut block = unsafe {
             Free::new(
                 Region::from_page_range(range, RegionKind::FREE),
@@ -278,6 +347,7 @@ where
 
 impl Free {
     const MAGIC: usize = 0xF4EE_B10C; // haha lol it spells "free block"
+    const MAGIC_BUSY: usize = 0xB4D_B10C;
 
     pub unsafe fn new(region: Region, offset: usize) -> ptr::NonNull<Free> {
         tracing::trace!(?region, offset = ?format_args!("{:x}", offset));
@@ -302,6 +372,13 @@ impl Free {
         Some(new_free)
     }
 
+    pub fn split_back(&mut self, size: usize, offset: usize) -> Option<ptr::NonNull<Self>> {
+        debug_assert_eq!(self.magic, Self::MAGIC);
+        let new_meta = self.meta.split_back(size)?;
+        let new_free = unsafe { Self::new(new_meta, offset) };
+        Some(new_free)
+    }
+
     pub fn merge(&mut self, other: &mut Self) {
         debug_assert_eq!(self.magic, Self::MAGIC);
         debug_assert_eq!(other.magic, Self::MAGIC);
@@ -314,6 +391,10 @@ impl Free {
 
     pub fn size(&self) -> usize {
         self.meta.size()
+    }
+
+    pub fn make_busy(&mut self) {
+        self.magic = Self::MAGIC_BUSY;
     }
 }
 
