@@ -267,14 +267,15 @@ where
         let _e = span.enter();
         let order = self.order_for(size, len)?;
         tracing::trace!(?order);
-        for (curr_order, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
-            tracing::trace!(curr_order);
+        for (idx, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
+            tracing::trace!(curr_order = idx + order);
             // Is there an available block on this free list?
             if let Some(mut block) = free_list.lock().pop_back() {
                 tracing::trace!(?block, "found");
                 // If the block is larger than the desired size, split it.
                 let block = unsafe { block.as_mut() };
-                if curr_order > order {
+                if idx > 0 {
+                    let curr_order = idx + order;
                     tracing::trace!(?curr_order, ?order, "split down");
                     self.split_down(block, curr_order, order);
                 }
