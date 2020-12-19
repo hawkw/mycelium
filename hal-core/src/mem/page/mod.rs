@@ -378,14 +378,26 @@ impl<A: Address, S: Size> PageRange<A, S> {
     /// Returns the size in bytes of the page range.
     #[track_caller]
     pub fn size(&self) -> usize {
-        let diff = self.end.end_addr().difference(self.start.base_addr()).abs() as usize;
+        let diff = self.start.base_addr().difference(self.end.end_addr());
+        debug_assert!(
+            diff >= 0,
+            "assertion failed: page range base address must be lower than end \
+            address!\n\
+            \x20 base addr = {:?}\n\
+            \x20  end addr = {:?}\n\
+            ",
+            self.base_addr(),
+            self.end_addr(),
+        );
+        // add 1 to compensate for the base address not being included in `difference`
+        let diff = diff as usize + 1;
         debug_assert!(
             diff >= self.page_size().as_usize(),
-            "page range must be at least one page; base addr must be less than end addr\n \
-            \tdifference = {}\n\
-            \t      size = {}\n\
-            \t base addr = {:?}\n\
-            \t  end addr = {:?}\n\
+            "assertion failed: page range must be at least one page!\n\
+            \x20 difference = {}\n\
+            \x20       size = {}\n\
+            \x20  base addr = {:?}\n\
+            \x20   end addr = {:?}\n\
             ",
             diff,
             self.page_size().as_usize(),
