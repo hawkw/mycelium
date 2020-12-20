@@ -16,6 +16,7 @@ impl BootInfo for RustbootBootInfo {
     type MemoryMap = core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
+    type KernelAddrs = Self;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
@@ -66,6 +67,16 @@ impl BootInfo for RustbootBootInfo {
 
     fn init_paging(&self) {
         mm::init_paging(self.vm_offset())
+    }
+
+    fn kernel_addrs<'a>(&'a self) -> &'a Self::KernelAddrs {
+        self
+    }
+}
+
+impl mem::TranslateAddr for RustbootBootInfo {
+    fn translate_addr(&self, addr: VAddr) -> Option<PAddr> {
+        PAddr::from_usize_checked(addr.as_usize() + self.inner.physical_memory_offset as usize).ok()
     }
 }
 

@@ -35,7 +35,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     bootinfo.init_paging();
 
     // XXX(eliza): this sucks
-    PAGE_ALLOCATOR.set_base_addr(arch::mm::vm_offset());
+    PAGE_ALLOCATOR.set_vm_offset(arch::mm::vm_offset());
 
     let mut regions = 0;
     let mut free_regions = 0;
