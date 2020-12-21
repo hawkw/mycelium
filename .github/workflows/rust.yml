@@ -86,6 +86,7 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview
         override: true
+    - uses: actions/checkout@v2
     - name: run cargo check
       uses: actions-rs/cargo@v1.0.1
       with:
@@ -104,6 +105,7 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview, clippy
         override: true
+    - uses: actions/checkout@v2
     - name: run cargo clippy
       uses: actions-rs/clippy-check@v1.0.5
       with:
