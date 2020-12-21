@@ -3,7 +3,8 @@ name: CI
 on: [push]
 
 jobs:
-  build-x64:
+  check-host:
+    name: cargo check (host)
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -11,27 +12,72 @@ jobs:
       with:
         profile: minimal
         toolchain: nightly
-        components: rust-src, llvm-tools-preview
+        override: true
     - uses: actions/checkout@v2
-    - uses: actions/cache@v1
-      id: toolcache
-      with:
-        path: _devtools
-        key: devtools-${{ runner.os }}-v0
-    - name: install dev env
-      if: steps.toolcache.outputs.cache-hit != 'true'
+    - name: run cargo check
       uses: actions-rs/cargo@v1.0.1
       with:
-        command: dev-env
-        args: --root=_devtools
-    - run: echo "::add-path::_devtools/bin"
-    - name: x86_64 boot image
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: bootimage-x64
+        command: check
+        args: --all --all-features
 
-  test-x64:
+  clippy-host:
+    name: cargo clippy (host)
     runs-on: ubuntu-latest
+    needs: check-host
+    steps:
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: clippy
+        override: true
+    - uses: actions/checkout@v2
+    - name: run clippy
+      uses: actions-rs/clippy-check@v1.0.5
+      with:
+        name: clippy-host
+        token: ${{ secrets.GITHUB_TOKEN }}
+        args: --all-features
+
+  rustfmt:
+    runs-on: ubuntu-latest
+    needs: check-host
+    steps:
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rustfmt
+        override: true
+    - uses: actions/checkout@v2
+    - name: run rustfmt
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: fmt
+        args: --all -- --check
+
+  test-host:
+    runs-on: ubuntu-latest
+    name: cargo test (host)
+    needs: check-host
+    steps:
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        override: true
+    - uses: actions/checkout@v2
+    - name: run host tests
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: test
+        args: --all --all-features
+
+  check-x64:
+    name: cargo check (cross x64)
+    runs-on: ubuntu-latest
+    needs: check-host
     steps:
     - name: install rust toolchain
       uses: actions-rs/toolchain@v1
@@ -39,27 +85,17 @@ jobs:
         profile: minimal
         toolchain: nightly
         components: rust-src, llvm-tools-preview
+        override: true
     - uses: actions/checkout@v2
-    - uses: actions/cache@v1
-      id: toolcache
-      with:
-        path: _devtools
-        key: devtools-${{ runner.os }}-v0
-    - name: install dev env
-      if: steps.toolcache.outputs.cache-hit != 'true'
+    - name: run cargo check
       uses: actions-rs/cargo@v1.0.1
       with:
-        command: dev-env
-        args: --root=_devtools
-    - run: echo "::add-path::_devtools/bin"
-    - name: install qemu
-      run: sudo apt-get update && sudo apt-get install qemu
-    - name: run tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test-x64
+        command: check
+        args: -Z build-std=core,alloc --target=x86_64-mycelium.json --all-features
 
   clippy-x64:
+    name: cargo clippy (cross x64)
+    needs: check-x64
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -68,54 +104,62 @@ jobs:
         profile: minimal
         toolchain: nightly
         components: rust-src, llvm-tools-preview, clippy
+        override: true
     - uses: actions/checkout@v2
-    - uses: actions/cache@v1
-      id: toolcache
-      with:
-        path: _devtools
-        key: devtools-${{ runner.os }}-v0
-    - name: install dev env
-      if: steps.toolcache.outputs.cache-hit != 'true'
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: dev-env
-        args: --root=_devtools
-    - run: echo "::add-path::_devtools/bin"
-    - name: rust-clippy-check
+    - name: run cargo clippy
       uses: actions-rs/clippy-check@v1.0.5
       with:
         name: clippy-x64
         token: ${{ secrets.GITHUB_TOKEN }}
         args: -Z build-std=core,alloc --target=x86_64-mycelium.json --all-features
 
-  test-host:
+  build-x64:
+    name: cargo bootimage (cross x64)
     runs-on: ubuntu-latest
+    needs: check-x64
     steps:
     - name: install rust toolchain
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
         toolchain: nightly
+        components: rust-src, llvm-tools-preview
+        override: true
+    - name: install cargo-bootimage
+      uses: actions-rs/install@v0.1.2
+      with:
+        crate: bootimage
+        version: latest
+        use-tool-cache: true
     - uses: actions/checkout@v2
-    - name: run host tests
+    - name: x86_64 boot image
       uses: actions-rs/cargo@v1.0.1
       with:
-        command: test
-        args: --all --all-features
+        command: bootimage-x64
 
-  clippy-host:
+  test-x64:
+    name: cargo test (cross x64)
     runs-on: ubuntu-latest
-    needs: test-host
+    needs: check-x64
     steps:
-    - uses: actions-rs/toolchain@v1
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1
       with:
         profile: minimal
         toolchain: nightly
-        components: clippy
-    - uses: actions/checkout@v2
-    - name: rust-clippy-check
-      uses: actions-rs/clippy-check@v1.0.5
+        components: rust-src, llvm-tools-preview
+        override: true
+    - name: install cargo-bootimage
+      uses: actions-rs/install@v0.1.2
       with:
-        name: clippy-host
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-features
+        crate: bootimage
+        version: latest
+        use-tool-cache: true
+    - uses: actions/checkout@v2
+    - name: install qemu
+      run: sudo apt-get update && sudo apt-get install qemu
+    - name: run tests
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: test-x64
+
