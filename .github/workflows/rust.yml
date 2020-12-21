@@ -6,13 +6,13 @@ jobs:
   build-x64:
     runs-on: ubuntu-latest
     steps:
-    - &install-toolchain name: install rust toolchain
+    - name: install rust toolchain
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
         toolchain: nightly
         components: rust-src, llvm-tools-preview
-    - &install-bootimage name: install cargo-bootimage
+    - name: install cargo-bootimage
       uses: actions-rs/install
       with:
         crate: bootimage
@@ -27,8 +27,18 @@ jobs:
   test-x64:
     runs-on: ubuntu-latest
     steps:
-    - *install-toolchain
-    - *install-bootimage
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rust-src, llvm-tools-preview
+    - name: install cargo-bootimage
+      uses: actions-rs/install
+      with:
+        crate: bootimage
+        version: latest
+        use-tool-cache: true
     - uses: actions/checkout@v2
     - name: install qemu
       run: sudo apt-get update && sudo apt-get install qemu
@@ -46,7 +56,12 @@ jobs:
         profile: minimal
         toolchain: nightly
         components: rust-src, llvm-tools-preview, clippy
-    - *install-bootimage
+    - name: install cargo-bootimage
+      uses: actions-rs/install
+      with:
+        crate: bootimage
+        version: latest
+        use-tool-cache: true
     - name: rust-clippy-check
       uses: actions-rs/clippy-check@v1.0.5
       with:
