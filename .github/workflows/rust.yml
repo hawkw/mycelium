@@ -65,16 +65,11 @@ jobs:
         profile: minimal
         toolchain: nightly
         components: rust-src, llvm-tools-preview
-    - name: install cargo-bootimage
-      uses: actions-rs/install@v0.1.2
-      with:
-        crate: bootimage
-        version: latest
-        use-tool-cache: true
     - name: run cargo check
       uses: actions-rs/cargo@v1.0.1
       with:
         command: check
+        toolchain: nightly
         args: -Z build-std=core,alloc --target=x86_64-mycelium.json --all-features
 
   clippy-x64:
@@ -88,13 +83,7 @@ jobs:
         profile: minimal
         toolchain: nightly
         components: rust-src, llvm-tools-preview, clippy
-    - name: install cargo-bootimage
-      uses: actions-rs/install@v0.1.2
-      with:
-        crate: bootimage
-        version: latest
-        use-tool-cache: true
-    - name: rust-clippy-check
+    - name: run cargo clippy
       uses: actions-rs/clippy-check@v1.0.5
       with:
         name: clippy-x64
