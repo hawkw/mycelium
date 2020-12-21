@@ -66,7 +66,7 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview
     - name: install cargo-bootimage
-      uses: actions-rs/install
+      uses: actions-rs/install@v0.1.2
       with:
         crate: bootimage
         version: latest
@@ -89,7 +89,7 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview, clippy
     - name: install cargo-bootimage
-      uses: actions-rs/install
+      uses: actions-rs/install@v0.1.2
       with:
         crate: bootimage
         version: latest
@@ -113,7 +113,7 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview
     - name: install cargo-bootimage
-      uses: actions-rs/install
+      uses: actions-rs/install@v0.1.2
       with:
         crate: bootimage
         version: latest
@@ -136,7 +136,7 @@ jobs:
         toolchain: nightly
         components: rust-src, llvm-tools-preview
     - name: install cargo-bootimage
-      uses: actions-rs/install
+      uses: actions-rs/install@v0.1.2
       with:
         crate: bootimage
         version: latest
