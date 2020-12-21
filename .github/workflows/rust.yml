@@ -39,6 +39,23 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         args: --all-features
 
+  rustfmt:
+    runs-on: ubuntu-latest
+    needs: check-host
+    steps:
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rustfmt
+        override: true
+    - uses: actions/checkout@v2
+    - name: run rustfmt
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: fmt
+        args: --all -- --check
+
   test-host:
     runs-on: ubuntu-latest
     name: cargo test (host)
