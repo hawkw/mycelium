@@ -75,8 +75,8 @@ jobs:
       uses: actions-rs/cargo@v1.0.1
       with:
         command: check
-        args:-Z build-std=core,alloc --target=x86_64-mycelium.json --all-features
-        
+        args: -Z build-std=core,alloc --target=x86_64-mycelium.json --all-features
+
   clippy-x64:
     name: cargo clippy (cross x64)
     needs: check-x64
