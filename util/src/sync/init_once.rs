@@ -185,6 +185,21 @@ impl<T, F> Lazy<T, F> {
             initializer,
         }
     }
+
+    /// Returns the value of the lazy cell, if it has already been initialized.
+    /// Otherwise, returns `None`.
+    #[inline]
+    pub fn get_if_present(&self) -> Option<&T> {
+        if self.state.load(Ordering::Acquire) == INITIALIZED {
+            let value = unsafe {
+                // Safety: we just ensured the cell was initialized.
+                &*((*self.value.get()).as_ptr())
+            };
+            Some(value)
+        } else {
+            None
+        }
+    }
 }
 
 impl<T, F> Lazy<T, F>
@@ -258,13 +273,16 @@ where
     }
 }
 
-impl<T: fmt::Debug, F> fmt::Debug for Lazy<T, F> {
+impl<T, F> fmt::Debug for Lazy<T, F>
+where
+    T: fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Lazy");
         d.field("type", &any::type_name::<T>())
             .field("initializer", &format_args!("..."));
         match self.state.load(Ordering::Acquire) {
-            INITIALIZED => d.field("value", Deref::deref(self)).finish(),
+            INITIALIZED => d.field("value", self.get_if_present().unwrap()).finish(),
             INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
             UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
             state => unreachable!("unexpected state value {}, this is a bug!", state),
