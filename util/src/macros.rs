@@ -1,4 +1,3 @@
-
 /// Indicates unreachable code that we are confident is *truly* unreachable.
 ///
 /// This is essentially a compromise between `core::unreachable!()` and
@@ -51,4 +50,4 @@ macro_rules! unreachable_unchecked {
             core::hint::unreachable_unchecked();
         }
     });
-}`
+}
