@@ -21,8 +21,8 @@ macro_rules! unreachable_unchecked {
             \x32   Please double- or triple-check any assumptions about code which \n\
             \x32   could lead to this being triggered."
         );
-        #[cfg(not(any(test, debug_assertions)))]
-        unsafe {
+        #[allow(unreachable_code)] // lol
+        {
             core::hint::unreachable_unchecked();
         }
     });
@@ -45,8 +45,8 @@ macro_rules! unreachable_unchecked {
             ),
             $($arg)*
         );
-        #[cfg(not(any(test, debug_assertions)))]
-        unsafe {
+        #[allow(unreachable_code)] // lol
+        {
             core::hint::unreachable_unchecked();
         }
     });
