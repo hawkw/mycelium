@@ -2,16 +2,9 @@ use core::{any, cell::UnsafeCell, fmt, mem::MaybeUninit, ops::Deref};
 
 use crate::sync::atomic::{AtomicU8, Ordering};
 
-/// A cell which represents a promise to initialize some piece of data once,
-/// before it will be accessed.
+/// A cell which which may be initialized a single time after it is created.
 ///
-/// In debug mode, accesses to this cell will check whether or not it has been
-/// initialized. In release mode, **these checks are elided**. This means that
-/// if you dereference a `InitOnce<T>` in release mode without having first
-/// initialized it, YOU WILL READ UNINITIALIZED MEMORY. However, when the data
-/// is accessed frequently enough for the performance penalty of a single atomic
-/// load to matter, this may be worth it.
-// TODO(eliza): maybe this whole thing is just an incredibly bad idea...
+/// This can be used as a safer alternative to `static mut`.
 pub struct InitOnce<T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicU8,
