@@ -5,6 +5,11 @@ use crate::sync::atomic::{AtomicU8, Ordering};
 /// A cell which which may be initialized a single time after it is created.
 ///
 /// This can be used as a safer alternative to `static mut`.
+///
+/// For performance-critical use-cases, this type also has a [`get_unchecked`]
+/// method, which dereferences the cell **without** checking if it has been
+/// initialized. This method is unsafe and should be used with caution ---
+/// incorrect usage can result in reading uninitialized memory.
 pub struct InitOnce<T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicU8,
