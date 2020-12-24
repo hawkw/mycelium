@@ -172,6 +172,9 @@ impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
     }
 }
 
+unsafe impl<T: Send> Send for InitOnce<T> {}
+unsafe impl<T: Sync> Sync for InitOnce<T> {}
+
 // === impl Lazy ===
 
 impl<T, F> Lazy<T, F> {
@@ -268,6 +271,9 @@ impl<T: fmt::Debug, F> fmt::Debug for Lazy<T, F> {
         }
     }
 }
+
+unsafe impl<T: Send, F: Send> Send for Lazy<T, F> {}
+unsafe impl<T: Sync, F: Sync> Sync for Lazy<T, F> {}
 
 // === impl TryInitError ===
 
