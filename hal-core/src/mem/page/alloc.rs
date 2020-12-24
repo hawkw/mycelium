@@ -39,34 +39,6 @@ pub struct Free {
 }
 
 // ==== impl BuddyAlloc ===
-impl<L> BuddyAlloc<L> {
-    fn size_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
-        let size = size.as_usize() * len;
-
-        // Round up to the heap's minimum allocateable size.
-        let size = usize::max(size, self.min_size);
-
-        let size = size.next_power_of_two();
-
-        let available = self.heap_size.load(Acquire);
-
-        if size > available {
-            tracing::error!(size, available, "out of memory!");
-            return Err(AllocErr::oom());
-        }
-
-        Ok(size)
-    }
-
-    fn order_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
-        self.size_for(size, len)
-            .map(|size| self.order_for_size(size))
-    }
-
-    fn order_for_size(&self, size: usize) -> usize {
-        size.log2() - self.min_size_log2
-    }
-}
 
 impl BuddyAlloc {
     #[cfg(not(loom))]
@@ -140,6 +112,33 @@ impl<L> BuddyAlloc<L> {
     fn size_for_order(&self, order: usize) -> usize {
         1 << (self.min_size_log2 as usize + order)
     }
+
+    fn size_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
+        let size = size.as_usize() * len;
+
+        // Round up to the heap's minimum allocateable size.
+        let size = usize::max(size, self.min_size);
+
+        let size = size.next_power_of_two();
+
+        let available = self.heap_size.load(Acquire);
+
+        if size > available {
+            tracing::error!(size, available, "out of memory!");
+            return Err(AllocErr::oom());
+        }
+
+        Ok(size)
+    }
+
+    fn order_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
+        self.size_for(size, len)
+            .map(|size| self.order_for_size(size))
+    }
+
+    fn order_for_size(&self, size: usize) -> usize {
+        size.log2() - self.min_size_log2
+    }
 }
 
 impl<L> BuddyAlloc<L>
@@ -149,32 +148,25 @@ where
     #[tracing::instrument(skip(self), level = "trace")]
     pub unsafe fn add_region(&self, mut region: Region) -> core::result::Result<(), ()> {
         if region.kind() == RegionKind::FREE {
-            let is_aligned = region.end_addr().is_aligned(self.min_size);
-            tracing::trace!(
-                ?region,
-                region.is_aligned = is_aligned,
-                self.min_size,
-                "adding to allocator"
-            );
-            if !is_aligned {
-                let actual_end = region.end_addr();
-                let aligned_end = actual_end.align_down(self.min_size);
-                let leaked = aligned_end.difference(actual_end) as usize;
-                let size = region.size();
-                let aligned_size = size - leaked;
-                tracing::trace!(
-                    ?actual_end,
-                    ?aligned_end,
-                    leaked,
-                    size,
-                    aligned_size,
-                    "aligned down"
-                );
-                region = Region::new(region.base_addr(), aligned_size, RegionKind::FREE);
+            let size = region.size();
+            tracing::info!(size, base = ?region.base_addr(), "add region");
+            if !size.is_power_of_two() {
+                let prev_power_of_two = prev_power_of_two(size);
+                let rem = size - prev_power_of_two;
+                tracing::debug!(prev_power_of_two, rem, "not a power of two!");
+                let region2 = region.split_back(prev_power_of_two).unwrap();
+                if region2.size() > self.min_size {
+                    tracing::debug!("add split part");
+                    self.add_region(region2)?;
+                } else {
+                    tracing::info!(region = ?region2, "leaking a region smaller than min page size");
+                }
             }
             self.base_paddr
                 .fetch_min(region.base_addr().as_usize(), AcqRel);
-            unsafe { self.push_block(Free::new(region, self.offset())) };
+            let mut block = Free::new(region, self.offset());
+            // self.split_down(block.as_mut(), self.order_for_size(sz), 0);
+            unsafe { self.push_block(block) };
             return Ok(());
         }
         Err(())
@@ -325,18 +317,19 @@ where
             )
         };
 
-        for (curr_order, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
-            let mut free_list = free_list.lock();
+        for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
             if let Some(buddy) = unsafe { self.buddy_for(block, curr_order) } {
                 unsafe {
-                    let mut buddy = free_list.remove(buddy).unwrap();
+                    let mut buddy = free_list.lock().remove(buddy).unwrap();
                     block.as_mut().merge(buddy.as_mut());
                 }
                 // Keep merging!
                 continue;
             }
 
-            free_list.push_front(block);
+            unsafe {
+                self.push_block(block);
+            }
             return Ok(());
         }
 
@@ -410,4 +403,8 @@ unsafe impl list::Linked for Free {
     unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
         ptr::NonNull::from(&ptr.as_ref().links)
     }
+}
+
+fn prev_power_of_two(n: usize) -> usize {
+    (n / 2).next_power_of_two()
 }
