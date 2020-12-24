@@ -1,19 +1,17 @@
 use self::size::*;
 use crate::{PAddr, VAddr};
-use core::{
-    fmt,
-    marker::PhantomData,
-    ops,
-    ptr::NonNull,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use core::{fmt, marker::PhantomData, ops, ptr::NonNull};
 use hal_core::{
-    mem::page::{
-        self, Map, Page, Size, StaticSize, TranslateAddr, TranslateError, TranslatePage,
-        TranslateResult,
+    mem::{
+        page::{
+            self, Map, Page, Size, StaticSize, TranslateAddr, TranslateError, TranslatePage,
+            TranslateResult,
+        },
+        TranslateKernelAddrs,
     },
-    Address,
+    Address, BootInfo,
 };
+use mycelium_util::sync::InitOnce;
 
 const ENTRIES: usize = 512;
 
@@ -44,16 +42,19 @@ pub struct Entry<L> {
     _level: PhantomData<L>,
 }
 
-#[tracing::instrument(level = "info")]
-pub fn init_paging(vm_offset: VAddr) {
-    VM_OFFSET.store(vm_offset.as_usize(), Ordering::Release);
+static KERNEL_ADDRS: InitOnce<&'static (dyn TranslateKernelAddrs + Send + Sync)> =
+    InitOnce::uninitialized();
+
+#[tracing::instrument(level = "info", skip(bootinfo))]
+pub fn init_paging(bootinfo: &'static impl BootInfo) {
+    KERNEL_ADDRS.init(bootinfo.kernel_addrs());
 
     tracing::info!("initializing paging...");
 
     let (pml4_page, flags) = crate::control_regs::cr3::read();
     tracing::debug!(?pml4_page, ?flags);
     tracing::trace!("old PML4:");
-    let pml4 = PageTable::<level::Pml4>::current(vm_offset);
+    let pml4 = PageTable::<level::Pml4>::current();
 
     // Log out some details about our starting page table.
     let mut present_entries = 0;
@@ -89,25 +90,21 @@ pub fn init_paging(vm_offset: VAddr) {
             tracing::trace!(idx, ?entry);
             present_entries += 1;
         }
+        tracing::trace!(present_entries);
     }
-    tracing::trace!(present_entries);
 }
 
-/// This value should only be set once, early in the kernel boot process before
-/// we have access to multiple cores. So, technically, it could be a `static
-/// mut`. But, using an atomic is safe, even though it's not strictly necessary.
-static VM_OFFSET: AtomicUsize = AtomicUsize::new(core::usize::MAX);
-
 impl PageTable<level::Pml4> {
-    fn current(vm_offset: VAddr) -> &'static mut Self {
+    fn current() -> &'static mut Self {
         let (phys, _) = crate::control_regs::cr3::read();
-        unsafe { Self::from_pml4_page(vm_offset, phys) }
+        unsafe { Self::from_pml4_page(phys) }
     }
-    unsafe fn from_pml4_page(vm_offset: VAddr, page: Page<PAddr, Size4Kb>) -> &'static mut Self {
-        let pml4_paddr = page.base_addr();
-        tracing::trace!(?pml4_paddr, ?vm_offset);
 
-        let virt = vm_offset + VAddr::from_usize(pml4_paddr.as_usize());
+    unsafe fn from_pml4_page(page: Page<PAddr, Size4Kb>) -> &'static mut Self {
+        let pml4_paddr = page.base_addr();
+        tracing::trace!(?pml4_paddr);
+
+        let virt = KERNEL_ADDRS.get_unchecked().to_kernel_vaddr(pml4_paddr);
         tracing::debug!(current_pml4_vaddr = ?virt);
         &mut *(virt.as_ptr::<Self>() as *mut _)
     }
@@ -174,14 +171,7 @@ where
 
 impl PageCtrl {
     pub fn current() -> Self {
-        let vm_offset = VM_OFFSET.load(Ordering::Acquire);
-        assert_ne!(
-            vm_offset,
-            core::usize::MAX,
-            "`init_paging` must be called before calling `PageTable::current`!"
-        );
-        let vm_offset = VAddr::from_usize(vm_offset);
-        let pml4 = PageTable::current(vm_offset);
+        let pml4 = PageTable::current();
         Self {
             pml4: NonNull::from(pml4),
         }

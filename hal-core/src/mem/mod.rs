@@ -1,6 +1,14 @@
-use crate::Address;
+use crate::{Address, PAddr, VAddr};
 use core::fmt;
 pub mod page;
+
+/// Translates kernel-mode addresses.
+pub trait TranslateKernelAddrs {
+    /// Translate a kernel virtual address into a physical address.
+    fn to_kernel_paddr(&self, vaddr: VAddr) -> PAddr;
+    /// Translate a kernel physical address into a virtual address.
+    fn to_kernel_vaddr(&self, paddr: PAddr) -> VAddr;
+}
 
 /// A cross-platform representation of a memory region.
 #[derive(Clone)]
