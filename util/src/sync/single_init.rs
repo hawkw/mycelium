@@ -17,6 +17,10 @@ pub struct SingleInit<T> {
     state: AtomicU8,
 }
 
+pub struct TryInitError<T> {
+    value: T,
+}
+
 impl<T> SingleInit<T> {
     const UNINITIALIZED: u8 = 0;
     const INITIALIZING: u8 = 1;
@@ -32,19 +36,14 @@ impl<T> SingleInit<T> {
         }
     }
 
-    #[track_caller]
-    pub fn initialize(&self, value: T) {
+    pub fn try_init(&self, value: T) -> Result<(), TryInitError<T>> {
         if let Err(actual) = self.state.compare_exchange(
             Self::UNINITIALIZED,
             Self::INITIALIZING,
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
-            panic!(
-                "SingleInit<{}>: attempted to initialize twice! (state={})",
-                any::type_name::<T>(),
-                actual
-            );
+            return Err(TryInitError { value });
         };
         unsafe {
             *(self.value.get()) = MaybeUninit::new(value);
@@ -61,6 +60,12 @@ impl<T> SingleInit<T> {
                 actual
             );
         }
+        Ok(())
+    }
+
+    #[track_caller]
+    pub fn init(&self, value: T) {
+        self.try_init(value).unwrap()
     }
 }
 
@@ -101,3 +106,32 @@ impl<T: fmt::Debug> fmt::Debug for SingleInit<T> {
         }
     }
 }
+
+// === impl TryInitError ===
+
+impl<T> TryInitError<T> {
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+impl<T> fmt::Debug for TryInitError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TryInitError")
+            .field("type", &any::type_name::<T>())
+            .field("value", &format_args!("..."))
+            .finish()
+    }
+}
+
+impl<T> fmt::Display for TryInitError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "SingleInit<{}> already initialized",
+            any::type_name::<T>()
+        )
+    }
+}
+
+impl<T> crate::Error for TryInitError<T> {}
