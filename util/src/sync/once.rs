@@ -72,18 +72,13 @@ impl<T> InitOnce<T> {
         unsafe {
             *(self.value.get()) = MaybeUninit::new(value);
         }
-        if let Err(actual) = self.state.compare_exchange(
+        let _prev = self.state.swap(INITIALIZED, Ordering::AcqRel);
+        debug_assert_eq!(
+            _prev,
             INITIALIZING,
-            INITIALIZED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            unreachable_unchecked!(
-                "InitOnce<{}>: state changed while locked. This is a bug! (state={})",
-                any::type_name::<T>(),
-                actual
-            );
-        }
+            "InitOnce<{}>: state changed while locked. This is a bug!",
+            any::type_name::<T>(),
+        );
         Ok(())
     }
 
