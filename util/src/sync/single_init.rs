@@ -26,16 +26,18 @@ impl<T> SingleInit<T> {
     const INITIALIZING: u8 = 1;
     const INITIALIZED: u8 = 2;
 
-    /// # Safety
-    ///
-    /// Callers must ensure they **DON'T FUCK IT UP**.
-    pub const unsafe fn uninitialized() -> Self {
+    pub const fn uninitialized() -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
             state: AtomicU8::new(Self::UNINITIALIZED),
         }
     }
 
+    /// Initialize the cell to `value`, returning an error if it has already
+    /// been initialized.
+    ///
+    /// If the cell has already been initialized, the returned error contains
+    /// the value.
     pub fn try_init(&self, value: T) -> Result<(), TryInitError<T>> {
         if let Err(actual) = self.state.compare_exchange(
             Self::UNINITIALIZED,
@@ -63,18 +65,46 @@ impl<T> SingleInit<T> {
         Ok(())
     }
 
+    /// Initialize the cell to `value`, panicking if it has already been
+    /// initialized.
     #[track_caller]
     pub fn init(&self, value: T) {
         self.try_init(value).unwrap()
     }
-}
 
-impl<T> core::ops::Deref for SingleInit<T> {
-    type Target = T;
+    /// Borrow the contents of this `SingleInit` cell, if it has been
+    /// initialized. Otherwise, if the cell has not yet been initialized, this
+    /// returns `None`.
+    #[inline]
+    pub fn get(&self) -> Option<&T> {
+        if self.state.load(Ordering::Acquire) != Self::INITIALIZED {
+            return None;
+        }
+        unsafe {
+            // Safety: we just checked if the value was initialized.
+            Some(&*((*self.value.get()).as_ptr()))
+        }
+    }
 
+    /// Borrow the contents of this `SingleInit` cell, **without** checking
+    /// whether it has been initialized.
+    ///
+    /// # Safety
+    ///
+    /// The caller is responsible for ensuring that the value has already been
+    /// initialized.
+    ///
+    /// In debug mode, this still checks the state of the cell, so if it has yet
+    /// to be initialized, this will panic. However, in release mode builds,
+    /// this is completely unchecked. If the value has not yet been initialized,
+    /// this may return a pointer to uninitialized memory! It may also return a
+    /// pointer to memory that is currently being written to.
+    ///
+    /// If you see this method panic in debug mode, please, **please** re-check
+    /// your code.
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, track_caller)]
-    fn deref(&self) -> &Self::Target {
+    pub unsafe fn get_unchecked(&self) -> &T {
         debug_assert_eq!(
             Self::INITIALIZED,
             self.state.load(Ordering::Acquire),
@@ -91,6 +121,19 @@ impl<T> core::ops::Deref for SingleInit<T> {
         unsafe {
             // Safety: hahaha wheeee no rules! You can't stop meeeeee!
             &*((*self.value.get()).as_ptr())
+        }
+    }
+}
+
+impl<T> core::ops::Deref for SingleInit<T> {
+    type Target = T;
+
+    #[track_caller]
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match self.get() {
+            Some(t) => t,
+            None => panic!("SingleInit<{}> not yet initialized!", any::type_name::<T>(),),
         }
     }
 }
@@ -134,4 +177,4 @@ impl<T> fmt::Display for TryInitError<T> {
     }
 }
 
-impl<T> crate::Error for TryInitError<T> {}
+impl<T> crate::error::Error for TryInitError<T> {}
