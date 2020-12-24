@@ -118,7 +118,8 @@ impl Buffer {
             }
         }
 
-        self.buf[self.row][self.col].write(self.character(ch));
+        let ch = self.character(ch);
+        self.buf[self.row][self.col].write(ch);
         self.col += 1;
     }
 
