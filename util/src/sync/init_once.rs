@@ -7,7 +7,7 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 
-/// A cell which which may be initialized a single time after it is created.
+/// A cell which may be initialized a single time after it is created.
 ///
 /// This can be used as a safer alternative to `static mut`.
 ///
@@ -18,6 +18,21 @@ use core::{
 pub struct InitOnce<T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicU8,
+}
+
+/// A cell which will be lazily initialized by the provided function the first
+/// time it is accessed.
+///
+/// This can be used as a safer alternative to `static mut`.
+///
+/// For performance-critical use-cases, this type also has a [`get_unchecked`]
+/// method, which dereferences the cell **without** checking if it has been
+/// initialized. This method is unsafe and should be used with caution ---
+/// incorrect usage can result in reading uninitialized memory.
+pub struct Lazy<T> {
+    value: UnsafeCell<MaybeUninit<T>>,
+    state: AtomicU8,
+    initializer: fn() -> T,
 }
 
 pub struct TryInitError<T> {
@@ -148,6 +163,95 @@ impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("InitOnce");
         d.field("type", &any::type_name::<T>());
+        match self.state.load(Ordering::Acquire) {
+            INITIALIZED => d.field("value", Deref::deref(self)).finish(),
+            INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
+            UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
+            state => unreachable!("unexpected state value {}, this is a bug!", state),
+        }
+    }
+}
+
+// === impl Lazy ===
+
+impl<T> Lazy<T> {
+    pub const fn new(initializer: fn() -> T) -> Self {
+        Self {
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+            state: AtomicU8::new(UNINITIALIZED),
+            initializer,
+        }
+    }
+
+    /// Initialize the cell to `value`, returning an error if it has already
+    /// been initialized.
+    ///
+    /// If the cell has already been initialized, the returned error contains
+    /// the value.
+    pub fn get(&self) -> &T {
+        let state = self.state.compare_exchange(
+            UNINITIALIZED,
+            INITIALIZING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+
+        match state {
+            Err(INITIALIZED) => {
+                // Already initialized! Just return the value.
+            }
+            Err(INITIALIZING) => {
+                // Wait for the cell to be initialized
+                let mut backoff = super::Backoff::new();
+                while self.state.load(Ordering::Acquire) != INITIALIZED {
+                    backoff.spin();
+                }
+            }
+            Ok(_) => {
+                // Now we have to actually initialize the cell.
+                unsafe {
+                    *(self.value.get()) = MaybeUninit::new((self.initializer)());
+                }
+                if let Err(actual) = self.state.compare_exchange(
+                    INITIALIZING,
+                    INITIALIZED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    unreachable!(
+                        "Lazy<{}>: state changed while locked. This is a bug! (state={})",
+                        any::type_name::<T>(),
+                        actual
+                    );
+                }
+            }
+            Err(state) => unreachable!(
+                "Lazy<{}>: unexpected state {}!. This is a bug!",
+                any::type_name::<T>(),
+                state
+            ),
+        };
+        unsafe {
+            // Safety: we just ensured the cell was initialized.
+            &*((*self.value.get()).as_ptr())
+        }
+    }
+}
+
+impl<T> core::ops::Deref for Lazy<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Lazy<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = f.debug_struct("Lazy");
+        d.field("type", &any::type_name::<T>())
+            .field("initializer", &format_args!("..."));
         match self.state.load(Ordering::Acquire) {
             INITIALIZED => d.field("value", Deref::deref(self)).finish(),
             INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),

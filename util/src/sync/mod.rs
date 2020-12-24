@@ -8,7 +8,7 @@ pub use core::sync::atomic;
 
 pub mod init_once;
 pub mod spin;
-pub use self::init_once::InitOnce;
+pub use self::init_once::{InitOnce, Lazy};
 
 /// An exponential backoff for spin loops
 #[derive(Debug, Clone)]
