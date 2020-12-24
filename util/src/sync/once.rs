@@ -167,7 +167,7 @@ impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
         let mut d = f.debug_struct("InitOnce");
         d.field("type", &any::type_name::<T>());
         match self.state.load(Ordering::Acquire) {
-            INITIALIZED => d.field("value", Deref::deref(self)).finish(),
+            INITIALIZED => d.field("value", self.get()).finish(),
             INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
             UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
             state => unreachable_unchecked!("unexpected state value {}, this is a bug!", state),
