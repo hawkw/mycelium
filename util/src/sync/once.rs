@@ -1,3 +1,4 @@
+use crate::unreachable_unchecked;
 use core::{
     any,
     cell::UnsafeCell,
@@ -77,7 +78,7 @@ impl<T> InitOnce<T> {
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
-            unreachable!(
+            unreachable_unchecked!(
                 "InitOnce<{}>: state changed while locked. This is a bug! (state={})",
                 any::type_name::<T>(),
                 actual
@@ -167,7 +168,7 @@ impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
             INITIALIZED => d.field("value", Deref::deref(self)).finish(),
             INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
             UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
-            state => unreachable!("unexpected state value {}, this is a bug!", state),
+            state => unreachable_unchecked!("unexpected state value {}, this is a bug!", state),
         }
     }
 }
@@ -248,7 +249,7 @@ where
                     );
                 }
             }
-            Err(state) => unreachable!(
+            Err(state) => unreachable_unchecked!(
                 "Lazy<{}>: unexpected state {}!. This is a bug!",
                 any::type_name::<T>(),
                 state
@@ -285,7 +286,7 @@ where
             INITIALIZED => d.field("value", self.get_if_present().unwrap()).finish(),
             INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
             UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
-            state => unreachable!("unexpected state value {}, this is a bug!", state),
+            state => unreachable_unchecked!("unexpected state value {}, this is a bug!", state),
         }
     }
 }
@@ -311,8 +312,8 @@ impl<T> fmt::Debug for TryInitError<T> {
                 &format_args!("State::{}", match self.actual {
                     UNINITIALIZED => "UNINITIALIZED",
                     INITIALIZING => "INITIALIZING",
-                    INITIALIZED => unreachable!("an error should not be returned when InitOnce is in the initialized state, this is a bug!"),
-                    state => unreachable!("unexpected state value {}, this is a bug!", state),
+                    INITIALIZED => unreachable_unchecked!("an error should not be returned when InitOnce is in the initialized state, this is a bug!"),
+                    state => unreachable_unchecked!("unexpected state value {}, this is a bug!", state),
                 }),
             )
             .finish()

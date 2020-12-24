@@ -9,5 +9,8 @@ extern crate alloc;
 pub mod cell;
 pub mod error;
 pub mod io;
+mod macros;
 pub mod sync;
 pub mod testing;
+
+pub use self::macros::*;
