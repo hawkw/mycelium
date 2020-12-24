@@ -6,9 +6,9 @@ pub use loom::sync::atomic;
 #[cfg(all(not(test), not(feature = "loom")))]
 pub use core::sync::atomic;
 
-pub mod init_once;
+pub mod once;
 pub mod spin;
-pub use self::init_once::{InitOnce, Lazy};
+pub use self::once::{InitOnce, Lazy};
 
 /// An exponential backoff for spin loops
 #[derive(Debug, Clone)]
