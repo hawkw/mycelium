@@ -1,6 +1,7 @@
 //! A "standard library" for programming in the Mycelium kernel and related
 //! libraries.
 #![cfg_attr(target_os = "none", no_std)]
+#![allow(unused_unsafe)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
