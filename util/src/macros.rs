@@ -28,10 +28,10 @@ macro_rules! unreachable_unchecked {
         }
     });
     ($msg:expr) => ({
-        $crate::unreachable!("{}", $msg)
+        $crate::unreachable_unchecked!("{}", $msg)
     });
     ($msg:expr,) => ({
-        $crate::unreachable!($msg)
+        $crate::unreachable_unchecked!($msg)
     });
     ($fmt:expr, $($arg:tt)*) => ({
         #[cfg(any(test, debug_assertions))]
