@@ -89,6 +89,9 @@ impl<T> InitOnce<T> {
 
     /// Initialize the cell to `value`, panicking if it has already been
     /// initialized.
+    ///
+    /// # Panics
+    /// If the cell has already been initialized..
     #[track_caller]
     pub fn init(&self, value: T) {
         self.try_init(value).unwrap()
@@ -98,13 +101,30 @@ impl<T> InitOnce<T> {
     /// initialized. Otherwise, if the cell has not yet been initialized, this
     /// returns `None`.
     #[inline]
-    pub fn get(&self) -> Option<&T> {
+    pub fn try_get(&self) -> Option<&T> {
         if self.state.load(Ordering::Acquire) != INITIALIZED {
             return None;
         }
         unsafe {
             // Safety: we just checked if the value was initialized.
             Some(&*((*self.value.get()).as_ptr()))
+        }
+    }
+
+    /// Borrow the contents of this `InitOnce` cell, or panic if it has not
+    /// been initialized.
+    ///
+    /// # Panics
+    /// If the cell has not yet been initialized.
+    #[track_caller]
+    #[inline]
+    fn get(&self) -> &T {
+        if self.state.load(Ordering::Acquire) != INITIALIZED {
+            panic!("InitOnce<{}> not yet initialized!", any::type_name::<T>());
+        }
+        unsafe {
+            // Safety: we just checked if the value was initialized.
+            &*((*self.value.get()).as_ptr())
         }
     }
 
@@ -143,19 +163,6 @@ impl<T> InitOnce<T> {
         unsafe {
             // Safety: hahaha wheeee no rules! You can't stop meeeeee!
             &*((*self.value.get()).as_ptr())
-        }
-    }
-}
-
-impl<T> core::ops::Deref for InitOnce<T> {
-    type Target = T;
-
-    #[track_caller]
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        match self.get() {
-            Some(t) => t,
-            None => panic!("InitOnce<{}> not yet initialized!", any::type_name::<T>(),),
         }
     }
 }
