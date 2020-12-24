@@ -13,7 +13,7 @@ use hal_core::{boot::BootInfo, mem};
 
 mod wasm;
 
-pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
+pub fn kernel_main(bootinfo: &'static impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
         &mut writer,
@@ -60,7 +60,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     }
 
     arch::interrupt::init::<arch::InterruptHandlers>();
-    bootinfo.init_paging();
+    arch::mm::init_paging(bootinfo);
 
     #[cfg(test)]
     {

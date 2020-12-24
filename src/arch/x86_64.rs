@@ -1,6 +1,6 @@
 use bootloader::bootinfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
+use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
 
@@ -12,10 +12,11 @@ pub struct RustbootBootInfo {
 type MemRegionIter = core::slice::Iter<'static, bootinfo::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
-    // TODO(eliza): implement
     type MemoryMap = core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
+    /// Translate kernel addresses using the fixed virtual memory offset.
+    type KernelAddrs = Self;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
@@ -64,14 +65,18 @@ impl BootInfo for RustbootBootInfo {
         "rust-bootloader"
     }
 
-    fn init_paging(&self) {
-        mm::init_paging(self.vm_offset())
+    fn kernel_addrs(&self) -> &Self::KernelAddrs {
+        self
     }
 }
 
-impl RustbootBootInfo {
-    fn vm_offset(&self) -> VAddr {
-        VAddr::from_u64(self.inner.physical_memory_offset)
+impl mem::TranslateKernelAddrs for RustbootBootInfo {
+    fn to_kernel_paddr(&self, vaddr: VAddr) -> PAddr {
+        PAddr::from_u64(vaddr.as_usize() as u64 - self.inner.physical_memory_offset)
+    }
+
+    fn to_kernel_vaddr(&self, paddr: PAddr) -> VAddr {
+        VAddr::from_usize((paddr.as_u64() + self.inner.physical_memory_offset) as usize)
     }
 }
 
