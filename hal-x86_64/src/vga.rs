@@ -1,14 +1,17 @@
 use core::{fmt, ptr};
-use mycelium_util::{io, sync::spin};
+use mycelium_util::{
+    io,
+    sync::{spin, Lazy},
+};
 
-lazy_static::lazy_static! {
-    static ref BUFFER: spin::Mutex<Buffer> = spin::Mutex::new(Buffer {
+static BUFFER: Lazy<spin::Mutex<Buffer>> = Lazy::new(|| {
+    spin::Mutex::new(Buffer {
         col: 0,
         row: 0,
         color: ColorSpec::new(Color::LightGray, Color::Black),
         buf: unsafe { &mut *(0xb8000 as *mut Buf) },
-    });
-}
+    })
+});
 
 pub fn writer() -> Writer {
     Writer(())

@@ -1,14 +1,15 @@
 //! A simple 16550 UART serial port driver.
 use crate::cpu;
 use core::{fmt, marker::PhantomData};
-use mycelium_util::{io, sync::spin};
+use mycelium_util::{
+    io,
+    sync::{spin, Lazy},
+};
 
-lazy_static::lazy_static! {
-    static ref COM1: Option<Port> = Port::new(0x3F8).ok();
-    static ref COM2: Option<Port> = Port::new(0x2F8).ok();
-    static ref COM3: Option<Port> = Port::new(0x3E8).ok();
-    static ref COM4: Option<Port> = Port::new(0x2E8).ok();
-}
+static COM1: Lazy<Option<Port>> = Lazy::new(|| Port::new(0x3F8).ok());
+static COM2: Lazy<Option<Port>> = Lazy::new(|| Port::new(0x2F8).ok());
+static COM3: Lazy<Option<Port>> = Lazy::new(|| Port::new(0x3E8).ok());
+static COM4: Lazy<Option<Port>> = Lazy::new(|| Port::new(0x2E8).ok());
 
 pub fn com1() -> Option<&'static Port> {
     COM1.as_ref()

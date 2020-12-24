@@ -1,0 +1,359 @@
+use crate::unreachable_unchecked;
+use core::{
+    any,
+    cell::UnsafeCell,
+    fmt,
+    mem::MaybeUninit,
+    ops::{Deref, DerefMut},
+    sync::atomic::{AtomicU8, Ordering},
+};
+
+/// A cell which may be initialized a single time after it is created.
+///
+/// This can be used as a safer alternative to `static mut`.
+///
+/// For performance-critical use-cases, this type also has a [`get_unchecked`]
+/// method, which dereferences the cell **without** checking if it has been
+/// initialized. This method is unsafe and should be used with caution ---
+/// incorrect usage can result in reading uninitialized memory.
+pub struct InitOnce<T> {
+    value: UnsafeCell<MaybeUninit<T>>,
+    state: AtomicU8,
+}
+
+/// A cell which will be lazily initialized by the provided function the first
+/// time it is accessed.
+///
+/// This can be used as a safer alternative to `static mut`.
+///
+/// For performance-critical use-cases, this type also has a [`get_unchecked`]
+/// method, which dereferences the cell **without** checking if it has been
+/// initialized. This method is unsafe and should be used with caution ---
+/// incorrect usage can result in reading uninitialized memory.
+pub struct Lazy<T, F = fn() -> T> {
+    value: UnsafeCell<MaybeUninit<T>>,
+    state: AtomicU8,
+    initializer: F,
+}
+
+pub struct TryInitError<T> {
+    value: T,
+    actual: u8,
+}
+
+const UNINITIALIZED: u8 = 0;
+const INITIALIZING: u8 = 1;
+const INITIALIZED: u8 = 2;
+
+// === impl InitOnce ===
+
+impl<T> InitOnce<T> {
+    pub const fn uninitialized() -> Self {
+        Self {
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+            state: AtomicU8::new(UNINITIALIZED),
+        }
+    }
+
+    /// Initialize the cell to `value`, returning an error if it has already
+    /// been initialized.
+    ///
+    /// If the cell has already been initialized, the returned error contains
+    /// the value.
+    pub fn try_init(&self, value: T) -> Result<(), TryInitError<T>> {
+        if let Err(actual) = self.state.compare_exchange(
+            UNINITIALIZED,
+            INITIALIZING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            return Err(TryInitError { value, actual });
+        };
+        unsafe {
+            *(self.value.get()) = MaybeUninit::new(value);
+        }
+        let _prev = self.state.swap(INITIALIZED, Ordering::AcqRel);
+        debug_assert_eq!(
+            _prev,
+            INITIALIZING,
+            "InitOnce<{}>: state changed while locked. This is a bug!",
+            any::type_name::<T>(),
+        );
+        Ok(())
+    }
+
+    /// Initialize the cell to `value`, panicking if it has already been
+    /// initialized.
+    ///
+    /// # Panics
+    /// If the cell has already been initialized..
+    #[track_caller]
+    pub fn init(&self, value: T) {
+        self.try_init(value).unwrap()
+    }
+
+    /// Borrow the contents of this `InitOnce` cell, if it has been
+    /// initialized. Otherwise, if the cell has not yet been initialized, this
+    /// returns `None`.
+    #[inline]
+    pub fn try_get(&self) -> Option<&T> {
+        if self.state.load(Ordering::Acquire) != INITIALIZED {
+            return None;
+        }
+        unsafe {
+            // Safety: we just checked if the value was initialized.
+            Some(&*((*self.value.get()).as_ptr()))
+        }
+    }
+
+    /// Borrow the contents of this `InitOnce` cell, or panic if it has not
+    /// been initialized.
+    ///
+    /// # Panics
+    /// If the cell has not yet been initialized.
+    #[track_caller]
+    #[inline]
+    fn get(&self) -> &T {
+        if self.state.load(Ordering::Acquire) != INITIALIZED {
+            panic!("InitOnce<{}> not yet initialized!", any::type_name::<T>());
+        }
+        unsafe {
+            // Safety: we just checked if the value was initialized.
+            &*((*self.value.get()).as_ptr())
+        }
+    }
+
+    /// Borrow the contents of this `InitOnce` cell, **without** checking
+    /// whether it has been initialized.
+    ///
+    /// # Safety
+    ///
+    /// The caller is responsible for ensuring that the value has already been
+    /// initialized.
+    ///
+    /// In debug mode, this still checks the state of the cell, so if it has yet
+    /// to be initialized, this will panic. However, in release mode builds,
+    /// this is completely unchecked. If the value has not yet been initialized,
+    /// this may return a pointer to uninitialized memory! It may also return a
+    /// pointer to memory that is currently being written to.
+    ///
+    /// If you see this method panic in debug mode, please, **please** re-check
+    /// your code.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(debug_assertions, track_caller)]
+    pub unsafe fn get_unchecked(&self) -> &T {
+        debug_assert_eq!(
+            INITIALIZED,
+            self.state.load(Ordering::Acquire),
+            "InitOnce<{}>: accessed before initialized!\n\
+            /!\\ EXTREMELY SERIOUS WARNING: /!\\ This is REAL BAD! If you were \
+            running in release mode, you would have just read uninitialized \
+            memory! That's bad news indeed, buddy. Double- or triple-check \
+            your assumptions, or consider Just Using A Goddamn Mutex --- it's \
+            much safer that way. Maybe this whole `InitOnce` thing was a \
+            mistake...
+            ",
+            any::type_name::<T>(),
+        );
+        unsafe {
+            // Safety: hahaha wheeee no rules! You can't stop meeeeee!
+            &*((*self.value.get()).as_ptr())
+        }
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = f.debug_struct("InitOnce");
+        d.field("type", &any::type_name::<T>());
+        match self.state.load(Ordering::Acquire) {
+            INITIALIZED => d.field("value", self.get()).finish(),
+            INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
+            UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
+            state => unsafe {
+                unreachable_unchecked!("unexpected state value {}, this is a bug!", state)
+            },
+        }
+    }
+}
+
+unsafe impl<T: Send> Send for InitOnce<T> {}
+unsafe impl<T: Sync> Sync for InitOnce<T> {}
+
+// === impl Lazy ===
+
+impl<T, F> Lazy<T, F> {
+    pub const fn new(initializer: F) -> Self {
+        Self {
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+            state: AtomicU8::new(UNINITIALIZED),
+            initializer,
+        }
+    }
+
+    /// Returns the value of the lazy cell, if it has already been initialized.
+    /// Otherwise, returns `None`.
+    #[inline]
+    pub fn get_if_present(&self) -> Option<&T> {
+        if self.state.load(Ordering::Acquire) == INITIALIZED {
+            let value = unsafe {
+                // Safety: we just ensured the cell was initialized.
+                &*((*self.value.get()).as_ptr())
+            };
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T, F> Lazy<T, F>
+where
+    F: Fn() -> T,
+{
+    /// Borrow the value, initializing it if it has not yet been initialized.
+    pub fn get(&self) -> &T {
+        self.init();
+        unsafe {
+            // Safety: we just ensured the cell was initialized.
+            &*((*self.value.get()).as_ptr())
+        }
+    }
+
+    /// Borrow the value mutably, initializing it if it has not yet been initialized.
+    pub fn get_mut(&mut self) -> &mut T {
+        self.init();
+        unsafe {
+            // Safety: we just ensured the cell was initialized.
+            &mut *((*self.value.get()).as_mut_ptr())
+        }
+    }
+
+    /// Ensure that the cell has been initialized.
+    ///
+    /// If the cell has yet to be initialized, this initializes it. If it is
+    /// currently initializing, this spins until it has been fully initialized.
+    /// Otherwise, this returns immediately.
+    pub fn init(&self) {
+        let state = self.state.compare_exchange(
+            UNINITIALIZED,
+            INITIALIZING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+
+        match state {
+            Err(INITIALIZED) => {
+                // Already initialized! Just return the value.
+            }
+            Err(INITIALIZING) => {
+                // Wait for the cell to be initialized
+                let mut backoff = super::Backoff::new();
+                while self.state.load(Ordering::Acquire) != INITIALIZED {
+                    backoff.spin();
+                }
+            }
+            Ok(_) => {
+                // Now we have to actually initialize the cell.
+                unsafe {
+                    *(self.value.get()) = MaybeUninit::new((self.initializer)());
+                }
+                if let Err(actual) = self.state.compare_exchange(
+                    INITIALIZING,
+                    INITIALIZED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    unreachable!(
+                        "Lazy<{}>: state changed while locked. This is a bug! (state={})",
+                        any::type_name::<T>(),
+                        actual
+                    );
+                }
+            }
+            Err(state) => unsafe {
+                unreachable_unchecked!(
+                    "Lazy<{}>: unexpected state {}!. This is a bug!",
+                    any::type_name::<T>(),
+                    state
+                )
+            },
+        };
+    }
+}
+
+impl<T, F> Deref for Lazy<T, F>
+where
+    F: Fn() -> T,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+impl<T, F> DerefMut for Lazy<T, F>
+where
+    F: Fn() -> T,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.get_mut()
+    }
+}
+
+impl<T, F> fmt::Debug for Lazy<T, F>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = f.debug_struct("Lazy");
+        d.field("type", &any::type_name::<T>())
+            .field("initializer", &format_args!("..."));
+        match self.state.load(Ordering::Acquire) {
+            INITIALIZED => d.field("value", self.get_if_present().unwrap()).finish(),
+            INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
+            UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
+            state => unsafe {
+                unreachable_unchecked!("unexpected state value {}, this is a bug!", state)
+            },
+        }
+    }
+}
+
+unsafe impl<T: Send, F: Send> Send for Lazy<T, F> {}
+unsafe impl<T: Sync, F: Sync> Sync for Lazy<T, F> {}
+
+// === impl TryInitError ===
+
+impl<T> TryInitError<T> {
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+impl<T> fmt::Debug for TryInitError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TryInitError")
+            .field("type", &any::type_name::<T>())
+            .field("value", &format_args!("..."))
+            .field(
+                "state",
+                &format_args!("State::{}", match self.actual {
+                    UNINITIALIZED => "UNINITIALIZED",
+                    INITIALIZING => "INITIALIZING",
+                    INITIALIZED => unsafe { unreachable_unchecked!("an error should not be returned when InitOnce is in the initialized state, this is a bug!") },
+                    state => unsafe { unreachable_unchecked!("unexpected state value {}, this is a bug!", state) },
+                }),
+            )
+            .finish()
+    }
+}
+
+impl<T> fmt::Display for TryInitError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "InitOnce<{}> already initialized", any::type_name::<T>())
+    }
+}
+
+impl<T> crate::error::Error for TryInitError<T> {}
