@@ -29,10 +29,10 @@ pub struct InitOnce<T> {
 /// method, which dereferences the cell **without** checking if it has been
 /// initialized. This method is unsafe and should be used with caution ---
 /// incorrect usage can result in reading uninitialized memory.
-pub struct Lazy<T> {
+pub struct Lazy<T, F = fn() -> T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicU8,
-    initializer: fn() -> T,
+    initializer: F,
 }
 
 pub struct TryInitError<T> {
@@ -174,15 +174,20 @@ impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
 
 // === impl Lazy ===
 
-impl<T> Lazy<T> {
-    pub const fn new(initializer: fn() -> T) -> Self {
+impl<T, F> Lazy<T, F> {
+    pub const fn new(initializer: F) -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
             state: AtomicU8::new(UNINITIALIZED),
             initializer,
         }
     }
+}
 
+impl<T, F> Lazy<T, F>
+where
+    F: Fn() -> T,
+{
     /// Initialize the cell to `value`, returning an error if it has already
     /// been initialized.
     ///
@@ -238,7 +243,10 @@ impl<T> Lazy<T> {
     }
 }
 
-impl<T> core::ops::Deref for Lazy<T> {
+impl<T, F> Deref for Lazy<T, F>
+where
+    F: Fn() -> T,
+{
     type Target = T;
 
     #[inline]
@@ -247,7 +255,7 @@ impl<T> core::ops::Deref for Lazy<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Lazy<T> {
+impl<T: fmt::Debug, F> fmt::Debug for Lazy<T, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Lazy");
         d.field("type", &any::type_name::<T>())
