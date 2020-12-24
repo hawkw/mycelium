@@ -4,7 +4,7 @@ use core::{
     cell::UnsafeCell,
     fmt,
     mem::MaybeUninit,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     sync::atomic::{AtomicU8, Ordering},
 };
 
@@ -209,12 +209,30 @@ impl<T, F> Lazy<T, F>
 where
     F: Fn() -> T,
 {
-    /// Initialize the cell to `value`, returning an error if it has already
-    /// been initialized.
-    ///
-    /// If the cell has already been initialized, the returned error contains
-    /// the value.
+    /// Borrow the value, initializing it if it has not yet been initialized.
     pub fn get(&self) -> &T {
+        self.init();
+        unsafe {
+            // Safety: we just ensured the cell was initialized.
+            &*((*self.value.get()).as_ptr())
+        }
+    }
+
+    /// Borrow the value mutably, initializing it if it has not yet been initialized.
+    pub fn get_mut(&mut self) -> &mut T {
+        self.init();
+        unsafe {
+            // Safety: we just ensured the cell was initialized.
+            &mut *((*self.value.get()).as_mut_ptr())
+        }
+    }
+
+    /// Ensure that the cell has been initialized.
+    ///
+    /// If the cell has yet to be initialized, this initializes it. If it is
+    /// currently initializing, this spins until it has been fully initialized.
+    /// Otherwise, this returns immediately.
+    pub fn init(&self) {
         let state = self.state.compare_exchange(
             UNINITIALIZED,
             INITIALIZING,
@@ -257,10 +275,6 @@ where
                 state
             ),
         };
-        unsafe {
-            // Safety: we just ensured the cell was initialized.
-            &*((*self.value.get()).as_ptr())
-        }
     }
 }
 
@@ -270,9 +284,17 @@ where
 {
     type Target = T;
 
-    #[inline]
     fn deref(&self) -> &Self::Target {
         self.get()
+    }
+}
+
+impl<T, F> DerefMut for Lazy<T, F>
+where
+    F: Fn() -> T,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.get_mut()
     }
 }
 
