@@ -268,6 +268,17 @@ where
     fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>> {
         let span = tracing::trace_span!("alloc_range", size = size.as_usize(), len);
         let _e = span.enter();
+
+        if size.as_usize() > self.min_size {
+            // TODO(eliza): huge pages should work!
+            tracing::error!(
+                requested.size = size.as_usize(),
+                requested.len = len,
+                "cannot allocate; huge pages are not currently supported!"
+            );
+            return Err(AllocErr::oom());
+        }
+
         let order = self.order_for(size, len)?;
         tracing::trace!(?order);
         for (idx, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {

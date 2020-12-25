@@ -284,30 +284,30 @@ mycelium_util::decl_test! {
             tracing::info!(?res, "deallocated page 1");
             res
         })?;
-        let page3 = tracing::info_span!("alloc page 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
-            tracing::info!(?res);
-            res
-        })?;
+        // let page3 = tracing::info_span!("alloc page 3").in_scope(|| {
+        //     let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
+        //     tracing::info!(?res);
+        //     res
+        // })?;
         tracing::info_span!("dealloc page 2").in_scope(|| {
             let res = crate::PAGE_ALLOCATOR.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
             res
         })?;
-        let page4 = tracing::info_span!("alloc page 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
-            tracing::info!(?res);
-            res
-        })?;
-        tracing::info_span!("dealloc page 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page3);
-            tracing::info!(?res, "deallocated page 3");
-            res
-        })?;
-        tracing::info_span!("dealloc page 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page4);
-            tracing::info!(?res, "deallocated page 4");
-            res
-        })
+        // let page4 = tracing::info_span!("alloc page 4").in_scope(|| {
+        //     let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
+        //     tracing::info!(?res);
+        //     res
+        // })?;
+        // tracing::info_span!("dealloc page 3").in_scope(|| {
+        //     let res = crate::PAGE_ALLOCATOR.dealloc(page3);
+        //     tracing::info!(?res, "deallocated page 3");
+        //     res
+        // })?;
+        // tracing::info_span!("dealloc page 4").in_scope(|| {
+        //     let res = crate::PAGE_ALLOCATOR.dealloc(page4);
+        //     tracing::info!(?res, "deallocated page 4");
+        //     res
+        // })
     }
 }
