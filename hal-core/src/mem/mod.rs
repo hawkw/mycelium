@@ -104,7 +104,7 @@ impl<A: Address> Region<A> {
             return None;
         }
         let rem_size = self.size - size;
-        let base = self.base + size;
+        let base = self.base.offset(size as i32);
         tracing::trace!(
             size,
             self.size,
