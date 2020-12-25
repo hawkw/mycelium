@@ -12,6 +12,14 @@ impl Log2 for usize {
 }
 
 pub const fn usize_const_log2(u: usize) -> usize {
-    const WORD_SIZE: usize = 0usize.leading_zeros() as usize;
-    WORD_SIZE - u.leading_zeros() as usize
+    u.next_power_of_two().trailing_zeros() as usize
+}
+
+#[test]
+fn test_log2() {
+    assert_eq!(0, 0.log2(), "");
+    assert_eq!(0, 1.log2());
+    assert_eq!(1, 2.log2());
+    assert_eq!(5, 32.log2());
+    assert_eq!(10, 1024.log2());
 }
