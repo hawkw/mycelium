@@ -132,6 +132,15 @@ impl<T: ?Sized + Linked> List<T> {
 unsafe impl<T: Linked> Send for List<T> where T: Send {}
 unsafe impl<T: Linked> Sync for List<T> where T: Sync {}
 
+impl<T: ?Sized> fmt::Debug for List<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("List")
+            .field("head", &self.head)
+            .field("tail", &self.tail)
+            .finish()
+    }
+}
+
 // ==== impl Links ====
 
 impl<T: ?Sized> Links<T> {
@@ -151,6 +160,10 @@ impl<T: ?Sized> Links<T> {
 
     fn unlink(&mut self) {
         self.take();
+    }
+
+    pub fn is_linked(&self) -> bool {
+        self.next.is_some() || self.prev.is_some()
     }
 }
 

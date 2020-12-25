@@ -119,7 +119,7 @@ impl<L> BuddyAlloc<L> {
         // Round up to the heap's minimum allocateable size.
         let size = usize::max(size, self.min_size);
 
-        let size = size.next_power_of_two();
+        // let size = size.next_power_of_two();
 
         let available = self.heap_size.load(Acquire);
 
@@ -149,19 +149,28 @@ where
     pub unsafe fn add_region(&self, mut region: Region) -> core::result::Result<(), ()> {
         if region.kind() == RegionKind::FREE {
             let size = region.size();
-            tracing::info!(size, base = ?region.base_addr(), "add region");
+            let base = region.base_addr();
+            tracing::info!(region.size = size, region.base_addr = ?base, "add region");
+
+            if !region.base_addr().is_aligned(self.min_size) {
+                let new_base = base.align_up(self.min_size);
+                tracing::trace!(region.new_base = ?new_base, "base address not aligned!");
+                region = Region::new(new_base, region.size(), RegionKind::FREE);
+            }
+
             if !size.is_power_of_two() {
                 let prev_power_of_two = prev_power_of_two(size);
                 let rem = size - prev_power_of_two;
                 tracing::debug!(prev_power_of_two, rem, "not a power of two!");
                 let region2 = region.split_back(prev_power_of_two).unwrap();
-                if region2.size() > self.min_size {
+                if region2.size() >= self.min_size {
                     tracing::debug!("add split part");
                     self.add_region(region2)?;
                 } else {
                     tracing::info!(region = ?region2, "leaking a region smaller than min page size");
                 }
             }
+
             self.base_paddr
                 .fetch_min(region.base_addr().as_usize(), AcqRel);
             let mut block = Free::new(region, self.offset());
@@ -176,6 +185,7 @@ where
     unsafe fn push_block(&self, block: ptr::NonNull<Free>) {
         let block_size = block.as_ref().size();
         let order = self.order_for_size(block_size);
+        tracing::trace!(block = ?block.as_ref(), block.order = order);
         let free_lists = self.free_lists.as_ref();
         if order > free_lists.len() {
             todo!("(eliza): choppity chop chop down the block!");
@@ -229,7 +239,8 @@ where
 
     #[tracing::instrument(skip(self), level = "trace")]
     fn split_down(&self, block: &mut Free, mut order: usize, target_order: usize) {
-        let mut size = self.size_for_order(order);
+        let mut size = block.size();
+        debug_assert_eq!(size, self.size_for_order(order));
         let free_lists = self.free_lists.as_ref();
         while order > target_order {
             order -= 1;
@@ -238,7 +249,7 @@ where
             let new_block = block
                 .split_back(size, self.offset())
                 .expect("block too small to split!");
-            tracing::trace!(?new_block);
+            tracing::trace!(?block, ?new_block);
             free_lists[order].lock().push_front(new_block);
         }
     }
@@ -262,10 +273,11 @@ where
         for (idx, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
             tracing::trace!(curr_order = idx + order);
             // Is there an available block on this free list?
-            if let Some(mut block) = free_list.lock().pop_back() {
-                tracing::trace!(?block, "found");
+            let mut free_list = free_list.lock();
+            if let Some(mut block) = free_list.pop_back() {
                 // If the block is larger than the desired size, split it.
                 let block = unsafe { block.as_mut() };
+                tracing::trace!(?block, ?free_list, "found");
                 if idx > 0 {
                     let curr_order = idx + order;
                     tracing::trace!(?curr_order, ?order, "split down");
@@ -318,18 +330,22 @@ where
         };
 
         for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
+            let curr_order = idx + min_order;
+            let mut free_list = free_list.lock();
+            tracing::trace!(curr_order, ?free_list, "check for buddy");
             if let Some(buddy) = unsafe { self.buddy_for(block, curr_order) } {
+                tracing::trace!(buddy = ?unsafe { buddy.as_ref() }, "found");
                 unsafe {
-                    let mut buddy = free_list.lock().remove(buddy).unwrap();
+                    let mut buddy = free_list.remove(buddy).unwrap();
                     block.as_mut().merge(buddy.as_mut());
                 }
+                tracing::trace!("merged with buddy");
                 // Keep merging!
                 continue;
             }
 
-            unsafe {
-                self.push_block(block);
-            }
+            free_list.push_front(block);
+            tracing::trace!("done");
             return Ok(());
         }
 
@@ -374,8 +390,9 @@ impl Free {
     }
 
     pub fn merge(&mut self, other: &mut Self) {
-        debug_assert_eq!(self.magic, Self::MAGIC);
-        debug_assert_eq!(other.magic, Self::MAGIC);
+        debug_assert_eq!(self.magic, Self::MAGIC, "self.magic={:x}", self.magic);
+        debug_assert_eq!(other.magic, Self::MAGIC, "self.magic={:x}", self.magic);
+        assert!(!other.links.is_linked());
         self.meta.merge(&mut other.meta)
     }
 
