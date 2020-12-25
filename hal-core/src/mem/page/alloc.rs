@@ -210,10 +210,12 @@ where
     ) -> Option<ptr::NonNull<Free>> {
         let size = 1 << (self.min_size_log2 + order);
         let base = self.base_paddr.load(Relaxed);
+
         if base == 0 {
             tracing::warn!("cannot find buddy block; heap not initialized!");
             return None;
         }
+
         let vm_offset = self.offset();
         tracing::trace!(
             "buddy for base={:x}; block={:p}; vm_offset={:x}",
@@ -227,13 +229,16 @@ where
         tracing::trace!("buddy_offset={:x}", buddy_offset);
         let buddy = (base + buddy_offset + vm_offset) as *mut Free;
         tracing::trace!("buddy_addr = {:p}", buddy);
+
         if core::ptr::eq(buddy as *const _, block.as_ptr() as *const _) {
             tracing::trace!("buddy block is the same as self");
             return None;
         }
+
         if unsafe { (*buddy).magic == Free::MAGIC } {
             return Some(ptr::NonNull::new_unchecked(buddy));
         }
+
         None
     }
 
@@ -346,13 +351,14 @@ where
             tracing::trace!(curr_order, ?free_list, "check for buddy");
             if let Some(buddy) = unsafe { self.buddy_for(block, curr_order) } {
                 tracing::trace!(buddy = ?unsafe { buddy.as_ref() }, "found");
-                unsafe {
-                    let mut buddy = free_list.remove(buddy).unwrap();
-                    block.as_mut().merge(buddy.as_mut());
+                if let Some(mut buddy) = unsafe { free_list.remove(buddy) } {
+                    unsafe {
+                        block.as_mut().merge(buddy.as_mut());
+                    }
+                    tracing::trace!("merged with buddy");
+                    // Keep merging!
+                    continue;
                 }
-                tracing::trace!("merged with buddy");
-                // Keep merging!
-                continue;
             }
 
             free_list.push_front(block);
