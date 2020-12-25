@@ -12,5 +12,6 @@ pub mod io;
 mod macros;
 pub mod sync;
 pub mod testing;
+pub mod trace;
 
 pub use self::macros::*;
