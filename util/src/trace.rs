@@ -92,8 +92,8 @@ pub fn bin<T: fmt::Binary>(value: T) -> tracing::field::DebugValue<FormatWith<T>
 ///     answer: 42,
 /// };
 ///
-/// debug!(something = ?thing);            // will be formatted on the current line
-/// debug!(something = trace::alt(thing)); // will be formatted with newlines and indentation
+/// debug!(something = ?thing);             // will be formatted on the current line
+/// debug!(something = trace::alt(&thing)); // will be formatted with newlines and indentation
 ///
 /// ```
 #[inline]
