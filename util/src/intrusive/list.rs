@@ -26,7 +26,7 @@ pub struct Cursor<'a, T: ?Sized + Linked> {
 }
 
 pub struct Iter<'a, T: ?Sized + Linked> {
-    list: &'a List<T>,
+    _list: &'a List<T>,
     curr: Option<NonNull<T>>,
 }
 

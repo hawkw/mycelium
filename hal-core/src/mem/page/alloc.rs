@@ -173,11 +173,9 @@ impl<L> BuddyAlloc<L> {
 
     /// Returns the order of the block that would be allocated for a range of
     /// `len` pages of size `size`.
-    fn order_for<S: Size>(&self, size: S, len: usize) -> Result<usize> {
-        self.size_for(size, len).map(|size| {
-            let order = self.order_for_size(size);
-            debug_assert_eq!(order, size / self.min_size)
-        })
+    fn order_for<S: Size>(&self, page_size: S, len: usize) -> Result<usize> {
+        self.size_for(page_size, len)
+            .map(|size| self.order_for_size(size))
     }
 
     /// Returns the order of a block of `size` bytes.
@@ -250,7 +248,7 @@ where
         self.base_vaddr.fetch_min(region_vaddr, AcqRel);
 
         // ...and actually add the block to a free list.
-        let mut block = Free::new(region, self.offset());
+        let block = Free::new(region, self.offset());
         unsafe { self.push_block(block) };
         Ok(())
     }
@@ -287,11 +285,11 @@ where
         order: usize,
     ) -> Option<ptr::NonNull<Free>> {
         let size = self.size_for_order(order);
-        let base = self.base_addr.load(Relaxed);
+        let base = self.base_vaddr.load(Relaxed);
 
         if base == core::usize::MAX {
             // This is a bug.
-            tracing::warn!("cannot find buddy block; heap not initialized!");
+            tracing::error!("cannot find buddy block; heap not initialized!");
             return None;
         }
 
@@ -377,12 +375,12 @@ where
             return Err(AllocErr::oom());
         }
 
-        /// This is the minimum order necessary for the requested allocation ---
-        /// the first free list we'll check.
+        // This is the minimum order necessary for the requested allocation ---
+        // the first free list we'll check.
         let order = self.order_for(size, len)?;
         tracing::trace!(?order);
 
-        /// Try each free list, starting at the minimum necessary order.
+        // Try each free list, starting at the minimum necessary order.
         for (idx, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
             tracing::trace!(curr_order = idx + order);
 
@@ -504,12 +502,12 @@ impl Free {
     const MAGIC_BUSY: usize = 0xB4D_B10C;
 
     pub unsafe fn new(region: Region, offset: usize) -> ptr::NonNull<Free> {
-        tracing::trace!(?region, offset = trace::hex(offset);
+        tracing::trace!(?region, offset = trace::hex(offset));
 
         let ptr = ((region.base_addr().as_ptr::<Free>() as usize) + offset) as *mut _;
         let nn = ptr::NonNull::new(ptr)
             .expect("definitely don't try to free the zero page; that's evil");
-            
+
         ptr::write_volatile(
             ptr,
             Free {
