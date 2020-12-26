@@ -13,6 +13,7 @@ use mycelium_util::sync::{
     },
     spin,
 };
+use mycelium_util::trace;
 
 #[derive(Debug)]
 pub struct BuddyAlloc<L = [spin::Mutex<List<Free>>; 32]> {
@@ -208,7 +209,7 @@ where
         block: ptr::NonNull<Free>,
         order: usize,
     ) -> Option<ptr::NonNull<Free>> {
-        let size = 1 << (self.min_size_log2 + order);
+        let size = self.size_for_order(order);
         let base = self.base_paddr.load(Relaxed);
 
         if base == 0 {
@@ -218,14 +219,20 @@ where
 
         let vm_offset = self.offset();
         tracing::trace!(
-            "buddy for base={:x}; block={:p}; vm_offset={:x}",
-            base,
-            block,
-            vm_offset
+            heap.base = trace::hex(base),
+            heap.vm_offset = trace::hex(vm_offset),
+            block.addr = trace::ptr(block),
+            block.order = order,
+            block.size = size,
+            "calculating buddy..."
         );
+
         let block_paddr = block.as_ptr() as usize - vm_offset;
+
+        // This is the "cool part"
         let rel_offset = block_paddr - base;
         let buddy_offset = rel_offset ^ size;
+
         tracing::trace!("buddy_offset={:x}", buddy_offset);
         let buddy = (base + buddy_offset + vm_offset) as *mut Free;
         tracing::trace!("buddy_addr = {:p}", buddy);
