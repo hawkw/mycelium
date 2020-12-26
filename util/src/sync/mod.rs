@@ -1,9 +1,9 @@
 //! Synchronization primitives.
 
-#[cfg(any(test, feature = "loom"))]
+#[cfg(test)]
 pub use loom::sync::atomic;
 
-#[cfg(all(not(test), not(feature = "loom")))]
+#[cfg(not(test))]
 pub use core::sync::atomic;
 
 pub mod once;

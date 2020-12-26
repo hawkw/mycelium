@@ -11,7 +11,6 @@ alloc = []
 
 [dependencies]
 tracing = { version = "0.1", default_features = false, features = ["attributes"] }
-loom = { version = "0.2.14", optional = true }
 
 [dev-dependencies]
-loom = "0.2.14"
+loom = "0.4"
