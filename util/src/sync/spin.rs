@@ -1,4 +1,4 @@
-use super::atomic::{AtomicBool, Ordering};
+use super::atomic::{AtomicBool, Ordering::*};
 use crate::cell::CausalCell;
 use core::{
     fmt,
@@ -34,7 +34,11 @@ impl<T> Mutex<T> {
     }
 
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        if !self.locked.compare_and_swap(false, true, Ordering::Acquire) {
+        if self
+            .locked
+            .compare_exchange(false, true, Acquire, Acquire)
+            .is_ok()
+        {
             Some(MutexGuard { mutex: self })
         } else {
             None
@@ -43,8 +47,12 @@ impl<T> Mutex<T> {
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
         let mut boff = super::Backoff::default();
-        while self.locked.compare_and_swap(false, true, Ordering::Acquire) {
-            while self.locked.load(Ordering::Relaxed) {
+        while self
+            .locked
+            .compare_exchange(false, true, Acquire, Acquire)
+            .is_err()
+        {
+            while self.locked.load(Relaxed) {
                 boff.spin();
             }
         }
@@ -66,7 +74,7 @@ impl<T> Mutex<T> {
     /// Essentially, this is only okay to call when the kernel is oopsing and
     /// all code running on other cores has already been killed.
     pub unsafe fn force_unlock(&self) {
-        self.locked.store(false, Ordering::Release);
+        self.locked.store(false, Release);
     }
 }
 
@@ -90,7 +98,7 @@ impl<'a, T> DerefMut for MutexGuard<'a, T> {
 
 impl<'a, T> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
-        self.mutex.locked.store(false, Ordering::Release);
+        self.mutex.locked.store(false, Release);
     }
 }
 
