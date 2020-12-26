@@ -2,7 +2,6 @@
 //! libraries.
 #![cfg_attr(target_os = "none", no_std)]
 #![allow(unused_unsafe)]
-#![feature(const_int_pow)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
