@@ -102,10 +102,25 @@ impl<T: ?Sized + Linked> List<T> {
         unsafe {
             let mut tail_links = T::links(tail);
             self.tail = tail_links.as_ref().prev;
+            debug_assert_eq!(
+                tail_links.as_ref().next,
+                None,
+                "the tail node must not have a next link"
+            );
 
             if let Some(prev) = tail_links.as_mut().prev {
+                debug_assert_ne!(
+                    self.head,
+                    Some(tail),
+                    "a node with a previous link should not be the list head"
+                );
                 T::links(prev).as_mut().next = None;
             } else {
+                debug_assert_eq!(
+                    self.head,
+                    Some(tail),
+                    "if the tail has no previous link, it must be the head"
+                );
                 self.head = None;
             }
             tail_links.as_mut().unlink();
@@ -127,6 +142,7 @@ impl<T: ?Sized + Linked> List<T> {
         } else if self.head != Some(item) {
             return None;
         } else {
+            debug_assert_ne!(Some(item), next, "node must not be linked to itself");
             self.head = next;
         }
 
@@ -135,6 +151,7 @@ impl<T: ?Sized + Linked> List<T> {
         } else if self.tail != Some(item) {
             return None;
         } else {
+            debug_assert_ne!(Some(item), prev, "node must not be linked to itself");
             self.tail = prev;
         }
 
