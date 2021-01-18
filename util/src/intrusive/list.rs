@@ -5,8 +5,28 @@ use core::ptr::NonNull;
 pub unsafe trait Linked {
     type Handle;
 
+    /// Convert a `Handle` to a raw pointer, without consuming it.
+    #[allow(clippy::wrong_self_convention)]
     fn as_ptr(r: &Self::Handle) -> NonNull<Self>;
-    unsafe fn as_handle(ptr: NonNull<Self>) -> Self::Handle;
+
+    /// Convert a raw pointer to a `Handle`.
+    ///
+    /// # Safety
+    ///
+    /// This function is safe to call when:
+    /// - It is valid to construct a `Handle` from a`raw pointer
+    /// - The pointer points to a valid instance of `Self` (e.g. it does not
+    ///   dangle).
+    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle;
+
+    /// Return the links of the node pointed to by `ptr`.
+    ///
+    /// # Safety
+    ///
+    /// This function is safe to call when:
+    /// - It is valid to construct a `Handle` from a`raw pointer
+    /// - The pointer points to a valid instance of `Self` (e.g. it does not
+    ///   dangle).
     unsafe fn links(ptr: NonNull<Self>) -> NonNull<Links<Self>>;
 }
 
@@ -89,7 +109,7 @@ impl<T: ?Sized + Linked> List<T> {
                 self.head = None;
             }
             tail_links.as_mut().unlink();
-            Some(T::as_handle(tail))
+            Some(T::from_ptr(tail))
         }
     }
 
@@ -118,7 +138,7 @@ impl<T: ?Sized + Linked> List<T> {
             self.tail = prev;
         }
 
-        Some(T::as_handle(item))
+        Some(T::from_ptr(item))
     }
 
     pub fn cursor(&mut self) -> Cursor<'_, T> {
@@ -187,7 +207,7 @@ impl<T: ?Sized> fmt::Debug for Links<T> {
 impl<'a, T: ?Sized + Linked> Iterator for Cursor<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_ptr().map(|ptr| unsafe { T::as_handle(ptr) })
+        self.next_ptr().map(|ptr| unsafe { T::from_ptr(ptr) })
     }
 }
 
@@ -221,7 +241,7 @@ impl<'a, T: ?Sized + Linked> Iterator for Iter<'a, T> {
         let curr = self.curr.take()?;
         unsafe {
             self.curr = T::links(curr).as_ref().next;
-            Some(T::as_handle(curr))
+            Some(T::from_ptr(curr))
         }
     }
 }

@@ -144,7 +144,7 @@ impl<A: Address> Region<A> {
         debug_assert_eq!(self.kind, other.kind);
         // TOOD(eliza): assert that there's no in-between space.
         self.base = cmp::min(self.base, other.base);
-        self.size = self.size + other.size;
+        self.size += other.size;
     }
 }
 

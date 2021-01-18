@@ -10,6 +10,14 @@ pub mod once;
 pub mod spin;
 pub use self::once::{InitOnce, Lazy};
 
+pub mod hint {
+    #[cfg(not(test))]
+    pub use core::hint::spin_loop;
+
+    #[cfg(test)]
+    pub use loom::sync::atomic::spin_loop_hint as spin_loop;
+}
+
 /// An exponential backoff for spin loops
 #[derive(Debug, Clone)]
 pub(crate) struct Backoff {
@@ -39,7 +47,7 @@ impl Backoff {
     pub(crate) fn spin(&mut self) {
         // Issue 2^exp pause instructions.
         for _ in 0..(1 << self.exp) {
-            atomic::spin_loop_hint();
+            hint::spin_loop();
         }
 
         if self.exp < self.max {

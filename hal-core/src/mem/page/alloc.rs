@@ -573,7 +573,7 @@ unsafe impl list::Linked for Free {
     fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {
         *r
     }
-    unsafe fn as_handle(ptr: ptr::NonNull<Self>) -> Self::Handle {
+    unsafe fn from_ptr(ptr: ptr::NonNull<Self>) -> Self::Handle {
         ptr
     }
     unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
