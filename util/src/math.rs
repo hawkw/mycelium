@@ -15,10 +15,10 @@ pub const fn usize_const_log2_ceil(u: usize) -> usize {
 }
 
 #[test]
-fn test_log2() {
-    assert_eq!(0, 0.log2(), "");
-    assert_eq!(0, 1.log2());
-    assert_eq!(1, 2.log2());
-    assert_eq!(5, 32.log2());
-    assert_eq!(10, 1024.log2());
+fn test_log2_ceil() {
+    assert_eq!(0, 0.log2_ceil());
+    assert_eq!(0, 1.log2_ceil());
+    assert_eq!(1, 2.log2_ceil());
+    assert_eq!(5, 32.log2_ceil());
+    assert_eq!(10, 1024.log2_ceil());
 }
