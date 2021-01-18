@@ -100,7 +100,7 @@ impl<L> BuddyAlloc<L> {
             min_size,
             base_vaddr: AtomicUsize::new(core::usize::MAX),
             vm_offset: AtomicUsize::new(0),
-            min_size_log2: mycelium_util::math::usize_const_log2(min_size),
+            min_size_log2: mycelium_util::math::usize_const_log2_ceil(min_size),
             heap_size: AtomicUsize::new(0),
             free_lists,
         }

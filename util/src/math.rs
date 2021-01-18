@@ -1,17 +1,16 @@
 pub trait Log2 {
-    /// Returns the log base 2 of `self`.
-    fn log2(self) -> Self;
+    /// Returns `ceiling(log2(self))`.
+    fn log2_ceil(self) -> Self;
 }
 
 impl Log2 for usize {
-    /// Fast log base 2 implementation for integers.
     #[inline(always)]
-    fn log2(self) -> usize {
-        usize_const_log2(self)
+    fn log2_ceil(self) -> usize {
+        usize_const_log2_ceil(self)
     }
 }
 
-pub const fn usize_const_log2(u: usize) -> usize {
+pub const fn usize_const_log2_ceil(u: usize) -> usize {
     u.next_power_of_two().trailing_zeros() as usize
 }
 
