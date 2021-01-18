@@ -22,7 +22,7 @@ pub struct BuddyAlloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Free blocks on free_lists[0] are one page of this size each. For each
     /// index higher in the array of free lists, the blocks on that free list
     /// are 2x as large.
-    pub min_size: usize,
+    min_size: usize,
 
     base_vaddr: AtomicUsize,
     vm_offset: AtomicUsize,
@@ -112,6 +112,16 @@ impl<L> BuddyAlloc<L> {
             .expect("dont do this twice lol");
     }
 
+    /// Returns the minimum allocatable size, in bytes.
+    pub fn min_size(&self) -> usize {
+        self.min_size
+    }
+
+    /// Returns the current amount of allocatable memory, in bytes.
+    pub fn free_size(&self) -> usize {
+        self.heap_size.load(Ordering::Acquire)
+    }
+
     /// Returns the base virtual memory offset.
     // TODO(eliza): nicer way to configure this?
     fn offset(&self) -> usize {
@@ -122,13 +132,18 @@ impl<L> BuddyAlloc<L> {
 
     /// Returns the size of the allocation for a given order
     fn size_for_order(&self, order: usize) -> usize {
-        1 << (self.min_size_log2 as usize + order)
+        1 << (self.min_size_log2 + order)
     }
 
     /// Returns the actual size of the block that must be allocated for an
     /// allocation of `len` pages of `page_size`.
     fn size_for<S: Size>(&self, page_size: S, len: usize) -> Result<usize> {
-        let mut size = page_size.as_usize() * len;
+        let mut size = page_size
+            .as_usize()
+            // If the size of the page range would overflow, we *definitely*
+            // can't allocate that lol.
+            .checked_mul(len)
+            .map_err(AllocError::oom)?;
 
         // Round up to the heap's minimum allocateable size.
         if size < self.min_size {
