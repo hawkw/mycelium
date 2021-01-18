@@ -119,7 +119,7 @@ impl<L> BuddyAlloc<L> {
 
     /// Returns the current amount of allocatable memory, in bytes.
     pub fn free_size(&self) -> usize {
-        self.heap_size.load(Ordering::Acquire)
+        self.heap_size.load(Acquire)
     }
 
     /// Returns the base virtual memory offset.
@@ -143,7 +143,7 @@ impl<L> BuddyAlloc<L> {
             // If the size of the page range would overflow, we *definitely*
             // can't allocate that lol.
             .checked_mul(len)
-            .map_err(AllocError::oom)?;
+            .ok_or_else(AllocErr::oom)?;
 
         // Round up to the heap's minimum allocateable size.
         if size < self.min_size {
@@ -195,7 +195,7 @@ impl<L> BuddyAlloc<L> {
 
     /// Returns the order of a block of `size` bytes.
     fn order_for_size(&self, size: usize) -> usize {
-        size.log2() - self.min_size_log2
+        size.log2_ceil() - self.min_size_log2
     }
 }
 
