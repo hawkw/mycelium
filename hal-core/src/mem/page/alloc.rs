@@ -289,15 +289,16 @@ where
         }
     }
 
-    /// Returns `block`'s buddy, if it is free
+    /// Removes `block`'s buddy from the free list and returns it, if it is free
     ///
     /// The "buddy" of a block is the block from which that block was split off
     /// to reach its current order, and therefore the block with which it could
     /// be merged to reach the target order.
-    unsafe fn buddy_for(
+    unsafe fn take_buddy(
         &self,
         block: ptr::NonNull<Free>,
         order: usize,
+        free_list: &mut List<Free>,
     ) -> Option<ptr::NonNull<Free>> {
         let size = self.size_for_order(order);
         let base = self.base_vaddr.load(Relaxed);
@@ -331,17 +332,27 @@ where
             return None;
         }
 
-        if unsafe { (*buddy).magic == Free::MAGIC } {
-            unsafe {
-                // Safety: we constructed this address via a usize add of two
-                // values we know are not 0, so this should not be null, and
-                // it's okay to use `new_unchecked`.
-                // TODO(eliza): we should probably die horribly if that add
-                // *does* overflow i guess...
-                return Some(ptr::NonNull::new_unchecked(buddy));
-            }
+        let buddy = unsafe {
+            // Safety: we constructed this address via a usize add of two
+            // values we know are not 0, so this should not be null, and
+            // it's okay to use `new_unchecked`.
+            // TODO(eliza): we should probably die horribly if that add
+            // *does* overflow i guess...
+            ptr::NonNull::new_unchecked(buddy)
+        };
+
+        // Check if the buddy block is definitely in use before removing it from
+        // the free list.
+        //
+        // `is_maybe_free` returns a *hint* --- if it returns `false`, we know
+        // the block is in use, so we don't have to remove it from the free list.
+        if unsafe { buddy.as_ref().is_maybe_free() } {
+            // Okay, now try to remove the buddy from its free list. If it's not
+            // free, this will return `None`.
+            return free_list.remove(buddy);
         }
 
+        // Otherwise, the buddy block is currently in use.
         None
     }
 
@@ -416,20 +427,9 @@ where
                     self.split_down(block, curr_order, order);
                 }
 
-                // Change the block's magic to indicate that it is allocated.
-                // /!\ EXTREMELY SERIOUS WARNING /!\
-                // This is ACTUALLY LOAD BEARING. If a block is allocated and
-                // the first word isn't immediately written to, it *might* still
-                // appear to be "free" when its buddy is deallocated, and the
-                // buddy may want to merge with it. When the buddy tries to
-                // remove the block from the free list, though, it will be
-                // surprised to find that the block is not, in fact, free!
-                //
-                // Therefore, we need to clobber the block magic, even if it
-                // will *probably* be immediately overwritten by whoever
-                // allocated the block --- they *might* not overwrite it, or
-                // someone else might free the buddy of this block before the
-                // user of this block writes to it!
+                // Change the block's magic to indicate that it is allocated, so
+                // that we can avoid checking the free list if we try to merge
+                // it before the first word is written to.
                 block.make_busy();
 
                 // Return the allocation!
@@ -477,33 +477,27 @@ where
         for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
             let curr_order = idx + min_order;
             let mut free_list = free_list.lock();
-            tracing::trace!(curr_order, ?free_list, "check for buddy");
 
             // Is there a free buddy block at this order?
-            if let Some(buddy) = unsafe { self.buddy_for(block, curr_order) } {
-                tracing::trace!(buddy = ?unsafe { buddy.as_ref() }, "found");
-
-                if let Some(mut buddy) = unsafe { free_list.remove(buddy) } {
-                    // Okay, merge the blocks, and try the next order!
-                    unsafe {
-                        block.as_mut().merge(buddy.as_mut());
-                    }
-                    tracing::trace!("merged with buddy");
-                    // Keep merging!
-                    continue;
+            if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, &mut free_list) } {
+                // Okay, merge the blocks, and try the next order!
+                unsafe {
+                    block.as_mut().merge(buddy.as_mut());
                 }
+                tracing::trace!("merged with buddy");
+                // Keep merging!
+            } else {
+                // Okay, we can't keep merging, so push the block on the current
+                // free list.
+                free_list.push_front(block);
+                tracing::debug!(
+                    range.base = ?range.base_addr(),
+                    range.page_size = range.page_size().as_usize(),
+                    range.len = range.len(),
+                    "deallocated"
+                );
+                return Ok(());
             }
-
-            // Okay, we can't keep merging, so push the block on the current
-            // free list.
-            free_list.push_front(block);
-            tracing::debug!(
-                range.base = ?range.base_addr(),
-                range.page_size = range.page_size().as_usize(),
-                range.len = range.len(),
-                "deallocated"
-            );
-            return Ok(());
         }
 
         unreachable!("we will always iterate over at least one free list");
@@ -561,6 +555,19 @@ impl Free {
 
     pub fn size(&self) -> usize {
         self.meta.size()
+    }
+
+    /// Returns `true` if the region *might* be free.
+    ///
+    /// If this returns false, the region is *definitely* not free. If it
+    /// returns true, the region is *possibly* free, and the free list should be
+    /// checked.
+    ///
+    /// This is intended as a hint to avoid traversing the free list for blocks
+    /// which are definitely in use, not as an authoritative source.
+    #[inline]
+    pub fn is_maybe_free(&self) -> bool {
+        self.magic == Self::MAGIC
     }
 
     pub fn make_busy(&mut self) {
