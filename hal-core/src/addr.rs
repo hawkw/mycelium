@@ -99,8 +99,16 @@ pub trait Address:
     }
 
     /// Returns `true` if `self` is aligned on the specified alignment.
+    ///
+    /// # Notes
+    /// `align` must be a power of two. This is asserted in debug builds.
     fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
-        self.as_usize() % align.into() == 0
+        debug_assert!(
+            align.is_power_of_two(),
+            "align must be a power of two (actual align: {})",
+            align
+        );
+        self.as_usize() & (align.into() - 1) == 0
     }
 
     /// Returns `true` if `self` is aligned on the alignment of the specified
