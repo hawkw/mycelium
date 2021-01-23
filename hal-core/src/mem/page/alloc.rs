@@ -367,7 +367,7 @@ where
             order -= 1;
             size >>= 1;
 
-            tracing::trace!(order, target_order, size, "split at");
+            tracing::trace!(order, target_order, size, ?block, "split at");
             let new_block = block
                 .split_back(size, self.offset())
                 .expect("block too small to split!");
@@ -431,8 +431,8 @@ where
                 // that we can avoid checking the free list if we try to merge
                 // it before the first word is written to.
                 block.make_busy();
-                tracing::trace(?block, "made busy");
-                
+                tracing::trace!(?block, "made busy");
+
                 // Return the allocation!
                 let range = block.region().page_range(size);
                 tracing::debug!(
