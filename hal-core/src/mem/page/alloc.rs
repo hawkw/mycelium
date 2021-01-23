@@ -431,7 +431,8 @@ where
                 // that we can avoid checking the free list if we try to merge
                 // it before the first word is written to.
                 block.make_busy();
-
+                tracing::trace(?block, "made busy");
+                
                 // Return the allocation!
                 let range = block.region().page_range(size);
                 tracing::debug!(

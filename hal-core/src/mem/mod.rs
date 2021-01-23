@@ -125,7 +125,7 @@ impl<A: Address> Region<A> {
         &self,
         size: S,
     ) -> Result<page::PageRange<A, S>, page::NotAligned<S>> {
-        tracing::trace!(?self.base, self.size, self.end = ?self.end_addr());
+        tracing::trace!(?self.base, self.size, self.end = ?self.end_addr(), "Region -> PageRange");
         let start = page::Page::starting_at(self.base, size)?;
         let end = page::Page::starting_at(self.end_addr(), size)?;
         Ok(start.range_to(end))
