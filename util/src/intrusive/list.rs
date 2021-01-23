@@ -79,6 +79,7 @@ impl<T: ?Sized + Linked> List<T> {
     pub fn push_front(&mut self, item: T::Handle) {
         let item = ManuallyDrop::new(item);
         let ptr = T::as_ptr(&*item);
+        tracing::trace!(?self, ?ptr, "push_front");
         assert_ne!(self.head, Some(ptr));
         unsafe {
             let mut links = T::links(ptr);
@@ -95,12 +96,15 @@ impl<T: ?Sized + Linked> List<T> {
         if self.tail.is_none() {
             self.tail = Some(ptr);
         }
+
+        tracing::trace!(?self, "push_front: pushed");
     }
 
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
         unsafe {
             let mut tail_links = T::links(tail);
+            tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
             self.tail = tail_links.as_ref().prev;
             debug_assert_eq!(
                 tail_links.as_ref().next,
@@ -124,6 +128,7 @@ impl<T: ?Sized + Linked> List<T> {
                 self.head = None;
             }
             tail_links.as_mut().unlink();
+            tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
             Some(T::from_ptr(tail))
         }
     }
@@ -135,7 +140,9 @@ impl<T: ?Sized + Linked> List<T> {
     /// The caller *must* ensure that the removed node is an element of this
     /// linked list, and not any other linked list.
     pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
-        let Links { next, prev } = T::links(item).as_mut().take();
+        let links = T::links(item).as_mut().take();
+        tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
+        let Links { next, prev } = links;
 
         if let Some(prev) = prev {
             T::links(prev).as_mut().next = next;
@@ -155,6 +162,7 @@ impl<T: ?Sized + Linked> List<T> {
             self.tail = prev;
         }
 
+        tracing::trace!(?self, item.addr = ?item, "remove: done");
         Some(T::from_ptr(item))
     }
 
