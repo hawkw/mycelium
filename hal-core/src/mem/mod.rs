@@ -1,6 +1,7 @@
 use crate::Address;
 use core::{cmp, fmt};
 pub mod page;
+use mycelium_util::trace;
 
 /// A cross-platform representation of a memory region.
 #[derive(Clone, Eq, PartialEq)]
@@ -109,9 +110,10 @@ impl<A: Address> Region<A> {
             size,
             self.size,
             ?self.base,
+            self.addr = trace::ptr(&self),
             rem_size,
             ?base,
-            "split_back"
+            "split_back",
         );
         self.size = size;
         tracing::trace!(?self);
