@@ -233,6 +233,7 @@ mycelium_util::decl_test! {
             tracing::info!(?res);
             res
         })?;
+        assert_ne!(page1, page2);
         tracing::info_span!("dealloc page 1").in_scope(|| {
             let res = crate::PAGE_ALLOCATOR.dealloc(page1);
             tracing::info!(?res, "deallocated page 1");
@@ -243,6 +244,7 @@ mycelium_util::decl_test! {
             tracing::info!(?res);
             res
         })?;
+        assert_ne!(page2, page3);
         tracing::info_span!("dealloc page 2").in_scope(|| {
             let res = crate::PAGE_ALLOCATOR.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
@@ -253,6 +255,7 @@ mycelium_util::decl_test! {
             tracing::info!(?res);
             res
         })?;
+        assert_ne!(page3, page4);
         tracing::info_span!("dealloc page 3").in_scope(|| {
             let res = crate::PAGE_ALLOCATOR.dealloc(page3);
             tracing::info!(?res, "deallocated page 3");
@@ -325,6 +328,7 @@ mycelium_util::decl_test! {
             tracing::info!(?res);
             res
         })?;
+        assert_ne!(page1, page2);
         tracing::info_span!("dealloc page 1").in_scope(|| {
             let res = crate::PAGE_ALLOCATOR.dealloc(page1);
             tracing::info!(?res, "deallocated page 1");
