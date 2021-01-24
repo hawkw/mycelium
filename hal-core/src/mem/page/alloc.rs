@@ -375,6 +375,35 @@ where
             free_lists[order].lock().push_front(new_block);
         }
     }
+
+    #[tracing::instrument(skip(self), level = "debug")]
+    fn dump_free_lists(&self) {
+        for (idx, free_list) in self.free_lists.as_ref().iter().enumerate() {
+            let span = tracing::debug_span!("free_list: {}", idx);
+            let _e = span.enter();
+
+            let mut free_list = free_list.lock();
+            for (idx, e) in free_list.cursor().enumerate() {
+                tracing::debug!("free_list[{}] = (@{:?}) {:?}", idx, e, unsafe { e.as_ref() });
+            }
+
+            if idx > 5 { break; }
+        }
+    }
+}
+
+struct OnExit<F: FnOnce()>(core::mem::ManuallyDrop<F>);
+
+impl<F: FnOnce()> OnExit<F> {
+    fn new(f: F) -> Self {
+        OnExit(core::mem::ManuallyDrop::new(f))
+    }
+}
+
+impl<F: FnOnce()> Drop for OnExit<F> {
+    fn drop(&mut self) {
+        unsafe { core::mem::ManuallyDrop::take(&mut self.0)(); }
+    }
 }
 
 unsafe impl<S, L> Alloc<S> for BuddyAlloc<L>
@@ -409,6 +438,9 @@ where
         // Try each free list, starting at the minimum necessary order.
         for (idx, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
             tracing::trace!(curr_order = idx + order);
+
+            self.dump_free_lists();
+            let _g = OnExit::new(|| self.dump_free_lists());
 
             // Is there an available block on this free list?
             let mut free_list = free_list.lock();
@@ -461,6 +493,9 @@ where
         );
         let _e = span.enter();
 
+        self.dump_free_lists();
+        let _g = OnExit::new(|| self.dump_free_lists());
+
         // Find the order of the free list on which the freed range belongs.
         let min_order = self.order_for(range.page_size(), range.len());
         tracing::trace!(?min_order);
@@ -488,7 +523,7 @@ where
                 unsafe {
                     block.as_mut().merge(buddy.as_mut());
                 }
-                tracing::trace!("merged with buddy");
+                tracing::trace!("merged with buddy {:?} {:?}", block, buddy);
                 // Keep merging!
             } else {
                 // Okay, we can't keep merging, so push the block on the current
