@@ -538,8 +538,13 @@ impl Free {
 
     pub fn split_back(&mut self, size: usize, offset: usize) -> Option<ptr::NonNull<Self>> {
         debug_assert_eq!(self.magic, Self::MAGIC);
+
         let new_meta = self.meta.split_back(size)?;
+        debug_assert_ne!(new_meta, self.meta);
+
         let new_free = unsafe { Self::new(new_meta, offset) };
+        debug_assert_ne!(new_free, ptr::NonNull::from(self));
+
         Some(new_free)
     }
 

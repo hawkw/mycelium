@@ -3,7 +3,7 @@ use core::{cmp, fmt};
 pub mod page;
 
 /// A cross-platform representation of a memory region.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Region<A = crate::PAddr> {
     base: A,
     // TODO(eliza): should regions be stored as (start -> end) or as
