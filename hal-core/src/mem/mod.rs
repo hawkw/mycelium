@@ -114,6 +114,7 @@ impl<A: Address> Region<A> {
             "split_back"
         );
         self.size = size;
+        tracing::trace!(?self);
         Some(Self {
             base,
             size: rem_size,
