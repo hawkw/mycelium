@@ -541,7 +541,8 @@ impl Free {
 
         let new_meta = self.meta.split_back(size)?;
         debug_assert_ne!(new_meta, self.meta);
-
+        tracing::trace(?new_meta, ?self.meta, "split meta");
+        
         let new_free = unsafe { Self::new(new_meta, offset) };
         debug_assert_ne!(new_free, ptr::NonNull::from(self));
 
