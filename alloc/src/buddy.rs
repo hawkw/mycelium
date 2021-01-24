@@ -1,9 +1,11 @@
-use super::{Alloc, AllocErr, PageRange, Size};
-use crate::{
-    mem::{Region, RegionKind},
+use core::ptr;
+use hal_core::{
+    mem::{
+        page::{self, AllocErr, PageRange, Size},
+        Region, RegionKind,
+    },
     Address, PAddr, VAddr,
 };
-use core::ptr;
 use mycelium_util::intrusive::{list, List};
 use mycelium_util::math::Log2;
 use mycelium_util::sync::{
@@ -16,7 +18,7 @@ use mycelium_util::sync::{
 use mycelium_util::trace;
 
 #[derive(Debug)]
-pub struct BuddyAlloc<L = [spin::Mutex<List<Free>>; 32]> {
+pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Minimum allocateable page size in bytes.
     ///
     /// Free blocks on free_lists[0] are one page of this size each. For each
@@ -47,9 +49,9 @@ pub struct Free {
     meta: Region,
 }
 
-// ==== impl BuddyAlloc ===
+// ==== impl Alloc ===
 
-impl BuddyAlloc {
+impl Alloc {
     #[cfg(not(loom))]
     pub const fn new_default(min_size: usize) -> Self {
         Self::new(
@@ -93,7 +95,7 @@ impl BuddyAlloc {
     }
 }
 
-impl<L> BuddyAlloc<L> {
+impl<L> Alloc<L> {
     #[cfg(not(loom))]
     pub const fn new(min_size: usize, free_lists: L) -> Self {
         Self {
@@ -199,7 +201,7 @@ impl<L> BuddyAlloc<L> {
     }
 }
 
-impl<L> BuddyAlloc<L>
+impl<L> Alloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
 {
@@ -377,7 +379,7 @@ where
     }
 }
 
-unsafe impl<S, L> Alloc<S> for BuddyAlloc<L>
+unsafe impl<S, L> page::Alloc<S> for Alloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
     S: Size + core::fmt::Display,

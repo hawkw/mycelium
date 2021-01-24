@@ -10,11 +10,11 @@ pub mod arch;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
+use mycelium_alloc::buddy;
 
 mod wasm;
 
-static PAGE_ALLOCATOR: mem::page::BuddyAlloc =
-    mem::page::BuddyAlloc::new_default(arch::mm::MIN_PAGE_SIZE);
+static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -132,7 +132,7 @@ mycelium_util::decl_test! {
 
 #[global_allocator]
 #[cfg(target_os = "none")]
-pub static GLOBAL: mycelium_alloc::Alloc = mycelium_alloc::Alloc;
+pub static GLOBAL: mycelium_alloc::bump::Alloc = mycelium_alloc::bump::Alloc;
 
 #[alloc_error_handler]
 #[cfg(target_os = "none")]

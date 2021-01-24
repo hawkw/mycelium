@@ -1,7 +1,17 @@
 [package]
 name = "mycelium-alloc"
 version = "0.1.0"
-authors = ["Nika Layzell <nika@thelayzells.com>"]
+authors = [
+    "Nika Layzell <nika@thelayzells.com>",
+    "Eliza Weisman <eliza@elizas.website>",
+]
 edition = "2018"
 
+[features]
+bump = []
+buddy = ["hal-core", "mycelium-util", "tracing"]
+
 [dependencies]
+tracing = { version = "0.1", default_features = false, optional = true }
+mycelium-util = { path = "../util", optional = true }
+hal-core = { path = "../hal-core", optional = true }

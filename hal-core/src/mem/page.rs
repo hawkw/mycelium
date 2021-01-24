@@ -1,7 +1,5 @@
-pub use self::alloc::BuddyAlloc;
 use crate::{Address, PAddr, VAddr};
 use core::{cmp, fmt, ops, slice};
-mod alloc;
 
 pub trait Size: Copy + Eq + PartialEq + fmt::Display {
     /// Returns the size (in bytes) of this page.
