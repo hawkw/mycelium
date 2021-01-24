@@ -41,6 +41,10 @@ impl<T: fmt::Debug> TestResult for Result<(), T> {
 #[macro_export]
 macro_rules! decl_test {
     (fn $name:ident $($t:tt)*) => {
+        // Clippy will complain about these functions returning `Result<(),
+        // ()>` unnecessarily, but this is actually required by the test
+        // harness.
+        #[allow(clippy::unnecessary_wraps)]
         fn $name $($t)*
 
         // Introduce an anonymous const to avoid name conflicts. The `#[used]`

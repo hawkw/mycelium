@@ -239,7 +239,7 @@ mod tests {
     use crate::io::prelude::*;
     use crate::io::{Cursor, SeekFrom};
     #[cfg(feature = "alloc")]
-    use alloc::{boxed::Box, vec, vec::Vec};
+    use alloc::{vec, vec::Vec};
 
     #[test]
     #[cfg(feature = "alloc")]

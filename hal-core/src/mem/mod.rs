@@ -1,9 +1,10 @@
 use crate::Address;
-use core::fmt;
+use core::{cmp, fmt};
 pub mod page;
+use mycelium_util::trace;
 
 /// A cross-platform representation of a memory region.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Region<A = crate::PAddr> {
     base: A,
     // TODO(eliza): should regions be stored as (start -> end) or as
@@ -13,11 +14,11 @@ pub struct Region<A = crate::PAddr> {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-#[repr(C)]
+#[repr(transparent)]
 pub struct RegionKind(KindInner);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(C)]
+#[repr(u8)]
 enum KindInner {
     /// For whatever reason, this memory region's kind is undetermined.
     // TODO(eliza): do we need this?
@@ -61,6 +62,10 @@ impl<A: Address> Region<A> {
         self.size
     }
 
+    pub fn is_aligned(&self, align: impl Into<usize>) -> bool {
+        self.base.is_aligned(align)
+    }
+
     /// Returns `true` if `self` contains the specified address.
     pub fn contains(&self, addr: impl Into<A>) -> bool {
         let addr = addr.into();
@@ -78,10 +83,52 @@ impl<A: Address> Region<A> {
         self.kind
     }
 
+    pub fn split_front(&mut self, size: usize) -> Option<Self> {
+        assert!(size <= core::i32::MAX as usize);
+        if size > self.size {
+            return None;
+        }
+        let base = self.base;
+        tracing::trace!(size, self.size, "splitting down by");
+        self.base = self.base.offset(size as i32);
+        self.size -= size;
+        Some(Self {
+            base,
+            size,
+            kind: self.kind,
+        })
+    }
+
+    pub fn split_back(&mut self, size: usize) -> Option<Self> {
+        assert!(size <= core::i32::MAX as usize);
+        if size >= self.size {
+            return None;
+        }
+        let rem_size = self.size - size;
+        let base = self.base.offset(size as i32);
+        tracing::trace!(
+            size,
+            self.size,
+            ?self.base,
+            self.addr = trace::ptr(&self),
+            rem_size,
+            ?base,
+            "split_back",
+        );
+        self.size = size;
+        tracing::trace!(?self);
+        Some(Self {
+            base,
+            size: rem_size,
+            kind: self.kind,
+        })
+    }
+
     pub fn page_range<S: page::Size>(
         &self,
         size: S,
     ) -> Result<page::PageRange<A, S>, page::NotAligned<S>> {
+        tracing::trace!(?self.base, self.size, self.end = ?self.end_addr(), "Region -> PageRange");
         let start = page::Page::starting_at(self.base, size)?;
         let end = page::Page::starting_at(self.end_addr(), size)?;
         Ok(start.range_to(end))
@@ -91,9 +138,16 @@ impl<A: Address> Region<A> {
         let base = range.start().base_addr();
         Self {
             base,
-            size: range.page_size().as_usize(),
+            size: range.size(),
             kind,
         }
+    }
+
+    pub fn merge(&mut self, other: &mut Self) {
+        debug_assert_eq!(self.kind, other.kind);
+        // TOOD(eliza): assert that there's no in-between space.
+        self.base = cmp::min(self.base, other.base);
+        self.size += other.size;
     }
 }
 

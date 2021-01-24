@@ -99,8 +99,17 @@ pub trait Address:
     }
 
     /// Returns `true` if `self` is aligned on the specified alignment.
+    ///
+    /// # Notes
+    /// `align` must be a power of two. This is asserted in debug builds.
     fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
-        self.align_down(align) == self
+        let align = align.into();
+        debug_assert!(
+            align.is_power_of_two(),
+            "align must be a power of two (actual align: {})",
+            align
+        );
+        self.as_usize() & (align - 1) == 0
     }
 
     /// Returns `true` if `self` is aligned on the alignment of the specified
@@ -113,10 +122,16 @@ pub trait Address:
     /// # Panics
     ///
     /// - If `self` is not aligned for a `T`-typed value.
+    #[track_caller]
     fn as_ptr<T>(self) -> *mut T {
         // Some architectures permit unaligned reads, but Rust considers
         // dereferencing a pointer that isn't type-aligned to be UB.
-        assert!(self.is_aligned_for::<T>());
+        assert!(
+            self.is_aligned_for::<T>(),
+            "assertion failed: self.is_aligned_for::<{}>();\n\tself={:?}",
+            core::any::type_name::<T>(),
+            self
+        );
         self.as_usize() as *mut T
     }
 }

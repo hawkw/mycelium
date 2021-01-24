@@ -10,8 +10,11 @@ pub mod arch;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
+use mycelium_alloc::buddy;
 
 mod wasm;
+
+static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -27,6 +30,12 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     if let Some(subscriber) = bootinfo.subscriber() {
         tracing::dispatcher::set_global_default(subscriber).unwrap();
     }
+
+    arch::interrupt::init::<arch::InterruptHandlers>();
+    bootinfo.init_paging();
+
+    // XXX(eliza): this sucks
+    PAGE_ALLOCATOR.set_vm_offset(arch::mm::vm_offset());
 
     let mut regions = 0;
     let mut free_regions = 0;
@@ -48,6 +57,11 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
             if region.kind() == mem::RegionKind::FREE {
                 free_regions += 1;
                 free_bytes += size;
+                unsafe {
+                    tracing::trace!(?region, "adding to page allocator");
+                    let e = PAGE_ALLOCATOR.add_region(region);
+                    tracing::trace!(added = e.is_ok());
+                }
             }
         }
 
@@ -58,9 +72,6 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
             free_bytes,
         );
     }
-
-    arch::interrupt::init::<arch::InterruptHandlers>();
-    bootinfo.init_paging();
 
     #[cfg(test)]
     {
@@ -121,7 +132,7 @@ mycelium_util::decl_test! {
 
 #[global_allocator]
 #[cfg(target_os = "none")]
-pub static GLOBAL: mycelium_alloc::Alloc = mycelium_alloc::Alloc;
+pub static GLOBAL: mycelium_alloc::bump::Alloc = mycelium_alloc::bump::Alloc;
 
 #[alloc_error_handler]
 #[cfg(target_os = "none")]

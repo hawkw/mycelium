@@ -31,8 +31,8 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(Page)` if a page was successfully allocated.
     /// - `Err` if no more pages can be allocated by this allocator.
-    fn alloc(&mut self) -> Result<Page<PAddr, S>, AllocErr> {
-        self.alloc_range(1).map(|r| r.start())
+    fn alloc(&self, size: S) -> Result<Page<PAddr, S>, AllocErr> {
+        self.alloc_range(size, 1).map(|r| r.start())
     }
 
     /// Allocate a range of `len` pages.
@@ -40,7 +40,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&mut self, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
+    fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
 
     /// Deallocate a single page.
     ///
@@ -50,7 +50,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(())` if the page was successfully deallocated.
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc(&mut self, page: Page<PAddr, S>) -> Result<(), AllocErr> {
+    fn dealloc(&self, page: Page<PAddr, S>) -> Result<(), AllocErr> {
         self.dealloc_range(page.range_inclusive(page))
     }
 
@@ -192,6 +192,7 @@ pub struct NotAligned<S> {
     size: S,
 }
 
+#[derive(Debug)]
 pub struct AllocErr {
     // TODO: eliza
     _p: (),
@@ -362,13 +363,46 @@ impl<A: Address, S: Size> PageRange<A, S> {
 
     /// Returns the size of the pages in the range. All pages in a page range
     /// have the same size.
+    #[track_caller]
     pub fn page_size(&self) -> S {
         debug_assert_eq!(self.start.size().as_usize(), self.end.size().as_usize());
         self.start.size()
     }
 
     pub fn len(&self) -> usize {
-        unimplemented!("eliza")
+        self.size() / self.page_size().as_usize()
+    }
+
+    /// Returns the size in bytes of the page range.
+    #[track_caller]
+    pub fn size(&self) -> usize {
+        let diff = self.start.base_addr().difference(self.end.end_addr());
+        debug_assert!(
+            diff >= 0,
+            "assertion failed: page range base address must be lower than end \
+            address!\n\
+            \x20 base addr = {:?}\n\
+            \x20  end addr = {:?}\n\
+            ",
+            self.base_addr(),
+            self.end_addr(),
+        );
+        // add 1 to compensate for the base address not being included in `difference`
+        let diff = diff as usize + 1;
+        debug_assert!(
+            diff >= self.page_size().as_usize(),
+            "assertion failed: page range must be at least one page!\n\
+            \x20 difference = {}\n\
+            \x20       size = {}\n\
+            \x20  base addr = {:?}\n\
+            \x20   end addr = {:?}\n\
+            ",
+            diff,
+            self.page_size().as_usize(),
+            self.base_addr(),
+            self.end_addr(),
+        );
+        diff
     }
 }
 
@@ -384,8 +418,21 @@ impl<A: Address, S: Size> Iterator for PageRange<A, S> {
     }
 }
 
+impl<A, S> fmt::Debug for PageRange<A, S>
+where
+    A: Address + fmt::Debug,
+    S: Size + fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PageRange")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .finish()
+    }
+}
+
 unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
-    fn alloc_range(&mut self, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
+    fn alloc_range(&self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
         Err(AllocErr { _p: () })
     }
 
@@ -438,6 +485,20 @@ impl<S: Size> fmt::Display for TranslateError<S> {
                 core::any::type_name::<S>()
             ),
         }
+    }
+}
+
+// === impl AllocErr ===
+
+impl AllocErr {
+    pub fn oom() -> Self {
+        Self { _p: () }
+    }
+}
+
+impl<S: Size> From<NotAligned<S>> for AllocErr {
+    fn from(_na: NotAligned<S>) -> Self {
+        Self { _p: () } // TODO(eliza)
     }
 }
 
