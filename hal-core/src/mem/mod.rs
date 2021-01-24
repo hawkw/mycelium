@@ -13,11 +13,11 @@ pub struct Region<A = crate::PAddr> {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-#[repr(C)]
+#[repr(transparent)]
 pub struct RegionKind(KindInner);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(C)]
+#[repr(u8)]
 enum KindInner {
     /// For whatever reason, this memory region's kind is undetermined.
     // TODO(eliza): do we need this?
