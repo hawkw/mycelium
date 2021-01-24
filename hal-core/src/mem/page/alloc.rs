@@ -482,10 +482,13 @@ where
             // Is there a free buddy block at this order?
             if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, &mut free_list) } {
                 // Okay, merge the blocks, and try the next order!
+                if buddy < block {
+                    core::mem::swap(&mut block, &mut buddy);
+                }
                 unsafe {
                     block.as_mut().merge(buddy.as_mut());
                 }
-                tracing::trace!("merged with buddy");
+                tracing::trace!(?buddy, ?block, "merged with buddy");
                 // Keep merging!
             } else {
                 // Okay, we can't keep merging, so push the block on the current
