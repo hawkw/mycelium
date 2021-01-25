@@ -1,4 +1,4 @@
-use core::ptr;
+use core::{alloc::Layout, cmp, ptr};
 use hal_core::{
     mem::{
         page::{self, AllocErr, PageRange, Size},
@@ -41,7 +41,8 @@ pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
     free_lists: L,
 }
 
-pub type Result<T> = core::result::Result<T, AllocErr>;
+type Result<T> = core::result::Result<T, AllocErr>;
+
 #[derive(Debug)]
 pub struct Free {
     magic: usize,
@@ -139,38 +140,28 @@ impl<L> Alloc<L> {
 
     /// Returns the actual size of the block that must be allocated for an
     /// allocation of `len` pages of `page_size`.
-    fn size_for<S: Size>(&self, page_size: S, len: usize) -> Result<usize> {
-        let mut size = page_size
-            .as_usize()
-            // If the size of the page range would overflow, we *definitely*
-            // can't allocate that lol.
-            .checked_mul(len)
-            .ok_or_else(AllocErr::oom)?;
+    fn size_for(&self, layout: Layout) -> Option<usize> {
+        let mut size = layout.size();
+        let align = layout.align();
+        size = cmp::max(size, align);
 
         // Round up to the heap's minimum allocateable size.
         if size < self.min_size {
             tracing::warn!(
                 size,
                 min_size = self.min_size,
-                allocation.page_size = page_size.as_usize(),
-                allocation.len = len,
+                layout.size = layout.size(),
+                layout.align = layout.align(),
                 "size is less than the minimum page size; rounding up"
             );
             size = self.min_size;
         }
 
         // Is the size a power of two?
-        if !size.is_power_of_two() {
-            let rounded = size.next_power_of_two();
-            tracing::warn!(
-                size,
-                rounded,
-                allocation.page_size = page_size.as_usize(),
-                allocation.len = len,
-                "size is not a power of two; rounding up"
-            );
-            size = rounded;
-        }
+        debug_assert!(
+            size.is_power_of_two(),
+            "somebody constructed a bad layout! don't do that!"
+        );
 
         // Is there enough room to meet this allocation request?
         let available = self.heap_size.load(Acquire);
@@ -178,21 +169,20 @@ impl<L> Alloc<L> {
             tracing::error!(
                 size,
                 available,
-                allocation.page_size = page_size.as_usize(),
-                allocation.len = len,
+                layout.size = layout.size(),
+                layout.align = layout.align(),
                 "out of memory!"
             );
-            return Err(AllocErr::oom());
+            return None;
         }
 
-        Ok(size)
+        Some(size)
     }
 
     /// Returns the order of the block that would be allocated for a range of
     /// `len` pages of size `size`.
-    fn order_for<S: Size>(&self, page_size: S, len: usize) -> Result<usize> {
-        self.size_for(page_size, len)
-            .map(|size| self.order_for_size(size))
+    fn order_for(&self, layout: Layout) -> Option<usize> {
+        self.size_for(layout).map(|size| self.order_for_size(size))
     }
 
     /// Returns the order of a block of `size` bytes.
@@ -268,6 +258,88 @@ where
         let block = Free::new(region, self.offset());
         unsafe { self.push_block(block) };
         Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    unsafe fn alloc_inner(&self, layout: Layout) -> Option<ptr::NonNull<Free>> {
+        // This is the minimum order necessary for the requested allocation ---
+        // the first free list we'll check.
+        let order = self.order_for(layout)?;
+        tracing::trace!(?order);
+
+        // Try each free list, starting at the minimum necessary order.
+        for (idx, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
+            tracing::trace!(curr_order = idx + order);
+
+            // Is there an available block on this free list?
+            let mut free_list = free_list.lock();
+            if let Some(mut block) = free_list.pop_back() {
+                let block = unsafe { block.as_mut() };
+                tracing::trace!(?block, ?free_list, "found");
+
+                // Unless this is the free list on which we'd expect to find a
+                // block of the requested size (the first free list we checked),
+                // the block is larger than the requested allocation. In that
+                // case, we'll need to split it down and push the remainder onto
+                // the appropriate free lists.
+                if idx > 0 {
+                    let curr_order = idx + order;
+                    tracing::trace!(?curr_order, ?order, "split down");
+                    self.split_down(block, curr_order, order);
+                }
+
+                // Change the block's magic to indicate that it is allocated, so
+                // that we can avoid checking the free list if we try to merge
+                // it before the first word is written to.
+                block.make_busy();
+                tracing::trace!(?block, "made busy");
+                return Some(block.into());
+            }
+        }
+        None
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    unsafe fn dealloc_inner(&self, paddr: PAddr, layout: Layout) -> Result<()> {
+        // Find the order of the free list on which the freed range belongs.
+        let min_order = self.order_for(layout);
+        tracing::trace!(?min_order);
+        let min_order = min_order.ok_or_else(AllocErr::oom)?;
+
+        // Construct a new free block.
+        let mut block = unsafe {
+            Free::new(
+                Region::new(paddr, layout.size(), RegionKind::FREE),
+                self.offset(),
+            )
+        };
+
+        // Starting at the minimum order on which the freed range will fit
+        for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
+            let curr_order = idx + min_order;
+            let mut free_list = free_list.lock();
+
+            // Is there a free buddy block at this order?
+            if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, &mut free_list) } {
+                // Okay, merge the blocks, and try the next order!
+                if buddy < block {
+                    core::mem::swap(&mut block, &mut buddy);
+                }
+                unsafe {
+                    block.as_mut().merge(buddy.as_mut());
+                }
+                tracing::trace!(?buddy, ?block, "merged with buddy");
+                // Keep merging!
+            } else {
+                // Okay, we can't keep merging, so push the block on the current
+                // free list.
+                free_list.push_front(block);
+                tracing::trace!("deallocated block");
+                return Ok(());
+            }
+        }
+
+        unreachable!("we will always iterate over at least one free list");
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -393,6 +465,7 @@ where
         let span = tracing::trace_span!("alloc_range", size = size.as_usize(), len);
         let _e = span.enter();
 
+        // Determine the layout to allocate this page range...
         if size.as_usize() > self.min_size {
             // TODO(eliza): huge pages should work!
             tracing::error!(
@@ -402,51 +475,34 @@ where
             );
             return Err(AllocErr::oom());
         }
+        let total_size = size
+            .as_usize()
+            // If the size of the page range would overflow, we *definitely*
+            // can't allocate that lol.
+            .checked_mul(len)
+            .ok_or_else(AllocErr::oom)?;
 
-        // This is the minimum order necessary for the requested allocation ---
-        // the first free list we'll check.
-        let order = self.order_for(size, len)?;
-        tracing::trace!(?order);
+        #[cfg(debug_assertions)]
+        let layout = Layout::from_size_align(total_size, size.as_usize())
+            .expect("page ranges should have valid (power of 2) size/align");
+        #[cfg(not(debug_assertions))]
+        let layout = unsafe {
+            // Safety: we expect all page sizes to be powers of 2.
+            Layout::from_size_align_unchecked(total_size, size.as_usize())
+        };
 
-        // Try each free list, starting at the minimum necessary order.
-        for (idx, free_list) in self.free_lists.as_ref()[order..].iter().enumerate() {
-            tracing::trace!(curr_order = idx + order);
+        // Try to allocate the page range
+        let block = unsafe { self.alloc_inner(layout) }.ok_or_else(AllocErr::oom)?;
 
-            // Is there an available block on this free list?
-            let mut free_list = free_list.lock();
-            if let Some(mut block) = free_list.pop_back() {
-                let block = unsafe { block.as_mut() };
-                tracing::trace!(?block, ?free_list, "found");
-
-                // Unless this is the free list on which we'd expect to find a
-                // block of the requested size (the first free list we checked),
-                // the block is larger than the requested allocation. In that
-                // case, we'll need to split it down and push the remainder onto
-                // the appropriate free lists.
-                if idx > 0 {
-                    let curr_order = idx + order;
-                    tracing::trace!(?curr_order, ?order, "split down");
-                    self.split_down(block, curr_order, order);
-                }
-
-                // Change the block's magic to indicate that it is allocated, so
-                // that we can avoid checking the free list if we try to merge
-                // it before the first word is written to.
-                block.make_busy();
-                tracing::trace!(?block, "made busy");
-
-                // Return the allocation!
-                let range = block.region().page_range(size);
-                tracing::debug!(
-                    ?range,
-                    requested.size = size.as_usize(),
-                    requested.len = len,
-                    "allocated"
-                );
-                return Ok(range?);
-            }
-        }
-        Err(AllocErr::oom())
+        // Return the allocation!
+        let range = unsafe { block.as_ref() }.region().page_range(size);
+        tracing::debug!(
+            ?range,
+            requested.size = size.as_usize(),
+            requested.len = len,
+            "allocated"
+        );
+        range.map_err(Into::into)
     }
 
     /// Deallocate a range of pages.
@@ -455,58 +511,41 @@ where
     /// - `Ok(())` if a range of pages was successfully deallocated
     /// - `Err` if the requested range could not be deallocated.
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<()> {
+        let page_size = range.page_size().as_usize();
+        let len = range.len();
+        let base = range.base_addr();
         let span = tracing::trace_span!(
             "dealloc_range",
-            range.base = ?range.base_addr(),
-            range.page_size = range.page_size().as_usize(),
-            range.len = range.len()
+            range.base = ?base,
+            range.page_size = page_size,
+            range.len = len
         );
         let _e = span.enter();
 
-        // Find the order of the free list on which the freed range belongs.
-        let min_order = self.order_for(range.page_size(), range.len());
-        tracing::trace!(?min_order);
-        let min_order = min_order?;
+        let total_size = page_size
+            .checked_mul(len)
+            .expect("page range size shouldn't overflow, this is super bad news");
 
-        // Construct a new free block.
-        let mut block = unsafe {
-            Free::new(
-                Region::from_page_range(range, RegionKind::FREE),
-                self.offset(),
-            )
+        #[cfg(debug_assertions)]
+        let layout = Layout::from_size_align(total_size, page_size)
+            .expect("page ranges should be well-aligned");
+        #[cfg(not(debug_assertions))]
+        let layout = unsafe {
+            // Safety: we expect page ranges to be well-aligned.
+            Layout::from_size_align_unchecked(total_size, page_size)
         };
 
-        // Starting at the minimum order on which the freed range will fit
-        for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
-            let curr_order = idx + min_order;
-            let mut free_list = free_list.lock();
-
-            // Is there a free buddy block at this order?
-            if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, &mut free_list) } {
-                // Okay, merge the blocks, and try the next order!
-                if buddy < block {
-                    core::mem::swap(&mut block, &mut buddy);
-                }
-                unsafe {
-                    block.as_mut().merge(buddy.as_mut());
-                }
-                tracing::trace!(?buddy, ?block, "merged with buddy");
-                // Keep merging!
-            } else {
-                // Okay, we can't keep merging, so push the block on the current
-                // free list.
-                free_list.push_front(block);
-                tracing::debug!(
-                    range.base = ?range.base_addr(),
-                    range.page_size = range.page_size().as_usize(),
-                    range.len = range.len(),
-                    "deallocated"
-                );
-                return Ok(());
-            }
+        unsafe {
+            self.dealloc_inner(base, layout)?;
         }
 
-        unreachable!("we will always iterate over at least one free list");
+        tracing::debug!(
+            range.base = ?range.base_addr(),
+            range.page_size = range.page_size().as_usize(),
+            range.len = range.len(),
+            "deallocated"
+        );
+        Ok(())
     }
 }
 
