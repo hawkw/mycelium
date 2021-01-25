@@ -459,7 +459,11 @@ where
     L: AsRef<[spin::Mutex<List<Free>>]>,
     S: Size + core::fmt::Display,
 {
-    /// Allocate a range of `len` pages.
+    /// Allocate a range of at least `len` pages.
+    ///
+    /// If `len` is not a power of two, the length is rounded up to the next
+    /// power of two. The returned `PageRange` struct stores the actual length
+    /// of the allocated page range.
     ///
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
@@ -478,12 +482,39 @@ where
             );
             return Err(AllocErr::oom());
         }
+
+        debug_assert!(
+            size.as_usize().is_power_of_two(),
+            "page size must be a power of 2; size={}",
+            size
+        );
+
+        let actual_len = if len.is_power_of_two() {
+            len
+        } else {
+            let next = len.next_power_of_two();
+            tracing::debug!(
+                requested.len = len,
+                rounded.len = next,
+                "rounding up page range length to next power of 2"
+            );
+            next
+        };
+
         let total_size = size
             .as_usize()
             // If the size of the page range would overflow, we *definitely*
             // can't allocate that lol.
-            .checked_mul(len)
+            .checked_mul(actual_len)
             .ok_or_else(AllocErr::oom)?;
+
+        debug_assert!(
+            total_size.is_power_of_two(),
+            "total size of page range must be a power of 2; total_size={} size={} len={}",
+            total_size,
+            size,
+            actual_len
+        );
 
         #[cfg(debug_assertions)]
         let layout = Layout::from_size_align(total_size, size.as_usize())
@@ -503,6 +534,7 @@ where
             ?range,
             requested.size = size.as_usize(),
             requested.len = len,
+            actual.len = actual_len,
             "allocated"
         );
         range.map_err(Into::into)
