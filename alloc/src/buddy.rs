@@ -1,4 +1,7 @@
-use core::{alloc::Layout, cmp, ptr};
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    cmp, ptr,
+};
 use hal_core::{
     mem::{
         page::{self, AllocErr, PageRange, Size},
@@ -546,6 +549,37 @@ where
             "deallocated"
         );
         Ok(())
+    }
+}
+
+unsafe impl GlobalAlloc for Alloc {
+    #[tracing::instrument(level = "trace", skip(self))]
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.alloc_inner(layout)
+            .map(ptr::NonNull::as_ptr)
+            .unwrap_or_else(ptr::null_mut)
+            .cast::<u8>()
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        let addr = match (ptr as usize).checked_sub(self.offset()) {
+            Some(addr) => addr,
+            None => panic!(
+                "pointer is not to a kernel VAddr! ptr={:p}; offset={:x}",
+                ptr,
+                self.offset()
+            ),
+        };
+
+        let addr = PAddr::from_usize(addr);
+        match self.dealloc_inner(addr, layout) {
+            Ok(_) => {}
+            Err(_) => panic!(
+                "deallocating {:?} with layout {:?} failed! this shouldn't happen!",
+                addr, layout
+            ),
+        }
     }
 }
 
