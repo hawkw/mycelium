@@ -1,4 +1,9 @@
-use core::{fmt, marker::PhantomPinned, mem::ManuallyDrop, ptr::NonNull};
+use core::{
+    fmt,
+    marker::PhantomPinned,
+    mem::ManuallyDrop,
+    ptr::{self, NonNull},
+};
 
 pub unsafe trait Linked {
     type Handle;
@@ -77,6 +82,51 @@ impl<T: ?Sized> List<T> {
 }
 
 impl<T: ?Sized + Linked> List<T> {
+    /// Asserts as many of the linked list's invariants as possible.
+    pub fn assert_valid(&self) {
+        let head = match self.head {
+            Some(head) => head,
+            None => {
+                assert!(
+                    self.tail.is_none(),
+                    "if the linked list's head is null, the tail must also be null"
+                );
+                return;
+            }
+        };
+
+        let tail = self
+            .tail
+            .expect("if the linked list has a head, it must also have a tail");
+        let head_links = unsafe { T::links(head) };
+        let tail_links = unsafe { T::links(tail) };
+        let head_links = unsafe { head_links.as_ref() };
+        let tail_links = unsafe { tail_links.as_ref() };
+        if head == tail {
+            assert_eq!(
+                head_links, tail_links,
+                "this should just never fucking happen lol"
+            );
+            assert_eq!(
+                head_links.next, None,
+                "if the linked list has only one node, it must not be linked"
+            );
+            assert_eq!(
+                head_links.prev, None,
+                "if the linked list has only one node, it must not be linked"
+            );
+            return;
+        }
+
+        let mut curr = Some(head);
+        while let Some(node) = curr {
+            let links = unsafe { T::links(node) };
+            let links = unsafe { links.as_ref() };
+            links.assert_valid(head_links, tail_links);
+            curr = links.next;
+        }
+    }
+
     /// Appends an item to the head of the list.
     pub fn push_front(&mut self, item: T::Handle) {
         let item = ManuallyDrop::new(item);
@@ -214,6 +264,50 @@ impl<T: ?Sized> Links<T> {
     pub fn is_linked(&self) -> bool {
         self.next.is_some() || self.prev.is_some()
     }
+
+    fn assert_valid(&self, head: &Self, tail: &Self)
+    where
+        T: Linked,
+    {
+        if ptr::eq(self, head) {
+            assert_eq!(
+                self.prev, None,
+                "head node must not have a prev link; node={:#?}",
+                self
+            );
+        }
+
+        if ptr::eq(self, tail) {
+            assert_eq!(
+                self.next, None,
+                "tail node must not have a next link; node={:#?}",
+                self
+            );
+        }
+
+        assert_ne!(
+            self.next, self.prev,
+            "node cannot be linked in a loop; node={:#?}",
+            self
+        );
+
+        if let Some(next) = self.next {
+            assert_ne!(
+                unsafe { T::links(next) },
+                NonNull::from(self),
+                "node's next link cannot be to itself; node={:#?}",
+                self
+            );
+        }
+        if let Some(prev) = self.prev {
+            assert_ne!(
+                unsafe { T::links(prev) },
+                NonNull::from(self),
+                "node's prev link cannot be to itself; node={:#?}",
+                self
+            );
+        }
+    }
 }
 
 impl<T: ?Sized> Default for Links<T> {
@@ -225,9 +319,16 @@ impl<T: ?Sized> Default for Links<T> {
 impl<T: ?Sized> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Links")
+            .field("self", &format_args!("{:p}", self))
             .field("next", &self.next)
             .field("prev", &self.prev)
             .finish()
+    }
+}
+
+impl<T: ?Sized> PartialEq for Links<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.next == other.next && self.prev == other.prev
     }
 }
 
