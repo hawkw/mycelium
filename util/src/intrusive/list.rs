@@ -1,6 +1,4 @@
-use core::fmt;
-use core::mem::ManuallyDrop;
-use core::ptr::NonNull;
+use core::{fmt, marker::PhantomPinned, mem::ManuallyDrop, ptr::NonNull};
 
 pub unsafe trait Linked {
     type Handle;
@@ -38,6 +36,10 @@ pub struct List<T: ?Sized> {
 pub struct Links<T: ?Sized> {
     next: Option<NonNull<T>>,
     prev: Option<NonNull<T>>,
+    /// Linked list links must always be `!Unpin`, in order to ensure that they
+    /// never recieve LLVM `noalias` annotations; see also
+    /// https://github.com/rust-lang/rust/issues/63818.
+    _unpin: PhantomPinned,
 }
 
 pub struct Cursor<'a, T: ?Sized + Linked> {
@@ -142,7 +144,7 @@ impl<T: ?Sized + Linked> List<T> {
     pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
         let links = T::links(item).as_mut().take();
         tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
-        let Links { next, prev } = links;
+        let Links { next, prev, .. } = links;
 
         if let Some(prev) = prev {
             T::links(prev).as_mut().next = next;
@@ -193,6 +195,7 @@ impl<T: ?Sized> Links<T> {
         Self {
             next: None,
             prev: None,
+            _unpin: PhantomPinned,
         }
     }
 
@@ -200,6 +203,7 @@ impl<T: ?Sized> Links<T> {
         Self {
             next: self.next.take(),
             prev: self.next.take(),
+            _unpin: PhantomPinned,
         }
     }
 
