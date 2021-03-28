@@ -149,6 +149,7 @@ impl<T: Linked + ?Sized> List<T> {
 
             if let Some(head) = self.head {
                 T::links(head).as_mut().prev = Some(ptr);
+                tracing::trace!(head.links = ?T::links(head).as_ref(), "set head prev ptr",);
             }
         }
 
@@ -201,13 +202,16 @@ impl<T: Linked + ?Sized> List<T> {
     /// The caller *must* ensure that the removed node is an element of this
     /// linked list, and not any other linked list.
     pub unsafe fn remove(&mut self, item: NonNull<T::Node>) -> Option<T::Handle> {
-        let links = T::links(item).as_mut().take();
+        let mut links = T::links(item);
+        let links = links.as_mut();
         tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
-        let Links { next, prev, .. } = links;
+        let prev = links.prev.take();
+        let next = links.next.take();
 
         if let Some(prev) = prev {
             T::links(prev).as_mut().next = next;
         } else if self.head != Some(item) {
+            tracing::trace!(?self.head, "item is not head, but has no prev; return None");
             return None;
         } else {
             debug_assert_ne!(Some(item), next, "node must not be linked to itself");
@@ -217,6 +221,7 @@ impl<T: Linked + ?Sized> List<T> {
         if let Some(next) = next {
             T::links(next).as_mut().prev = prev;
         } else if self.tail != Some(item) {
+            tracing::trace!(?self.tail, "item is not tail, but has no prev; return None");
             return None;
         } else {
             debug_assert_ne!(Some(item), prev, "node must not be linked to itself");
@@ -258,16 +263,9 @@ impl<T: ?Sized> Links<T> {
         }
     }
 
-    fn take(&mut self) -> Self {
-        Self {
-            next: self.next.take(),
-            prev: self.next.take(),
-            _unpin: PhantomPinned,
-        }
-    }
-
     fn unlink(&mut self) {
-        self.take();
+        self.next = None;
+        self.prev = None;
     }
 
     pub fn is_linked(&self) -> bool {
@@ -410,7 +408,16 @@ mod tests {
         }
 
         unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<&'a Entry> {
-            Pin::new(&*ptr.as_ptr())
+            // Safety: if this function is only called by the linked list
+            // implementation (and it is not intended for external use), we can
+            // expect that the `NonNull` was constructed from a reference which
+            // was pinned.
+            //
+            // If other callers besides `List`'s internals were to call this on
+            // some random `NonNull<Entry>`, this would not be the case, and
+            // this could be constructing an erroneous `Pin` from a referent
+            // that may not be pinned!
+            Pin::new_unchecked(&*ptr.as_ptr())
         }
 
         unsafe fn links(mut target: NonNull<Entry>) -> NonNull<Links<Entry>> {
