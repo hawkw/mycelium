@@ -464,8 +464,18 @@ mod tests {
         const _: List<&Entry> = List::new();
     }
 
+    fn trace_init() -> tracing::dispatcher::DefaultGuard {
+        use tracing_subscriber::prelude::*;
+        tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_max_level(tracing::Level::TRACE)
+            .set_default()
+    }
+
     #[test]
     fn push_and_drain() {
+        let _trace = trace_init();
+
         let a = entry(5);
         let b = entry(7);
         let c = entry(31);
@@ -490,6 +500,8 @@ mod tests {
 
     #[test]
     fn push_pop_push_pop() {
+        let _trace = trace_init();
+
         let a = entry(5);
         let b = entry(7);
 
@@ -520,6 +532,7 @@ mod tests {
 
         #[test]
         fn first() {
+            let _trace = trace_init();
             let a = entry(5);
             let b = entry(7);
             let c = entry(31);
@@ -583,6 +596,8 @@ mod tests {
 
         #[test]
         fn middle() {
+            let _trace = trace_init();
+
             let a = entry(5);
             let b = entry(7);
             let c = entry(31);
@@ -624,6 +639,8 @@ mod tests {
 
         #[test]
         fn last_middle() {
+            let _trace = trace_init();
+
             let a = entry(5);
             let b = entry(7);
             let c = entry(31);
@@ -649,6 +666,8 @@ mod tests {
 
         #[test]
         fn last() {
+            let _trace = trace_init();
+
             let a = entry(5);
             let b = entry(7);
 
@@ -691,6 +710,8 @@ mod tests {
 
         #[test]
         fn missing() {
+            let _trace = trace_init();
+
             let a = entry(5);
             let b = entry(7);
             let c = entry(31);
@@ -709,6 +730,8 @@ mod tests {
 
     #[test]
     fn cursor() {
+        let _trace = trace_init();
+
         let a = entry(5);
         let b = entry(7);
 
@@ -728,6 +751,8 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn fuzz_linked_list(ops: Vec<usize>) {
+            let _trace = trace_init();
+            let _span = tracing::info_span!("fuzz", ?ops).entered();
             run_fuzz(ops);
         }
     }
