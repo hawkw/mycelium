@@ -28,7 +28,7 @@ mycelium-util = { path = "util" }
 rlibc = "1.0"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-bootloader = {version = "0.9.11", features = ["map_physical_memory"] }
+bootloader = {version = "0.9.16", features = ["map_physical_memory"] }
 hal-x86_64 = { path = "hal-x86_64" }
 
 [dependencies.tracing]

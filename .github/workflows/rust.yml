@@ -155,7 +155,9 @@ jobs:
         use-tool-cache: true
     - uses: actions/checkout@v2
     - name: install qemu
-      run: sudo apt-get update && sudo apt-get install qemu
+      run: |
+        sudo apt-get update
+        sudo apt-get install qemu-system-x86
     - name: run tests
       uses: actions-rs/cargo@v1.0.1
       with:
