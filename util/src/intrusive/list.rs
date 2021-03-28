@@ -6,11 +6,22 @@ use core::{
 };
 
 pub unsafe trait Linked {
+    /// The handle owning nodes in the linked list.
     type Handle;
+
+    /// Type of nodes in the linked list.
+    ///
+    /// When the type implementing `Linked` is not itself a reference, this is
+    /// typically `Self`.
+    ///
+    /// # Safety
+    ///
+    /// This type may not be `Unpin`.
+    type Node: ?Sized;
 
     /// Convert a `Handle` to a raw pointer, without consuming it.
     #[allow(clippy::wrong_self_convention)]
-    fn as_ptr(r: &Self::Handle) -> NonNull<Self>;
+    fn as_ptr(r: &Self::Handle) -> NonNull<Self::Node>;
 
     /// Convert a raw pointer to a `Handle`.
     ///
@@ -20,7 +31,7 @@ pub unsafe trait Linked {
     /// - It is valid to construct a `Handle` from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
-    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle;
+    unsafe fn from_ptr(ptr: NonNull<Self::Node>) -> Self::Handle;
 
     /// Return the links of the node pointed to by `ptr`.
     ///
@@ -30,36 +41,36 @@ pub unsafe trait Linked {
     /// - It is valid to construct a `Handle` from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
-    unsafe fn links(ptr: NonNull<Self>) -> NonNull<Links<Self>>;
+    unsafe fn links(ptr: NonNull<Self::Node>) -> NonNull<Links<Self>>;
 }
 
-pub struct List<T: ?Sized> {
-    head: Option<NonNull<T>>,
-    tail: Option<NonNull<T>>,
+pub struct List<T: Linked + ?Sized> {
+    head: Option<NonNull<T::Node>>,
+    tail: Option<NonNull<T::Node>>,
 }
 
-pub struct Links<T: ?Sized> {
-    next: Option<NonNull<T>>,
-    prev: Option<NonNull<T>>,
+pub struct Links<T: Linked + ?Sized> {
+    next: Option<NonNull<T::Node>>,
+    prev: Option<NonNull<T::Node>>,
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
     /// https://github.com/rust-lang/rust/issues/63818.
     _unpin: PhantomPinned,
 }
 
-pub struct Cursor<'a, T: ?Sized + Linked> {
+pub struct Cursor<'a, T: Linked + ?Sized> {
     list: &'a mut List<T>,
-    curr: Option<NonNull<T>>,
+    curr: Option<NonNull<T::Node>>,
 }
 
-pub struct Iter<'a, T: ?Sized + Linked> {
+pub struct Iter<'a, T: Linked + ?Sized> {
     _list: &'a List<T>,
-    curr: Option<NonNull<T>>,
+    curr: Option<NonNull<T::Node>>,
 }
 
 // ==== impl List ====
 
-impl<T: ?Sized> List<T> {
+impl<T: Linked + ?Sized> List<T> {
     /// Returns a new empty list.
     pub const fn new() -> List<T> {
         List {
@@ -79,9 +90,7 @@ impl<T: ?Sized> List<T> {
 
         false
     }
-}
 
-impl<T: ?Sized + Linked> List<T> {
     /// Asserts as many of the linked list's invariants as possible.
     pub fn assert_valid(&self) {
         let head = match self.head {
@@ -191,7 +200,7 @@ impl<T: ?Sized + Linked> List<T> {
     ///
     /// The caller *must* ensure that the removed node is an element of this
     /// linked list, and not any other linked list.
-    pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
+    pub unsafe fn remove(&mut self, item: NonNull<T::Node>) -> Option<T::Handle> {
         let links = T::links(item).as_mut().take();
         tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
         let Links { next, prev, .. } = links;
@@ -226,10 +235,10 @@ impl<T: ?Sized + Linked> List<T> {
     }
 }
 
-unsafe impl<T: Linked> Send for List<T> where T: Send {}
-unsafe impl<T: Linked> Sync for List<T> where T: Sync {}
+unsafe impl<T: Linked + ?Sized> Send for List<T> where T::Node: Send {}
+unsafe impl<T: Linked + ?Sized> Sync for List<T> where T::Node: Sync {}
 
-impl<T: ?Sized> fmt::Debug for List<T> {
+impl<T: Linked + ?Sized> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("List")
             .field("head", &self.head)
@@ -240,7 +249,7 @@ impl<T: ?Sized> fmt::Debug for List<T> {
 
 // ==== impl Links ====
 
-impl<T: ?Sized> Links<T> {
+impl<T: Linked + ?Sized> Links<T> {
     pub const fn new() -> Self {
         Self {
             next: None,
@@ -310,13 +319,13 @@ impl<T: ?Sized> Links<T> {
     }
 }
 
-impl<T: ?Sized> Default for Links<T> {
+impl<T: Linked + ?Sized> Default for Links<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: ?Sized> fmt::Debug for Links<T> {
+impl<T: Linked + ?Sized> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Links")
             .field("self", &format_args!("{:p}", self))
@@ -326,7 +335,7 @@ impl<T: ?Sized> fmt::Debug for Links<T> {
     }
 }
 
-impl<T: ?Sized> PartialEq for Links<T> {
+impl<T: Linked + ?Sized> PartialEq for Links<T> {
     fn eq(&self, other: &Self) -> bool {
         self.next == other.next && self.prev == other.prev
     }
@@ -334,22 +343,25 @@ impl<T: ?Sized> PartialEq for Links<T> {
 
 // === impl Cursor ====
 
-impl<'a, T: ?Sized + Linked> Iterator for Cursor<'a, T> {
+impl<'a, T: Linked + ?Sized> Iterator for Cursor<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_ptr().map(|ptr| unsafe { T::from_ptr(ptr) })
     }
 }
 
-impl<'a, T: ?Sized + Linked> Cursor<'a, T> {
-    fn next_ptr(&mut self) -> Option<NonNull<T>> {
+impl<'a, T: Linked + ?Sized> Cursor<'a, T> {
+    fn next_ptr(&mut self) -> Option<NonNull<T::Node>> {
         let curr = self.curr.take()?;
         self.curr = unsafe { T::links(curr).as_ref().next };
         Some(curr)
     }
 
     // Find and remove the first element matching a predicate.
-    pub fn remove_first(&mut self, mut predicate: impl FnMut(&T) -> bool) -> Option<T::Handle> {
+    pub fn remove_first(
+        &mut self,
+        mut predicate: impl FnMut(&T::Node) -> bool,
+    ) -> Option<T::Handle> {
         let mut item = None;
         while let Some(node) = self.next_ptr() {
             if predicate(unsafe { node.as_ref() }) {
@@ -365,7 +377,7 @@ impl<'a, T: ?Sized + Linked> Cursor<'a, T> {
 
 // === impl Iter ====
 
-impl<'a, T: ?Sized + Linked> Iterator for Iter<'a, T> {
+impl<'a, T: Linked + ?Sized> Iterator for Iter<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         let curr = self.curr.take()?;
