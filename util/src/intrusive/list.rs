@@ -41,7 +41,7 @@ pub unsafe trait Linked {
     /// - It is valid to construct a `Handle` from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
-    unsafe fn links(ptr: NonNull<Self::Node>) -> NonNull<Links<Self>>;
+    unsafe fn links(ptr: NonNull<Self::Node>) -> NonNull<Links<Self::Node>>;
 }
 
 pub struct List<T: Linked + ?Sized> {
@@ -49,9 +49,9 @@ pub struct List<T: Linked + ?Sized> {
     tail: Option<NonNull<T::Node>>,
 }
 
-pub struct Links<T: Linked + ?Sized> {
-    next: Option<NonNull<T::Node>>,
-    prev: Option<NonNull<T::Node>>,
+pub struct Links<T: ?Sized> {
+    next: Option<NonNull<T>>,
+    prev: Option<NonNull<T>>,
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
     /// https://github.com/rust-lang/rust/issues/63818.
@@ -131,7 +131,7 @@ impl<T: Linked + ?Sized> List<T> {
         while let Some(node) = curr {
             let links = unsafe { T::links(node) };
             let links = unsafe { links.as_ref() };
-            links.assert_valid(head_links, tail_links);
+            links.assert_valid::<T>(head_links, tail_links);
             curr = links.next;
         }
     }
@@ -249,7 +249,7 @@ impl<T: Linked + ?Sized> fmt::Debug for List<T> {
 
 // ==== impl Links ====
 
-impl<T: Linked + ?Sized> Links<T> {
+impl<T: ?Sized> Links<T> {
     pub const fn new() -> Self {
         Self {
             next: None,
@@ -274,9 +274,9 @@ impl<T: Linked + ?Sized> Links<T> {
         self.next.is_some() || self.prev.is_some()
     }
 
-    fn assert_valid(&self, head: &Self, tail: &Self)
+    fn assert_valid<L>(&self, head: &Self, tail: &Self)
     where
-        T: Linked,
+        L: Linked<Node = T> + ?Sized,
     {
         if ptr::eq(self, head) {
             assert_eq!(
@@ -302,7 +302,7 @@ impl<T: Linked + ?Sized> Links<T> {
 
         if let Some(next) = self.next {
             assert_ne!(
-                unsafe { T::links(next) },
+                unsafe { L::links(next) },
                 NonNull::from(self),
                 "node's next link cannot be to itself; node={:#?}",
                 self
@@ -310,7 +310,7 @@ impl<T: Linked + ?Sized> Links<T> {
         }
         if let Some(prev) = self.prev {
             assert_ne!(
-                unsafe { T::links(prev) },
+                unsafe { L::links(prev) },
                 NonNull::from(self),
                 "node's prev link cannot be to itself; node={:#?}",
                 self
@@ -319,13 +319,13 @@ impl<T: Linked + ?Sized> Links<T> {
     }
 }
 
-impl<T: Linked + ?Sized> Default for Links<T> {
+impl<T: ?Sized> Default for Links<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Linked + ?Sized> fmt::Debug for Links<T> {
+impl<T: ?Sized> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Links")
             .field("self", &format_args!("{:p}", self))
@@ -335,7 +335,7 @@ impl<T: Linked + ?Sized> fmt::Debug for Links<T> {
     }
 }
 
-impl<T: Linked + ?Sized> PartialEq for Links<T> {
+impl<T: ?Sized> PartialEq for Links<T> {
     fn eq(&self, other: &Self) -> bool {
         self.next == other.next && self.prev == other.prev
     }
@@ -384,6 +384,411 @@ impl<'a, T: Linked + ?Sized> Iterator for Iter<'a, T> {
         unsafe {
             self.curr = T::links(curr).as_ref().next;
             Some(T::from_ptr(curr))
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(loom))]
+mod tests {
+    use super::*;
+
+    use std::pin::Pin;
+
+    #[derive(Debug)]
+    struct Entry {
+        links: Links<Entry>,
+        val: i32,
+    }
+
+    unsafe impl<'a> Linked for &'a Entry {
+        type Handle = Pin<&'a Entry>;
+        type Node = Entry;
+
+        fn as_ptr(handle: &Pin<&'_ Entry>) -> NonNull<Entry> {
+            NonNull::from(handle.get_ref())
+        }
+
+        unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<&'a Entry> {
+            Pin::new(&*ptr.as_ptr())
+        }
+
+        unsafe fn links(mut target: NonNull<Entry>) -> NonNull<Links<Entry>> {
+            NonNull::from(&mut target.as_mut().links)
+        }
+    }
+
+    fn entry(val: i32) -> Pin<Box<Entry>> {
+        Box::pin(Entry {
+            links: Links::new(),
+            val,
+        })
+    }
+
+    fn ptr(r: &Pin<Box<Entry>>) -> NonNull<Entry> {
+        r.as_ref().get_ref().into()
+    }
+
+    fn collect_list(list: &mut List<&'_ Entry>) -> Vec<i32> {
+        let mut ret = vec![];
+
+        while let Some(entry) = list.pop_back() {
+            ret.push(entry.val);
+        }
+
+        ret
+    }
+
+    fn push_all<'a>(list: &mut List<&'a Entry>, entries: &[Pin<&'a Entry>]) {
+        for entry in entries.iter() {
+            list.push_front(*entry);
+        }
+    }
+
+    macro_rules! assert_clean {
+        ($e:ident) => {{
+            assert!($e.links.next.is_none());
+            assert!($e.links.prev.is_none());
+        }};
+    }
+
+    macro_rules! assert_ptr_eq {
+        ($a:expr, $b:expr) => {{
+            // Deal with mapping a Pin<&mut T> -> Option<NonNull<T>>
+            assert_eq!(Some($a.as_ref().get_ref().into()), $b)
+        }};
+    }
+
+    #[test]
+    fn const_new() {
+        const _: List<&Entry> = List::new();
+    }
+
+    #[test]
+    fn push_and_drain() {
+        let a = entry(5);
+        let b = entry(7);
+        let c = entry(31);
+
+        let mut list = List::new();
+        assert!(list.is_empty());
+
+        list.push_front(a.as_ref());
+        assert!(!list.is_empty());
+        list.assert_valid();
+        list.push_front(b.as_ref());
+        list.assert_valid();
+        list.push_front(c.as_ref());
+        list.assert_valid();
+
+        let items: Vec<i32> = collect_list(&mut list);
+        assert_eq!([5, 7, 31].to_vec(), items);
+
+        list.assert_valid();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn push_pop_push_pop() {
+        let a = entry(5);
+        let b = entry(7);
+
+        let mut list = List::<&Entry>::new();
+
+        list.push_front(a.as_ref());
+        list.assert_valid();
+
+        let entry = list.pop_back().unwrap();
+        assert_eq!(5, entry.val);
+        assert!(list.is_empty());
+        list.assert_valid();
+
+        list.push_front(b.as_ref());
+        list.assert_valid();
+
+        let entry = list.pop_back().unwrap();
+        assert_eq!(7, entry.val);
+        list.assert_valid();
+
+        assert!(list.is_empty());
+        assert!(list.pop_back().is_none());
+        list.assert_valid();
+    }
+
+    mod remove_by_address {
+        use super::*;
+
+        #[test]
+        fn first() {
+            let a = entry(5);
+            let b = entry(7);
+            let c = entry(31);
+
+            unsafe {
+                // Remove first
+                let mut list = List::new();
+
+                push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
+                assert!(list.remove(ptr(&a)).is_some());
+                assert_clean!(a);
+                list.assert_valid();
+
+                // `a` should be no longer there and can't be removed twice
+                assert!(list.remove(ptr(&a)).is_none());
+                assert!(!list.is_empty());
+                list.assert_valid();
+
+                assert!(list.remove(ptr(&b)).is_some());
+                assert_clean!(b);
+                list.assert_valid();
+
+                // `b` should be no longer there and can't be removed twice
+                assert!(list.remove(ptr(&b)).is_none());
+                assert!(!list.is_empty());
+                list.assert_valid();
+
+                assert!(list.remove(ptr(&c)).is_some());
+                assert_clean!(c);
+                list.assert_valid();
+                // `b` should be no longer there and can't be removed twice
+                assert!(list.remove(ptr(&c)).is_none());
+                assert!(list.is_empty());
+                list.assert_valid();
+            }
+
+            unsafe {
+                // Remove first of two
+                let mut list = List::new();
+
+                push_all(&mut list, &[b.as_ref(), a.as_ref()]);
+
+                assert!(list.remove(ptr(&a)).is_some());
+                assert_clean!(a);
+                list.assert_valid();
+
+                // a should be no longer there and can't be removed twice
+                assert!(list.remove(ptr(&a)).is_none());
+                list.assert_valid();
+
+                assert_ptr_eq!(b, list.head);
+                assert_ptr_eq!(b, list.tail);
+
+                assert!(b.links.next.is_none());
+                assert!(b.links.prev.is_none());
+
+                let items = collect_list(&mut list);
+                assert_eq!([7].to_vec(), items);
+            }
+        }
+
+        #[test]
+        fn middle() {
+            let a = entry(5);
+            let b = entry(7);
+            let c = entry(31);
+
+            unsafe {
+                let mut list = List::new();
+
+                push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
+
+                assert!(list.remove(ptr(&a)).is_some());
+                assert_clean!(a);
+                list.assert_valid();
+
+                assert_ptr_eq!(b, list.head);
+                assert_ptr_eq!(c, b.links.next);
+                assert_ptr_eq!(b, c.links.prev);
+
+                let items = collect_list(&mut list);
+                assert_eq!([31, 7].to_vec(), items);
+                list.assert_valid();
+            }
+
+            unsafe {
+                let mut list = List::new();
+
+                push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
+
+                assert!(list.remove(ptr(&b)).is_some());
+                assert_clean!(b);
+                list.assert_valid();
+
+                assert_ptr_eq!(c, a.links.next);
+                assert_ptr_eq!(a, c.links.prev);
+
+                let items = collect_list(&mut list);
+                assert_eq!([31, 5].to_vec(), items);
+            }
+        }
+
+        #[test]
+        fn last_middle() {
+            let a = entry(5);
+            let b = entry(7);
+            let c = entry(31);
+
+            unsafe {
+                // Remove last
+                // Remove middle
+                let mut list = List::new();
+
+                push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
+
+                assert!(list.remove(ptr(&c)).is_some());
+                assert_clean!(c);
+                list.assert_valid();
+
+                assert!(b.links.next.is_none());
+                assert_ptr_eq!(b, list.tail);
+
+                let items = collect_list(&mut list);
+                assert_eq!([7, 5].to_vec(), items);
+            }
+        }
+
+        #[test]
+        fn last() {
+            let a = entry(5);
+            let b = entry(7);
+
+            unsafe {
+                // Remove last item
+                let mut list = List::new();
+
+                push_all(&mut list, &[a.as_ref()]);
+
+                assert!(list.remove(ptr(&a)).is_some());
+                assert_clean!(a);
+                list.assert_valid();
+
+                assert!(list.head.is_none());
+                assert!(list.tail.is_none());
+                let items = collect_list(&mut list);
+                assert!(items.is_empty());
+            }
+
+            unsafe {
+                // Remove last of two
+                let mut list = List::new();
+
+                push_all(&mut list, &[b.as_ref(), a.as_ref()]);
+
+                assert!(list.remove(ptr(&b)).is_some());
+                assert_clean!(b);
+                list.assert_valid();
+
+                assert_ptr_eq!(a, list.head);
+                assert_ptr_eq!(a, list.tail);
+
+                assert!(a.links.next.is_none());
+                assert!(a.links.prev.is_none());
+
+                let items = collect_list(&mut list);
+                assert_eq!([5].to_vec(), items);
+            }
+        }
+
+        #[test]
+        fn missing() {
+            let a = entry(5);
+            let b = entry(7);
+            let c = entry(31);
+            unsafe {
+                // Remove missing
+                let mut list = List::<&Entry>::new();
+
+                list.push_front(b.as_ref());
+                list.push_front(a.as_ref());
+
+                assert!(list.remove(ptr(&c)).is_none());
+                list.assert_valid();
+            }
+        }
+    }
+
+    #[test]
+    fn cursor() {
+        let a = entry(5);
+        let b = entry(7);
+
+        let mut list = List::<&Entry>::new();
+
+        assert_eq!(0, list.cursor().count());
+
+        list.push_front(a.as_ref());
+        list.push_front(b.as_ref());
+
+        let mut i = list.cursor();
+        assert_eq!(7, i.next().unwrap().val);
+        assert_eq!(5, i.next().unwrap().val);
+        assert!(i.next().is_none());
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn fuzz_linked_list(ops: Vec<usize>) {
+            run_fuzz(ops);
+        }
+    }
+
+    fn run_fuzz(ops: Vec<usize>) {
+        use std::collections::VecDeque;
+
+        #[derive(Debug)]
+        enum Op {
+            Push,
+            Pop,
+            Remove(usize),
+        }
+
+        let ops = ops
+            .iter()
+            .map(|i| match i % 3 {
+                0 => Op::Push,
+                1 => Op::Pop,
+                2 => Op::Remove(i / 3),
+                _ => unreachable!(),
+            })
+            .collect::<Vec<_>>();
+
+        let mut ll = List::<&Entry>::new();
+        let mut reference = VecDeque::new();
+
+        let entries: Vec<_> = (0..ops.len()).map(|i| entry(i as i32)).collect();
+
+        for (i, op) in ops.iter().enumerate() {
+            match op {
+                Op::Push => {
+                    reference.push_front(i as i32);
+                    assert_eq!(entries[i].val, i as i32);
+
+                    ll.push_front(entries[i].as_ref());
+                }
+                Op::Pop => {
+                    if reference.is_empty() {
+                        assert!(ll.is_empty());
+                        continue;
+                    }
+
+                    let v = reference.pop_back();
+                    assert_eq!(v, ll.pop_back().map(|v| v.val));
+                }
+                Op::Remove(n) => {
+                    if reference.is_empty() {
+                        assert!(ll.is_empty());
+                        continue;
+                    }
+
+                    let idx = n % reference.len();
+                    let expect = reference.remove(idx).unwrap();
+
+                    unsafe {
+                        let entry = ll.remove(ptr(&entries[expect as usize])).unwrap();
+                        assert_eq!(expect, entry.val);
+                    }
+                }
+            }
         }
     }
 }
