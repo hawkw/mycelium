@@ -694,6 +694,7 @@ impl Free {
 
 unsafe impl list::Linked for Free {
     type Handle = ptr::NonNull<Free>;
+    type Node = Self;
     fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {
         *r
     }

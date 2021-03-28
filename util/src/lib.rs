@@ -1,6 +1,9 @@
 //! A "standard library" for programming in the Mycelium kernel and related
 //! libraries.
 #![cfg_attr(target_os = "none", no_std)]
+#![feature(
+    const_fn // To allow trait bounds on const fn constructors.
+)]
 #![allow(unused_unsafe)]
 
 #[cfg(feature = "alloc")]
