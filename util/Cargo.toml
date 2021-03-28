@@ -14,3 +14,4 @@ tracing = { version = "0.1", default_features = false, features = ["attributes"]
 
 [dev-dependencies]
 loom = "0.4"
+proptest = "1"
