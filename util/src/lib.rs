@@ -2,7 +2,7 @@
 //! libraries.
 #![cfg_attr(target_os = "none", no_std)]
 #![feature(
-    const_fn // To allow trait bounds on const fn constructors.
+    const_fn_trait_bound // To allow trait bounds on const fn constructors.
 )]
 #![allow(unused_unsafe)]
 
