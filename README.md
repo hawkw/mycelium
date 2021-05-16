@@ -4,20 +4,32 @@ someday this will do stuff
 
 ## building & running
 
+### build dependencies
+
 to build mycelium for x86_64, you need the following:
 
 - a nightly rust compiler
 - the `cargo xbuild` and `bootimage` tools
-- the `rust-src` and `llvm-tools-preview` Rustup components
+- the `rust-src` and `llvm-tools-preview` Rust toolchain components
 
-you can install these tools with:
+you can install the required cargo extensions with:
 
 ```shell
 cargo install cargo-xbuild bootimage
+```
+
+the `rust-src` and `llvm-tools-preview` toolchain components are required in the
+`rust-toolchain.toml` file, so in most cases, rustup will install them
+automatically. if, for whatever reason, they are not present, you can install
+them manually with
+
+```shell
 rustup component add rust-src llvm-tools-preview
 ```
 
-then, you can build mycelium with:
+### building mycelium
+
+once the required build dependencies are present, you can build mycelium with:
 
 ```shell
 cargo xbuild --target=x86_64-mycelium.json

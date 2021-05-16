@@ -358,9 +358,8 @@ where
         let mut sz = self.heap_size.load(Acquire);
         while let Err(actual) =
             // TODO(eliza): if this overflows that's bad news lol...
-            self
-            .heap_size
-            .compare_exchange_weak(sz, sz + block_size, AcqRel, Acquire)
+            self.heap_size
+                    .compare_exchange_weak(sz, sz + block_size, AcqRel, Acquire)
         {
             sz = actual;
         }
@@ -621,6 +620,10 @@ impl Free {
     const MAGIC: usize = 0xF4EE_B10C; // haha lol it spells "free block"
     const MAGIC_BUSY: usize = 0xB4D_B10C;
 
+    /// # Safety
+    ///
+    /// Don't construct a free list entry for a region that isn't actually free,
+    /// that would be, uh, bad, lol.
     pub unsafe fn new(region: Region, offset: usize) -> ptr::NonNull<Free> {
         tracing::trace!(?region, offset = trace::hex(offset));
 

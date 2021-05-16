@@ -385,7 +385,7 @@ impl_addrs! {
 
 impl InvalidAddress {
     fn new(addr: usize, msg: &'static str) -> Self {
-        Self { addr, msg }
+        Self { msg, addr }
     }
 }
 impl fmt::Display for InvalidAddress {
@@ -414,12 +414,12 @@ mod tests {
             PAddr::from_usize(0x0)
         );
         assert_eq!(
-            PAddr::from_usize(0xDEADFACE).align_up(1usize),
-            PAddr::from_usize(0xDEADFACE)
+            PAddr::from_usize(0xDEAD_FACE).align_up(1usize),
+            PAddr::from_usize(0xDEAD_FACE)
         );
         assert_eq!(
-            PAddr::from_usize(0x000_F_FFFF_FFFF_FFFF).align_up(1usize),
-            PAddr::from_usize(0x000_F_FFFF_FFFF_FFFF)
+            PAddr::from_usize(0x000F_FFFF_FFFF_FFFF).align_up(1usize),
+            PAddr::from_usize(0x000F_FFFF_FFFF_FFFF)
         );
     }
 

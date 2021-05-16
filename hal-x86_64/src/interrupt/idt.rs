@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn idt_entry_is_correct() {
         let mut idt_entry = Descriptor::null();
-        idt_entry.set_handler(0x12348765_abcdfdec as *const ());
+        idt_entry.set_handler(0x1234_8765_abcd_fdec as *const ());
 
         let idt_bytes = unsafe { core::mem::transmute::<&Descriptor, &[u8; 16]>(&idt_entry) };
 
