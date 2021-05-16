@@ -42,10 +42,7 @@ jobs:
     needs: check-host
     steps:
     - uses: actions-rs/toolchain@v1.0.6
-      with:
-        profile: minimal
-        components: clippy
-        override: true
+      run: rustup show
     - uses: actions/checkout@v2
     - name: run clippy
       uses: actions-rs/clippy-check@v1.0.5
@@ -61,11 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1.0.6
-      with:
-        profile: minimal
-        components: rust-src, llvm-tools-preview, clippy
-        override: true
+      run: rustup show
     - uses: actions/checkout@v2
     - name: run cargo clippy
       uses: actions-rs/clippy-check@v1.0.5

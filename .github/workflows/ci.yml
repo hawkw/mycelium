@@ -8,10 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1.0.6
-      with:
-        profile: minimal
-        override: true
+      run: rustup show
     - uses: actions/checkout@v2
     - name: run cargo check
       uses: actions-rs/cargo@v1.0.1
@@ -23,10 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions-rs/toolchain@v1.0.6
-      with:
-        profile: minimal
-        components: rustfmt
-        override: true
+      run: rustup show
     - uses: actions/checkout@v2
     - name: run rustfmt
       uses: actions-rs/cargo@v1.0.1
@@ -40,10 +34,7 @@ jobs:
     needs: check-host
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1.0.6
-      with:
-        profile: minimal
-        override: true
+      run: rustup show
     - uses: actions/checkout@v2
     - name: run host tests
       uses: actions-rs/cargo@v1.0.1
@@ -57,11 +48,7 @@ jobs:
     needs: check-host
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1.0.6
-      with:
-        profile: minimal
-        components: rust-src, llvm-tools-preview
-        override: true
+      run: rustup show
     - name: install cargo-bootimage
       uses: actions-rs/install@v0.1.2
       with:
@@ -80,11 +67,7 @@ jobs:
     needs: check-host
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1.0.6
-      with:
-        profile: minimal
-        components: rust-src, llvm-tools-preview
-        override: true
+      run: rustup show
     - name: install cargo-bootimage
       uses: actions-rs/install@v0.1.2
       with:
