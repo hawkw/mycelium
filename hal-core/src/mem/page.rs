@@ -123,6 +123,116 @@ where
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
         unsafe { self.map_page(virt, phys, frame_alloc) }
     }
+
+    /// Map the range of virtual memory pages represented by `virt` to the range
+    /// of physical pages represented by `phys`.
+    ///
+    /// # Panics
+    ///
+    /// - If the two ranges have different lengths.
+    /// - If the size is dynamic and the two ranges are of different sized pages.
+    /// - If the physical address is invalid.
+    /// - If any page is already mapped.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page mappings may be used to violate Rust invariants
+    /// in a variety of exciting ways. For example, aliasing a physical page by
+    /// mapping multiple virtual pages to it and setting one or more of those
+    /// virtual pages as writable may result in undefined behavior.
+    ///
+    /// Some rules of thumb:
+    ///
+    /// - Ensure that the writable XOR executable rule is not violated (by
+    ///   making a page both writable and executable).
+    /// - Don't alias stack pages onto the heap or vice versa.
+    /// - If loading arbitrary code into executable pages, ensure that this code
+    ///   is trusted and will not violate the kernel's invariants.
+    ///
+    /// Good luck and have fun!
+    unsafe fn map_range<F>(
+        &'mapper mut self,
+        virt: PageRange<VAddr, S>,
+        phys: PageRange<PAddr, S>,
+        mut set_flags: F,
+        frame_alloc: &mut A,
+    ) -> PageRange<VAddr, S>
+    where
+        F: FnMut(Page<VAddr, S>, &mut Self::Flags),
+    {
+        let _span = tracing::trace_span!("map_range", ?virt, ?phys).entered();
+        assert_eq!(
+            virt.len(),
+            phys.len(),
+            "virtual and physical page ranges must have the same number of pages"
+        );
+        assert_eq!(
+            virt.size(),
+            phys.size(),
+            "virtual and physical pages must be the same size"
+        );
+        for (virt, phys) in &virt.into_iter().zip(&phys.into_iter()) {
+            tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
+            let mut flags = self.map_page(virt, phys, frame_alloc);
+            set_flags(virt, &mut flags);
+            flags.commit();
+            tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapped");
+        }
+        virt
+    }
+
+    /// Unmap the provided range of virtual pages.
+    ///
+    /// This does not deallocate any page frames.
+    ///
+    /// # Notes
+    ///
+    /// The default implementation of this method does *not* assume that the
+    /// virtual pages are mapped to a contiguous range of physical page frames.
+    /// Overridden implementations *may* perform different behavior when the
+    /// pages are mapped contiguously in the physical address space, but they
+    /// *must not* assume this. If an implementation performs additional
+    /// behavior for contiguously-mapped virtual page ranges, it must check that
+    /// the page range is, in fact, contiguously mapped.
+    ///
+    /// Additionally, and unlike [`Mapper::unmap`], this method does not return
+    /// a physical [`PageRange`], since it is not guaranteed that the unmapped
+    /// pages are mapped to a contiguous physical page range.
+    ///
+    /// # Panics
+    ///
+    /// - If any virtual page in the range was not mapped.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page mappings may be used to violate Rust invariants
+    /// in a variety of exciting ways.
+    unsafe fn unmap_range(&'mapper mut self, virt: PageRange<VAddr, S>) {
+        let _span = tracing::trace_span!("unmap_range", ?virt).entered();
+
+        for virt in &virt {
+            self.unmap(virt);
+        }
+    }
+
+    /// Identity map the provided physical page range to a range of virtual
+    /// pages with the same address
+    fn identity_map_range<F>(
+        &'mapper mut self,
+        phys: PageRange<PAddr, S>,
+        set_flags: F,
+        frame_alloc: &mut A,
+    ) -> PageRange<VAddr, S>
+    where
+        F: FnMut(Page<VAddr, S>, &mut Self::Flags),
+    {
+        let base_paddr = phys.base_addr().as_usize();
+        let virt_base = Page::containing(VAddr::from_usize(base_paddr), phys.size());
+        let end_paddr = phys.end_addr().as_usize();
+        let virt_end = Page::containing(VAddr::from_usize(end_paddr), phys.size());
+        let virt = virt_base.range_to(virt_end);
+        unsafe { self.map_range(virt, phys, set_flags, frame_alloc) }
+    }
 }
 
 pub trait TranslatePage<S: Size> {
@@ -403,6 +513,15 @@ impl<A: Address, S: Size> PageRange<A, S> {
             self.end_addr(),
         );
         diff
+    }
+}
+
+impl<A: Address, S: Size> IntoIterator for &'_ PageRange<A, S> {
+    type IntoIter = PageRange<A, S>;
+    type Item = Page<A, S>;
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        *self
     }
 }
 
