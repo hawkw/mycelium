@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: actions-rs/toolchain@v1.0.6
       with:
         profile: minimal
         override: true
@@ -22,7 +22,7 @@ jobs:
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions-rs/toolchain@v1
+    - uses: actions-rs/toolchain@v1.0.6
       with:
         profile: minimal
         components: rustfmt
@@ -40,7 +40,7 @@ jobs:
     needs: check-host
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: actions-rs/toolchain@v1.0.6
       with:
         profile: minimal
         override: true
@@ -57,7 +57,7 @@ jobs:
     needs: check-host
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: actions-rs/toolchain@v1.0.6
       with:
         profile: minimal
         components: rust-src, llvm-tools-preview
@@ -80,7 +80,7 @@ jobs:
     needs: check-host
     steps:
     - name: install rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: actions-rs/toolchain@v1.0.6
       with:
         profile: minimal
         components: rust-src, llvm-tools-preview
