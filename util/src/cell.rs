@@ -1,6 +1,10 @@
 pub use self::causal::*;
 #[cfg(test)]
 mod causal {
+    // Clippy is trying to help us not hurt ourselves, but this is being renamed
+    // as an API compat stopgap b/c i haven't updated our stuff to the latest
+    // loom APIs...
+    #![allow(clippy::unsafe_removed_from_name)]
     pub use loom::cell::UnsafeCell as CausalCell;
 }
 
