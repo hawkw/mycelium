@@ -151,14 +151,14 @@ where
     ///
     /// Good luck and have fun!
     unsafe fn map_range<F>(
-        &'mapper mut self,
+        &mut self,
         virt: PageRange<VAddr, S>,
         phys: PageRange<PAddr, S>,
         mut set_flags: F,
         frame_alloc: &mut A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(Page<VAddr, S>, &mut Self::Flags),
+        F: FnMut(Page<VAddr, S>, &mut Self::Handle),
     {
         let _span = tracing::trace_span!("map_range", ?virt, ?phys).entered();
         assert_eq!(
@@ -171,7 +171,7 @@ where
             phys.size(),
             "virtual and physical pages must be the same size"
         );
-        for (virt, phys) in &virt.into_iter().zip(&phys.into_iter()) {
+        for (virt, phys) in (&virt).into_iter().zip(&phys.into_iter()) {
             tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
             let mut flags = self.map_page(virt, phys, frame_alloc);
             set_flags(virt, &mut flags);
@@ -207,7 +207,7 @@ where
     ///
     /// Manual control of page mappings may be used to violate Rust invariants
     /// in a variety of exciting ways.
-    unsafe fn unmap_range(&'mapper mut self, virt: PageRange<VAddr, S>) {
+    unsafe fn unmap_range(&mut self, virt: PageRange<VAddr, S>) {
         let _span = tracing::trace_span!("unmap_range", ?virt).entered();
 
         for virt in &virt {
@@ -218,20 +218,51 @@ where
     /// Identity map the provided physical page range to a range of virtual
     /// pages with the same address
     fn identity_map_range<F>(
-        &'mapper mut self,
+        &mut self,
         phys: PageRange<PAddr, S>,
         set_flags: F,
         frame_alloc: &mut A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(Page<VAddr, S>, &mut Self::Flags),
+        F: FnMut(Page<VAddr, S>, &mut Self::Handle),
     {
         let base_paddr = phys.base_addr().as_usize();
-        let virt_base = Page::containing(VAddr::from_usize(base_paddr), phys.size());
+        let page_size = phys.start().size();
+        let virt_base = Page::containing(VAddr::from_usize(base_paddr), page_size);
         let end_paddr = phys.end_addr().as_usize();
-        let virt_end = Page::containing(VAddr::from_usize(end_paddr), phys.size());
+        let virt_end = Page::containing(VAddr::from_usize(end_paddr), page_size);
         let virt = virt_base.range_to(virt_end);
         unsafe { self.map_range(virt, phys, set_flags, frame_alloc) }
+    }
+}
+
+impl<'mapper, M, A, S> Map<'mapper, S, A> for &mut M
+where
+    M: Map<'mapper, S, A>,
+    S: Size,
+    A: Alloc<S>,
+{
+    type Handle = M::Handle;
+
+    unsafe fn map_page(
+        &'mapper mut self,
+        virt: Page<VAddr, S>,
+        phys: Page<PAddr, S>,
+        frame_alloc: &mut A,
+    ) -> Self::Handle {
+        (*self).map_page(virt, phys, frame_alloc)
+    }
+
+    fn flags_mut(&'mapper mut self, virt: Page<VAddr, S>) -> Self::Handle {
+        (*self).flags_mut(virt)
+    }
+
+    unsafe fn unmap(&'mapper mut self, virt: Page<VAddr, S>) -> Page<PAddr, S> {
+        (*self).unmap(virt)
+    }
+
+    fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
+        (*self).identity_map(phys, frame_alloc)
     }
 }
 
