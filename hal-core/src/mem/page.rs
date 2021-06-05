@@ -62,12 +62,12 @@ pub unsafe trait Alloc<S: Size> {
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
 }
 
-pub trait Map<'mapper, S, A>
+pub trait Map<S, A>
 where
     S: Size,
     A: Alloc<S>,
 {
-    type Handle: PageFlags<S>;
+    type Entry: PageFlags<S>;
     /// Map the virtual memory page represented by `virt` to the physical page
     /// represented bt `phys`.
     ///
@@ -93,13 +93,13 @@ where
     ///
     /// Good luck and have fun!
     unsafe fn map_page(
-        &'mapper mut self,
+        &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
         frame_alloc: &mut A,
-    ) -> Self::Handle;
+    ) -> Handle<'_, S, Self::Entry>;
 
-    fn flags_mut(&'mapper mut self, virt: Page<VAddr, S>) -> Self::Handle;
+    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Handle<'_, S, Self::Entry>;
 
     /// Unmap the provided virtual page, returning the physical page it was
     /// previously mapped to.
@@ -114,11 +114,15 @@ where
     ///
     /// Manual control of page mappings may be used to violate Rust invariants
     /// in a variety of exciting ways.
-    unsafe fn unmap(&'mapper mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
+    unsafe fn unmap(&mut self, virt: Page<VAddr, S>) -> Page<PAddr, S>;
 
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
-    fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
+    fn identity_map(
+        &mut self,
+        phys: Page<PAddr, S>,
+        frame_alloc: &mut A,
+    ) -> Handle<'_, S, Self::Entry> {
         let base_paddr = phys.base_addr().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
         unsafe { self.map_page(virt, phys, frame_alloc) }
@@ -158,7 +162,7 @@ where
         frame_alloc: &mut A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(Page<VAddr, S>, &mut Self::Handle),
+        F: FnMut(Page<VAddr, S>, &mut Handle<'_, S, Self::Entry>),
     {
         let _span = tracing::trace_span!("map_range", ?virt, ?phys).entered();
         assert_eq!(
@@ -171,7 +175,7 @@ where
             phys.size(),
             "virtual and physical pages must be the same size"
         );
-        for (virt, phys) in (&virt).into_iter().zip(&phys.into_iter()) {
+        for (virt, phys) in (&virt).into_iter().zip(&phys) {
             tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
             let mut flags = self.map_page(virt, phys, frame_alloc);
             set_flags(virt, &mut flags);
@@ -224,7 +228,7 @@ where
         frame_alloc: &mut A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(Page<VAddr, S>, &mut Self::Handle),
+        F: FnMut(Page<VAddr, S>, &mut Handle<'_, S, Self::Entry>),
     {
         let base_paddr = phys.base_addr().as_usize();
         let page_size = phys.start().size();
@@ -236,32 +240,40 @@ where
     }
 }
 
-impl<'mapper, M, A, S> Map<'mapper, S, A> for &mut M
+impl<M, A, S> Map<S, A> for &mut M
 where
-    M: Map<'mapper, S, A>,
+    M: Map<S, A>,
     S: Size,
     A: Alloc<S>,
 {
-    type Handle = M::Handle;
+    type Entry = M::Entry;
 
+    #[inline]
     unsafe fn map_page(
-        &'mapper mut self,
+        &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
         frame_alloc: &mut A,
-    ) -> Self::Handle {
+    ) -> Handle<'_, S, Self::Entry> {
         (*self).map_page(virt, phys, frame_alloc)
     }
 
-    fn flags_mut(&'mapper mut self, virt: Page<VAddr, S>) -> Self::Handle {
+    #[inline]
+    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Handle<'_, S, Self::Entry> {
         (*self).flags_mut(virt)
     }
 
-    unsafe fn unmap(&'mapper mut self, virt: Page<VAddr, S>) -> Page<PAddr, S> {
+    #[inline]
+    unsafe fn unmap(&mut self, virt: Page<VAddr, S>) -> Page<PAddr, S> {
         (*self).unmap(virt)
     }
 
-    fn identity_map(&'mapper mut self, phys: Page<PAddr, S>, frame_alloc: &mut A) -> Self::Handle {
+    #[inline]
+    fn identity_map(
+        &mut self,
+        phys: Page<PAddr, S>,
+        frame_alloc: &mut A,
+    ) -> Handle<'_, S, Self::Entry> {
         (*self).identity_map(phys, frame_alloc)
     }
 }
@@ -284,7 +296,7 @@ pub trait PageFlags<S: Size> {
     /// read-only may cause undefined behavior. Making a page which is aliased
     /// page table (i.e. it has multiple page table entries pointing to it) may
     /// also cause undefined behavior.
-    unsafe fn set_writable(&mut self, writable: bool) -> &mut Self;
+    unsafe fn set_writable(&mut self, writable: bool);
 
     /// Set whether or not this page is executable.
     ///
@@ -294,20 +306,38 @@ pub trait PageFlags<S: Size> {
     /// Using `set_executable` to make writable memory executable may cause
     /// undefined behavior. Also, this can be used to execute the contents of
     /// arbitrary memory, which (of course) is wildly unsafe.
-    unsafe fn set_executable(&mut self, executable: bool) -> &mut Self;
+    unsafe fn set_executable(&mut self, executable: bool);
 
     /// Set whether or not this page is present.
     ///
     /// # Safety
     ///
     /// Manual control of page flags can be used to violate Rust invariants.
-    unsafe fn set_present(&mut self, present: bool) -> &mut Self;
+    unsafe fn set_present(&mut self, present: bool);
 
     fn is_writable(&self) -> bool;
     fn is_executable(&self) -> bool;
     fn is_present(&self) -> bool;
 
-    fn commit(self) -> Page<VAddr, S>;
+    /// Commit the changes to the page table.
+    ///
+    /// Depending on the CPU architecture, this may be a nop. In other cases, it
+    /// may invoke special instructions (such as `invlpg` on x86) or write data
+    /// to the page table.
+    ///
+    /// If page table changes are reflected as soon as flags are modified, the
+    /// implementation may do nothing.
+    fn commit(&mut self, page: Page<VAddr, S>);
+}
+
+/// A page in the process of being remapped.
+///
+/// This reference allows updating page table flags prior to committing changes.
+#[derive(Debug)]
+#[must_use = "page table updates may not be reflected until changes are committed (using `Handle::commit`)"]
+pub struct Handle<'mapper, S: Size, E: PageFlags<S>> {
+    entry: &'mapper mut E,
+    page: Page<VAddr, S>,
 }
 
 /// A memory page.
@@ -660,5 +690,78 @@ where
 {
     fn as_usize(&self) -> usize {
         Self::SIZE
+    }
+}
+
+// === impl Handle ===
+
+impl<'mapper, S, E> Handle<'mapper, S, E>
+where
+    S: Size,
+    E: PageFlags<S>,
+{
+    pub fn new(page: Page<VAddr, S>, entry: &'mapper mut E) -> Self {
+        Self { entry, page }
+    }
+
+    /// Set whether or not this page is writable.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    /// Using `set_writable` to make memory that the Rust compiler expects to be
+    /// read-only may cause undefined behavior. Making a page which is aliased
+    /// page table (i.e. it has multiple page table entries pointing to it) may
+    /// also cause undefined behavior.
+    #[inline]
+    pub unsafe fn set_writable(&mut self, writable: bool) -> &mut Self {
+        self.entry.set_writable(writable);
+        self
+    }
+
+    /// Set whether or not this page is executable.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    /// Using `set_executable` to make writable memory executable may cause
+    /// undefined behavior. Also, this can be used to execute the contents of
+    /// arbitrary memory, which (of course) is wildly unsafe.
+    #[inline]
+    pub unsafe fn set_executable(&mut self, executable: bool) -> &mut Self {
+        self.entry.set_executable(executable);
+        self
+    }
+
+    /// Set whether or not this page is present.
+    ///
+    /// # Safety
+    ///
+    /// Manual control of page flags can be used to violate Rust invariants.
+    #[inline]
+    pub unsafe fn set_present(&mut self, present: bool) -> &mut Self {
+        self.entry.set_present(present);
+        self
+    }
+
+    #[inline]
+    pub fn is_writable(&self) -> bool {
+        self.entry.is_writable()
+    }
+
+    #[inline]
+    pub fn is_executable(&self) -> bool {
+        self.entry.is_executable()
+    }
+
+    #[inline]
+    pub fn is_present(&self) -> bool {
+        self.entry.is_present()
+    }
+
+    #[inline]
+    pub fn commit(self) -> Page<VAddr, S> {
+        self.entry.commit(self.page);
+        self.page
     }
 }
