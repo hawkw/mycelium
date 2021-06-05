@@ -24,12 +24,6 @@ pub struct PageCtrl {
     pml4: NonNull<PageTable<level::Pml4>>,
 }
 
-#[must_use = "page table updates will not be reflected until the changed pages are flushed from the TLB"]
-pub struct Handle<'a, L: level::PointsToPage> {
-    page: Page<VAddr, L::Size>,
-    entry: &'a mut Entry<L>,
-}
-
 /// An x86_64 page table.
 #[repr(align(4096))]
 #[repr(C)]
@@ -124,18 +118,18 @@ impl PageTable<level::Pml4> {
     }
 }
 
-impl<'mapper, A> Map<'mapper, Size4Kb, A> for PageCtrl
+impl<A> Map<Size4Kb, A> for PageCtrl
 where
     A: page::Alloc<Size4Kb>,
 {
-    type Handle = Handle<'mapper, level::Pt>;
+    type Entry = Entry<level::Pt>;
 
     unsafe fn map_page(
-        &'mapper mut self,
+        &mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
         frame_alloc: &mut A,
-    ) -> Self::Handle {
+    ) -> page::Handle<'_, Size4Kb, Self::Entry> {
         // XXX(eliza): most of this fn is *internally* safe and should be
         // factored out into a safe function...
         let span = tracing::debug_span!("map_page", ?virt, ?phys);
@@ -158,17 +152,17 @@ where
         );
         assert!(!entry.is_huge(), "huge bit should not be set for 4KB entry");
         let entry = entry.set_phys_page(phys).set_present(true);
-        Handle { entry, page: virt }
+        page::Handle::new(virt, entry)
     }
 
-    fn flags_mut(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Self::Handle {
+    fn flags_mut(&mut self, _virt: Page<VAddr, Size4Kb>) -> page::Handle<'_, Size4Kb, Self::Entry> {
         unimplemented!()
     }
 
     /// # Safety
     ///
     /// Unmapping a page can break pretty much everything.
-    unsafe fn unmap(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
+    unsafe fn unmap(&mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
         unimplemented!()
     }
 }
@@ -531,45 +525,41 @@ impl<L: level::Recursive> Entry<L> {
     }
 }
 
-impl<'a, L: level::PointsToPage> page::PageFlags<L::Size> for Handle<'a, L> {
+impl<L: level::PointsToPage> page::PageFlags<L::Size> for Entry<L> {
     #[inline]
     fn is_writable(&self) -> bool {
-        self.entry.is_writable()
+        self.is_writable()
     }
 
     #[inline]
-    unsafe fn set_writable(&mut self, writable: bool) -> &mut Self {
-        self.entry.set_writable(writable);
-        self
+    unsafe fn set_writable(&mut self, writable: bool) {
+        self.set_writable(writable);
     }
 
     #[inline]
     fn is_executable(&self) -> bool {
-        self.entry.is_executable()
+        self.is_executable()
     }
 
     #[inline]
-    unsafe fn set_executable(&mut self, executable: bool) -> &mut Self {
-        self.entry.set_executable(executable);
-        self
+    unsafe fn set_executable(&mut self, executable: bool) {
+        self.set_executable(executable);
     }
 
     #[inline]
     fn is_present(&self) -> bool {
-        self.entry.is_present()
+        self.is_present()
     }
 
     #[inline]
-    unsafe fn set_present(&mut self, present: bool) -> &mut Self {
-        self.entry.set_present(present);
-        self
+    unsafe fn set_present(&mut self, present: bool) {
+        self.set_present(present);
     }
 
-    fn commit(self) -> Page<VAddr, L::Size> {
+    fn commit(&mut self, page: Page<VAddr, L::Size>) {
         unsafe {
-            tlb::flush_page(self.page.base_addr());
+            tlb::flush_page(page.base_addr());
         }
-        self.page
     }
 }
 
@@ -868,7 +858,6 @@ pub(crate) mod tlb {
 
 mycelium_util::decl_test! {
     fn basic_map() -> Result<(), ()> {
-        use hal_core::mem::page::PageFlags;
         let mut ctrl = PageCtrl::current();
         // We shouldn't need to allocate page frames for this test.
         let mut frame_alloc = page::EmptyAlloc::default();
