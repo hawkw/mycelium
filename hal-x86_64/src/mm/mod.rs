@@ -14,6 +14,7 @@ use hal_core::{
     },
     Address,
 };
+pub type MinPageSize = Size4Kb;
 pub const MIN_PAGE_SIZE: usize = Size4Kb::SIZE;
 const ENTRIES: usize = 512;
 
@@ -118,18 +119,18 @@ impl PageTable<level::Pml4> {
     }
 }
 
-impl<A> Map<Size4Kb, A> for PageCtrl
-where
-    A: page::Alloc<Size4Kb>,
-{
+impl Map<Size4Kb> for PageCtrl {
     type Entry = Entry<level::Pt>;
 
-    unsafe fn map_page(
+    unsafe fn map_page<A>(
         &mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
-        frame_alloc: &mut A,
-    ) -> page::Handle<'_, Size4Kb, Self::Entry> {
+        frame_alloc: &A,
+    ) -> page::Handle<'_, Size4Kb, Self::Entry>
+    where
+        A: page::Alloc<Size4Kb>,
+    {
         // XXX(eliza): most of this fn is *internally* safe and should be
         // factored out into a safe function...
         let span = tracing::debug_span!("map_page", ?virt, ?phys);
@@ -305,7 +306,7 @@ impl<R: level::Recursive> PageTable<R> {
     fn create_next_table<S: Size>(
         &mut self,
         idx: VirtPage<S>,
-        alloc: &mut impl page::Alloc<Size4Kb>,
+        alloc: &impl page::Alloc<Size4Kb>,
     ) -> &mut PageTable<R::Next> {
         let span = tracing::trace_span!("create_next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
         let _e = span.enter();
@@ -860,13 +861,13 @@ mycelium_util::decl_test! {
     fn basic_map() -> Result<(), ()> {
         let mut ctrl = PageCtrl::current();
         // We shouldn't need to allocate page frames for this test.
-        let mut frame_alloc = page::EmptyAlloc::default();
+        let frame_alloc = page::EmptyAlloc::default();
 
         let frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
         let page = Page::containing_fixed(VAddr::from_usize(0));
 
         let page = unsafe {
-            let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
+            let mut flags = ctrl.map_page(page, frame, &frame_alloc);
             flags.set_writable(true);
             flags.commit()
         };

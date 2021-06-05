@@ -12,6 +12,7 @@ use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 use mycelium_alloc::buddy;
 
+mod acpi;
 mod wasm;
 
 static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
@@ -56,7 +57,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
             regions += 1;
             if region.kind() == mem::RegionKind::FREE {
                 free_regions += 1;
-                free_bytes += size;
+                // free_bytes += size;
                 unsafe {
                     tracing::trace!(?region, "adding to page allocator");
                     let e = PAGE_ALLOCATOR.add_region(region);
@@ -71,6 +72,20 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
             free_regions,
             free_bytes,
         );
+    }
+
+    // lol acpi
+    unsafe {
+        // TODO(eliza): figure out uefi lol
+        let acpi_tables = acpi::Tables::search_for_rsdp_bios(acpi::AcpiMapper).unwrap();
+        tracing::debug!("finding acpi tables apparently worked");
+        let platform = acpi_tables.platform_info().unwrap();
+        tracing::info!(?platform.power_profile, ?platform.interrupt_model, "ACPI platform info");
+        if let Some(processor_info) = platform.processor_info.as_ref() {
+            tracing::info!(?processor_info.boot_processor, ?processor_info.application_processors, "ACPI processor info");
+        } else {
+            tracing::warn!("no ACPI processor info");
+        }
     }
 
     #[cfg(test)]

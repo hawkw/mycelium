@@ -62,10 +62,9 @@ pub unsafe trait Alloc<S: Size> {
     fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
 }
 
-pub trait Map<S, A>
+pub trait Map<S>
 where
     S: Size,
-    A: Alloc<S>,
 {
     type Entry: PageFlags<S>;
 
@@ -93,12 +92,14 @@ where
     ///   is trusted and will not violate the kernel's invariants.
     ///
     /// Good luck and have fun!
-    unsafe fn map_page(
+    unsafe fn map_page<A>(
         &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
-    ) -> Handle<'_, S, Self::Entry>;
+        frame_alloc: &A,
+    ) -> Handle<'_, S, Self::Entry>
+    where
+        A: Alloc<S>;
 
     fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Handle<'_, S, Self::Entry>;
 
@@ -119,11 +120,14 @@ where
 
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
-    fn identity_map(
+    fn identity_map<A>(
         &mut self,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
-    ) -> Handle<'_, S, Self::Entry> {
+        frame_alloc: &A,
+    ) -> Handle<'_, S, Self::Entry>
+    where
+        A: Alloc<S>,
+    {
         let base_paddr = phys.base_addr().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
         unsafe { self.map_page(virt, phys, frame_alloc) }
@@ -167,14 +171,15 @@ where
     ///   is trusted and will not violate the kernel's invariants.
     ///
     /// Good luck and have fun!
-    unsafe fn map_range<F>(
+    unsafe fn map_range<A, F>(
         &mut self,
         virt: PageRange<VAddr, S>,
         phys: PageRange<PAddr, S>,
         mut set_flags: F,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
+        A: Alloc<S>,
         F: FnMut(&mut Handle<'_, S, Self::Entry>),
     {
         let _span = tracing::trace_span!("map_range", ?virt, ?phys).entered();
@@ -250,13 +255,14 @@ where
     ///
     /// - If any page's physical address is invalid.
     /// - If any page is already mapped.
-    fn identity_map_range<F>(
+    fn identity_map_range<A, F>(
         &mut self,
         phys: PageRange<PAddr, S>,
         set_flags: F,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
+        A: Alloc<S>,
         F: FnMut(&mut Handle<'_, S, Self::Entry>),
     {
         let base_paddr = phys.base_addr().as_usize();
@@ -269,21 +275,23 @@ where
     }
 }
 
-impl<M, A, S> Map<S, A> for &mut M
+impl<M, S> Map<S> for &mut M
 where
-    M: Map<S, A>,
+    M: Map<S>,
     S: Size,
-    A: Alloc<S>,
 {
     type Entry = M::Entry;
 
     #[inline]
-    unsafe fn map_page(
+    unsafe fn map_page<A>(
         &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
-    ) -> Handle<'_, S, Self::Entry> {
+        frame_alloc: &A,
+    ) -> Handle<'_, S, Self::Entry>
+    where
+        A: Alloc<S>,
+    {
         (*self).map_page(virt, phys, frame_alloc)
     }
 
@@ -298,11 +306,14 @@ where
     }
 
     #[inline]
-    fn identity_map(
+    fn identity_map<A>(
         &mut self,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
-    ) -> Handle<'_, S, Self::Entry> {
+        frame_alloc: &A,
+    ) -> Handle<'_, S, Self::Entry>
+    where
+        A: Alloc<S>,
+    {
         (*self).identity_map(phys, frame_alloc)
     }
 }
