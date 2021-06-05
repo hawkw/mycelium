@@ -77,6 +77,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     // lol acpi
     unsafe {
         // TODO(eliza): figure out uefi lol
+        tracing::debug!("searching for ACPI tables...");
         let acpi_tables = acpi::Tables::search_for_rsdp_bios(acpi::AcpiMapper).unwrap();
         tracing::debug!("finding acpi tables apparently worked");
         let platform = acpi_tables.platform_info().unwrap();
