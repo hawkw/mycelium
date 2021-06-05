@@ -68,6 +68,7 @@ where
     A: Alloc<S>,
 {
     type Entry: PageFlags<S>;
+
     /// Map the virtual memory page represented by `virt` to the physical page
     /// represented bt `phys`.
     ///
@@ -131,6 +132,18 @@ where
     /// Map the range of virtual memory pages represented by `virt` to the range
     /// of physical pages represented by `phys`.
     ///
+    /// # Arguments
+    ///
+    /// - `virt`: the range of virtual pages to map.
+    /// - `phys`: the range of physical pages to map `virt` to.
+    /// - `set_flags`: a closure invoked with a `Handle` to each page in the
+    ///   range as it is mapped. This closure may modify the flags for that page
+    ///   before the changes to the page mapping are committed.
+    ///
+    ///   **Note**: The [`Handle::virt_page`] method may be used to determine
+    ///   which page's flags would be modified by each invocation of the cosure.
+    /// - `frame_alloc`: a page-frame allocator.
+    ///
     /// # Panics
     ///
     /// - If the two ranges have different lengths.
@@ -162,7 +175,7 @@ where
         frame_alloc: &mut A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(Page<VAddr, S>, &mut Handle<'_, S, Self::Entry>),
+        F: FnMut(&mut Handle<'_, S, Self::Entry>),
     {
         let _span = tracing::trace_span!("map_range", ?virt, ?phys).entered();
         assert_eq!(
@@ -178,7 +191,7 @@ where
         for (virt, phys) in (&virt).into_iter().zip(&phys) {
             tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
             let mut flags = self.map_page(virt, phys, frame_alloc);
-            set_flags(virt, &mut flags);
+            set_flags(&mut flags);
             flags.commit();
             tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapped");
         }
@@ -221,6 +234,22 @@ where
 
     /// Identity map the provided physical page range to a range of virtual
     /// pages with the same address
+    ///
+    /// # Arguments
+    ///
+    /// - `phys`: the range of physical pages to identity map
+    /// - `set_flags`: a closure invoked with a `Handle` to each page in the
+    ///   range as it is mapped. This closure may modify the flags for that page
+    ///   before the changes to the page mapping are committed.
+    ///
+    ///   **Note**: The [`Handle::virt_page`] method may be used to determine
+    ///   which page's flags would be modified by each invocation of the cosure.
+    /// - `frame_alloc`: a page-frame allocator.
+    ///
+    /// # Panics
+    ///
+    /// - If any page's physical address is invalid.
+    /// - If any page is already mapped.
     fn identity_map_range<F>(
         &mut self,
         phys: PageRange<PAddr, S>,
@@ -228,7 +257,7 @@ where
         frame_alloc: &mut A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(Page<VAddr, S>, &mut Handle<'_, S, Self::Entry>),
+        F: FnMut(&mut Handle<'_, S, Self::Entry>),
     {
         let base_paddr = phys.base_addr().as_usize();
         let page_size = phys.start().size();
@@ -702,6 +731,11 @@ where
 {
     pub fn new(page: Page<VAddr, S>, entry: &'mapper mut E) -> Self {
         Self { entry, page }
+    }
+
+    /// Returns the virtual page this entry is currently mapped to.
+    pub fn virt_page(&self) -> &Page<VAddr, S> {
+        &self.page
     }
 
     /// Set whether or not this page is writable.
