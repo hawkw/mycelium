@@ -2,6 +2,7 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![cfg_attr(target_os = "none", feature(panic_info_message))]
+#![cfg_attr(target_os = "none", feature(asm))]
 
 extern crate alloc;
 extern crate rlibc;
@@ -16,6 +17,7 @@ mod wasm;
 
 static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
 
+#[inline]
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(

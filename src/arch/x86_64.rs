@@ -5,6 +5,7 @@ use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct RustbootBootInfo {
     inner: &'static boot_info::BootInfo,
 }
@@ -135,9 +136,22 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
     }
 }
 
-#[no_mangle]
-#[cfg(target_os = "none")]
-pub extern "C" fn _start(info: &'static boot_info::BootInfo) -> ! {
+bootloader::entry_point!(arch_entry);
+
+fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
+    unsafe {
+        cpu::intrinsics::cli();
+    }
+    if let Some(offset) = info.physical_memory_offset.into_option() {
+        // Safety: i hate everything
+        unsafe {
+            vga::init_with_offset(offset);
+        }
+    }
+    /* else {
+        // lol we're hosed
+    } */
+
     let boot_info = RustbootBootInfo { inner: info };
     crate::kernel_main(&boot_info);
 }

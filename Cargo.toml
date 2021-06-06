@@ -30,7 +30,7 @@ rlibc = "1.0"
 # NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`
 # instead of normal [dependencies]. don't move this.
-bootloader = { version = "0.10" }
+bootloader = { version = "0.10.6" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 hal-x86_64 = { path = "hal-x86_64" }
@@ -52,13 +52,8 @@ wat = "1.0"
 [package.metadata.bootloader]
 map-physical-memory = true
 map-page-table-recursively = true
-
-[package.metadata.bootimage]
-test-success-exit-code = 33 # (0x10 << 1) | 1
-test-args = [
-    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
-    "-serial", "stdio", "-display", "none"
-]
+map-framebuffer = true
+physical-memory-offset = 0x0000_4000_0000_0000
 
 [package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
 memcpy = true

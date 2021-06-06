@@ -9,12 +9,20 @@ static BUFFER: Lazy<spin::Mutex<Buffer>> = Lazy::new(|| {
         col: 0,
         row: 0,
         color: ColorSpec::new(Color::LightGray, Color::Black),
-        buf: unsafe { &mut *(0xb8000 as *mut Buf) },
+        buf: unsafe { &mut *(0xb8000u64 as *mut Buf) },
     })
 });
 
 pub fn writer() -> Writer {
     Writer(())
+}
+
+/// # Safety
+/// fuck off
+pub unsafe fn init_with_offset(offset: u64) {
+    // lmao
+    BUFFER.force_unlock();
+    BUFFER.lock().buf = &mut *((0xb8000u64 + offset) as *mut Buf);
 }
 
 #[derive(Debug)]
