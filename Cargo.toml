@@ -4,6 +4,7 @@ members = [
     "util",
     "hal-core",
     "hal-x86_64",
+    "inoculate"
 ]
 
 [package]
