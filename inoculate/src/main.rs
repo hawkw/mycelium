@@ -76,6 +76,7 @@ impl Options {
         locate_cargo_manifest::locate_manifest()
             .note("where the hell is the kernel's Cargo.toml?")
             .note("this should never happen, seriously, wtf")
+            .suggestion("have you tried not having it be missing")
     }
 
     #[tracing::instrument]
@@ -98,7 +99,8 @@ impl Options {
         let run_dir = bootloader_manifest
             .parent()
             .ok_or_else(|| format_err!("bootloader manifest path doesn't have a parent dir"))
-            .note("thats messed up lol")?;
+            .note("thats messed up lol")
+            .suggestion("maybe dont run this in `/`???")?;
         let output = Command::new(env!("CARGO"))
             .current_dir(run_dir)
             .arg("builder")
@@ -110,17 +112,20 @@ impl Options {
             .arg(out_dir)
             .arg("--target-dir")
             .arg(target_dir)
-            .output()
+            .status()
             .context("run builder command")?;
+        // TODO(eliza): modes for capturing/piping stdout?
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format_err!("cmd exited with non-zero status code"))
-                .with_section(move || stdout.trim().to_string().header("stdout:"))
-                .with_section(move || stderr.trim().to_string().header("stderr:"))
-                .note("whoopsy-daisy!");
+        // let stdout = String::from_utf8_lossy(&output.stdout);
+        // if !output.status.success() {
+        if !output.success() {
+            // let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format_err!(
+                "bootloader's builder command exited with non-zero status code"
+            ))
+            // .with_section(move || stdout.trim().to_string().header("stdout:"))
+            // .with_section(move || stderr.trim().to_string().header("stderr:"))
+            .suggestion("if you had gotten all the inputs right, this should have worked");
         }
 
         let bin_name = self.kernel_bin.file_name().unwrap().to_str().unwrap();
@@ -149,7 +154,8 @@ fn main() -> Result<()> {
 
     let image = opts
         .make_image(bootloader_manifest.as_ref(), kernel_manifest.as_ref())
-        .context("make the image")?;
+        .context("making the mycelium image didnt work")
+        .note("this sucks T_T")?;
     tracing::info!(image = %image.display());
 
     Ok(())

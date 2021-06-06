@@ -1,4 +1,4 @@
-use bootloader::bootinfo;
+use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
@@ -6,48 +6,43 @@ pub use hal_x86_64::{interrupt, mm, NAME};
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
-    inner: &'static bootinfo::BootInfo,
+    inner: &'static boot_info::BootInfo,
 }
 
-type MemRegionIter = core::slice::Iter<'static, bootinfo::MemoryRegion>;
+type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
     // TODO(eliza): implement
-    type MemoryMap = core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region>;
+    type MemoryMap = core::iter::Map<MemRegionIter, fn(&boot_info::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
-        fn convert_region_kind(kind: bootinfo::MemoryRegionType) -> mem::RegionKind {
+        fn convert_region_kind(kind: boot_info::MemoryRegionKind) -> mem::RegionKind {
             match kind {
-                bootinfo::MemoryRegionType::Usable => mem::RegionKind::FREE,
-                bootinfo::MemoryRegionType::InUse => mem::RegionKind::USED,
-                bootinfo::MemoryRegionType::Reserved => mem::RegionKind::USED,
-                bootinfo::MemoryRegionType::AcpiReclaimable => mem::RegionKind::BOOT_RECLAIMABLE,
-                bootinfo::MemoryRegionType::BadMemory => mem::RegionKind::BAD,
-                bootinfo::MemoryRegionType::Kernel => mem::RegionKind::KERNEL,
-                bootinfo::MemoryRegionType::KernelStack => mem::RegionKind::KERNEL,
-                bootinfo::MemoryRegionType::PageTable => mem::RegionKind::PAGE_TABLE,
-                bootinfo::MemoryRegionType::Bootloader => mem::RegionKind::BOOT,
-                bootinfo::MemoryRegionType::BootInfo => mem::RegionKind::BOOT,
+                boot_info::MemoryRegionKind::Usable => mem::RegionKind::FREE,
+                // TODO(eliza): make known
+                boot_info::MemoryRegionKind::UnknownUefi(_) => mem::RegionKind::UNKNOWN,
+                boot_info::MemoryRegionKind::UnknownBios(_) => mem::RegionKind::UNKNOWN,
+                boot_info::MemoryRegionKind::Bootloader => mem::RegionKind::BOOT,
                 _ => mem::RegionKind::UNKNOWN,
             }
         }
 
-        fn convert_region(region: &bootinfo::MemoryRegion) -> mem::Region {
-            let start = PAddr::from_u64(region.range.start_addr());
+        fn convert_region(region: &boot_info::MemoryRegion) -> mem::Region {
+            let start = PAddr::from_u64(region.start);
             let size = {
-                let end = PAddr::from_u64(region.range.end_addr()).offset(1);
-                assert!(start < end, "bad memory range from bootinfo!");
+                let end = PAddr::from_u64(region.end).offset(1);
+                assert!(start < end, "bad memory range from boot_info!");
                 let size = start.difference(end);
                 assert!(size >= 0);
                 size as usize + 1
             };
-            let kind = convert_region_kind(region.region_type);
+            let kind = convert_region_kind(region.kind);
             mem::Region::new(start, size, kind)
         }
-        (&self.inner.memory_map[..]).iter().map(convert_region)
+        (&self.inner.memory_regions[..]).iter().map(convert_region)
     }
 
     fn writer(&self) -> Self::Writer {
@@ -71,7 +66,12 @@ impl BootInfo for RustbootBootInfo {
 
 impl RustbootBootInfo {
     fn vm_offset(&self) -> VAddr {
-        VAddr::from_u64(self.inner.physical_memory_offset)
+        VAddr::from_u64(
+            self.inner
+                .physical_memory_offset
+                .into_option()
+                .expect("haha wtf"),
+        )
     }
 }
 
@@ -137,9 +137,9 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
 
 #[no_mangle]
 #[cfg(target_os = "none")]
-pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
-    let bootinfo = RustbootBootInfo { inner: info };
-    crate::kernel_main(&bootinfo);
+pub extern "C" fn _start(info: &'static boot_info::BootInfo) -> ! {
+    let boot_info = RustbootBootInfo { inner: info };
+    crate::kernel_main(&boot_info);
 }
 
 #[cold]

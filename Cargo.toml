@@ -29,7 +29,7 @@ mycelium-util = { path = "util" }
 rlibc = "1.0"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-bootloader = {version = "0.9.16", features = ["map_physical_memory"] }
+bootloader = {version = "0.10" }
 hal-x86_64 = { path = "hal-x86_64" }
 
 [dependencies.tracing]
@@ -45,6 +45,9 @@ features = ["core"]
 
 [build-dependencies]
 wat = "1.0"
+
+[package.metadata.bootloader]
+map-physical-memory = true
 
 [package.metadata.bootimage]
 test-success-exit-code = 33 # (0x10 << 1) | 1
