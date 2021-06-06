@@ -75,18 +75,25 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     }
 
     // lol acpi
-    unsafe {
-        // TODO(eliza): figure out uefi lol
-        tracing::debug!("searching for ACPI tables...");
-        let acpi_tables = acpi::Tables::search_for_rsdp_bios(acpi::AcpiMapper).unwrap();
-        tracing::debug!("finding acpi tables apparently worked");
-        let platform = acpi_tables.platform_info().unwrap();
-        tracing::info!(?platform.power_profile, ?platform.interrupt_model, "ACPI platform info");
-        if let Some(processor_info) = platform.processor_info.as_ref() {
-            tracing::info!(?processor_info.boot_processor, ?processor_info.application_processors, "ACPI processor info");
-        } else {
-            tracing::warn!("no ACPI processor info");
+    if let Some(rsdp_addr) = bootinfo.rsdp_address() {
+        tracing::info!(
+            "bootloader RSDP address is {:x}; reading ACPI tables...",
+            rsdp_addr
+        );
+        unsafe {
+            // TODO(eliza): figure out uefi lol
+            let acpi_tables = acpi::Tables::from_rsdp(acpi::AcpiMapper, rsdp_addr).unwrap();
+            tracing::debug!("finding acpi tables apparently worked");
+            let platform = acpi_tables.platform_info().unwrap();
+            tracing::info!(?platform.power_profile, ?platform.interrupt_model, "ACPI platform info");
+            if let Some(processor_info) = platform.processor_info.as_ref() {
+                tracing::info!(?processor_info.boot_processor, ?processor_info.application_processors, "ACPI processor info");
+            } else {
+                tracing::warn!("no ACPI processor info");
+            }
         }
+    } else {
+        tracing::info!("no RSDP address; will try to find ACPI tables 'some other way' i guess?");
     }
 
     #[cfg(test)]

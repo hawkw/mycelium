@@ -270,7 +270,7 @@ where
         let virt_base = Page::containing(VAddr::from_usize(base_paddr), page_size);
         let end_paddr = phys.end_addr().as_usize();
         let virt_end = Page::containing(VAddr::from_usize(end_paddr), page_size);
-        let virt = virt_base.range_to(virt_end);
+        let virt = virt_base.range_inclusive(virt_end);
         unsafe { self.map_range(virt, phys, set_flags, frame_alloc) }
     }
 }

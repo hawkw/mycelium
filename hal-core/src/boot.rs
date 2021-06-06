@@ -21,6 +21,8 @@ pub trait BootInfo {
         None
     }
 
+    fn rsdp_address(&self) -> Option<usize>;
+
     fn init_paging(&self);
 
     // TODO(eliza): figure out a non-bad way to represent boot command lines (is

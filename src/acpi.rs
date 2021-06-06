@@ -2,7 +2,7 @@ use crate::arch::mm;
 use acpi::{AcpiHandler, PhysicalMapping};
 use core::ptr;
 use hal_core::{
-    mem::page::{Map, Page, Size},
+    mem::page::{Map, Page, Size, TranslatePage},
     Address, PAddr, VAddr,
 };
 
@@ -30,21 +30,20 @@ impl AcpiHandler for AcpiMapper {
         let mut ctrl = mm::PageCtrl::current();
         if start_page == end_page {
             tracing::debug!("ACPI region is contained within one page...");
-
-            let virt = ctrl
-                .identity_map(start_page, &crate::PAGE_ALLOCATOR)
-                .commit();
+            // let virt = ctrl.translate_page(start_page);
+            let virt_addr = mm::vm_offset() + start_page.base_addr().as_usize();
+            let virt_page = Page::<VAddr, mm::MinPageSize>::containing_fixed(virt_addr);
             return PhysicalMapping {
                 physical_start: start_page.base_addr().as_usize(),
-                virtual_start: ptr::NonNull::new(virt.base_addr().as_ptr())
+                virtual_start: ptr::NonNull::new(virt_addr.as_ptr())
                     .expect("base of identity mapped range is not null lol"),
                 region_length: size,
-                mapped_length: virt.size().as_usize(),
+                mapped_length: virt_page.size().as_usize(),
                 handler: *self,
             };
         }
 
-        let range = start_page.range_inclusive(end_page);
+        let range = start_page.range_to(end_page);
         let virt_range = ctrl.identity_map_range(range, |_| {}, &crate::PAGE_ALLOCATOR);
         PhysicalMapping {
             physical_start: range.base_addr().as_usize(),
@@ -57,13 +56,14 @@ impl AcpiHandler for AcpiMapper {
     }
 
     fn unmap_physical_region<T>(&self, region: &PhysicalMapping<Self, T>) {
-        let base_vaddr = VAddr::from_usize(region.virtual_start.as_ptr() as *const _ as usize);
-        let start_page = Page::<VAddr, mm::MinPageSize>::starting_at_fixed(base_vaddr)
-            .expect("not page aligned");
-        let end_vaddr = base_vaddr.offset(region.mapped_length as i32 /* lol */);
-        let end_page = Page::<VAddr, mm::MinPageSize>::starting_at_fixed(end_vaddr)
-            .expect("not page aligned lol");
-        let range = start_page.range_to(end_page);
-        unsafe { mm::PageCtrl::current().unmap_range(range) }
+        // let base_vaddr = VAddr::from_usize(region.virtual_start.as_ptr() as *const _ as usize);
+        // let start_page = Page::<VAddr, mm::MinPageSize>::starting_at_fixed(base_vaddr)
+        //     .expect("not page aligned");
+        // let end_vaddr = base_vaddr.offset(region.mapped_length as i32 /* lol */);
+        // let end_page = Page::<VAddr, mm::MinPageSize>::starting_at_fixed(end_vaddr)
+        //     .expect("not page aligned lol");
+        // let range = start_page.range_to(end_page);
+        // unsafe { mm::PageCtrl::current().unmap_range(range) }
+        let _ = region;
     }
 }
