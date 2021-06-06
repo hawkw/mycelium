@@ -51,6 +51,7 @@ wat = "1.0"
 
 [package.metadata.bootloader]
 map-physical-memory = true
+map-page-table-recursively = true
 
 [package.metadata.bootimage]
 test-success-exit-code = 33 # (0x10 << 1) | 1

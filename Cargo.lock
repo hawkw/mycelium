@@ -271,7 +271,9 @@ dependencies = [
  "locate-cargo-manifest",
  "structopt",
  "tracing",
+ "tracing-error",
  "tracing-subscriber",
+ "wait-timeout",
 ]
 
 [[package]]
