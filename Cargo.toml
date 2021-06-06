@@ -27,9 +27,12 @@ hal-core = { path = "hal-core" }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
 mycelium-util = { path = "util" }
 rlibc = "1.0"
+# NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
+# script is not that good, and breaks if you put this in `cfg(...).dependencies`
+# instead of normal [dependencies]. don't move this.
+bootloader = { version = "0.10" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-bootloader = {version = "0.10" }
 hal-x86_64 = { path = "hal-x86_64" }
 
 [dependencies.tracing]

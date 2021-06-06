@@ -81,11 +81,18 @@ impl Options {
 
     #[tracing::instrument]
     fn make_image(&self, bootloader_manifest: &Path, kernel_manifest: &Path) -> Result<PathBuf> {
+        let kernel_bin = self
+            .kernel_bin
+            // the bootloader crate's build script gets mad if this is a
+            // relative pathe
+            .canonicalize()
+            .context("couldn't to canonicalize kernel manifest path")
+            .note("it should work")?;
         let out_dir = self
             .out_dir
             .as_ref()
             .map(|path| path.as_ref())
-            .or_else(|| self.kernel_bin.parent())
+            .or_else(|| kernel_bin.parent())
             .ok_or_else(|| format_err!("can't find out dir, wtf"))
             .context("determining out dir")
             .note("somethings messed up lol")?;
@@ -107,7 +114,7 @@ impl Options {
             .arg("--kernel-manifest")
             .arg(&kernel_manifest)
             .arg("--kernel-binary")
-            .arg(&self.kernel_bin)
+            .arg(&kernel_bin)
             .arg("--out-dir")
             .arg(out_dir)
             .arg("--target-dir")
