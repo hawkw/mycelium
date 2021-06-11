@@ -212,6 +212,59 @@ pub fn oops(
     }
 }
 
+// TODO(eliza): this is now in arch because it uses the serial port, would be
+// nice if that was cross platform...
+#[cfg(test)]
+pub fn run_tests() {
+    let span = tracing::info_span!("run tests");
+    let _enter = span.enter();
+
+    let mut passed = 0;
+    let mut failed = 0;
+    let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
+
+    for test in mycelium_util::testing::all_tests() {
+        use core::fmt::Write;
+        writeln!(
+            &mut com1.lock(),
+            "MYCELIUM_TEST_START: {} {}",
+            test.module,
+            test.name
+        )
+        .expect("serial write failed");
+
+        let span = tracing::info_span!("test", test.name, test.module);
+        let _enter = span.enter();
+
+        if (test.run)() {
+            writeln!(
+                &mut com1.lock(),
+                "MYCELIUM_TEST_PASSED: {} {}",
+                test.module,
+                test.name
+            )
+            .expect("serial write failed");
+            passed += 1;
+        } else {
+            writeln!(
+                &mut com1.lock(),
+                "MYCELIUM_TEST_FAILED: {} {}",
+                test.module,
+                test.name
+            )
+            .expect("serial write failed");
+            failed += 1;
+        }
+    }
+
+    tracing::warn!("{} passed | {} failed", passed, failed);
+    if failed == 0 {
+        qemu_exit(QemuExitCode::Success);
+    } else {
+        qemu_exit(QemuExitCode::Failed);
+    }
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]

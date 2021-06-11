@@ -25,17 +25,6 @@ fn main() -> Result<()> {
         "inoculating...",
     };
 
-    // if opts.is_test() {
-    //     let rustflags = if let Ok(mut rustflags) = std::env::var("RUSTFLAGS") {
-    //         rustflags.push_str(" --cfg test");
-    //         rustflags
-    //     } else {
-    //         String::from("--cfg test")
-    //     };
-    //     tracing::info!(opts.is_test = true, ?rustflags);
-    //     std::env::set_var("RUSTFLAGS", rustflags);
-    // }
-
     let bootloader_manifest = opts.wheres_bootloader()?;
     tracing::info!(path = %bootloader_manifest.display(), "found bootloader manifest");
 

@@ -1,9 +1,10 @@
-use crate::Result;
+use crate::{cargo_log, Result};
 use color_eyre::{
-    eyre::{format_err, WrapErr},
+    eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
 };
 use std::{
+    collections::HashMap,
     ffi::{OsStr, OsString},
     path::Path,
     process::{Command, ExitStatus, Stdio},
@@ -55,6 +56,12 @@ pub struct Settings {
     /// Extra arguments passed to QEMU
     #[structopt(raw = true)]
     qemu_args: Vec<String>,
+}
+
+#[derive(Debug)]
+struct TestResults {
+    tests: usize,
+    failed: HashMap<String, Vec<String>>,
 }
 
 impl Cmd {
@@ -141,7 +148,7 @@ impl Cmd {
                     "-serial",
                     "stdio",
                 ];
-
+                cargo_log!("Running", "tests in QEMU");
                 tracing::info!("running QEMU in test mode");
                 qemu_settings.configure(&mut qemu);
                 qemu.args(TEST_ARGS);
@@ -154,14 +161,7 @@ impl Cmd {
                         .spawn()
                         .context("spawning QEMU with captured stdout failed")?;
                     let mut stdout = child.stdout.take().expect("wtf");
-                    let stdout = std::thread::spawn(move || {
-                        use std::io::Read;
-                        let mut output = String::new();
-                        stdout
-                            .read_to_string(&mut output)
-                            .map(move |_| output)
-                            .context("reading QEMU stdout failed")
-                    });
+                    let stdout = std::thread::spawn(move || TestResults::watch_tests(stdout));
                     (child, Some(stdout))
                 } else {
                     let child = qemu
@@ -202,11 +202,13 @@ impl Cmd {
                     }
                 }
                 .context("tests failed");
-                if let Some(stdout) = stdout {
+                if let Some(res) = stdout {
                     tracing::trace!("collecting stdout");
-                    let stdout = stdout.join().unwrap()?;
-                    tracing::trace!(?stdout);
-                    res.with_section(move || stdout.trim().to_string().header("serial output:"))
+                    let res = res.join().unwrap()?;
+                    // TODO(eliza): fromat nicely
+                    eprintln!("test results: {:?}", res);
+                    Ok(())
+                    // res.with_section(move || stdout.trim().to_string().header("serial output:"))
                 } else {
                     res
                 }
@@ -240,4 +242,81 @@ fn parse_secs(s: &OsStr) -> std::result::Result<Duration, OsString> {
         .ok_or_else(|| OsString::from(s))
         .and_then(|s| s.parse::<u64>().map_err(|_| OsString::from(s)))
         .map(Duration::from_secs)
+}
+
+impl TestResults {
+    fn watch_tests(output: impl std::io::Read) -> Result<Self> {
+        use std::io::{BufRead, BufReader};
+        let mut results = Self {
+            tests: 0,
+            failed: HashMap::new(),
+        };
+        let mut lines = BufReader::new(output).lines();
+
+        'all_tests: while let Some(line) = lines.next() {
+            let line = line?;
+            tracing::trace!(message = %line);
+            if let Some(rest) = line.strip_prefix("MYCELIUM_TEST_START:") {
+                tracing::debug!(?rest, "found test");
+                let (test_mod, test_name) = parse_test_name(rest)?;
+                eprint!("test {}::{} ...", test_mod, test_name);
+                results.tests += 1;
+                let mut curr_output = Vec::new();
+                for line in &mut lines {
+                    let line = line?;
+
+                    tracing::trace!(message = %line);
+                    if let Some(rest) = line.strip_prefix("MYCELIUM_TEST_PASSED:") {
+                        tracing::debug!(?rest, "found passed test");
+                        let (passed_mod, passed_name) = parse_test_name(rest)?;
+                        ensure!(
+                            (passed_mod, passed_name) == (test_mod, test_name),
+                            "got unexpected passed test {}::{} (expected {}::{})",
+                            passed_mod,
+                            passed_name,
+                            test_mod,
+                            test_name
+                        );
+                        eprintln!("[ok]");
+                        continue 'all_tests;
+                    }
+
+                    if let Some(rest) = line.strip_prefix("MYCELIUM_TEST_FAILED:") {
+                        tracing::debug!(?rest, "found failed test",);
+                        let (failed_mod, failed_name) = parse_test_name(rest)?;
+                        ensure!(
+                            (failed_mod, failed_name) == (test_mod, test_name),
+                            "got unexpected failed test {}::{} (expected {}::{})",
+                            failed_mod,
+                            failed_name,
+                            test_mod,
+                            test_name
+                        );
+                        results
+                            .failed
+                            .insert(format!("{}::{}", failed_mod, failed_name), curr_output);
+                        eprintln!("[not ok!]");
+                        continue 'all_tests;
+                    }
+
+                    curr_output.push(line);
+                }
+            }
+        }
+
+        Ok(results)
+    }
+}
+
+fn parse_test_name(s: &str) -> Result<(&str, &str)> {
+    let mut s = s.trim().split_whitespace();
+    let module = s
+        .next()
+        .ok_or_else(|| format_err!("no module path in test name {:?}", s))?
+        .trim();
+    let test = s
+        .next()
+        .ok_or_else(|| format_err!("no test name in {:?}", s))?
+        .trim();
+    Ok((module, test))
 }

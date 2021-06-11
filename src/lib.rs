@@ -76,30 +76,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     }
 
     #[cfg(test)]
-    {
-        let span = tracing::info_span!("run tests");
-        let _enter = span.enter();
-
-        let mut passed = 0;
-        let mut failed = 0;
-        for test in mycelium_util::testing::all_tests() {
-            let span = tracing::info_span!("test", test.name, test.module);
-            let _enter = span.enter();
-
-            if (test.run)() {
-                passed += 1;
-            } else {
-                failed += 1;
-            }
-        }
-
-        tracing::warn!("{} passed | {} failed", passed, failed);
-        if failed == 0 {
-            arch::qemu_exit(arch::QemuExitCode::Success);
-        } else {
-            arch::qemu_exit(arch::QemuExitCode::Failed);
-        }
-    }
+    arch::run_tests();
 
     // if this function returns we would boot loop. Hang, instead, so the debug
     // output can be read.
