@@ -33,6 +33,9 @@ rlibc = "1.0"
 # instead of normal [dependencies]. don't move this.
 bootloader = { version = "0.10.6" }
 
+[dev-dependencies]
+mycotest = { path = "mycotest" }
+
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 hal-x86_64 = { path = "hal-x86_64" }
 

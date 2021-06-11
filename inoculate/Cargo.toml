@@ -17,3 +17,4 @@ locate-cargo-manifest = "0.2"
 wait-timeout = "0.2"
 owo-colors = "2.0.0"
 atty = "0.2"
+mycotest = { path = "../mycotest", features = ["alloc"] }

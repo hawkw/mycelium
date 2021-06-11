@@ -1,11 +1,14 @@
+use crate::term::{ColorMode, OwoColorize};
 use crate::{cargo_log, Result};
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
 };
+use mycotest::{Outcome, Test};
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     ffi::{OsStr, OsString},
+    fmt,
     path::Path,
     process::{Command, ExitStatus, Stdio},
     time::Duration,
@@ -37,6 +40,10 @@ pub enum Cmd {
         #[structopt(long)]
         nocapture: bool,
 
+        /// Show captured serial output of successful tests
+        #[structopt(long)]
+        show_output: bool,
+
         /// Extra arguments passed to QEMU
         #[structopt(flatten)]
         qemu_settings: Settings,
@@ -61,7 +68,9 @@ pub struct Settings {
 #[derive(Debug)]
 struct TestResults {
     tests: usize,
-    failed: HashMap<String, Vec<String>>,
+    completed: usize,
+    failed: BTreeMap<mycotest::Test<'static, String>, Vec<String>>,
+    total: usize,
 }
 
 impl Cmd {
@@ -148,7 +157,7 @@ impl Cmd {
                     "-serial",
                     "stdio",
                 ];
-                cargo_log!("Running", "tests in QEMU");
+                cargo_log!("Running", "kernel tests ({})", image.display());
                 tracing::info!("running QEMU in test mode");
                 qemu_settings.configure(&mut qemu);
                 qemu.args(TEST_ARGS);
@@ -161,6 +170,7 @@ impl Cmd {
                         .spawn()
                         .context("spawning QEMU with captured stdout failed")?;
                     let mut stdout = child.stdout.take().expect("wtf");
+                    eprintln!("");
                     let stdout = std::thread::spawn(move || TestResults::watch_tests(stdout));
                     (child, Some(stdout))
                 } else {
@@ -205,8 +215,7 @@ impl Cmd {
                 if let Some(res) = stdout {
                     tracing::trace!("collecting stdout");
                     let res = res.join().unwrap()?;
-                    // TODO(eliza): fromat nicely
-                    eprintln!("test results: {:?}", res);
+                    eprintln!("{}", res);
                     Ok(())
                     // res.with_section(move || stdout.trim().to_string().header("serial output:"))
                 } else {
@@ -249,53 +258,54 @@ impl TestResults {
         use std::io::{BufRead, BufReader};
         let mut results = Self {
             tests: 0,
-            failed: HashMap::new(),
+            completed: 0,
+            failed: BTreeMap::new(),
+            total: 0,
         };
         let mut lines = BufReader::new(output).lines();
+        let colors = ColorMode::default();
+        let green = colors.if_color(owo_colors::style().green());
+        let red = colors.if_color(owo_colors::style().red());
 
         'all_tests: while let Some(line) = lines.next() {
             let line = line?;
             tracing::trace!(message = %line);
-            if let Some(rest) = line.strip_prefix("MYCELIUM_TEST_START:") {
-                tracing::debug!(?rest, "found test");
-                let (test_mod, test_name) = parse_test_name(rest)?;
-                eprint!("test {}::{} ...", test_mod, test_name);
+
+            if let Some(count) = line.strip_prefix(mycotest::TEST_COUNT) {
+                results.total = count
+                    .trim()
+                    .parse::<usize>()
+                    .with_context(|| format!("parse string: {:?}", count.trim()))?;
+            }
+
+            if let Some(test) = Test::parse_start(&line) {
+                tracing::debug!(?test, "found test");
+                eprint!("test {} ...", test);
                 results.tests += 1;
+
                 let mut curr_output = Vec::new();
                 for line in &mut lines {
                     let line = line?;
-
                     tracing::trace!(message = %line);
-                    if let Some(rest) = line.strip_prefix("MYCELIUM_TEST_PASSED:") {
-                        tracing::debug!(?rest, "found passed test");
-                        let (passed_mod, passed_name) = parse_test_name(rest)?;
-                        ensure!(
-                            (passed_mod, passed_name) == (test_mod, test_name),
-                            "got unexpected passed test {}::{} (expected {}::{})",
-                            passed_mod,
-                            passed_name,
-                            test_mod,
-                            test_name
-                        );
-                        eprintln!("[ok]");
-                        continue 'all_tests;
-                    }
 
-                    if let Some(rest) = line.strip_prefix("MYCELIUM_TEST_FAILED:") {
-                        tracing::debug!(?rest, "found failed test",);
-                        let (failed_mod, failed_name) = parse_test_name(rest)?;
+                    if let Some((completed_test, outcome)) = Test::parse_outcome(&line) {
                         ensure!(
-                            (failed_mod, failed_name) == (test_mod, test_name),
-                            "got unexpected failed test {}::{} (expected {}::{})",
-                            failed_mod,
-                            failed_name,
-                            test_mod,
-                            test_name
+                            test == completed_test,
+                            "an unexpected test completed (actual: {}, expected: {}, outcome={:?})",
+                            completed_test,
+                            test,
+                            outcome,
                         );
-                        results
-                            .failed
-                            .insert(format!("{}::{}", failed_mod, failed_name), curr_output);
-                        eprintln!("[not ok!]");
+
+                        match outcome {
+                            Outcome::Pass => eprintln!(" {}", "ok".style(green)),
+                            Outcome::Fail => {
+                                eprintln!(" {}", "not ok!".style(red));
+                                results.failed.insert(test.to_static(), curr_output);
+                            }
+                        }
+
+                        results.completed += 1;
                         continue 'all_tests;
                     }
 
@@ -308,15 +318,51 @@ impl TestResults {
     }
 }
 
-fn parse_test_name(s: &str) -> Result<(&str, &str)> {
-    let mut s = s.trim().split_whitespace();
-    let module = s
-        .next()
-        .ok_or_else(|| format_err!("no module path in test name {:?}", s))?
-        .trim();
-    let test = s
-        .next()
-        .ok_or_else(|| format_err!("no test name in {:?}", s))?
-        .trim();
-    Ok((module, test))
+impl fmt::Display for TestResults {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let num_failed = self.failed.len();
+        if num_failed > 0 {
+            writeln!(f, "\nfailures:")?;
+            for (test, output) in &self.failed {
+                writeln!(
+                    f,
+                    "\n---- {} serial ----\n{}\n",
+                    test,
+                    &output[..].join("\n")
+                )?;
+            }
+            writeln!(f, "\nfailures:\n")?;
+            for test in self.failed.keys() {
+                writeln!(f, "\t{}", test,)?;
+            }
+        }
+        let colors = ColorMode::default();
+        let res = if !self.failed.is_empty() {
+            "FAILED".style(colors.if_color(owo_colors::style().red()))
+        } else {
+            "ok".style(colors.if_color(owo_colors::style().green()))
+        };
+
+        let num_missed = self.total - (self.completed + num_failed);
+        writeln!(
+            f,
+            "\ntest result: {}. {} passed; {} failed; {} missed; {} total",
+            res,
+            self.completed - num_failed,
+            num_failed,
+            num_missed,
+            self.total
+        )?;
+
+        if num_missed > 0 {
+            writeln!(
+                f,
+                "\n{}: {} tests didn't get to run due to a panic/fault",
+                "note".style(colors.if_color(owo_colors::style().yellow().bold())),
+                num_missed
+            )?;
+        }
+
+        Ok(())
+    }
 }

@@ -6,7 +6,7 @@ use std::{
 };
 
 pub const CARGO_LOG_WIDTH: usize = 12;
-pub use owo_colors::OwoColorize;
+pub use owo_colors::{style, OwoColorize};
 #[macro_export]
 macro_rules! cargo_log {
     ($tag:expr, $($arg:tt)+) => {
@@ -53,6 +53,14 @@ impl fmt::Display for ColorMode {
 }
 
 impl ColorMode {
+    pub fn if_color(self, style: owo_colors::Style) -> owo_colors::Style {
+        if self.should_color_stderr() {
+            style
+        } else {
+            owo_colors::style()
+        }
+    }
+
     pub fn set_global(self) {
         GLOBAL_COLOR_MODE
             .compare_exchange(0, self as u8, Ordering::AcqRel, Ordering::Acquire)

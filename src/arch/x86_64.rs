@@ -1,5 +1,8 @@
 use bootloader::boot_info;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
@@ -204,7 +207,22 @@ pub fn oops(
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
     #[cfg(test)]
-    qemu_exit(QemuExitCode::Failed);
+    {
+        if let Some(test) = ptr::NonNull::new(CURRENT_TEST.load(Ordering::Acquire)) {
+            if let Some(com1) = serial::com1() {
+                let test = unsafe { test.as_ref() };
+                writeln!(
+                    &mut com1.lock(),
+                    "{} {} {}",
+                    mycotest::FAIL_TEST,
+                    test.module,
+                    test.name
+                )
+                .expect("serial write failed");
+            }
+        }
+        qemu_exit(QemuExitCode::Failed);
+    }
 
     #[cfg(not(test))]
     unsafe {
@@ -212,22 +230,30 @@ pub fn oops(
     }
 }
 
+#[cfg(test)]
+static CURRENT_TEST: AtomicPtr<mycelium_util::testing::Test> = AtomicPtr::new(ptr::null_mut());
+
 // TODO(eliza): this is now in arch because it uses the serial port, would be
 // nice if that was cross platform...
 #[cfg(test)]
 pub fn run_tests() {
+    use core::fmt::Write;
     let span = tracing::info_span!("run tests");
     let _enter = span.enter();
 
     let mut passed = 0;
     let mut failed = 0;
     let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
+    let tests = mycelium_util::testing::all_tests();
+    writeln!(&mut com1.lock(), "{}{}", mycotest::TEST_COUNT, tests.len())
+        .expect("serial write failed");
+    for test in tests {
+        CURRENT_TEST.store(test as *const _ as *mut _, Ordering::Release);
 
-    for test in mycelium_util::testing::all_tests() {
-        use core::fmt::Write;
         writeln!(
             &mut com1.lock(),
-            "MYCELIUM_TEST_START: {} {}",
+            "{}{} {}",
+            mycotest::START_TEST,
             test.module,
             test.name
         )
@@ -239,7 +265,8 @@ pub fn run_tests() {
         if (test.run)() {
             writeln!(
                 &mut com1.lock(),
-                "MYCELIUM_TEST_PASSED: {} {}",
+                "{}{} {}",
+                mycotest::PASS_TEST,
                 test.module,
                 test.name
             )
@@ -248,7 +275,8 @@ pub fn run_tests() {
         } else {
             writeln!(
                 &mut com1.lock(),
-                "MYCELIUM_TEST_FAILED: {} {}",
+                "{}{} {}",
+                mycotest::FAIL_TEST,
                 test.module,
                 test.name
             )
@@ -256,6 +284,8 @@ pub fn run_tests() {
             failed += 1;
         }
     }
+
+    CURRENT_TEST.store(ptr::null_mut(), Ordering::Release);
 
     tracing::warn!("{} passed | {} failed", passed, failed);
     if failed == 0 {
