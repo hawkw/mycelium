@@ -125,12 +125,12 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
-    fn wasm_hello_world() -> Result<(), wasmi::Error> {
-        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
-        wasm::run_wasm(HELLOWORLD_WASM)
-    }
-}
+// mycelium_util::decl_test! {
+//     fn wasm_hello_world() -> Result<(), wasmi::Error> {
+//         const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+//         wasm::run_wasm(HELLOWORLD_WASM)
+//     }
+// }
 
 #[global_allocator]
 #[cfg(target_os = "none")]

@@ -4,11 +4,13 @@ use structopt::StructOpt;
 
 fn main() -> Result<()> {
     use tracing_subscriber::prelude::*;
-
     color_eyre::install()?;
+
     let opts = Options::from_args();
+    let color = opts.color;
+    color.set_global();
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_ansi(color.should_color_stdout()))
         .with(tracing_error::ErrorLayer::default())
         .with(opts.log.parse::<tracing_subscriber::EnvFilter>()?)
         .init();
@@ -22,6 +24,18 @@ fn main() -> Result<()> {
         ?opts.out_dir,
         "inoculating...",
     };
+
+    // if opts.is_test() {
+    //     let rustflags = if let Ok(mut rustflags) = std::env::var("RUSTFLAGS") {
+    //         rustflags.push_str(" --cfg test");
+    //         rustflags
+    //     } else {
+    //         String::from("--cfg test")
+    //     };
+    //     tracing::info!(opts.is_test = true, ?rustflags);
+    //     std::env::set_var("RUSTFLAGS", rustflags);
+    // }
+
     let bootloader_manifest = opts.wheres_bootloader()?;
     tracing::info!(path = %bootloader_manifest.display(), "found bootloader manifest");
 

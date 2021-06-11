@@ -4,12 +4,15 @@ use color_eyre::{
 };
 use std::{
     path::{Path, PathBuf},
-    process::Command,
+    process::Stdio,
 };
 use structopt::StructOpt;
 
 pub use color_eyre::eyre::Result;
+
+pub mod cargo;
 pub mod qemu;
+pub mod term;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -48,9 +51,25 @@ pub struct Options {
     /// Overrides the target directory for the kernel build.
     #[structopt(short, long, parse(from_os_str))]
     pub target_dir: Option<PathBuf>,
+
+    /// Whether to emit colors in output.
+    #[structopt(
+        long,
+        possible_values(&["auto", "always", "never"]),
+        env = "CARGO_TERM_COLORS",
+        default_value = "auto"
+    )]
+    pub color: term::ColorMode,
 }
 
 impl Options {
+    pub fn is_test(&self) -> bool {
+        match self.qemu {
+            Some(qemu::Cmd::Test { .. }) => true,
+            _ => false,
+        }
+    }
+
     pub fn wheres_bootloader(&self) -> Result<PathBuf> {
         tracing::debug!("where's bootloader?");
         if let Some(path) = self.bootloader_manifest.as_ref() {
@@ -87,6 +106,9 @@ impl Options {
             .canonicalize()
             .context("couldn't to canonicalize kernel manifest path")
             .note("it should work")?;
+
+        cargo_log!("Building", "disk image for `{}``s", kernel_bin.display());
+
         tracing::debug!(kernel_bin = %kernel_bin.display(), "making boot image...");
         let out_dir = self
             .out_dir
@@ -108,9 +130,8 @@ impl Options {
             .ok_or_else(|| format_err!("bootloader manifest path doesn't have a parent dir"))
             .note("thats messed up lol")
             .suggestion("maybe dont run this in `/`???")?;
-        let output = Command::new(env!("CARGO"))
+        let output = cargo::cmd("builder")?
             .current_dir(run_dir)
-            .arg("builder")
             .arg("--kernel-manifest")
             .arg(&kernel_manifest)
             .arg("--kernel-binary")
@@ -119,6 +140,8 @@ impl Options {
             .arg(out_dir)
             .arg("--target-dir")
             .arg(target_dir)
+            .stderr(Stdio::inherit())
+            .stdout(Stdio::piped())
             .status()
             .context("run builder command")?;
         // TODO(eliza): modes for capturing/piping stdout?
@@ -141,6 +164,8 @@ impl Options {
             image.exists(),
             "disk image should probably exist after running bootloader build command"
         );
+
+        cargo_log!("Created", "bootable disk image at `{}`", image.display());
 
         Ok(image)
     }
