@@ -146,12 +146,14 @@ where
         tracing::debug!(?page_table);
 
         let entry = &mut page_table[virt];
+        tracing::trace!(?entry);
         assert!(
             !entry.is_present(),
             "mapped page table entry already in use"
         );
         assert!(!entry.is_huge(), "huge bit should not be set for 4KB entry");
         let entry = entry.set_phys_page(phys).set_present(true);
+        tracing::trace!(?entry, "flags set");
         page::Handle::new(virt, entry)
     }
 
@@ -260,10 +262,10 @@ impl TranslateAddr for PageTable<level::Pdpt> {
 }
 
 impl<R: level::Recursive> PageTable<R> {
-    #[inline(always)]
-    fn next_table_ptr<S: Size>(&self, idx: VirtPage<S>) -> Option<NonNull<PageTable<R::Next>>> {
+    #[inline]
+    fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
         let span = tracing::debug_span!(
-            "next_table_ptr",
+            "next_table",
             ?idx,
             self.level = %R::NAME,
             next.level = %<R::Next>::NAME,
@@ -287,19 +289,48 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
-        NonNull::new(vaddr.as_ptr())
-    }
-
-    #[inline]
-    // #[tracing::instrument(skip(self))]
-    fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
-        Some(unsafe { &*self.next_table_ptr(idx)?.as_ptr() })
+        Some(unsafe { &*NonNull::new(vaddr.as_ptr())?.as_ptr() })
     }
 
     #[inline]
     #[tracing::instrument(skip(self))]
     fn next_table_mut<S: Size>(&mut self, idx: VirtPage<S>) -> Option<&mut PageTable<R::Next>> {
-        Some(unsafe { &mut *self.next_table_ptr(idx)?.as_ptr() })
+        let span = tracing::debug_span!(
+            "next_table_mut",
+            ?idx,
+            self.level = %R::NAME,
+            next.level = %<R::Next>::NAME,
+            self.addr = ?&self as *const _,
+        );
+        let _e = span.enter();
+        let entry = &mut self[idx];
+        tracing::trace!(?entry);
+        if !entry.is_present() {
+            tracing::debug!("entry not present!");
+            return None;
+        }
+        // XXX(eliza): should we have a different return type to distinguish
+        // between "the entry is huge, so you stop the page table walk" and "the entry is not
+        // present"? we definitely should...
+        if entry.is_huge() {
+            tracing::debug!("page is hudge!");
+            return None;
+        }
+
+        // If we are going to mutate the page table, make sure it's writable.
+        if !entry.is_writable() {
+            tracing::debug!("making page writable");
+            entry.set_writable(true);
+            unsafe {
+                tlb::flush_page(idx.base_addr());
+            }
+        }
+
+        let vaddr = R::Next::table_addr(idx.base_addr());
+        tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
+        // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
+        // all this, the next table address is null...we're probably pretty fucked!
+        Some(unsafe { &mut *NonNull::new(vaddr.as_ptr())?.as_ptr() })
     }
 
     fn create_next_table<S: Size>(
@@ -349,7 +380,7 @@ impl<R: level::Recursive> PageTable<R> {
             .set_next_table(table)
             .set_present(true)
             .set_writable(true);
-        tracing::trace!("set entry to point at new page table");
+        tracing::trace!(?entry, "set entry to point at new page table");
         unsafe { &mut *table }
     }
 }
@@ -852,6 +883,7 @@ pub(crate) mod tlb {
     // XXX(eliza): can/should this be feature flagged? do we care at all about
     // supporting 80386s from 1985?
     pub(crate) unsafe fn flush_page(addr: VAddr) {
+        tracing::trace!(?addr, "flush_page");
         asm!("invlpg [{0}]", in(reg) addr.as_usize() as u64);
     }
 }
