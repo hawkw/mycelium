@@ -915,12 +915,19 @@ mycelium_util::decl_test! {
 
 mycelium_util::decl_test! {
     fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
-        let ctrl = PageCtrl::current();
+        let mut ctrl = PageCtrl::current();
+
+        // We shouldn't need to allocate page frames for this test.
+        let mut frame_alloc = page::EmptyAlloc::default();
+        let actual_frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
+        unsafe {
+            let mut flags = ctrl.identity_map(actual_frame, &mut frame_alloc);
+            flags.set_writable(true);
+            flags.commit()
+        };
 
         let page = VirtPage::<Size4Kb>::containing_fixed(VAddr::from_usize(0xb8000));
-
         let frame = ctrl.translate_page(page).expect("translate");
-        let actual_frame = PhysPage::<Size4Kb>::containing_fixed(PAddr::from_usize(0xb8000));
         tracing::info!(?page, ?frame, "translated");
         assert_eq!(frame, actual_frame, "identity mapped address should translate to itself");
         Ok(())
