@@ -169,7 +169,7 @@ impl Cmd {
                         .stderr(Stdio::piped())
                         .spawn()
                         .context("spawning QEMU with captured stdout failed")?;
-                    let mut stdout = child.stdout.take().expect("wtf");
+                    let stdout = child.stdout.take().expect("wtf");
                     eprintln!("");
                     let stdout = std::thread::spawn(move || TestResults::watch_tests(stdout));
                     (child, Some(stdout))
@@ -216,6 +216,11 @@ impl Cmd {
                     tracing::trace!("collecting stdout");
                     let res = res.join().unwrap()?;
                     eprintln!("{}", res);
+
+                    // exit with an error if the tests failed.
+                    if !res.failed.is_empty() {
+                        std::process::exit(1);
+                    }
                     Ok(())
                     // res.with_section(move || stdout.trim().to_string().header("serial output:"))
                 } else {
