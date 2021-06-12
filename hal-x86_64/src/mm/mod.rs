@@ -17,8 +17,8 @@ use hal_core::{
 pub const MIN_PAGE_SIZE: usize = Size4Kb::SIZE;
 const ENTRIES: usize = 512;
 
-type VirtPage<S> = Page<VAddr, S>;
-type PhysPage<S> = Page<PAddr, S>;
+pub type VirtPage<S> = Page<VAddr, S>;
+pub type PhysPage<S> = Page<PAddr, S>;
 
 pub struct PageCtrl {
     pml4: NonNull<PageTable<level::Pml4>>,
@@ -87,6 +87,16 @@ pub fn init_paging(vm_offset: VAddr) {
     tracing::trace!(present_entries);
 }
 
+#[inline(always)]
+pub fn kernel_paddr_of<A>(it: A) -> PAddr
+where
+    VAddr: From<A>,
+{
+    let vaddr = VAddr::from(it);
+    let paddr = vaddr.as_usize() + vm_offset().as_usize();
+    PAddr::from_u64(paddr as u64)
+}
+
 /// This value should only be set once, early in the kernel boot process before
 /// we have access to multiple cores. So, technically, it could be a `static
 /// mut`. But, using an atomic is safe, even though it's not strictly necessary.
@@ -146,12 +156,14 @@ where
         tracing::debug!(?page_table);
 
         let entry = &mut page_table[virt];
+        tracing::trace!(?entry);
         assert!(
             !entry.is_present(),
             "mapped page table entry already in use"
         );
         assert!(!entry.is_huge(), "huge bit should not be set for 4KB entry");
         let entry = entry.set_phys_page(phys).set_present(true);
+        tracing::trace!(?entry, "flags set");
         page::Handle::new(virt, entry)
     }
 
@@ -260,10 +272,10 @@ impl TranslateAddr for PageTable<level::Pdpt> {
 }
 
 impl<R: level::Recursive> PageTable<R> {
-    #[inline(always)]
-    fn next_table_ptr<S: Size>(&self, idx: VirtPage<S>) -> Option<NonNull<PageTable<R::Next>>> {
+    #[inline]
+    fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
         let span = tracing::debug_span!(
-            "next_table_ptr",
+            "next_table",
             ?idx,
             self.level = %R::NAME,
             next.level = %<R::Next>::NAME,
@@ -287,19 +299,48 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
-        NonNull::new(vaddr.as_ptr())
-    }
-
-    #[inline]
-    // #[tracing::instrument(skip(self))]
-    fn next_table<S: Size>(&self, idx: VirtPage<S>) -> Option<&PageTable<R::Next>> {
-        Some(unsafe { &*self.next_table_ptr(idx)?.as_ptr() })
+        Some(unsafe { &*NonNull::new(vaddr.as_ptr())?.as_ptr() })
     }
 
     #[inline]
     #[tracing::instrument(skip(self))]
     fn next_table_mut<S: Size>(&mut self, idx: VirtPage<S>) -> Option<&mut PageTable<R::Next>> {
-        Some(unsafe { &mut *self.next_table_ptr(idx)?.as_ptr() })
+        let span = tracing::debug_span!(
+            "next_table_mut",
+            ?idx,
+            self.level = %R::NAME,
+            next.level = %<R::Next>::NAME,
+            self.addr = ?&self as *const _,
+        );
+        let _e = span.enter();
+        let entry = &mut self[idx];
+        tracing::trace!(?entry);
+        if !entry.is_present() {
+            tracing::debug!("entry not present!");
+            return None;
+        }
+        // XXX(eliza): should we have a different return type to distinguish
+        // between "the entry is huge, so you stop the page table walk" and "the entry is not
+        // present"? we definitely should...
+        if entry.is_huge() {
+            tracing::debug!("page is hudge!");
+            return None;
+        }
+
+        // If we are going to mutate the page table, make sure it's writable.
+        if !entry.is_writable() {
+            tracing::debug!("making page writable");
+            entry.set_writable(true);
+            unsafe {
+                tlb::flush_page(idx.base_addr());
+            }
+        }
+
+        let vaddr = R::Next::table_addr(idx.base_addr());
+        tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
+        // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
+        // all this, the next table address is null...we're probably pretty fucked!
+        Some(unsafe { &mut *NonNull::new(vaddr.as_ptr())?.as_ptr() })
     }
 
     fn create_next_table<S: Size>(
@@ -349,7 +390,7 @@ impl<R: level::Recursive> PageTable<R> {
             .set_next_table(table)
             .set_present(true)
             .set_writable(true);
-        tracing::trace!("set entry to point at new page table");
+        tracing::trace!(?entry, "set entry to point at new page table");
         unsafe { &mut *table }
     }
 }
@@ -602,7 +643,7 @@ impl<L: Level> fmt::Debug for Entry<L> {
         f.debug_struct("Entry")
             .field("level", &format_args!("{}", L::NAME))
             .field("addr", &self.phys_addr())
-            .field("flags", &FmtFlags(&self))
+            .field("flags", &FmtFlags(self))
             .finish()
     }
 }
@@ -852,6 +893,7 @@ pub(crate) mod tlb {
     // XXX(eliza): can/should this be feature flagged? do we care at all about
     // supporting 80386s from 1985?
     pub(crate) unsafe fn flush_page(addr: VAddr) {
+        tracing::trace!(?addr, "flush_page");
         asm!("invlpg [{0}]", in(reg) addr.as_usize() as u64);
     }
 }
@@ -883,12 +925,19 @@ mycelium_util::decl_test! {
 
 mycelium_util::decl_test! {
     fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
-        let ctrl = PageCtrl::current();
+        let mut ctrl = PageCtrl::current();
+
+        // We shouldn't need to allocate page frames for this test.
+        let mut frame_alloc = page::EmptyAlloc::default();
+        let actual_frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
+        unsafe {
+            let mut flags = ctrl.identity_map(actual_frame, &mut frame_alloc);
+            flags.set_writable(true);
+            flags.commit()
+        };
 
         let page = VirtPage::<Size4Kb>::containing_fixed(VAddr::from_usize(0xb8000));
-
         let frame = ctrl.translate_page(page).expect("translate");
-        let actual_frame = PhysPage::<Size4Kb>::containing_fixed(PAddr::from_usize(0xb8000));
         tracing::info!(?page, ?frame, "translated");
         assert_eq!(frame, actual_frame, "identity mapped address should translate to itself");
         Ok(())

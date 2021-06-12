@@ -69,13 +69,6 @@ pub fn init<H: Handlers<Registers>>() -> Control {
         IDT.enable();
     }
 
-    tracing::debug!("testing interrupts...");
-    unsafe {
-        asm!("int {0}", const 69);
-    }
-    // loop {}
-    tracing::debug!("it worked");
-
     unsafe { &mut IDT }
 }
 
@@ -83,7 +76,7 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
     type Registers = Registers;
 
     fn registers(&self) -> &Registers {
-        &self.registers
+        self.registers
     }
 
     /// # Safety
@@ -231,6 +224,10 @@ impl fmt::Display for Registers {
         writeln!(f, "  ss:    {:?}", self.stack_segment)?;
         Ok(())
     }
+}
+
+pub fn fire_test_interrupt() {
+    unsafe { asm!("int {0}", const 69) }
 }
 
 #[cfg(test)]

@@ -1,53 +1,54 @@
-use bootloader::bootinfo;
+use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
 
+#[cfg(test)]
+use core::{ptr, sync::atomic::AtomicPtr};
+
+pub type MinPageSize = mm::size::Size4Kb;
+
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct RustbootBootInfo {
-    inner: &'static bootinfo::BootInfo,
+    inner: &'static boot_info::BootInfo,
 }
 
-type MemRegionIter = core::slice::Iter<'static, bootinfo::MemoryRegion>;
+type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
     // TODO(eliza): implement
-    type MemoryMap = core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region>;
+    type MemoryMap = core::iter::Map<MemRegionIter, fn(&boot_info::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
-        fn convert_region_kind(kind: bootinfo::MemoryRegionType) -> mem::RegionKind {
+        fn convert_region_kind(kind: boot_info::MemoryRegionKind) -> mem::RegionKind {
             match kind {
-                bootinfo::MemoryRegionType::Usable => mem::RegionKind::FREE,
-                bootinfo::MemoryRegionType::InUse => mem::RegionKind::USED,
-                bootinfo::MemoryRegionType::Reserved => mem::RegionKind::USED,
-                bootinfo::MemoryRegionType::AcpiReclaimable => mem::RegionKind::BOOT_RECLAIMABLE,
-                bootinfo::MemoryRegionType::BadMemory => mem::RegionKind::BAD,
-                bootinfo::MemoryRegionType::Kernel => mem::RegionKind::KERNEL,
-                bootinfo::MemoryRegionType::KernelStack => mem::RegionKind::KERNEL,
-                bootinfo::MemoryRegionType::PageTable => mem::RegionKind::PAGE_TABLE,
-                bootinfo::MemoryRegionType::Bootloader => mem::RegionKind::BOOT,
-                bootinfo::MemoryRegionType::BootInfo => mem::RegionKind::BOOT,
+                boot_info::MemoryRegionKind::Usable => mem::RegionKind::FREE,
+                // TODO(eliza): make known
+                boot_info::MemoryRegionKind::UnknownUefi(_) => mem::RegionKind::UNKNOWN,
+                boot_info::MemoryRegionKind::UnknownBios(_) => mem::RegionKind::UNKNOWN,
+                boot_info::MemoryRegionKind::Bootloader => mem::RegionKind::BOOT,
                 _ => mem::RegionKind::UNKNOWN,
             }
         }
 
-        fn convert_region(region: &bootinfo::MemoryRegion) -> mem::Region {
-            let start = PAddr::from_u64(region.range.start_addr());
+        fn convert_region(region: &boot_info::MemoryRegion) -> mem::Region {
+            let start = PAddr::from_u64(region.start);
             let size = {
-                let end = PAddr::from_u64(region.range.end_addr()).offset(1);
-                assert!(start < end, "bad memory range from bootinfo!");
+                let end = PAddr::from_u64(region.end).offset(1);
+                assert!(start < end, "bad memory range from boot_info!");
                 let size = start.difference(end);
                 assert!(size >= 0);
                 size as usize + 1
             };
-            let kind = convert_region_kind(region.region_type);
+            let kind = convert_region_kind(region.kind);
             mem::Region::new(start, size, kind)
         }
-        (&self.inner.memory_map[..]).iter().map(convert_region)
+        (&self.inner.memory_regions[..]).iter().map(convert_region)
     }
 
     fn writer(&self) -> Self::Writer {
@@ -71,9 +72,16 @@ impl BootInfo for RustbootBootInfo {
 
 impl RustbootBootInfo {
     fn vm_offset(&self) -> VAddr {
-        VAddr::from_u64(self.inner.physical_memory_offset)
+        VAddr::from_u64(
+            self.inner
+                .physical_memory_offset
+                .into_option()
+                .expect("haha wtf"),
+        )
     }
 }
+
+static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
 pub(crate) struct InterruptHandlers;
@@ -131,15 +139,30 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
     where
         C: hal_core::interrupt::ctx::Context<Registers = X64Registers>,
     {
-        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
+        let fired = TEST_INTERRUPT_WAS_FIRED.fetch_add(1, Ordering::Release) + 1;
+        tracing::info!(registers = ?cx.registers(), fired, "lol im in ur test interrupt");
     }
 }
 
-#[no_mangle]
 #[cfg(target_os = "none")]
-pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
-    let bootinfo = RustbootBootInfo { inner: info };
-    crate::kernel_main(&bootinfo);
+bootloader::entry_point!(arch_entry);
+
+pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
+    unsafe {
+        cpu::intrinsics::cli();
+    }
+    if let Some(offset) = info.physical_memory_offset.into_option() {
+        // Safety: i hate everything
+        unsafe {
+            vga::init_with_offset(offset);
+        }
+    }
+    /* else {
+        // lol we're hosed
+    } */
+
+    let boot_info = RustbootBootInfo { inner: info };
+    crate::kernel_main(&boot_info);
 }
 
 #[cold]
@@ -190,11 +213,97 @@ pub fn oops(
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
     #[cfg(test)]
-    qemu_exit(QemuExitCode::Failed);
+    {
+        if let Some(test) = ptr::NonNull::new(CURRENT_TEST.load(Ordering::Acquire)) {
+            if let Some(com1) = serial::com1() {
+                let test = unsafe { test.as_ref() };
+                let failure = if fault.is_some() {
+                    mycotest::Failure::Fault
+                } else {
+                    mycotest::Failure::Panic
+                };
+                writeln!(
+                    &mut com1.lock(),
+                    "{} {} {} {}",
+                    mycotest::FAIL_TEST,
+                    failure.as_str(),
+                    test.module,
+                    test.name
+                )
+                .expect("serial write failed");
+            }
+        }
+        qemu_exit(QemuExitCode::Failed);
+    }
 
     #[cfg(not(test))]
     unsafe {
         cpu::halt();
+    }
+}
+
+#[cfg(test)]
+static CURRENT_TEST: AtomicPtr<mycelium_util::testing::Test> = AtomicPtr::new(ptr::null_mut());
+
+// TODO(eliza): this is now in arch because it uses the serial port, would be
+// nice if that was cross platform...
+#[cfg(test)]
+pub fn run_tests() {
+    use core::fmt::Write;
+    let span = tracing::info_span!("run tests");
+    let _enter = span.enter();
+
+    let mut passed = 0;
+    let mut failed = 0;
+    let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
+    let tests = mycelium_util::testing::all_tests();
+    writeln!(&mut com1.lock(), "{}{}", mycotest::TEST_COUNT, tests.len())
+        .expect("serial write failed");
+    for test in tests {
+        CURRENT_TEST.store(test as *const _ as *mut _, Ordering::Release);
+
+        writeln!(
+            &mut com1.lock(),
+            "{}{} {}",
+            mycotest::START_TEST,
+            test.module,
+            test.name
+        )
+        .expect("serial write failed");
+
+        let span = tracing::info_span!("test", test.name, test.module);
+        let _enter = span.enter();
+
+        if (test.run)() {
+            writeln!(
+                &mut com1.lock(),
+                "{}{} {}",
+                mycotest::PASS_TEST,
+                test.module,
+                test.name
+            )
+            .expect("serial write failed");
+            passed += 1;
+        } else {
+            writeln!(
+                &mut com1.lock(),
+                "{}{} {}",
+                mycotest::FAIL_TEST,
+                test.module,
+                test.name
+            )
+            .expect("serial write failed");
+            failed += 1;
+        }
+    }
+
+    CURRENT_TEST.store(ptr::null_mut(), Ordering::Release);
+
+    tracing::warn!("{} passed | {} failed", passed, failed);
+    if failed == 0 {
+        qemu_exit(QemuExitCode::Success);
+    } else {
+        qemu_exit(QemuExitCode::Failed);
     }
 }
 
@@ -217,6 +326,22 @@ pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
 
         // If the previous line didn't immediately trigger shutdown, hang.
         cpu::halt()
+    }
+}
+
+mycelium_util::decl_test! {
+    fn interrupts_work() -> Result<(), &'static str> {
+        let test_interrupt_fires = TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire);
+
+        tracing::debug!("testing interrupts...");
+        interrupt::fire_test_interrupt();
+        tracing::debug!("it worked");
+
+        if TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire) != test_interrupt_fires + 1 {
+            Err("test interrupt wasn't fired")
+        } else {
+            Ok(())
+        }
     }
 }
 

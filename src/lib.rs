@@ -12,7 +12,7 @@ use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 use mycelium_alloc::buddy;
 
-mod wasm;
+// mod wasm;
 
 static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
 
@@ -74,30 +74,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     }
 
     #[cfg(test)]
-    {
-        let span = tracing::info_span!("run tests");
-        let _enter = span.enter();
-
-        let mut passed = 0;
-        let mut failed = 0;
-        for test in mycelium_util::testing::all_tests() {
-            let span = tracing::info_span!("test", test.name, test.module);
-            let _enter = span.enter();
-
-            if (test.run)() {
-                passed += 1;
-            } else {
-                failed += 1;
-            }
-        }
-
-        tracing::warn!("{} passed | {} failed", passed, failed);
-        if failed == 0 {
-            arch::qemu_exit(arch::QemuExitCode::Success);
-        } else {
-            arch::qemu_exit(arch::QemuExitCode::Failed);
-        }
-    }
+    arch::run_tests();
 
     // if this function returns we would boot loop. Hang, instead, so the debug
     // output can be read.
@@ -123,12 +100,25 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
-    fn wasm_hello_world() -> Result<(), wasmi::Error> {
-        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
-        wasm::run_wasm(HELLOWORLD_WASM)
-    }
-}
+// mycelium_util::decl_test! {
+//     fn wasm_hello_world() -> Result<(), wasmi::Error> {
+//         // use hal_core::{VAddr, Address, mem::page::{self, Map}};
+//         // use arch::mm::{self, PageCtrl, PhysPage};
+
+//         const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+
+//         // // Make sure the goddamn wasm module is actually mapped lol.
+//         // let addr = mm::kernel_paddr_of(VAddr::from_usize(&HELLOWORLD_WASM as *const _ as usize));
+//         // tracing::info!(?addr, "page mapping wasm module");
+
+//         // let mut ctrl = PageCtrl::current();
+//         // let page = PhysPage::<arch::mm::size::Size2Mb>::containing_fixed(addr);
+//         // ctrl.identity_map(page, &mut page::EmptyAlloc::default()).commit();
+//         // tracing::info!("wasmodule mapped");
+
+//         wasm::run_wasm(HELLOWORLD_WASM)
+//     }
+// }
 
 #[global_allocator]
 #[cfg(target_os = "none")]
