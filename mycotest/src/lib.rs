@@ -4,7 +4,6 @@
 //! have the kernel write the wrong strings (which I did lol).
 
 #![no_std]
-
 pub const TEST_COUNT: &str = "MYCELIUM_TEST_COUNT:";
 pub const START_TEST: &str = "MYCELIUM_TEST_START:";
 pub const FAIL_TEST: &str = "MYCELIUM_TEST_FAIL:";
@@ -27,6 +26,16 @@ pub enum Outcome {
     Fail,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Failure {
+    Fail,
+    Panic,
+    Fault,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ParseError(&'static str);
+
 impl<'a, S> Test<'a, S>
 where
     S: AsRef<str>,
@@ -45,17 +54,19 @@ impl<'a> Test<'a> {
         Self::parse(line.strip_prefix(START_TEST)?)
     }
 
-    pub fn parse_outcome(line: &'a str) -> Option<(Self, Outcome)> {
+    pub fn parse_outcome(line: &'a str) -> Option<(Self, Result<(), Failure>)> {
         let line = line.strip_prefix("MYCELIUM_TEST_")?;
         let (line, result) = if let Some(line) = line.strip_prefix("PASS:") {
-            (line, Outcome::Pass)
+            (line, Ok(()))
         } else if let Some(line) = line.strip_prefix("FAIL:") {
-            (line, Outcome::Fail)
+            let failure = line.parse::<Failure>().ok()?;
+            let line = line.strip_prefix(failure.as_str())?;
+            (line, Err(failure))
         } else {
             return None;
         };
-        let test = Self::parse(line)?;
-        Some((test, result))
+
+        Some((Self::parse(line)?, result))
     }
 
     #[cfg(feature = "alloc")]
@@ -97,5 +108,37 @@ impl<S: Ord> cmp::Ord for Test<'_, S> {
 impl<S: fmt::Display> fmt::Display for Test<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}::{}", self.module, self.name)
+    }
+}
+
+// === impl Failure ===
+
+impl core::str::FromStr for Failure {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            s if s.eq_ignore_ascii_case("panic") => Ok(Self::Panic),
+            s if s.eq_ignore_ascii_case("fail") => Ok(Self::Fail),
+            s if s.eq_ignore_ascii_case("fault") => Ok(Self::Fault),
+            _ => Err(ParseError(
+                "invalid failure kind: expected one of `panic`, `fail`, or `fault`",
+            )),
+        }
+    }
+}
+
+impl Failure {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Failure::Fail => "fail",
+            Failure::Fault => "fault",
+            Failure::Panic => "panic",
+        }
+    }
+}
+
+impl fmt::Display for Failure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad(self.as_str())
     }
 }

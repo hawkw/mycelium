@@ -4,7 +4,7 @@ use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
 };
-use mycotest::{Outcome, Test};
+use mycotest::Test;
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
@@ -302,9 +302,17 @@ impl TestResults {
                         );
 
                         match outcome {
-                            Outcome::Pass => eprintln!(" {}", "ok".style(green)),
-                            Outcome::Fail => {
+                            Ok(()) => eprintln!(" {}", "ok".style(green)),
+                            Err(mycotest::Failure::Fail) => {
                                 eprintln!(" {}", "not ok!".style(red));
+                                results.failed.insert(test.to_static(), curr_output);
+                            }
+                            Err(mycotest::Failure::Panic) => {
+                                eprintln!(" {}", "PANIC".style(red));
+                                results.failed.insert(test.to_static(), curr_output);
+                            }
+                            Err(mycotest::Failure::Fault) => {
+                                eprintln!(" {}", "FAULT".style(red));
                                 results.failed.insert(test.to_static(), curr_output);
                             }
                         }

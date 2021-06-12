@@ -148,6 +148,9 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
 bootloader::entry_point!(arch_entry);
 
 pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
+    unsafe {
+        cpu::intrinsics::cli();
+    }
     if let Some(offset) = info.physical_memory_offset.into_option() {
         // Safety: i hate everything
         unsafe {
@@ -214,10 +217,16 @@ pub fn oops(
         if let Some(test) = ptr::NonNull::new(CURRENT_TEST.load(Ordering::Acquire)) {
             if let Some(com1) = serial::com1() {
                 let test = unsafe { test.as_ref() };
+                let failure = if fault.is_some() {
+                    mycotest::Failure::Fault
+                } else {
+                    mycotest::Failure::Panic
+                };
                 writeln!(
                     &mut com1.lock(),
-                    "{} {} {}",
+                    "{} {} {} {}",
                     mycotest::FAIL_TEST,
+                    failure.as_str(),
                     test.module,
                     test.name
                 )
