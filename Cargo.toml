@@ -46,9 +46,14 @@ features = ["attributes"]
 
 [dependencies.wasmi]
 git = "https://github.com/mystor/wasmi"
-branch = "mycelium"
+branch = "mycelium-v0.9.0"
 default-features = false
 features = ["core"]
+
+[dependencies.parity-wasm]
+version = "0.42"
+default-features = false
+features = ["reduced-stack-buffer"]
 
 [build-dependencies]
 wat = "1.0"
