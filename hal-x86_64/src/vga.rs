@@ -21,7 +21,6 @@ pub fn writer() -> Writer {
 /// fuck off
 pub unsafe fn init_with_offset(offset: u64) {
     // lmao
-    BUFFER.force_unlock();
     BUFFER.lock().buf = &mut *((0xb8000u64 + offset) as *mut Buf);
 }
 
