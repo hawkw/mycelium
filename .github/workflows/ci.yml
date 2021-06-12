@@ -43,23 +43,17 @@ jobs:
         args: --all --all-features
 
   build-x64:
-    name: cargo bootimage (cross x64)
+    name: build boot image (x86_64)
     runs-on: ubuntu-latest
     needs: check-host
     steps:
     - name: install rust toolchain
       run: rustup show
-    - name: install cargo-bootimage
-      uses: actions-rs/install@v0.1.2
-      with:
-        crate: bootimage
-        version: latest
-        use-tool-cache: true
     - uses: actions/checkout@v2
     - name: x86_64 boot image
       uses: actions-rs/cargo@v1.0.1
       with:
-        command: bootimage-x64
+        command: build-x64
 
   test-x64:
     name: cargo test (cross x64)
@@ -68,12 +62,6 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - name: install cargo-bootimage
-      uses: actions-rs/install@v0.1.2
-      with:
-        crate: bootimage
-        version: latest
-        use-tool-cache: true
     - uses: actions/checkout@v2
     - name: install qemu
       run: |
