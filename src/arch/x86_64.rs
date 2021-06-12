@@ -7,6 +7,8 @@ pub use hal_x86_64::{interrupt, mm, NAME};
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};
 
+pub type MinPageSize = mm::size::Size4Kb;
+
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct RustbootBootInfo {
@@ -79,6 +81,8 @@ impl RustbootBootInfo {
     }
 }
 
+static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
+
 pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
 pub(crate) struct InterruptHandlers;
 
@@ -135,7 +139,8 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
     where
         C: hal_core::interrupt::ctx::Context<Registers = X64Registers>,
     {
-        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
+        let fired = TEST_INTERRUPT_WAS_FIRED.fetch_add(1, Ordering::Release) + 1;
+        tracing::info!(registers = ?cx.registers(), fired, "lol im in ur test interrupt");
     }
 }
 
@@ -315,6 +320,22 @@ pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
 
         // If the previous line didn't immediately trigger shutdown, hang.
         cpu::halt()
+    }
+}
+
+mycelium_util::decl_test! {
+    fn interrupts_work() -> Result<(), &'static str> {
+        let test_interrupt_fires = TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire);
+
+        tracing::debug!("testing interrupts...");
+        interrupt::fire_test_interrupt();
+        tracing::debug!("it worked");
+
+        if TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire) != test_interrupt_fires + 1 {
+            Err("test interrupt wasn't fired")
+        } else {
+            Ok(())
+        }
     }
 }
 
