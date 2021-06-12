@@ -139,9 +139,10 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
     }
 }
 
+#[cfg(target_os = "none")]
 bootloader::entry_point!(arch_entry);
 
-fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
+pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
     unsafe {
         cpu::intrinsics::cli();
     }
