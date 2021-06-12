@@ -86,9 +86,17 @@ impl Cmd {
                 tracing::debug!("running normally with `--serial`, will not capture");
                 false
             }
-            Cmd::Test { qemu_settings, .. } | Cmd::Run { qemu_settings, .. } => {
-                qemu_settings.should_capture()
+            Cmd::Run { qemu_settings, .. }
+                if qemu_settings
+                    .qemu_args
+                    .iter()
+                    .map(String::as_str)
+                    .any(|s| s == "-d") =>
+            {
+                tracing::debug!("qemu args contains a `-d` flag, skipping capturing");
+                false
             }
+            _ => true,
         }
     }
 
@@ -232,15 +240,6 @@ impl Cmd {
 }
 
 impl Settings {
-    fn should_capture(&self) -> bool {
-        if self.qemu_args.iter().map(String::as_str).any(|s| s == "-d") {
-            tracing::debug!("qemu args contains a `-d` flag, skipping capturing");
-            return false;
-        }
-
-        true
-    }
-
     fn configure(&self, cmd: &mut Command) {
         if self.gdb {
             tracing::debug!(gdb_port = self.gdb_port, "configured QEMU to wait for GDB");
