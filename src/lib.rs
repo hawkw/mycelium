@@ -12,7 +12,7 @@ use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 use mycelium_alloc::buddy;
 
-mod wasm;
+// mod wasm;
 
 static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
 
