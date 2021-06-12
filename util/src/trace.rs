@@ -14,7 +14,6 @@ where
 ///
 /// # Examples
 /// ```
-/// panic!("lol");
 /// use mycelium_util::trace;
 /// use tracing::debug;
 ///
