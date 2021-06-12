@@ -256,6 +256,10 @@ macro_rules! impl_addrs {
             }
 
             impl $name {
+                pub const fn zero() -> Self {
+                    Self(0)
+                }
+
                 /// # Panics
                 ///
                 /// * If debug assertions are enabled and the address is not
@@ -375,6 +379,11 @@ impl VAddr {
         }
 
         Ok(Self(u))
+    }
+
+    #[inline]
+    pub fn of<T: ?Sized>(pointee: &T) -> Self {
+        Self::from_usize(pointee as *const _ as *const () as usize)
     }
 }
 
