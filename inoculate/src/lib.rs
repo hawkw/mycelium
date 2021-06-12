@@ -64,10 +64,7 @@ pub struct Options {
 
 impl Options {
     pub fn is_test(&self) -> bool {
-        match self.qemu {
-            Some(qemu::Cmd::Test { .. }) => true,
-            _ => false,
-        }
+        matches!(self.qemu, Some(qemu::Cmd::Test { .. }))
     }
 
     pub fn wheres_bootloader(&self) -> Result<PathBuf> {

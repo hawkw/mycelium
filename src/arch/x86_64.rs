@@ -1,11 +1,11 @@
 use bootloader::boot_info;
-use core::{
-    ptr,
-    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
-};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
+
+#[cfg(test)]
+use core::{ptr, sync::atomic::AtomicPtr};
 
 #[derive(Debug)]
 #[repr(transparent)]

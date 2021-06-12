@@ -83,7 +83,7 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
     type Registers = Registers;
 
     fn registers(&self) -> &Registers {
-        &self.registers
+        self.registers
     }
 
     /// # Safety

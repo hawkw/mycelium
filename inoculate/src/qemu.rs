@@ -170,7 +170,7 @@ impl Cmd {
                         .spawn()
                         .context("spawning QEMU with captured stdout failed")?;
                     let stdout = child.stdout.take().expect("wtf");
-                    eprintln!("");
+                    eprintln!();
                     let stdout = std::thread::spawn(move || TestResults::watch_tests(stdout));
                     (child, Some(stdout))
                 } else {

@@ -17,8 +17,8 @@ use hal_core::{
 pub const MIN_PAGE_SIZE: usize = Size4Kb::SIZE;
 const ENTRIES: usize = 512;
 
-type VirtPage<S> = Page<VAddr, S>;
-type PhysPage<S> = Page<PAddr, S>;
+pub type VirtPage<S> = Page<VAddr, S>;
+pub type PhysPage<S> = Page<PAddr, S>;
 
 pub struct PageCtrl {
     pml4: NonNull<PageTable<level::Pml4>>,
@@ -633,7 +633,7 @@ impl<L: Level> fmt::Debug for Entry<L> {
         f.debug_struct("Entry")
             .field("level", &format_args!("{}", L::NAME))
             .field("addr", &self.phys_addr())
-            .field("flags", &FmtFlags(&self))
+            .field("flags", &FmtFlags(self))
             .finish()
     }
 }

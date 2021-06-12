@@ -2,7 +2,6 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![cfg_attr(target_os = "none", feature(panic_info_message))]
-#![cfg_attr(target_os = "none", feature(asm))]
 
 extern crate alloc;
 extern crate rlibc;
@@ -17,7 +16,6 @@ mod wasm;
 
 static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
 
-#[inline]
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
@@ -102,12 +100,12 @@ mycelium_util::decl_test! {
     }
 }
 
-// mycelium_util::decl_test! {
-//     fn wasm_hello_world() -> Result<(), wasmi::Error> {
-//         const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
-//         wasm::run_wasm(HELLOWORLD_WASM)
-//     }
-// }
+mycelium_util::decl_test! {
+    fn wasm_hello_world() -> Result<(), wasmi::Error> {
+        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+        wasm::run_wasm(HELLOWORLD_WASM)
+    }
+}
 
 #[global_allocator]
 #[cfg(target_os = "none")]

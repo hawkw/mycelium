@@ -57,7 +57,6 @@ wat = "1.0"
 map-physical-memory = true
 map-page-table-recursively = true
 map-framebuffer = true
-physical-memory-offset = 0x0000_4000_0000_0000
 
 [package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
 memcpy = true
