@@ -176,6 +176,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "downcast-rs"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
+
+[[package]]
 name = "eyre"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -311,9 +317,9 @@ checksum = "18794a8ad5b29321f790b55d93dfba91e125cb1a9edbd4f8e3150acc771c1a5e"
 
 [[package]]
 name = "libm"
-version = "0.1.4"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
+checksum = "c7d73b3f436185384286bd8098d17ec07c9a7d2388a6599f824d8502b529702a"
 
 [[package]]
 name = "locate-cargo-manifest"
@@ -394,6 +400,7 @@ dependencies = [
  "mycelium-alloc",
  "mycelium-util",
  "mycotest",
+ "parity-wasm",
  "rlibc",
  "tracing",
  "wasmi",
@@ -473,9 +480,9 @@ checksum = "f2fe43bf372b08cc9ccee5144715db59c79ab00168bbe4cf0d274dc0d5f64d7f"
 
 [[package]]
 name = "parity-wasm"
-version = "0.41.0"
+version = "0.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddfc878dac00da22f8f61e7af3157988424567ab01d9920b962ef7dcbd7cd865"
+checksum = "be5e13c266502aadf83426d87d81a0f5d1ef45b8027f5a471c360abfe4bfae92"
 
 [[package]]
 name = "pin-project-lite"
@@ -935,9 +942,10 @@ checksum = "fd6fbd9a79829dd1ad0cc20627bf1ed606756a7f77edff7b66b7064f9cb327c6"
 
 [[package]]
 name = "wasmi"
-version = "0.6.2"
-source = "git+https://github.com/mystor/wasmi?branch=mycelium#134fcd7b4ca71bc173b7f8d83ab867126e2c1677"
+version = "0.9.0"
+source = "git+https://github.com/mystor/wasmi?branch=mycelium-v0.9.0#4a97fd6005bf6f10c753178f69cd60290f485973"
 dependencies = [
+ "downcast-rs",
  "libc",
  "libm",
  "memory_units",
@@ -949,8 +957,8 @@ dependencies = [
 
 [[package]]
 name = "wasmi-validation"
-version = "0.3.0"
-source = "git+https://github.com/mystor/wasmi?branch=mycelium#134fcd7b4ca71bc173b7f8d83ab867126e2c1677"
+version = "0.4.0"
+source = "git+https://github.com/mystor/wasmi?branch=mycelium-v0.9.0#4a97fd6005bf6f10c753178f69cd60290f485973"
 dependencies = [
  "parity-wasm",
 ]
