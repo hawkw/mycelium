@@ -221,7 +221,6 @@ impl wasmi::ImportResolver for HostResolver {
 
 pub fn run_wasm(binary: &[u8]) -> Result<(), wasmi::Error> {
     let module = wasmi::Module::from_buffer(binary)?;
-
     // Instantiate the module and it's corresponding `Host` instance.
     let instance = wasmi::ModuleInstance::new(&module, &HostResolver)?;
     let mut host = Host::new(instance.not_started_instance())?;

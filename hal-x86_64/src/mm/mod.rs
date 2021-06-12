@@ -87,6 +87,16 @@ pub fn init_paging(vm_offset: VAddr) {
     tracing::trace!(present_entries);
 }
 
+#[inline(always)]
+pub fn kernel_paddr_of<A>(it: A) -> PAddr
+where
+    VAddr: From<A>,
+{
+    let vaddr = VAddr::from(it);
+    let paddr = vaddr.as_usize() + vm_offset().as_usize();
+    PAddr::from_u64(paddr as u64)
+}
+
 /// This value should only be set once, early in the kernel boot process before
 /// we have access to multiple cores. So, technically, it could be a `static
 /// mut`. But, using an atomic is safe, even though it's not strictly necessary.

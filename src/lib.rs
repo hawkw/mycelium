@@ -100,12 +100,25 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
-    fn wasm_hello_world() -> Result<(), wasmi::Error> {
-        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
-        wasm::run_wasm(HELLOWORLD_WASM)
-    }
-}
+// mycelium_util::decl_test! {
+//     fn wasm_hello_world() -> Result<(), wasmi::Error> {
+//         // use hal_core::{VAddr, Address, mem::page::{self, Map}};
+//         // use arch::mm::{self, PageCtrl, PhysPage};
+
+//         const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+
+//         // // Make sure the goddamn wasm module is actually mapped lol.
+//         // let addr = mm::kernel_paddr_of(VAddr::from_usize(&HELLOWORLD_WASM as *const _ as usize));
+//         // tracing::info!(?addr, "page mapping wasm module");
+
+//         // let mut ctrl = PageCtrl::current();
+//         // let page = PhysPage::<arch::mm::size::Size2Mb>::containing_fixed(addr);
+//         // ctrl.identity_map(page, &mut page::EmptyAlloc::default()).commit();
+//         // tracing::info!("wasmodule mapped");
+
+//         wasm::run_wasm(HELLOWORLD_WASM)
+//     }
+// }
 
 #[global_allocator]
 #[cfg(target_os = "none")]

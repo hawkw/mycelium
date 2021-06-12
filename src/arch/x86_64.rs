@@ -148,9 +148,6 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
 bootloader::entry_point!(arch_entry);
 
 pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
-    unsafe {
-        cpu::intrinsics::cli();
-    }
     if let Some(offset) = info.physical_memory_offset.into_option() {
         // Safety: i hate everything
         unsafe {

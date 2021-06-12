@@ -56,7 +56,7 @@ wat = "1.0"
 [package.metadata.bootloader]
 map-physical-memory = true
 map-page-table-recursively = true
-map-framebuffer = true
+# map-framebuffer = true
 
 [package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
 memcpy = true
