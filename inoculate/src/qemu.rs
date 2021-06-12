@@ -230,7 +230,6 @@ impl Cmd {
                         std::process::exit(1);
                     }
                     Ok(())
-                    // res.with_section(move || stdout.trim().to_string().header("serial output:"))
                 } else {
                     res
                 }

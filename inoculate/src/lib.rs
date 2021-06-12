@@ -143,15 +143,10 @@ impl Options {
             .context("run builder command")?;
         // TODO(eliza): modes for capturing/piping stdout?
 
-        // let stdout = String::from_utf8_lossy(&output.stdout);
-        // if !output.status.success() {
         if !output.success() {
-            // let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format_err!(
                 "bootloader's builder command exited with non-zero status code"
             ))
-            // .with_section(move || stdout.trim().to_string().header("stdout:"))
-            // .with_section(move || stderr.trim().to_string().header("stderr:"))
             .suggestion("if you had gotten all the inputs right, this should have worked");
         }
 
