@@ -31,14 +31,21 @@ fn main() -> Result<()> {
     let kernel_manifest = opts.wheres_the_kernel()?;
     tracing::info!(path = %kernel_manifest.display(), "found kernel manifest");
 
+    let kernel_bin = opts.wheres_the_kernel_bin()?;
+    tracing::info!(path = %kernel_bin.display(), "found kernel binary");
+
     let image = opts
-        .make_image(bootloader_manifest.as_ref(), kernel_manifest.as_ref())
+        .make_image(
+            bootloader_manifest.as_ref(),
+            kernel_manifest.as_ref(),
+            kernel_bin.as_ref(),
+        )
         .context("making the mycelium image didnt work")
         .note("this sucks T_T")?;
     tracing::info!(image = %image.display());
 
     if let Some(qemu) = opts.qemu {
-        return qemu.run_qemu(image.as_ref());
+        return qemu.run_qemu(image.as_ref(), kernel_bin.as_ref());
     }
 
     Ok(())

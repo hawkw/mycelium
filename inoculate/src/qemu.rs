@@ -10,7 +10,7 @@ use std::{
     ffi::{OsStr, OsString},
     fmt,
     path::Path,
-    process::{Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     time::Duration,
 };
 use structopt::StructOpt;
@@ -101,8 +101,56 @@ impl Cmd {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn run_qemu(&self, image: &Path) -> Result<()> {
-        // TODO(eliza): should we `which qemu` here?
+    fn spawn_qemu(&self, qemu: &mut Command, binary: &Path) -> Result<Child> {
+        let (Cmd::Run { qemu_settings, .. } | Cmd::Test { qemu_settings, .. }) = self;
+
+        if self.should_capture() {
+            qemu.stdout(Stdio::piped()).stderr(Stdio::piped());
+        }
+
+        // if we're running gdb, ensure that qemu doesn't exit, and block qemu
+        // from inheriting stdin, so it's free for gdb to use.
+        if qemu_settings.gdb {
+            qemu.stdin(Stdio::piped()).arg("-no-shutdown");
+        }
+
+        let mut child = qemu.spawn().context("spawning qemu failed")?;
+
+        // If the `--gdb` flag was passed, try to run gdb & connect to the kernel.
+        if qemu_settings.gdb {
+            let mut gdb = Command::new("gdb");
+
+            // Set the file, and connect to the given remote, then advance to `kernel_main`.
+            //
+            // The `-ex` command provides a gdb command to which is run by gdb
+            // before handing control over to the user, and we can use it to
+            // configure the gdb session to connect to the gdb remote.
+            gdb.arg("-ex").arg(format!("file {}", binary.display()));
+            gdb.arg("-ex")
+                .arg(format!("target remote :{}", qemu_settings.gdb_port));
+
+            // Set a temporary breakpoint on `kernel_main` and continue to it to
+            // skip the non-mycelium boot process.
+            // XXX: Add a flag to skip doing this to allow debugging the boot process.
+            gdb.arg("-ex").arg("tbreak mycelium_kernel::kernel_main");
+            gdb.arg("-ex").arg("continue");
+
+            // Try to run gdb, and immediately kill qemu after gdb either exits
+            // or fails to spawn.
+            let status = gdb.status();
+            if let Err(_) = child.kill() {
+                tracing::error!("failed to kill qemu");
+            }
+
+            let status = status.context("starting gdb failed")?;
+            tracing::debug!("gdb exited with status {:?}", status);
+        }
+
+        Ok(child)
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn run_qemu(&self, image: &Path, binary: &Path) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
             .arg(format!("format=raw,file={}", image.display()))
@@ -122,10 +170,10 @@ impl Cmd {
                 qemu_settings.configure(&mut qemu);
                 qemu.arg("--no-shutdown");
 
-                // Run qemu
-                if self.should_capture() {
+                let mut child = self.spawn_qemu(&mut qemu, binary)?;
+                if child.stdout.is_some() {
                     tracing::debug!("should capture qemu output");
-                    let out = qemu.output()?;
+                    let out = child.wait_with_output()?;
                     if out.status.success() {
                         return Ok(());
                     }
@@ -139,7 +187,7 @@ impl Cmd {
                         .with_section(move || stderr.trim().to_string().header("stderr:"))
                 } else {
                     tracing::debug!("not capturing qemu output");
-                    let status = qemu.status()?;
+                    let status = child.wait()?;
                     if status.success() {
                         return Ok(());
                     }
@@ -170,23 +218,11 @@ impl Cmd {
                 qemu_settings.configure(&mut qemu);
                 qemu.args(TEST_ARGS);
 
-                let (mut child, stdout) = if self.should_capture() {
-                    tracing::debug!("capturing QEMU stdout");
-                    let mut child = qemu
-                        .stdout(Stdio::piped())
-                        .stderr(Stdio::piped())
-                        .spawn()
-                        .context("spawning QEMU with captured stdout failed")?;
-                    let stdout = child.stdout.take().expect("wtf");
-                    eprintln!();
-                    let stdout = std::thread::spawn(move || TestResults::watch_tests(stdout));
-                    (child, Some(stdout))
-                } else {
-                    let child = qemu
-                        .spawn()
-                        .context("spawning QEMU without captured stdout failed")?;
-                    (child, None)
-                };
+                let mut child = self.spawn_qemu(&mut qemu, binary)?;
+                let stdout = child
+                    .stdout
+                    .take()
+                    .map(|stdout| std::thread::spawn(move || TestResults::watch_tests(stdout)));
 
                 let res = match child
                     .wait_timeout(*timeout_secs)
@@ -242,7 +278,9 @@ impl Settings {
     fn configure(&self, cmd: &mut Command) {
         if self.gdb {
             tracing::debug!(gdb_port = self.gdb_port, "configured QEMU to wait for GDB");
-            cmd.arg("-s").arg("--gdb").arg(format!("tcp::{}", self.gdb));
+            cmd.arg("-S")
+                .arg("-gdb")
+                .arg(format!("tcp::{}", self.gdb_port));
         }
 
         cmd.args(&self.qemu_args[..]);
