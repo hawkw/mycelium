@@ -381,6 +381,23 @@ impl VAddr {
         Ok(Self(u))
     }
 
+    /// Constructs a `VAddr` from an arbitrary `usize` value *without* checking
+    /// if it's valid.
+    ///
+    /// Pros of this function:
+    /// - can be used in const-eval contexts
+    ///
+    /// Cons of this function:
+    /// - "refer to 'Safety' section"
+    ///
+    /// # Safety
+    ///
+    /// u can use dis function to construct invalid addresses. probably dont do
+    /// that.
+    pub const unsafe fn from_usize_unchecked(u: usize) -> Self {
+        Self(u)
+    }
+
     #[inline]
     pub fn of<T: ?Sized>(pointee: &T) -> Self {
         Self::from_usize(pointee as *const _ as *const () as usize)

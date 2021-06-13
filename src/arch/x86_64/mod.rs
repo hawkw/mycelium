@@ -2,7 +2,9 @@ use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
-pub use hal_x86_64::{interrupt, mm, NAME};
+pub use hal_x86_64::{mm, NAME};
+
+pub mod interrupt;
 
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};
@@ -148,9 +150,6 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
 bootloader::entry_point!(arch_entry);
 
 pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
-    unsafe {
-        cpu::intrinsics::cli();
-    }
     if let Some(offset) = info.physical_memory_offset.into_option() {
         // Safety: i hate everything
         unsafe {
