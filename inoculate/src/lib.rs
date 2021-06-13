@@ -90,19 +90,23 @@ impl Options {
             .suggestion("have you tried not having it be missing")
     }
 
+    pub fn wheres_the_kernel_bin(&self) -> Result<PathBuf> {
+        tracing::debug!("where's the kernel binary?");
+        self.kernel_bin
+            // the bootloader crate's build script gets mad if this is a
+            // relative path
+            .canonicalize()
+            .context("couldn't to canonicalize kernel manifest path")
+            .note("it should work")
+    }
+
     pub fn make_image(
         &self,
         bootloader_manifest: &Path,
         kernel_manifest: &Path,
+        kernel_bin: &Path,
     ) -> Result<PathBuf> {
         let _span = tracing::info_span!("make_image").entered();
-        let kernel_bin = self
-            .kernel_bin
-            // the bootloader crate's build script gets mad if this is a
-            // relative pathe
-            .canonicalize()
-            .context("couldn't to canonicalize kernel manifest path")
-            .note("it should work")?;
 
         cargo_log!("Building", "disk image for `{}``s", kernel_bin.display());
 
