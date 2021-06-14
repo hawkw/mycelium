@@ -44,12 +44,60 @@ pub unsafe fn sti() {
     asm!("sti")
 }
 
+/// Perform one x86 `lidt` (*L*oad *I*interrupt *D*escriptor *T*able)
+/// instruction.
+///
+/// `lidt` loads an interrupt descriptor table.
+///
+/// # Safety
+///
+/// - Intrinsics are inherently unsafe — this is just a less ugly way of writing
+///   inline assembly.
+/// - The provided `DtablePtr` must point to a valid IDT.
+/// - The pointed IDT must not be deallocated or overwritten while it is active.
+///
+/// Prefer the higher-level [`interrupt::Idt::load`] API when
+/// possible.
 #[inline(always)]
 pub(crate) unsafe fn lidt(ptr: super::DtablePtr) {
     asm!("lidt [{0}]", in(reg) &ptr)
 }
 
+/// Perform one x86 `lidt` (*L*oad *G*lobal *D*escriptor *T*able)
+/// instruction.
+///
+/// `lgdt` loads a GDT.
+///
+/// # Safety
+///
+/// - Intrinsics are inherently unsafe — this is just a less ugly way of writing
+///   inline assembly.
+/// - The provided `DtablePtr` must point to a valid GDT.
+/// - The pointed IDT must not be deallocated or overwritten while it is active.
+///
+/// Prefer the higher-level [`segment::Gdt::load`] API when possible.
 #[inline(always)]
 pub(crate) unsafe fn lgdt(ptr: super::DtablePtr) {
     asm!("lgdt [{0}]", in(reg) &ptr)
+}
+
+/// Perform one x86 `ltr` (*L*oad *T*ask *R*egister) instruction.
+///
+/// `ltr` loads a [task state segment (TSS)][tss] selector into the current task
+/// register.
+///
+/// # Safety
+///
+/// - Intrinsics are inherently unsafe — this is just a less ugly way of writing
+///   inline assembly.
+/// - The provided [segment selector] must select a task state segment ()
+/// - The pointed TSS must not be deallocated or overwritten while it is active.
+///
+/// Prefer the higher-level [`task::StateSegment::load`] API when possible.
+///
+/// [tss]: crate::task::StateSegment
+/// [segment selector]: crate::segment::Selector
+#[inline(always)]
+pub unsafe fn ltr(sel: crate::segment::Selector) {
+    asm!("lgdt {0:x}", in(reg) sel.bits())
 }
