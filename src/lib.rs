@@ -3,7 +3,8 @@
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![cfg_attr(target_os = "none", feature(panic_info_message))]
 #![allow(unused_unsafe)]
-
+// we need the SPICY version of const-eval apparently
+#![feature(const_raw_ptr_to_usize_cast, const_mut_refs)]
 extern crate alloc;
 extern crate rlibc;
 
@@ -96,7 +97,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         tracing::trace!("hahahaha yayyyy we drew a screen!");
     }
 
-    arch::interrupt::init::<arch::InterruptHandlers>();
+    arch::init_interrupts();
     bootinfo.init_paging();
 
     // XXX(eliza): this sucks

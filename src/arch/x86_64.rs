@@ -25,6 +25,10 @@ use core::{ptr, sync::atomic::AtomicPtr};
 
 pub type MinPageSize = mm::size::Size4Kb;
 
+pub fn init_interrupts() {
+    interrupt::init::<InterruptHandlers>();
+    interrupt::init_gdt();
+}
 #[derive(Debug)]
 pub struct RustbootBootInfo {
     inner: &'static boot_info::BootInfo,
