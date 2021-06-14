@@ -50,7 +50,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
         // Create the descriptor table pointer with *just* the actual table, so
         // that the next push index isn't considered a segment descriptor!
         let ptr = cpu::DtablePtr::new(&self.entries);
-        tracing::trace!(?ptr, "loading GDT...");
+        tracing::trace!(?ptr, "loading GDT");
         unsafe {
             // Safety: the `'static` bound ensures the GDT isn't going away
             // unless you did something really evil.

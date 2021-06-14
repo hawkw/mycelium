@@ -189,7 +189,7 @@ where
             "virtual and physical pages must be the same size"
         );
         for (virt, phys) in (&virt).into_iter().zip(&phys) {
-            tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
+            tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping");
             let mut flags = self.map_page(virt, phys, frame_alloc);
             set_flags(&mut flags);
             flags.commit();
