@@ -365,14 +365,25 @@ impl SystemDescriptor {
         let tss_addr = unsafe {
             // Safety: this is unsafe to do in const fn i guess? idk why but
             // this is probably fine.
-            tss as *const _ as usize
+            tss as *const _ as u64
         };
-        // TODO(eliza): finishme
-        Self { high: 0, low: 0 }
+        let low = DescriptorFlags::PRESENT.bits();
+        // limit (-1 because the bound is inclusive)
+        let low = Descriptor::LIMIT_LOW
+            .pack_truncating((mem::size_of::<task::StateSegment>() - 1) as u64, low);
+        // base addr (low half)
+        let low = Descriptor::BASE_LOW.pack_truncating(base::LOW.unpack(tss_addr), low);
+        // base addr (mid half)
+        let low = Descriptor::BASE_MID.pack_truncating(base::MID.unpack(tss_addr), low);
+        let low = Descriptor::FLAGS.pack_truncating(0b1001, low);
+        let high = Descriptor::BASE_HI.pack_truncating(base::HIGH.unpack(tss_addr), 0);
+
+        Self { high, low }
     }
 }
 
 mod limit {
+    #![allow(dead_code)] // i'll use these later...
     use mycelium_util::bits::Pack64;
     pub(super) const LOW: Pack64 = Pack64::least_significant(16);
     pub(super) const HIGH: Pack64 = LOW.next(4);
