@@ -166,6 +166,11 @@ impl Selector {
         Self::INDEX.pack_into(index, &mut self.0);
         self
     }
+
+    /// Returns this selector's bits as a `u16`.
+    pub(crate) fn bits(self) -> u16 {
+        self.0
+    }
 }
 
 impl fmt::Debug for Selector {
