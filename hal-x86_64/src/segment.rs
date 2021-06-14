@@ -1,6 +1,9 @@
 use crate::{cpu, task};
 use core::{fmt, mem};
-use mycelium_util::bits::{Pack16, Pack64};
+use mycelium_util::{
+    bits::{Pack16, Pack64},
+    trace,
+};
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[repr(transparent)]
@@ -170,6 +173,70 @@ impl Selector {
     /// Returns this selector's bits as a `u16`.
     pub(crate) fn bits(self) -> u16 {
         self.0
+    }
+
+    /// Returns the current selector in the `cs` (code segment) register
+    pub fn cs() -> Self {
+        let sel: u16;
+        unsafe {
+            asm!("mov {0:x}, cs", out(reg) sel, options(nomem, nostack, preserves_flags));
+        }
+        Self(sel)
+    }
+
+    #[inline]
+    pub unsafe fn set_cs(self) {
+        // because x86 is a very well designed and normal CPU architecture, you
+        // can set the value of the `cs` register with a normal `mov`
+        // instruction, just like you can with every other segment register.
+        //
+        // HA HA JUST KIDDING LOL. you can't set the value of `cs` with a `mov`.
+        // the only way to set the value of `cs` is by doing a ljmp, a lcall, or
+        // a lret with a `cs` selector on the stack (or triggering an interrupt).
+        //
+        // a thing i think is very cool about the AMD64 CPU Architecture is how
+        // we have to do all this cool segmentation bullshit in long mode even
+        // though we ... can't ... actually use memory segmentation.
+        //
+        // see https://wiki.osdev.org/Far_Call_Trick
+        tracing::trace!("setting code segment...");
+        asm!(
+            "push {selector}",
+            "lea {retaddr}, [1f + rip]",
+            "push {retaddr}",
+            "retfq",
+            "1:",
+            selector = in(reg) self.0 as u64,
+            retaddr = lateout(reg) _,
+            options(preserves_flags),
+        );
+
+        tracing::trace!(selector = trace::alt(self), "set code segment");
+    }
+
+    pub unsafe fn set_ss(self) {
+        asm!("mov ss, {:x}", in(reg) self.0, options(nostack, preserves_flags));
+        tracing::trace!(selector = trace::alt(self), "set stack segment");
+    }
+
+    pub unsafe fn set_ds(self) {
+        asm!("mov ds, {:x}", in(reg) self.0, options(nostack, preserves_flags));
+        tracing::trace!(selector = trace::alt(self), "set data segment");
+    }
+
+    pub unsafe fn set_es(self) {
+        asm!("mov es, {:x}", in(reg) self.0, options(nostack, preserves_flags));
+        tracing::trace!(selector = trace::alt(self), "set extra segment");
+    }
+
+    pub unsafe fn set_fs(self) {
+        asm!("mov fs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
+        tracing::trace!(selector = trace::alt(self), "set fs");
+    }
+
+    pub unsafe fn set_gs(self) {
+        asm!("mov gs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
+        tracing::trace!(selector = trace::alt(self), "set gs");
     }
 }
 

@@ -101,5 +101,5 @@ pub(crate) unsafe fn lgdt(ptr: super::DtablePtr) {
 /// [GDT]: crate::segment::Gdt
 #[inline(always)]
 pub unsafe fn ltr(sel: crate::segment::Selector) {
-    asm!("lgdt {0:x}", in(reg) sel.bits(), options(nomem, nostack, preserves_flags))
+    asm!("ltr {0:x}", in(reg) sel.bits(), options(nomem, nostack, preserves_flags))
 }

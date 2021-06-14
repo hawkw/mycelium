@@ -1,4 +1,4 @@
-use crate::VAddr;
+use crate::{cpu, segment, VAddr};
 
 /// A 64-bit mode task-state segment (TSS).
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +35,10 @@ impl StateSegment {
     #[inline]
     pub fn iomap_addr(&self) -> VAddr {
         VAddr::of(self).offset(self.iomap_offset as i32)
+    }
+
+    pub unsafe fn load_tss(sel: segment::Selector) {
+        cpu::intrinsics::ltr(sel);
     }
 }
 
