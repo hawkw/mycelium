@@ -12,8 +12,8 @@ use core::{ptr, sync::atomic::AtomicPtr};
 pub type MinPageSize = mm::size::Size4Kb;
 
 pub fn init_interrupts() {
-    interrupt::init::<InterruptHandlers>();
     interrupt::init_gdt();
+    interrupt::init::<InterruptHandlers>();
 }
 #[derive(Debug)]
 #[repr(transparent)]
