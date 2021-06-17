@@ -9,6 +9,7 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+pub mod bits;
 pub mod cell;
 pub mod error;
 pub mod intrusive;
