@@ -136,7 +136,7 @@ use core::{
 };
 
 macro_rules! make_packers {
-    ($(pub struct $name:ident { bits: $bits:ty, packing: $packing:ident })+) => {
+    ($(pub struct $name:ident { bits: $bits:ty, packing: $packing:ident, pair: $ident })+) => {
         $(
 
             #[doc = concat!(
@@ -144,7 +144,7 @@ macro_rules! make_packers {
                 stringify!($bits),
                 "`] values."
             )]
-            #[derive(Copy, Clone, PartialEq)]
+            #[derive(Copy, Clone, PartialEq, Eq)]
             pub struct $name {
                 mask: $bits,
                 shift: u32,
@@ -159,6 +159,13 @@ macro_rules! make_packers {
             )]
             #[derive(Copy, Clone, PartialEq, Eq)]
             pub struct $packing($bits);
+
+            #[derive(Copy, Clone, PartialEq, Eq)]
+            pub struct $pair {
+                src: $name,
+                dst_shl: $bits,
+                dst_shr: $bits,
+            }
 
             impl $name {
                 // XXX(eliza): why is this always `u32`? ask the stdlib i guess...
@@ -272,6 +279,10 @@ macro_rules! make_packers {
                     );
                     Self::starting_at(start, end.saturating_sub(start))
                 }
+
+                pub const fn pair_at(&self, at: u32) -> $pair {
+                    
+                } 
 
                 /// Returns the number of bits needed to pack this value.
                 pub const fn bits(&self) -> u32 {
@@ -487,10 +498,10 @@ macro_rules! make_packers {
 }
 
 make_packers! {
-    pub struct Pack64 { bits: u64, packing: Packing64 }
-    pub struct Pack32 { bits: u32, packing: Packing32 }
-    pub struct Pack16 { bits: u16, packing: Packing16 }
-    pub struct Pack8 { bits: u8, packing: Packing8 }
+    pub struct Pack64 { bits: u64, packing: Packing64, pair: Pair64, }
+    pub struct Pack32 { bits: u32, packing: Packing32, pair: Pair32 }
+    pub struct Pack16 { bits: u16, packing: Packing16, pair: Pair16 }
+    pub struct Pack8 { bits: u8, packing: Packing8, pair: Pair8 }
 }
 
 #[cfg(test)]
