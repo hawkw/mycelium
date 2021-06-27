@@ -1,4 +1,5 @@
 use crate::{cpu, segment};
+use mycelium_util::bits;
 
 #[repr(C)]
 #[repr(align(16))]
@@ -57,18 +58,17 @@ pub enum GateKind {
 }
 
 impl Attrs {
-    const IS_32_BIT: u8 = 0b1000;
-    const KIND_BITS: u8 = GateKind::Interrupt as u8 | GateKind::Trap as u8 | GateKind::Task as u8;
-    const PRESENT_BIT: u8 = 0b1000_0000;
-    const RING_BITS: u8 = 0b0111_0000;
-    const RING_SHIFT: u8 = Self::RING_BITS.trailing_zeros() as u8;
+    const KIND: bits::Pack8 = bits::Pack8::least_significant(3);
+    const IS_32_BIT: bits::Pack8 = Self::KIND.next(1);
+    const RING: bits::Pack8 = Self::IS_32_BIT.next(3);
+    const PRESENT_BIT: bits::Pack8 = Self::RING.next(1);
 
     pub const fn null() -> Self {
         Self(0)
     }
 
     pub fn gate_kind(&self) -> GateKind {
-        match self.0 & Self::KIND_BITS {
+        match Self::KIND.unpack(self.0) {
             0b0110 => GateKind::Interrupt,
             0b0111 => GateKind::Trap,
             0b0101 => GateKind::Task,
@@ -77,45 +77,42 @@ impl Attrs {
     }
 
     pub fn is_32_bit(&self) -> bool {
-        self.0 & Self::IS_32_BIT != 0
+        Self::IS_32_BIT.unpack(self.0) != 0
     }
 
     pub fn is_present(&self) -> bool {
-        self.0 & Self::PRESENT_BIT == Self::PRESENT_BIT
+        Self::PRESENT_BIT.unpack(self.0) != 0
     }
 
     pub fn ring(&self) -> cpu::Ring {
-        cpu::Ring::from_u8(self.0 & Self::RING_BITS >> Self::RING_SHIFT)
+        cpu::Ring::from_u8(Self::RING.unpack(self.0))
     }
 
     pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
-        self.0 &= !Self::KIND_BITS;
-        self.0 |= kind as u8;
+        Self::KIND.pack_into_truncating(kind as u8, &mut self.0);
         self
     }
 
     pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
         if is_32_bit {
-            self.0 |= Self::IS_32_BIT;
+            self.0 = Self::IS_32_BIT.set_all(self.0);
         } else {
-            self.0 &= !Self::IS_32_BIT;
+            self.0 = Self::IS_32_BIT.unset_all(self.0);
         }
         self
     }
 
     pub fn set_present(&mut self, present: bool) -> &mut Self {
         if present {
-            self.0 |= Self::PRESENT_BIT;
+            self.0 = Self::PRESENT_BIT.set_all(self.0);
         } else {
-            self.0 &= !Self::PRESENT_BIT;
+            self.0 = Self::PRESENT_BIT.unset_all(self.0);
         }
         self
     }
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
-        let ring = (ring as u8) << Self::RING_SHIFT;
-        self.0 &= !Self::RING_BITS;
-        self.0 |= ring;
+        Self::RING.pack_into_truncating(ring as u8, &mut self.0);
         self
     }
 }
@@ -223,6 +220,14 @@ mod tests {
     fn idt_entry_is_correct_size() {
         use core::mem::size_of;
         assert_eq!(size_of::<Descriptor>(), 16);
+    }
+
+    #[test]
+    fn attrs_pack_specs() {
+        ATTRS::KIND.assert_valid();
+        ATTRS::RING.assert_valid();
+        ATTRS::IS_32_BIT.assert_valid();
+        ATTRS::PRESENT_BIT.assert_valid();
     }
 
     #[test]
