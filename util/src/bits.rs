@@ -424,6 +424,21 @@ macro_rules! make_packers {
                     (src & self.mask) >> self.shift
                 }
 
+                /// Returns `true` if **any** bits specified by this packing spec
+                /// are set in `src`.
+                #[inline]
+                pub const fn contained_in_any(&self, bits: $Bits) -> bool {
+                    bits & self.mask != 0
+                }
+
+
+                /// Returns `true` if **all** bits specified by this packing spec
+                /// are set in `src`.
+                #[inline]
+                pub const fn contained_in_all(&self, bits: $Bits) -> bool {
+                    bits & self.mask == self.mask
+                }
+
                 /// Asserts that this packing pair is valid.
                 ///
                 /// Because assertions cannot be made in `const fn`, this
@@ -557,6 +572,22 @@ macro_rules! make_packers {
                 #[inline]
                 pub const fn unset_all(self, packer: &$Pack) -> Self {
                     Self(packer.unset_all(self.0))
+                }
+
+
+                /// Returns `true` if **any** bits specified by `packer` are set
+                /// in `self`.
+                #[inline]
+                pub const fn contains_any(self, packer: &$Pack) -> bool {
+                    packer.contained_in_any(self.0)
+                }
+
+
+                /// Returns `true` if **any** bits specified by `packer` are set
+                /// in `self`.
+                #[inline]
+                pub const fn contains_all(self, packer: &$Pack) -> bool {
+                    packer.contained_in_all(self.0)
                 }
 
                 /// Finish packing bits into `self`, returning the wrapped

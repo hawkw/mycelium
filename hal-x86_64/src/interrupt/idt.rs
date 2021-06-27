@@ -171,11 +171,11 @@ impl Attrs {
     }
 
     pub fn is_32_bit(&self) -> bool {
-        Self::IS_32_BIT.unpack(self.0) != 0
+        Self::IS_32_BIT.contained_in_any(self.0)
     }
 
     pub fn is_present(&self) -> bool {
-        Self::PRESENT_BIT.unpack(self.0) != 0
+        Self::PRESENT_BIT.contained_in_any(self.0)
     }
 
     pub fn ring(&self) -> cpu::Ring {
@@ -281,7 +281,11 @@ mod tests {
         // DPL: Descriptor Privilege Level (0 => ring 0)
         // Z: this bit is 0 for a 64-bit IDT. for a 32-bit IDT, this may be 1 for task gates.
         // Gate Type: 32-bit interrupt gate is 0b1110. that's just how it is.
-        assert_eq!(present_32bit_interrupt.0 as u8, 0b1000_1110, "\n attrs: {:#?}", present_32bit_interrupt);
+        assert_eq!(
+            present_32bit_interrupt.0 as u8, 0b1000_1110,
+            "\n attrs: {:#?}",
+            present_32bit_interrupt
+        );
     }
 
     #[test]
