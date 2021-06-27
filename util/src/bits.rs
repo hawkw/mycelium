@@ -418,6 +418,34 @@ macro_rules! make_packers {
                     base & !self.mask
                 }
 
+                /// Set _all_ bits packed by this packer to 1 in `base`.
+                ///
+                /// This is a convenience function for
+                /// ```rust,ignore
+                /// self.pack_into(self.max_value(), base)
+                /// ```
+                #[inline]
+                pub fn set_all_in<'base>(&self, base: &'base mut $Bits) -> &'base mut $Bits {
+                    // Note: this will never truncate (the reason why is left
+                    // as an exercise to the reader).
+                    self.pack_into_truncating(self.max_value(), base)
+                }
+
+                /// Set _all_ bits packed by this packer to 0.
+                ///
+                /// This is a convenience function for
+                /// ```rust,ignore
+                /// self.pack_into(0, base)
+                /// ```
+                #[inline]
+                pub fn unset_all_in<'base>(&self, base: &'base mut $Bits) ->  &'base mut $Bits {
+                    // may be slightly faster than actually calling
+                    // `self.pack(0, base)` when not const-evaling
+                    *base &= !self.mask;
+                    base
+                }
+
+
                 /// Unpack this packer's bits from `source`.
                 #[inline]
                 pub const fn unpack(&self, src: $Bits) -> $Bits {

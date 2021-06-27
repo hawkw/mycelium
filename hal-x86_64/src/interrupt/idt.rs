@@ -189,18 +189,18 @@ impl Attrs {
 
     pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
         if is_32_bit {
-            self.0 = Self::IS_32_BIT.set_all(self.0);
+            Self::IS_32_BIT.set_all_in(&mut self.0);
         } else {
-            self.0 = Self::IS_32_BIT.unset_all(self.0);
+           Self::IS_32_BIT.unset_all_in(&mut self.0);
         }
         self
     }
 
     pub fn set_present(&mut self, present: bool) -> &mut Self {
         if present {
-            self.0 = Self::PRESENT_BIT.set_all(self.0);
+            Self::PRESENT_BIT.set_all_in(&mut self.0);
         } else {
-            self.0 = Self::PRESENT_BIT.unset_all(self.0);
+           Self::PRESENT_BIT.unset_all_in(&mut self.0);
         }
         self
     }
