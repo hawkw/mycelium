@@ -291,7 +291,7 @@ macro_rules! make_packers {
                 /// The packing pair can be used to pack bits from one location
                 /// into another location, and vice versa.
                 pub const fn pair_at(&self, at: u32) -> $Pair {
-                    let dst = Pair::starting_at(at, self.bits());
+                    let dst = Self::starting_at(at, self.bits());
                     let at = at.saturating_sub(1);
                     // TODO(eliza): validate that `at + self.bits() < N_BITS` in
                     // const fn somehow lol
@@ -394,7 +394,7 @@ macro_rules! make_packers {
                 /// a unit test to ensure that the spec is valid.
                 #[track_caller]
                 pub fn assert_valid(&self) {
-                    self.assert_valid_inner("")
+                    self.assert_valid_inner(&"")
                 }
 
                 #[track_caller]
@@ -402,7 +402,7 @@ macro_rules! make_packers {
                     assert!(
                         self.shift < Self::SIZE_BITS,
                         "shift may not exceed maximum bits for {} (would wrap)\n\
-                         -> while checking validity of {:?}{}"
+                         -> while checking validity of {:?}{}",
                         stringify!($Bits),
                         self,
                         cx,
@@ -410,8 +410,8 @@ macro_rules! make_packers {
                     assert!(
                         self.bits() <= Self::SIZE_BITS,
                         "number of bits ({}) may not exceed maximum bits for {} (would wrap)\n\
-                        -> while checking validity of {:?}{}"
-                        self.bits()
+                        -> while checking validity of {:?}{}",
+                        self.bits(),
                         stringify!($Bits),
                         self,
                         cx,
@@ -419,9 +419,9 @@ macro_rules! make_packers {
                     assert!(
                         self.bits() + self.shift <= Self::SIZE_BITS,
                         "shift + number of bits ({} + {} = {}) may not exceed maximum bits for {} (would wrap)\n\
-                        -> while checking validity of {:?}{}"
+                        -> while checking validity of {:?}{}",
                         self.shift,
-                        self.bits()
+                        self.bits(),
                         self.bits() + self.shift,
                         stringify!($Bits),
                         self,
@@ -582,9 +582,6 @@ macro_rules! make_packers {
                     (val >> self.dst_shl) << self.dst_shr
                 }
 
-                const fn src_mask(&self) -> $Bits {
-                    self.src.mask
-                }
 
                 /// Returns the "source" member of the packing pair.
                 pub const fn src(&self) -> &$Pack {
@@ -602,9 +599,9 @@ macro_rules! make_packers {
                 pub const fn pack_from_src(&self, src: $Bits, dst: $Bits) -> $Bits {
                     // extract the bit range from `dst` and shift it over to the
                     // target range in `src`.
-                    let bits = self.shift_src(dst & self.dst_mask);
+                    let bits = self.shift_src(dst & self.dst.mask);
                     // zero packed range in `src`.
-                    let src = src & !self.src_mask();
+                    let src = src & !self.src.mask;
                     src | bits
                 }
 
@@ -613,9 +610,9 @@ macro_rules! make_packers {
                 pub const fn pack_from_dst(&self, src: $Bits, dst: $Bits) -> $Bits {
                     // extract the bit range from `src` and shift it over to
                     // the target range in `dst`.
-                    let bits = self.shift_dst(src & self.src_mask());
+                    let bits = self.shift_dst(src & self.src.mask);
                     // zero the target range in `dst`.
-                    let dst = dst & !self.dst_mask;
+                    let dst = dst & !self.dst.mask;
                     dst | bits
                 }
 
@@ -640,8 +637,8 @@ macro_rules! make_packers {
                         -> while checking validity of {:?}",
                         self
                     );
-                    self.dst.assert_valid_inner(&format_args!("\n-> while checking validity of {:?}", self))
-                    self.src.assert_valid_inner(&format_args!("\n-> while checking validity of {:?}", self))
+                    self.dst.assert_valid_inner(&format_args!("\n-> while checking validity of {:?}", self));
+                    self.src.assert_valid_inner(&format_args!("\n-> while checking validity of {:?}", self));
                 }
             }
 
