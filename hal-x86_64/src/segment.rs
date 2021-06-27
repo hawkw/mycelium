@@ -1,7 +1,8 @@
 use crate::cpu;
+use core::fmt;
 use mycelium_util::bits::Pack16;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct Selector(u16);
 
@@ -70,6 +71,41 @@ impl Selector {
     pub fn set_index(&mut self, index: u16) -> &mut Self {
         Self::INDEX.pack_into(index, &mut self.0);
         self
+    }
+}
+
+impl fmt::Debug for Selector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("segment::Selector")
+            .field("ring", &self.ring())
+            .field("index", &self.index())
+            .field("is_gdt", &self.is_gdt())
+            .field("bits", &format_args!("{:#b}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::UpperHex for Selector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("segment::Selector")
+            .field(&format_args!("{:#X}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::LowerHex for Selector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("segment::Selector")
+            .field(&format_args!("{:#x}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::Binary for Selector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("segment::Selector")
+            .field(&format_args!("{:#b}", self.0))
+            .finish()
     }
 }
 
