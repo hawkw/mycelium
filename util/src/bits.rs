@@ -173,7 +173,7 @@ macro_rules! make_packers {
                 const SIZE_BITS: u32 = <$Bits>::MAX.leading_ones();
 
                 /// Returns a value with the first `n` bits set.
-                const fn mask(n: u32) -> $Bits {
+                const fn mk_mask(n: u32) -> $Bits {
                     if n == 0 {
                         return 0
                     };
@@ -206,7 +206,7 @@ macro_rules! make_packers {
                 /// Returns a packer for packing a value into the first `bits` bits.
                 pub const fn least_significant(n: u32) -> Self {
                     Self {
-                        mask: Self::mask(n),
+                        mask: Self::mk_mask(n),
                         shift: 0,
                     }
                 }
@@ -215,7 +215,7 @@ macro_rules! make_packers {
                 /// `n` from `self`.
                 pub const fn next(&self, n: u32) -> Self {
                     let shift = self.shift_next();
-                    let mask = Self::mask(n) << shift;
+                    let mask = Self::mk_mask(n) << shift;
                     Self { mask, shift }
                 }
 
@@ -223,7 +223,7 @@ macro_rules! make_packers {
                 ///  after the `bit`th bit.
                 pub const fn starting_at(bit: u32, n: u32) -> Self {
                     let shift = bit.saturating_sub(1);
-                    let mask = Self::mask(n) << shift;
+                    let mask = Self::mk_mask(n) << shift;
                     Self { shift, mask }
                 }
 
@@ -331,6 +331,7 @@ macro_rules! make_packers {
                 /// Any bits more significant than the [`self.bits()`]-th bit are ignored.
                 ///
                 /// [`self.bits()`]: Self::bits
+                #[inline]
                 pub const fn pack_truncating(&self, value: $Bits, base: $Bits) -> $Bits {
                     let value = value & self.max_value();
                     // other bits from `base` we don't want to touch
@@ -356,12 +357,48 @@ macro_rules! make_packers {
                     self.pack_truncating(value, base)
                 }
 
+                /// Pack the [`self.bits()`] least-significant bits from `value`
+                /// into `base`, mutating `base`.
+                ///
+                /// # Panics
+                ///
+                /// Panics if any other bits outside of [`self.bits()`] are set
+                /// in `value`.
+                ///
+                /// [`self.bits()`]: Self::bits
+                pub fn pack_into<'base>(&self, value: $Bits, base: &'base mut $Bits) -> &'base mut $Bits {
+                    assert!(
+                        value <= self.max_value(),
+                        "bits outside of packed range are set!\n     value: {:0x},\n max_value: {:0x}",
+                        value,
+                        self.max_value(),
+                    );
+                    *base &= !self.mask;
+                    *base |= (value << self.shift);
+                    base
+                }
+
+                /// Pack the [`self.bits()`] least-significant bits from `value`
+                /// into `base`, mutating `base`.
+                ///
+                /// Any bits more significant than the [`self.bits()`]-th bit are ignored.
+                ///
+                /// [`self.bits()`]: Self::bits
+                #[inline]
+                pub fn pack_into_truncating<'base>(&self, value: $Bits, base: &'base mut $Bits) -> &'base mut $Bits {
+                    let value = value & self.max_value();
+                    *base &= !self.mask;
+                    *base |= (value << self.shift);
+                    base
+                }
+
                 /// Set _all_ bits packed by this packer to 1.
                 ///
                 /// This is a convenience function for
                 /// ```rust,ignore
                 /// self.pack(self.max_value(), base)
                 /// ```
+                #[inline]
                 pub const fn set_all(&self, base: $Bits) -> $Bits {
                     // Note: this will never truncate (the reason why is left
                     // as an exercise to the reader).
@@ -374,6 +411,7 @@ macro_rules! make_packers {
                 /// ```rust,ignore
                 /// self.pack(0, base)
                 /// ```
+                #[inline]
                 pub const fn unset_all(&self, base: $Bits) -> $Bits {
                     // may be slightly faster than actually calling
                     // `self.pack(0, base)` when not const-evaling
@@ -381,6 +419,7 @@ macro_rules! make_packers {
                 }
 
                 /// Unpack this packer's bits from `source`.
+                #[inline]
                 pub const fn unpack(&self, src: $Bits) -> $Bits {
                     (src & self.mask) >> self.shift
                 }
