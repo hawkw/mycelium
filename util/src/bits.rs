@@ -307,7 +307,7 @@ macro_rules! make_packers {
                 /// # Note
                 /// The two ranges must be the same size. This can be asserted
                 /// by the `assert_valid` method on the returned pair type.
-                pub const fn pair_with(&self, dst: &Self) -> $Pair {
+                pub const fn pair_with(&self, dst: Self) -> $Pair {
                     // TODO(eliza): validate that `dst.shift + self.bits() < N_BITS` in
                     // const fn somehow lol
                     let (dst_shl, dst_shr) = if dst.shift > self.shift {
@@ -588,6 +588,25 @@ macro_rules! make_packers {
                 pub const fn pack_truncating(self, value: $Bits, packer: &$Pack) -> Self {
                     Self(packer.pack_truncating(value, self.0))
                 }
+
+                /// Pack bits from `src` into `self`, using the packing pair
+                /// specified by `pair`, with `self` serving as the "destination" member
+                /// of the pair, and `src` serving as the "source" member of the
+                /// pair.
+                #[inline]
+                pub const fn pack_from_src(self, value: $Bits, pair: &$Pair) -> Self {
+                    Self(pair.pack_from_src(self.0, value))
+                }
+
+                /// Pack bits from `dst` into `self`, using the packing pair
+                /// specified by `pair`, with `self` serving as the "siyrce" member
+                /// of the pair, and `dst` serving as the "destination" member of the
+                /// pair.
+                #[inline]
+                pub const fn pack_from_dst(self, value: $Bits, pair: &$Pair) -> Self {
+                    Self(pair.pack_from_dst(value, self.0))
+                }
+
 
                 /// Pack bits from `value` into `self`, using the range
                 /// specified by `packer`.
