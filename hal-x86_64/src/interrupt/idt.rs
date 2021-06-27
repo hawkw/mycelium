@@ -191,7 +191,7 @@ impl Attrs {
         if is_32_bit {
             Self::IS_32_BIT.set_all_in(&mut self.0);
         } else {
-           Self::IS_32_BIT.unset_all_in(&mut self.0);
+            Self::IS_32_BIT.unset_all_in(&mut self.0);
         }
         self
     }
@@ -200,7 +200,7 @@ impl Attrs {
         if present {
             Self::PRESENT_BIT.set_all_in(&mut self.0);
         } else {
-           Self::PRESENT_BIT.unset_all_in(&mut self.0);
+            Self::PRESENT_BIT.unset_all_in(&mut self.0);
         }
         self
     }
