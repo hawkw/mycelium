@@ -213,8 +213,36 @@ impl Attrs {
 
 impl fmt::Debug for Attrs {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Attrs")
+            .field("gate_kind", &self.gate_kind())
+            .field("ring", &self.ring())
+            .field("is_32_bit", &self.is_32_bit())
+            .field("is_present", &self.is_present())
+            .field("bits", &format_args!("{:b}", self))
+            .finish()
+    }
+}
+
+impl fmt::Binary for Attrs {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("Attrs")
             .field(&format_args!("{:#08b}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::UpperHex for Attrs {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("Attrs")
+            .field(&format_args!("{:#X}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::LowerHex for Attrs {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("Attrs")
+            .field(&format_args!("{:#x}", self.0))
             .finish()
     }
 }
@@ -231,10 +259,10 @@ mod tests {
 
     #[test]
     fn attrs_pack_specs() {
-        ATTRS::KIND.assert_valid();
-        ATTRS::RING.assert_valid();
-        ATTRS::IS_32_BIT.assert_valid();
-        ATTRS::PRESENT_BIT.assert_valid();
+        Attrs::KIND.assert_valid();
+        Attrs::RING.assert_valid();
+        Attrs::IS_32_BIT.assert_valid();
+        Attrs::PRESENT_BIT.assert_valid();
     }
 
     #[test]
@@ -253,7 +281,7 @@ mod tests {
         // DPL: Descriptor Privilege Level (0 => ring 0)
         // Z: this bit is 0 for a 64-bit IDT. for a 32-bit IDT, this may be 1 for task gates.
         // Gate Type: 32-bit interrupt gate is 0b1110. that's just how it is.
-        assert_eq!(present_32bit_interrupt.0 as u8, 0b1000_1110);
+        assert_eq!(present_32bit_interrupt.0 as u8, 0b1000_1110, "\n attrs: {:#?}", present_32bit_interrupt);
     }
 
     #[test]
@@ -273,6 +301,6 @@ mod tests {
             0x00, 0x00, 0x00, 0x00,
         ];
 
-        assert_eq!(idt_bytes, &expected_idt);
+        assert_eq!(idt_bytes, &expected_idt, "\n entry: {:#?}", idt_entry);
     }
 }
