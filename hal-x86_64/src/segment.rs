@@ -1,7 +1,7 @@
 use crate::{cpu, task};
 use core::{fmt, mem};
 use mycelium_util::{
-    bits::{Pack16, Pack64},
+    bits::{self, Pack16, Pack64},
     trace,
 };
 
@@ -297,7 +297,14 @@ impl Descriptor {
     const LIMIT_HIGH: Pack64 = Self::PRESENT_BIT.next(4);
     const FLAGS: Pack64 = Self::LIMIT_HIGH.next(4);
     /// Highest 8 bits of the base field
-    const BASE_HI: Pack64 = Self::FLAGS.next(8);
+    const BASE_HIGH: Pack64 = Self::FLAGS.next(8);
+
+    const LIMIT_LOW_PAIR: bits::Pair64 = Self::LIMIT_LOW.pair_with(limit::LOW);
+    const LIMIT_HIGH_PAIR: bits::Pair64 = Self::LIMIT_HIGH.pair_with(limit::HIGH);
+
+    const BASE_LOW_PAIR: bits::Pair64 = Self::BASE_LOW.pair_with(base::LOW);
+    const BASE_MID_PAIR: bits::Pair64 = Self::BASE_MID.pair_with(base::MID);
+    const BASE_HIGH_PAIR: bits::Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
 
     // hahaha lol no limits
     const DEFAULT_BITS: u64 = Self::LIMIT_LOW.set_all(Self::LIMIT_HIGH.set_all(0));
@@ -328,8 +335,19 @@ impl Descriptor {
         cpu::Ring::from_u8(self.ring_bits())
     }
 
-    pub fn limit(&self) -> usize {
-        todo!("eliza")
+    pub const fn limit(&self) -> u64 {
+        Pack64::pack_in(0)
+            .pack_from_src(self.0, &Self::LIMIT_LOW_PAIR)
+            .pack_from_src(self.0, &Self::LIMIT_HIGH_PAIR)
+            .bits()
+    }
+
+    pub const fn base(&self) -> u64 {
+        Pack64::pack_in(0)
+            .pack_from_src(self.0, &Self::BASE_LOW_PAIR)
+            .pack_from_src(self.0, &Self::BASE_MID_PAIR)
+            .pack_from_src(self.0, &Self::BASE_HIGH_PAIR)
+            .bits()
     }
 
     /// Separated out from constructing the `cpu::Ring` for use in `const fn`s
@@ -359,6 +377,8 @@ impl fmt::Debug for Descriptor {
         f.debug_struct(Self::NAME)
             .field("ring", &self.ring())
             .field("flags", &self.flags())
+            .field("limit", &self.limit())
+            .field("base", &format_args!("{:#x}", self.base()))
             .field("bits", &format_args!("{:#x}", self.0))
             .finish()
     }
@@ -439,23 +459,29 @@ impl SystemDescriptor {
             // this is probably fine.
             tss as *const _ as u64
         };
-        let low = DescriptorFlags::PRESENT.bits();
+
         // limit (-1 because the bound is inclusive)
-        let low = Descriptor::LIMIT_LOW
-            .pack_truncating((mem::size_of::<task::StateSegment>() - 1) as u64, low);
-        // base addr (low half)
-        let low = Descriptor::BASE_LOW.pack_truncating(base::LOW.unpack(tss_addr), low);
-        // base addr (mid half)
-        let low = Descriptor::BASE_MID.pack_truncating(base::MID.unpack(tss_addr), low);
-        let low = Descriptor::FLAGS.pack_truncating(0b1001, low);
-        let high = Descriptor::BASE_HI.pack_truncating(base::HIGH.unpack(tss_addr), 0);
+        let limit = (mem::size_of::<task::StateSegment>() - 1) as u64;
+
+        let low = Pack64::pack_in(DescriptorFlags::PRESENT.bits())
+            .pack_from_dst(limit, &Descriptor::LIMIT_LOW_PAIR)
+            // base addr (low half)
+            .pack_from_dst(tss_addr, &Descriptor::BASE_LOW_PAIR)
+            // base addr (mid half)
+            .pack_from_dst(tss_addr, &Descriptor::BASE_MID_PAIR)
+            .pack_truncating(0b1001, &Descriptor::FLAGS)
+            .bits();
+
+        let high = Pack64::pack_in(0)
+            // base addr (high half)
+            .pack_from_dst(tss_addr, &Descriptor::BASE_HIGH_PAIR)
+            .bits();
 
         Self { high, low }
     }
 }
 
 mod limit {
-    #![allow(dead_code)] // i'll use these later...
     use mycelium_util::bits::Pack64;
     pub(super) const LOW: Pack64 = Pack64::least_significant(16);
     pub(super) const HIGH: Pack64 = LOW.next(4);
@@ -486,31 +512,47 @@ mod tests {
     }
 
     #[test]
+    fn descriptor_pack_specs_valid() {
+        Descriptor::ACCESS_FLAGS.assert_valid();
+        Descriptor::PRESENT_BIT.assert_valid();
+        Descriptor::FLAGS.assert_valid();
+        Descriptor::RING.assert_valid();
+
+        Descriptor::BASE_LOW_PAIR.assert_valid();
+        Descriptor::BASE_MID_PAIR.assert_valid();
+        Descriptor::BASE_HIGH_PAIR.assert_valid();
+
+
+        Descriptor::LIMIT_LOW_PAIR.assert_valid();
+        Descriptor::LIMIT_HIGH_PAIR.assert_valid();
+    }
+
+    #[test]
     fn default_descriptor_flags_match_linux() {
         use cpu::Ring::*;
         // are our default flags reasonable? stolen from linux: arch/x86/kernel/cpu/common.c
         assert_eq!(
-            Descriptor::code().with_ring(Ring0),
+            dbg!(Descriptor::code().with_ring(Ring0)),
             Descriptor(0x00af9b000000ffff),
         );
         assert_eq!(
-            Descriptor::code_32().with_ring(Ring0),
+            dbg!(Descriptor::code_32().with_ring(Ring0)),
             Descriptor(0x00cf9b000000ffff)
         );
         assert_eq!(
-            Descriptor::data().with_ring(Ring0),
+            dbg!(Descriptor::data().with_ring(Ring0)),
             Descriptor(0x00cf93000000ffff)
         );
         assert_eq!(
-            Descriptor::code().with_ring(Ring3),
+            dbg!(Descriptor::code().with_ring(Ring3)),
             Descriptor(0x00affb000000ffff)
         );
         assert_eq!(
-            Descriptor::code_32().with_ring(Ring3),
+            dbg!(Descriptor::code_32().with_ring(Ring3)),
             Descriptor(0x00cffb000000ffff)
         );
         assert_eq!(
-            Descriptor::data().with_ring(Ring3),
+            dbg!(Descriptor::data().with_ring(Ring3)),
             Descriptor(0x00cff3000000ffff)
         );
     }
