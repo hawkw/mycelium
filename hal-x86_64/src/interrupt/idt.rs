@@ -1,4 +1,5 @@
 use crate::{cpu, segment};
+use core::fmt;
 use mycelium_util::bits;
 
 #[repr(C)]
@@ -57,65 +58,7 @@ pub enum GateKind {
     Task = 0b0000_0101,
 }
 
-impl Attrs {
-    const KIND: bits::Pack8 = bits::Pack8::least_significant(3);
-    const IS_32_BIT: bits::Pack8 = Self::KIND.next(1);
-    const RING: bits::Pack8 = Self::IS_32_BIT.next(3);
-    const PRESENT_BIT: bits::Pack8 = Self::RING.next(1);
-
-    pub const fn null() -> Self {
-        Self(0)
-    }
-
-    pub fn gate_kind(&self) -> GateKind {
-        match Self::KIND.unpack(self.0) {
-            0b0110 => GateKind::Interrupt,
-            0b0111 => GateKind::Trap,
-            0b0101 => GateKind::Task,
-            bits => unreachable!("unexpected bit pattern {:#08b}", bits),
-        }
-    }
-
-    pub fn is_32_bit(&self) -> bool {
-        Self::IS_32_BIT.unpack(self.0) != 0
-    }
-
-    pub fn is_present(&self) -> bool {
-        Self::PRESENT_BIT.unpack(self.0) != 0
-    }
-
-    pub fn ring(&self) -> cpu::Ring {
-        cpu::Ring::from_u8(Self::RING.unpack(self.0))
-    }
-
-    pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
-        Self::KIND.pack_into_truncating(kind as u8, &mut self.0);
-        self
-    }
-
-    pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
-        if is_32_bit {
-            self.0 = Self::IS_32_BIT.set_all(self.0);
-        } else {
-            self.0 = Self::IS_32_BIT.unset_all(self.0);
-        }
-        self
-    }
-
-    pub fn set_present(&mut self, present: bool) -> &mut Self {
-        if present {
-            self.0 = Self::PRESENT_BIT.set_all(self.0);
-        } else {
-            self.0 = Self::PRESENT_BIT.unset_all(self.0);
-        }
-        self
-    }
-
-    pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
-        Self::RING.pack_into_truncating(ring as u8, &mut self.0);
-        self
-    }
-}
+// === impl Idt ===
 
 impl Idt {
     const NUM_VECTORS: usize = 256;
@@ -185,13 +128,15 @@ impl Idt {
     }
 }
 
-impl core::fmt::Debug for Idt {
+impl fmt::Debug for Idt {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list().entries(self.descriptors[..].iter()).finish()
     }
 }
 
-impl core::fmt::Debug for Descriptor {
+// === impl Descriptor ===
+
+impl fmt::Debug for Descriptor {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Descriptor")
             .field("offset_low", &format_args!("{:#x}", self.offset_low))
@@ -204,7 +149,69 @@ impl core::fmt::Debug for Descriptor {
     }
 }
 
-impl core::fmt::Debug for Attrs {
+// === impl Attrs ===
+
+impl Attrs {
+    const KIND: bits::Pack8 = bits::Pack8::least_significant(3);
+    const IS_32_BIT: bits::Pack8 = Self::KIND.next(1);
+    const RING: bits::Pack8 = Self::IS_32_BIT.next(3);
+    const PRESENT_BIT: bits::Pack8 = Self::RING.next(1);
+
+    pub const fn null() -> Self {
+        Self(0)
+    }
+
+    pub fn gate_kind(&self) -> GateKind {
+        match Self::KIND.unpack(self.0) {
+            0b0110 => GateKind::Interrupt,
+            0b0111 => GateKind::Trap,
+            0b0101 => GateKind::Task,
+            bits => unreachable!("unexpected bit pattern {:#08b}", bits),
+        }
+    }
+
+    pub fn is_32_bit(&self) -> bool {
+        Self::IS_32_BIT.unpack(self.0) != 0
+    }
+
+    pub fn is_present(&self) -> bool {
+        Self::PRESENT_BIT.unpack(self.0) != 0
+    }
+
+    pub fn ring(&self) -> cpu::Ring {
+        cpu::Ring::from_u8(Self::RING.unpack(self.0))
+    }
+
+    pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
+        Self::KIND.pack_into_truncating(kind as u8, &mut self.0);
+        self
+    }
+
+    pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
+        if is_32_bit {
+            self.0 = Self::IS_32_BIT.set_all(self.0);
+        } else {
+            self.0 = Self::IS_32_BIT.unset_all(self.0);
+        }
+        self
+    }
+
+    pub fn set_present(&mut self, present: bool) -> &mut Self {
+        if present {
+            self.0 = Self::PRESENT_BIT.set_all(self.0);
+        } else {
+            self.0 = Self::PRESENT_BIT.unset_all(self.0);
+        }
+        self
+    }
+
+    pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
+        Self::RING.pack_into_truncating(ring as u8, &mut self.0);
+        self
+    }
+}
+
+impl fmt::Debug for Attrs {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("Attrs")
             .field(&format_args!("{:#08b}", self.0))
