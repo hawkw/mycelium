@@ -704,13 +704,18 @@ mod tests {
                 left,
                 right,
                 "\n{:>expr_len$} = {:#0val_len$b}\n{:>expr_len$} = {:#0val_len$b}\n{state}",
-                lstr, left, rstr, right, expr_len = expr_len, val_len = val_len,
+                lstr,
+                left,
+                rstr,
+                right,
+                expr_len = expr_len,
+                val_len = val_len,
                 state = $state
             );
         };
         ($left:expr, $right:expr) => {
             prop_assert_bits_eq!($left, $right, "")
-        }
+        };
     }
 
     macro_rules! test_pack_unpack {
@@ -844,7 +849,6 @@ mod tests {
         };
     }
 
-
     // Test packing and unpacking through a pair with arbitrary src/dst values.
     // This tests that we don't leave behind unwanted bits, etc.
     macro_rules! test_pair_least_sig_arbitrary {
@@ -913,5 +917,4 @@ mod tests {
         fn pair_least_sig_arbitrary_16<Pack16, u16>(16);
         fn pair_least_sig_arbitrary_8<Pack8, u8>(8);
     }
-
 }
