@@ -212,16 +212,16 @@ pub fn oops(
 
         use hal_core::Address;
         let fault_addr = registers.instruction_ptr.as_usize();
-        use yaxpeax_arch::{Arch, Decoder, Instruction, LengthedInstruction};
+        use yaxpeax_arch::LengthedInstruction;
         let _ = writeln!(vga, "Disassembly:");
         let mut ptr = fault_addr as u64;
-        let decoder = <yaxpeax_x86::long_mode::Arch as Arch>::Decoder::default();
-        for i in 0..10 {
+        let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
+        for _ in 0..10 {
             // Safety: who cares! At worst this might double-fault by reading past the end of valid
             // memory. whoopsie.
             let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
             let _ = write!(vga, "  {:016x}: ", ptr).unwrap();
-            match decoder.decode(bytes.iter().cloned()) {
+            match decoder.decode_slice(bytes) {
                 Ok(inst) => {
                     let _ = writeln!(vga, "{}", inst);
                     ptr += inst.len();
