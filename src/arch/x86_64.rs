@@ -209,6 +209,29 @@ pub fn oops(
     let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
     if let Some(registers) = registers {
         let _ = writeln!(vga, "\n{}\n", registers);
+
+        use hal_core::Address;
+        let fault_addr = registers.instruction_ptr.as_usize();
+        use yaxpeax_arch::LengthedInstruction;
+        let _ = writeln!(vga, "Disassembly:");
+        let mut ptr = fault_addr as u64;
+        let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
+        for _ in 0..10 {
+            // Safety: who cares! At worst this might double-fault by reading past the end of valid
+            // memory. whoopsie.
+            let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
+            let _ = write!(vga, "  {:016x}: ", ptr).unwrap();
+            match decoder.decode_slice(bytes) {
+                Ok(inst) => {
+                    let _ = writeln!(vga, "{}", inst);
+                    ptr += inst.len();
+                }
+                Err(e) => {
+                    let _ = writeln!(vga, "{}", e);
+                    break;
+                }
+            }
+        }
     }
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 

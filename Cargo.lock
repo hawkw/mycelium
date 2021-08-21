@@ -405,6 +405,8 @@ dependencies = [
  "tracing",
  "wasmi",
  "wat",
+ "yaxpeax-arch",
+ "yaxpeax-x86",
 ]
 
 [[package]]
@@ -1002,3 +1004,22 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "yaxpeax-arch"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "effe4b97c0b314b9fa460f2513cd3eb5ffaf9643cc13c3307476b84f92e54175"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "yaxpeax-x86"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b8cf2aeb6c9b75d7e4ada5b26bcfa3ca7102b6b7c70a6a1ea2bcc59738b7229"
+dependencies = [
+ "num-traits",
+ "yaxpeax-arch",
+]
