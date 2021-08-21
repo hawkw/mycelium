@@ -113,7 +113,7 @@ impl<T> InitOnce<T> {
     /// If the cell has not yet been initialized.
     #[track_caller]
     #[inline]
-    fn get(&self) -> &T {
+    pub fn get(&self) -> &T {
         if self.state.load(Ordering::Acquire) != INITIALIZED {
             panic!("InitOnce<{}> not yet initialized!", any::type_name::<T>());
         }
