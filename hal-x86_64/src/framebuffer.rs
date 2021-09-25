@@ -25,13 +25,6 @@ pub enum PixelKind {
     Gray,
 }
 
-#[cfg(feature = "embedded-graphics-core")]
-#[doc(cfg(feature = "embedded-graphics-core"))]
-mod embedded_graphics;
-#[cfg(feature = "embedded-graphics-core")]
-#[doc(cfg(feature = "embedded-graphics-core"))]
-pub use self::embedded_graphics::*;
-
 impl<'buf, B> Framebuffer<'buf, B>
 where
     B: AsMut<[u8]>,
