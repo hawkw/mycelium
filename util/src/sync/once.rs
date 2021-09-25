@@ -123,6 +123,15 @@ impl<T> InitOnce<T> {
         }
     }
 
+    pub fn get_or_else(&self, f: impl FnOnce() -> T) -> &T {
+        if let Some(val) = self.try_get() {
+            return val;
+        }
+
+        let _ = self.try_init(f());
+        self.get()
+    }
+
     /// Borrow the contents of this `InitOnce` cell, **without** checking
     /// whether it has been initialized.
     ///

@@ -53,6 +53,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
+name = "az"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d6dff4a1892b54d70af377bf7a17064192e822865791d812957f21e3108c325"
+
+[[package]]
 name = "backtrace"
 version = "0.3.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -182,6 +188,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
+name = "embedded-graphics-core"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8b1239db5f3eeb7e33e35bd10bd014e7b2537b17e071f726a09351431337cfa"
+dependencies = [
+ "az",
+ "byteorder",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -239,6 +255,7 @@ dependencies = [
 name = "hal-x86_64"
 version = "0.1.0"
 dependencies = [
+ "embedded-graphics-core",
  "hal-core",
  "mycelium-util",
  "tracing",
