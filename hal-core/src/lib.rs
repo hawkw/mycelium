@@ -3,6 +3,7 @@
 mod addr;
 
 pub mod boot;
+pub mod framebuffer;
 pub mod interrupt;
 pub mod mem;
 pub use self::addr::*;
