@@ -1,5 +1,6 @@
 #![allow(unused_unsafe)]
 #![cfg_attr(target_os = "none", no_std)]
+#![feature(doc_cfg)]
 mod addr;
 
 pub mod boot;

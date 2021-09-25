@@ -42,6 +42,25 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
             }
         }
         tracing::trace!("hahahaha yayyyy we drew a screen!");
+
+        use embedded_graphics::{
+            mono_font::{ascii::FONT_10X20, MonoTextStyle},
+            pixelcolor::{Rgb888, RgbColor as _},
+            prelude::*,
+            text::{Alignment, Text},
+        };
+        let center = Point::new(
+            (framebuf.width() / 2) as i32,
+            (framebuf.height() / 2) as i32,
+        );
+        Text::with_alignment(
+            "MYCELIUM",
+            center,
+            MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE),
+            Alignment::Center,
+        )
+        .draw(&mut framebuf.clear().as_draw_target())
+        .expect("never panics");
     }
 
     arch::interrupt::init::<arch::InterruptHandlers>();

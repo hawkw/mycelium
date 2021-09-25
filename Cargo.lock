@@ -188,6 +188,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
+name = "embedded-graphics"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "750082c65094fbcc4baf9ba31583ce9a8bb7f52cadfb96f6164b1bc7f922f32b"
+dependencies = [
+ "az",
+ "byteorder",
+ "embedded-graphics-core",
+ "float-cmp",
+ "micromath",
+]
+
+[[package]]
 name = "embedded-graphics-core"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -205,6 +218,15 @@ checksum = "221239d1d5ea86bf5d6f91c9d6bc3646ffe471b08ff9b0f91c44f115ac969d2b"
 dependencies = [
  "indenter",
  "once_cell",
+]
+
+[[package]]
+name = "float-cmp"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1267f4ac4f343772758f7b1bdcbe767c218bbab93bb432acbf5162bbf85a6c4"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -247,6 +269,7 @@ checksum = "0e4075386626662786ddb0ec9081e7c7eeb1ba31951f447ca780ef9f5d568189"
 name = "hal-core"
 version = "0.1.0"
 dependencies = [
+ "embedded-graphics-core",
  "mycelium-util",
  "tracing",
 ]
@@ -255,7 +278,6 @@ dependencies = [
 name = "hal-x86_64"
 version = "0.1.0"
 dependencies = [
- "embedded-graphics-core",
  "hal-core",
  "mycelium-util",
  "tracing",
@@ -389,6 +411,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d96e3f3c0b6325d8ccd83c33b28acb183edcb6c67938ba104ec546854b0882"
 
 [[package]]
+name = "micromath"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc4010833aea396656c2f91ee704d51a6f1329ec2ab56ffd00bfd56f7481ea94"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -412,6 +440,7 @@ name = "mycelium-kernel"
 version = "0.0.1"
 dependencies = [
  "bootloader",
+ "embedded-graphics",
  "hal-core",
  "hal-x86_64",
  "mycelium-alloc",
