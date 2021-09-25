@@ -14,6 +14,7 @@ pub(crate) use hal_core::{PAddr, VAddr};
 
 pub mod control_regs;
 pub mod cpu;
+pub mod framebuffer;
 pub mod interrupt;
 pub mod mm;
 pub mod segment;
