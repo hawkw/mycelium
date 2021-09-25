@@ -123,6 +123,21 @@ impl<T> InitOnce<T> {
         }
     }
 
+    /// Borrow the contents of this `InitOnce` cell, or initialize it with the
+    /// provided closure.
+    ///
+    /// If the cell has been initialized, this returns the current value.
+    /// Otherwise, it calls the closure, puts the returned value from the
+    /// closure in the cell, and borrows the current value.
+    pub fn get_or_else(&self, f: impl FnOnce() -> T) -> &T {
+        if let Some(val) = self.try_get() {
+            return val;
+        }
+
+        let _ = self.try_init(f());
+        self.get()
+    }
+
     /// Borrow the contents of this `InitOnce` cell, **without** checking
     /// whether it has been initialized.
     ///
