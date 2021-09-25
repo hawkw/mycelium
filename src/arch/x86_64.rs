@@ -1,8 +1,17 @@
 use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
-use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
+use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
+use hal_x86_64::{
+    cpu,
+    framebuffer::{self, Framebuffer},
+    interrupt::Registers as X64Registers,
+    serial, vga,
+};
 pub use hal_x86_64::{interrupt, mm, NAME};
+use mycelium_util::{
+    sync::{spin, InitOnce},
+    trace,
+};
 
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};
@@ -22,6 +31,8 @@ impl BootInfo for RustbootBootInfo {
     type MemoryMap = core::iter::Map<MemRegionIter, fn(&boot_info::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
+
+    type Framebuffer = spin::MutexGuard<'static, Framebuffer>;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
@@ -53,6 +64,37 @@ impl BootInfo for RustbootBootInfo {
 
     fn writer(&self) -> Self::Writer {
         vga::writer()
+    }
+
+    fn framebuffer(&self) -> Option<Self::Framebuffer> {
+        let framebuffer = self.inner.framebuffer.as_ref()?;
+
+        static FRAMEBUFFER: InitOnce<spin::Mutex<Framebuffer>> = InitOnce::uninitialized();
+        Some(
+            FRAMEBUFFER
+                .get_or_else(move || {
+                    let info = framebuffer.info();
+                    let buf = framebuffer.buffer();
+                    let cfg = framebuffer::Config {
+                        height: info.vertical_resolution,
+                        width: info.horizontal_resolution,
+                        px_bytes: info.bytes_per_pixel,
+                        line_len: info.stride,
+                        px_kind: match info.pixel_format {
+                            boot_info::PixelFormat::RGB => framebuffer::PixelKind::Rgb,
+                            boot_info::PixelFormat::BGR => framebuffer::PixelKind::Bgr,
+                            boot_info::PixelFormat::U8 => framebuffer::PixelKind::Gray,
+                            x => unimplemented!("hahaha wtf, found a weird pixel format: {:?}", x),
+                        },
+                        len: buf.len(),
+                        // here's one for the "cool casts collection"...
+                        start_vaddr: VAddr::from_usize(buf as *const _ as *const () as usize),
+                    };
+                    tracing::info!(cfg = ?trace::alt(&cfg), "detected framebuffer");
+                    spin::Mutex::new(Framebuffer::new(cfg))
+                })
+                .lock(),
+        )
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
@@ -210,7 +252,6 @@ pub fn oops(
     if let Some(registers) = registers {
         let _ = writeln!(vga, "\n{}\n", registers);
 
-        use hal_core::Address;
         let fault_addr = registers.instruction_ptr.as_usize();
         use yaxpeax_arch::LengthedInstruction;
         let _ = writeln!(vga, "Disassembly:");

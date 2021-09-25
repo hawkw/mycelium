@@ -2,6 +2,7 @@
 #![cfg_attr(not(test), no_std)]
 #![feature(asm)]
 #![feature(abi_x86_interrupt)]
+#![feature(doc_cfg)]
 // Oftentimes it's necessary to write to a value at a particular location in
 // memory, and these types don't implement Copy to ensure they aren't
 // inadvertantly copied.
