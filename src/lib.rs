@@ -31,6 +31,19 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         tracing::dispatcher::set_global_default(subscriber).unwrap();
     }
 
+    if let Some(mut framebuf) = bootinfo.framebuffer() {
+        use hal_core::framebuffer::{Draw, RgbColor};
+        tracing::trace!("framebuffer exists!");
+        framebuf.fill(RgbColor::BLUE);
+        tracing::trace!("made it blue!");
+        for col in 0..framebuf.width() {
+            if col % 3 == 0 {
+                framebuf.fill_col(col, RgbColor::RED);
+            }
+        }
+        tracing::trace!("hahahaha yayyyy we drew a screen!");
+    }
+
     arch::interrupt::init::<arch::InterruptHandlers>();
     bootinfo.init_paging();
 
