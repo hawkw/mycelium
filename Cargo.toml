@@ -24,7 +24,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
-hal-core = { path = "hal-core" }
+hal-core = { path = "hal-core", features = ["embedded-graphics-core"] }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
 mycelium-util = { path = "util" }
 rlibc = "1.0"
@@ -32,6 +32,7 @@ rlibc = "1.0"
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`
 # instead of normal [dependencies]. don't move this.
 bootloader = { version = "0.10.6" }
+embedded-graphics = "0.7"
 
 [dev-dependencies]
 mycotest = { path = "mycotest" }

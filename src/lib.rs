@@ -34,13 +34,63 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     if let Some(mut framebuf) = bootinfo.framebuffer() {
         use hal_core::framebuffer::{Draw, RgbColor};
         tracing::trace!("framebuffer exists!");
-        framebuf.fill(RgbColor::BLUE);
-        tracing::trace!("made it blue!");
-        for col in 0..framebuf.width() {
-            if col % 3 == 0 {
-                framebuf.fill_col(col, RgbColor::RED);
+        framebuf.clear();
+        let mut color = 0;
+        for row in 0..framebuf.height() {
+            color += 1;
+            match color {
+                1 => {
+                    framebuf.fill_row(row, RgbColor::RED);
+                }
+                2 => {
+                    framebuf.fill_row(row, RgbColor::GREEN);
+                }
+                3 => {
+                    framebuf.fill_row(row, RgbColor::BLUE);
+                    color = 0;
+                }
+                _ => {}
             }
         }
+        tracing::trace!("made it grey!");
+
+        use embedded_graphics::{
+            mono_font::{ascii, MonoTextStyle},
+            pixelcolor::{Rgb888, RgbColor as _},
+            prelude::*,
+            text::{Alignment, Text},
+        };
+        let center = Point::new(
+            (framebuf.width() / 2) as i32,
+            (framebuf.height() / 2) as i32,
+        );
+        let mut target = framebuf.clear().as_draw_target();
+        let small_style = MonoTextStyle::new(&ascii::FONT_6X10, Rgb888::WHITE);
+        Text::with_alignment(
+            "the glorious\n",
+            Point::new(center.x, center.y - 20),
+            small_style,
+            Alignment::Center,
+        )
+        .draw(&mut target)
+        .expect("never panics");
+        Text::with_alignment(
+            "MYCELIUM\n",
+            center,
+            MonoTextStyle::new(&ascii::FONT_10X20, Rgb888::WHITE),
+            Alignment::Center,
+        )
+        .draw(&mut target)
+        .expect("never panics");
+        Text::with_alignment(
+            concat!("operating system\n\n v", env!("CARGO_PKG_VERSION"), "\n"),
+            Point::new(center.x, center.y + 10),
+            small_style,
+            Alignment::Center,
+        )
+        .draw(&mut target)
+        .expect("never panics");
+
         tracing::trace!("hahahaha yayyyy we drew a screen!");
     }
 
