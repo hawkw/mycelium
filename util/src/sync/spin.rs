@@ -96,6 +96,28 @@ impl<'a, T> DerefMut for MutexGuard<'a, T> {
     }
 }
 
+impl<'a, T, R: ?Sized> AsRef<R> for MutexGuard<'a, T>
+where
+    T: AsRef<R>,
+{
+    #[inline]
+    fn as_ref(&self) -> &R {
+        self.mutex.data.with(|ptr| unsafe { &*ptr }.as_ref())
+    }
+}
+
+impl<'a, T, R: ?Sized> AsMut<R> for MutexGuard<'a, T>
+where
+    T: AsMut<R>,
+{
+    #[inline]
+    fn as_mut(&mut self) -> &mut R {
+        self.mutex
+            .data
+            .with_mut(|ptr| unsafe { &mut *ptr }.as_mut())
+    }
+}
+
 impl<'a, T> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
         self.mutex.locked.store(false, Release);

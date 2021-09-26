@@ -1,10 +1,10 @@
-use core::slice;
+use core::ptr;
 use hal_core::framebuffer::{Draw, RgbColor};
 
 #[derive(Debug)]
-pub struct Framebuffer<'buf> {
-    buf: &'buf mut [u8],
-    cfg: Config,
+pub struct Framebuffer<'buf, B> {
+    buf: B,
+    cfg: &'buf Config,
 }
 
 #[derive(Debug, Clone)]
@@ -32,13 +32,16 @@ mod embedded_graphics;
 #[doc(cfg(feature = "embedded-graphics-core"))]
 pub use self::embedded_graphics::*;
 
-impl<'buf> Framebuffer<'buf> {
-    pub fn new(cfg: Config, buf: &'buf mut [u8]) -> Self {
+impl<'buf, B> Framebuffer<'buf, B>
+where
+    B: AsMut<[u8]>,
+{
+    pub fn new(cfg: &'buf Config, buf: B) -> Self {
         Self { cfg, buf }
     }
 
     pub fn clear(&mut self) -> &mut Self {
-        self.buf.fill(0);
+        self.buf.as_mut().fill(0);
         self
     }
 
@@ -46,7 +49,7 @@ impl<'buf> Framebuffer<'buf> {
         let px_bytes = self.cfg.px_bytes;
         let pos = (y * self.cfg.line_len + x) * px_bytes;
 
-        let slice = &mut self.buf[pos..(pos + px_bytes)];
+        let slice = &mut self.buf.as_mut()[pos..(pos + px_bytes)];
         let px_vals = &self.cfg.px_kind.convert_rgb(color)[..px_bytes];
         for (byte, &val) in slice.iter_mut().zip(px_vals) {
             let byte = byte as *mut u8;
@@ -65,7 +68,10 @@ impl<'buf> Framebuffer<'buf> {
     }
 }
 
-impl<'buf> Draw for Framebuffer<'buf> {
+impl<'buf, B> Draw for Framebuffer<'buf, B>
+where
+    B: AsMut<[u8]>,
+{
     fn height(&self) -> usize {
         self.cfg.height
     }
