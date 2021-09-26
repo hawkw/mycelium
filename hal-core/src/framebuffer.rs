@@ -75,7 +75,16 @@ pub trait Draw {
 
     #[cfg(feature = "embedded-graphics-core")]
     #[doc(cfg(feature = "embedded-graphics-core"))]
-    fn as_draw_target(self) -> DrawTarget<Self>
+    fn into_draw_target(self) -> DrawTarget<Self>
+    where
+        Self: Sized,
+    {
+        DrawTarget::new(self)
+    }
+
+    #[cfg(feature = "embedded-graphics-core")]
+    #[doc(cfg(feature = "embedded-graphics-core"))]
+    fn as_draw_target(&mut self) -> DrawTarget<&mut Self>
     where
         Self: Sized,
     {
