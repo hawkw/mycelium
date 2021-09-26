@@ -90,7 +90,12 @@ impl PixelKind {
         match self {
             PixelKind::Bgr => [blue, green, red, 0],
             PixelKind::Rgb => [red, green, blue, 0],
-            PixelKind::Gray => [mycelium_util::max!(red, green, blue), 0, 0, 0],
+            PixelKind::Gray => [Self::rgb_to_luminance(red, green, blue), 0, 0, 0],
         }
+    }
+
+    fn rgb_to_luminance(r: u8, g: u8, b: u8) -> u8 {
+        // Thanks to @mystor for magic numbers!
+        ((21 * (r as u32) + 72 * (g as u32) + 7 * (b as u32)) / 100) as u8
     }
 }
