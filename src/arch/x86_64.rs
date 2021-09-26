@@ -10,7 +10,6 @@ use hal_x86_64::{
 pub use hal_x86_64::{interrupt, mm, NAME};
 use mycelium_util::{
     sync::{spin, InitOnce},
-    trace,
 };
 
 #[cfg(test)]
@@ -19,9 +18,9 @@ use core::{ptr, sync::atomic::AtomicPtr};
 pub type MinPageSize = mm::size::Size4Kb;
 
 #[derive(Debug)]
-#[repr(transparent)]
 pub struct RustbootBootInfo {
     inner: &'static boot_info::BootInfo,
+    has_framebuffer: bool,
 }
 
 type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
@@ -32,7 +31,7 @@ impl BootInfo for RustbootBootInfo {
 
     type Writer = vga::Writer;
 
-    type Framebuffer = spin::MutexGuard<'static, Framebuffer>;
+    type Framebuffer = spin::MutexGuard<'static, Framebuffer<'static>>;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
@@ -67,34 +66,17 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn framebuffer(&self) -> Option<Self::Framebuffer> {
-        let framebuffer = self.inner.framebuffer.as_ref()?;
+        if !self.has_framebuffer {
+            return None;
+        }
 
-        static FRAMEBUFFER: InitOnce<spin::Mutex<Framebuffer>> = InitOnce::uninitialized();
-        Some(
-            FRAMEBUFFER
-                .get_or_else(move || {
-                    let info = framebuffer.info();
-                    let buf = framebuffer.buffer();
-                    let cfg = framebuffer::Config {
-                        height: info.vertical_resolution,
-                        width: info.horizontal_resolution,
-                        px_bytes: info.bytes_per_pixel,
-                        line_len: info.stride,
-                        px_kind: match info.pixel_format {
-                            boot_info::PixelFormat::RGB => framebuffer::PixelKind::Rgb,
-                            boot_info::PixelFormat::BGR => framebuffer::PixelKind::Bgr,
-                            boot_info::PixelFormat::U8 => framebuffer::PixelKind::Gray,
-                            x => unimplemented!("hahaha wtf, found a weird pixel format: {:?}", x),
-                        },
-                        len: buf.len(),
-                        // here's one for the "cool casts collection"...
-                        start_vaddr: VAddr::from_usize(buf as *const _ as *const () as usize),
-                    };
-                    tracing::info!(cfg = ?trace::alt(&cfg), "detected framebuffer");
-                    spin::Mutex::new(Framebuffer::new(cfg))
-                })
-                .lock(),
-        )
+        let lock = unsafe {
+            // Safety: we can reasonably assume this will only be called
+            // after `arch_entry`, so if we've failed to initialize the
+            // framebuffer...things have gone horribly wrong...
+            FRAMEBUFFER.get_unchecked()
+        };
+        Some(lock.lock())
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
@@ -121,8 +103,57 @@ impl RustbootBootInfo {
                 .expect("haha wtf"),
         )
     }
+
+    fn from_bootloader(inner: &'static mut boot_info::BootInfo) -> Self {
+        let framebuffer = core::mem::replace(&mut inner.framebuffer, boot_info::Optional::None);
+        let has_framebuffer = if let boot_info::Optional::Some(mut framebuffer) = framebuffer {
+            let info = framebuffer.info();
+            let buf = unsafe {
+                // Safety: this is sad, but there isn't a nice way to get the
+                // buffer out of the bootinfo as a `&'static mut [u8]`. if we
+                // call `framebuffer.buffer_mut()`, we borrow the whole bootinfo
+                // for the `'static` lifetime, and then we can't do anything
+                // else with it. OTTOH, since we're `replace`ing the
+                // `Framebuffer` struct out of the `BootInfo`, we are the only
+                // owners of the framebuffer's start and end address, so we can
+                // reasonably assume nothing else in the kernel can _find_ it...
+                // so we *do*, essentially, have unique ownership over it[1].
+                // would be nice if there was a way to do this without
+                // `transmute` though.
+                //
+                // [1]: *technically* the bootloader could still do something
+                // evil with it, but control is never returned to the
+                // bootloader, with the exception of a handful of functions
+                // called on the bootinfo...which we just moved the framebuffer
+                // out of...
+                core::mem::transmute::<&mut [u8], &'static mut [u8]>(framebuffer.buffer_mut())
+            };
+            let cfg = framebuffer::Config {
+                height: info.vertical_resolution,
+                width: info.horizontal_resolution,
+                px_bytes: info.bytes_per_pixel,
+                line_len: info.stride,
+                px_kind: match info.pixel_format {
+                    boot_info::PixelFormat::RGB => framebuffer::PixelKind::Rgb,
+                    boot_info::PixelFormat::BGR => framebuffer::PixelKind::Bgr,
+                    boot_info::PixelFormat::U8 => framebuffer::PixelKind::Gray,
+                    x => unimplemented!("hahaha wtf, found a weird pixel format: {:?}", x),
+                },
+            };
+            FRAMEBUFFER.init(spin::Mutex::new(Framebuffer::new(cfg, buf)));
+            true
+        } else {
+            false
+        };
+
+        Self {
+            inner,
+            has_framebuffer,
+        }
+    }
 }
 
+static FRAMEBUFFER: InitOnce<spin::Mutex<Framebuffer<'static>>> = InitOnce::uninitialized();
 static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
@@ -203,7 +234,7 @@ pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
         // lol we're hosed
     } */
 
-    let boot_info = RustbootBootInfo { inner: info };
+    let boot_info = RustbootBootInfo::from_bootloader(info);
     crate::kernel_main(&boot_info);
 }
 

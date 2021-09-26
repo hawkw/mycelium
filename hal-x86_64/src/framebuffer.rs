@@ -1,9 +1,9 @@
-use core::{ptr, slice};
+use core::slice;
 use hal_core::framebuffer::{Draw, RgbColor};
 
 #[derive(Debug)]
-pub struct Framebuffer {
-    buf: &'static mut [u8],
+pub struct Framebuffer<'buf> {
+    buf: &'buf mut [u8],
     cfg: Config,
 }
 
@@ -16,8 +16,6 @@ pub struct Config {
     pub px_bytes: usize,
     pub line_len: usize,
     pub px_kind: PixelKind,
-    pub start_vaddr: crate::VAddr,
-    pub len: usize,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -34,12 +32,8 @@ mod embedded_graphics;
 #[doc(cfg(feature = "embedded-graphics-core"))]
 pub use self::embedded_graphics::*;
 
-impl Framebuffer {
-    pub fn new(cfg: Config) -> Self {
-        let buf = unsafe {
-            // Safety: hope the config points at a valid framebuffer lol
-            slice::from_raw_parts_mut(cfg.start_vaddr.as_ptr::<u8>(), cfg.len)
-        };
+impl<'buf> Framebuffer<'buf> {
+    pub fn new(cfg: Config, buf: &'buf mut [u8]) -> Self {
         Self { cfg, buf }
     }
 
@@ -71,7 +65,7 @@ impl Framebuffer {
     }
 }
 
-impl Draw for Framebuffer {
+impl<'buf> Draw for Framebuffer<'buf> {
     fn height(&self) -> usize {
         self.cfg.height
     }
