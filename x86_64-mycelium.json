@@ -8,8 +8,7 @@
     "code-model": "kernel",
     "os": "none",
     "executables": true,
-    "linker-flavor": "ld.lld",
-    "linker": "rust-lld",
+    "linker-flavor": "ld",
     "panic-strategy": "abort",
     "disable-redzone": true,
     "features": "-mmx,-sse,+soft-float"
