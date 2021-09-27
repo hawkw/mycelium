@@ -10,6 +10,12 @@
     "executables": true,
     "linker-flavor": "ld.lld",
     "linker": "rust-lld",
+    "post-link-args": {
+        "ld.lld": [
+            "-z",
+            "nostart-stop-gc"
+        ]
+    },
     "panic-strategy": "abort",
     "disable-redzone": true,
     "features": "-mmx,-sse,+soft-float"
