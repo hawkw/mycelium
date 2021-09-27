@@ -118,32 +118,10 @@ impl Cmd {
 
         // If the `--gdb` flag was passed, try to run gdb & connect to the kernel.
         if qemu_settings.gdb {
-            let mut gdb = Command::new("gdb");
-
-            // Set the file, and connect to the given remote, then advance to `kernel_main`.
-            //
-            // The `-ex` command provides a gdb command to which is run by gdb
-            // before handing control over to the user, and we can use it to
-            // configure the gdb session to connect to the gdb remote.
-            gdb.arg("-ex").arg(format!("file {}", binary.display()));
-            gdb.arg("-ex")
-                .arg(format!("target remote :{}", qemu_settings.gdb_port));
-
-            // Set a temporary breakpoint on `kernel_main` and continue to it to
-            // skip the non-mycelium boot process.
-            // XXX: Add a flag to skip doing this to allow debugging the boot process.
-            gdb.arg("-ex").arg("tbreak mycelium_kernel::kernel_main");
-            gdb.arg("-ex").arg("continue");
-
-            // Try to run gdb, and immediately kill qemu after gdb either exits
-            // or fails to spawn.
-            let status = gdb.status();
-            if let Err(_) = child.kill() {
-                tracing::error!("failed to kill qemu");
+            crate::gdb::run_gdb(binary, qemu_settings.gdb_port)?;
+            if let Err(error) = child.kill() {
+                tracing::error!(?error, "failed to kill qemu");
             }
-
-            let status = status.context("starting gdb failed")?;
-            tracing::debug!("gdb exited with status {:?}", status);
         }
 
         Ok(child)
