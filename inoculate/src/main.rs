@@ -16,7 +16,7 @@ fn main() -> Result<()> {
         .init();
 
     tracing::info! {
-        ?opts.qemu,
+        ?opts.cmd,
         ?opts.kernel_bin,
         ?opts.bootloader_manifest,
         ?opts.kernel_manifest,
@@ -44,8 +44,8 @@ fn main() -> Result<()> {
         .note("this sucks T_T")?;
     tracing::info!(image = %image.display());
 
-    if let Some(qemu) = opts.qemu {
-        return qemu.run_qemu(image.as_ref(), kernel_bin.as_ref());
+    if let Some(cmd) = opts.cmd {
+        return cmd.run(image.as_ref(), kernel_bin.as_ref());
     }
 
     Ok(())

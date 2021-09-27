@@ -11,6 +11,7 @@ use structopt::StructOpt;
 pub use color_eyre::eyre::Result;
 
 pub mod cargo;
+pub mod gdb;
 pub mod qemu;
 pub mod term;
 
@@ -24,7 +25,7 @@ pub struct Options {
     ///
     /// By default, an image is built but not run.
     #[structopt(subcommand)]
-    pub qemu: Option<qemu::Cmd>,
+    pub cmd: Option<Subcommand>,
 
     /// Configures build logging.
     #[structopt(short, long, env = "RUST_LOG", default_value = "warn")]
@@ -62,9 +63,30 @@ pub struct Options {
     pub color: term::ColorMode,
 }
 
+#[derive(Debug, StructOpt)]
+pub enum Subcommand {
+    #[structopt(flatten)]
+    Qemu(qemu::Cmd),
+    /// Run `gdb` without launching the kernel in QEMU.
+    ///
+    /// This assumes QEMU was already started by a separate `cargo inoculate`
+    /// invocation, and that invocation was configured to listen for a GDB
+    /// connection on the default port.
+    Gdb,
+}
+
+impl Subcommand {
+    pub fn run(&self, image: &Path, kernel_bin: &Path) -> Result<()> {
+        match self {
+            Subcommand::Qemu(qemu) => qemu.run_qemu(image, kernel_bin),
+            Subcommand::Gdb => crate::gdb::run_gdb(kernel_bin, 1234).map(|_| ()),
+        }
+    }
+}
+
 impl Options {
     pub fn is_test(&self) -> bool {
-        matches!(self.qemu, Some(qemu::Cmd::Test { .. }))
+        matches!(self.cmd, Some(Subcommand::Qemu(qemu::Cmd::Test { .. })))
     }
 
     pub fn wheres_bootloader(&self) -> Result<PathBuf> {
