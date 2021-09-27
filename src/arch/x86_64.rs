@@ -234,6 +234,7 @@ pub fn oops(
 ) -> ! {
     use core::fmt::Write;
     let mut vga = vga::writer();
+
     // /!\ disable all interrupts, unlock everything to prevent deadlock /!\
     //
     // Safety: it is okay to do this because we are oopsing and everything
