@@ -4,7 +4,7 @@ let env = (import ./default.nix scope);
 
 in pkgs.mkShell {
   # also install qemu into the dev shell, for testing
-  packages = [ pkgs.qemu_full ];
+  packages = with pkgs; [ qemu_full gdb direnv ];
 
   LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
   LC_ALL = "en_US.UTF-8";

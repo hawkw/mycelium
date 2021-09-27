@@ -6,7 +6,6 @@ pkgs.buildEnv {
     [
       git
       bash
-      direnv
       binutils
       stdenv
       bashInteractive
