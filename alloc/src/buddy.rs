@@ -9,6 +9,7 @@ use hal_core::{
     },
     Address, PAddr, VAddr,
 };
+use mycelium_util::fmt;
 use mycelium_util::intrusive::{list, List};
 use mycelium_util::math::Log2;
 use mycelium_util::sync::{
@@ -18,7 +19,6 @@ use mycelium_util::sync::{
     },
     spin,
 };
-use mycelium_util::trace;
 
 #[derive(Debug)]
 pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
@@ -386,7 +386,7 @@ where
         }
 
         tracing::trace!(
-            heap.base = trace::hex(base),
+            heap.base = fmt::hex(base),
             block.addr = ?block,
             block.order = order,
             block.size = size,
@@ -398,8 +398,8 @@ where
         let buddy_offset = rel_offset ^ size;
         let buddy = (base + buddy_offset) as *mut Free;
         tracing::trace!(
-            block.rel_offset = trace::hex(rel_offset),
-            buddy.offset = trace::hex(buddy_offset),
+            block.rel_offset = fmt::hex(rel_offset),
+            buddy.offset = fmt::hex(buddy_offset),
             buddy.addr = ?buddy,
         );
 
@@ -625,7 +625,7 @@ impl Free {
     /// Don't construct a free list entry for a region that isn't actually free,
     /// that would be, uh, bad, lol.
     pub unsafe fn new(region: Region, offset: usize) -> ptr::NonNull<Free> {
-        tracing::trace!(?region, offset = trace::hex(offset));
+        tracing::trace!(?region, offset = fmt::hex(offset));
 
         let ptr = ((region.base_addr().as_ptr::<Free>() as usize) + offset) as *mut _;
         let nn = ptr::NonNull::new(ptr)
