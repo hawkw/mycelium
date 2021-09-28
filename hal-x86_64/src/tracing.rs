@@ -1,9 +1,9 @@
 use crate::{serial, vga};
-use core::{
-    fmt::{self, Write},
-    sync::atomic::{AtomicU64, Ordering},
+use core::sync::atomic::{AtomicU64, Ordering};
+use mycelium_util::{
+    fmt::{self, Write, WriteExt},
+    io,
 };
-use mycelium_util::io;
 use tracing::{field, level_filters::LevelFilter, span, Event, Level, Metadata};
 
 pub struct Subscriber {
@@ -17,14 +17,6 @@ struct Serial {
     port: &'static serial::Port,
     max_level: LevelFilter,
     indent: AtomicU64,
-}
-
-struct WithIndent<'a, W: io::Write> {
-    line_len: usize,
-    current_line: usize,
-    indent_chars: &'static str,
-    indent: &'a AtomicU64,
-    writer: W,
 }
 
 impl Default for Subscriber {
@@ -69,36 +61,40 @@ impl Subscriber {
             .unwrap_or(false)
     }
 
-    fn writer(&self, level: &Level) -> Writer<'_> {
-        // let vga = if self.vga_enabled(level) {
-        //     // Some(WithIndent::new(vga::writer(), &self.vga_indent, " "))
-        // } else {
-        //     None
-        // };
+    fn writer(&self, level: &Level) -> WriterPair<'_> {
         let vga = None;
         let serial = if self.serial_enabled(level) {
             self.serial
                 .as_ref()
-                .map(|s| WithIndent::new(s.port.lock(), &s.indent, " |"))
+                .map(|s| Writer::new(s.port.lock(), &s.indent, " |"))
         } else {
             None
         };
-        Writer { vga, serial }
+        WriterPair { vga, serial }
     }
 }
 
-struct Writer<'a> {
-    vga: Option<WithIndent<'a, vga::Writer>>,
-    serial: Option<WithIndent<'a, serial::Lock<'a>>>,
+struct Writer<'a, W: io::Write> {
+    line_len: usize,
+    current_line: usize,
+    span_indent_chars: &'static str,
+    span_indent: &'a AtomicU64,
+    writer: W,
 }
 
-struct Visitor<'a, W> {
-    writer: &'a mut W,
+struct WriterPair<'a> {
+    vga: Option<Writer<'a, vga::Writer>>,
+    serial: Option<Writer<'a, serial::Lock<'a>>>,
+}
+
+struct Visitor<'writer, W> {
+    writer: fmt::WithIndent<'writer, W>,
     seen: bool,
     newline: bool,
+    comma: bool,
 }
 
-impl<'a> Write for Writer<'a> {
+impl<'a> Write for WriterPair<'a> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         use io::Write;
         if let Some(ref mut vga) = self.vga {
@@ -122,7 +118,7 @@ impl<'a> Write for Writer<'a> {
     }
 }
 
-impl<'a> Writer<'a> {
+impl<'a> WriterPair<'a> {
     fn indent(&mut self, is_span: bool) -> fmt::Result {
         use io::Write;
         if let Some(ref mut vga) = self.vga {
@@ -138,21 +134,21 @@ impl<'a> Writer<'a> {
     }
 }
 
-impl<'a, W: io::Write> WithIndent<'a, W> {
+impl<'a, W: io::Write> Writer<'a, W> {
     fn new(writer: W, indent: &'a AtomicU64, indent_chars: &'static str) -> Self {
         Self {
             current_line: 0,
             line_len: 80,
-            indent,
+            span_indent: indent,
             writer,
-            indent_chars,
+            span_indent_chars: indent_chars,
         }
     }
 
     fn indent(&mut self) -> io::Result<()> {
-        for _ in 0..self.indent.load(Ordering::Acquire) {
-            self.writer.write_all(self.indent_chars.as_bytes())?;
-            self.current_line += self.indent_chars.len();
+        for _ in 0..self.span_indent.load(Ordering::Acquire) {
+            self.writer.write_all(self.span_indent_chars.as_bytes())?;
+            self.current_line += self.span_indent_chars.len();
         }
         Ok(())
     }
@@ -169,7 +165,7 @@ impl<'a, W: io::Write> WithIndent<'a, W> {
     }
 }
 
-impl<'a, W> io::Write for WithIndent<'a, W>
+impl<'a, W> io::Write for Writer<'a, W>
 where
     W: io::Write,
 {
@@ -181,22 +177,29 @@ where
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         let lines = buf.split_inclusive(|&c| c == b'\n');
         for line in lines {
-            // FIXME(eliza): doesn't really work yet T_T
             let mut line = line;
-            // while self.current_line + line.len() >= self.line_len {
-            //     let mut offset = self.line_len - self.current_line;
-            //     let next_ws = line.iter().position(|&c| c.is_ascii_whitespace());
-            //     amt += self.writer.write(&line[..offset])?;
-            //     self.writer.write(b"\n")?;
-            //     self.write_newline()?;
-            //     line = &line[offset..];
-            // }
+            while self.current_line + line.len() >= self.line_len {
+                let mut offset = self.line_len - self.current_line;
+                if let Some(last_ws) = &line[..offset]
+                    .iter()
+                    .rev()
+                    .position(|&c| c.is_ascii_whitespace())
+                {
+                    offset = *last_ws;
+                }
+                self.writer.write(&line[..offset])?;
+                self.writer.write(b"\n")?;
+                self.write_newline()?;
+                self.writer.write(b"  ")?;
+                self.current_line += 2;
+                line = &line[offset..];
+            }
             let wrote = self.writer.write(line)?;
             if line.last().map(|x| x == &b'\n').unwrap_or(false) {
                 self.write_newline()?;
                 self.writer.write(b" ")?;
             }
-            // self.current_line += wrote;
+            self.current_line += wrote;
         }
 
         Ok(())
@@ -207,53 +210,11 @@ where
     }
 }
 
-impl<'a, W: io::Write> Drop for WithIndent<'a, W> {
+impl<'a, W: io::Write> Drop for Writer<'a, W> {
     fn drop(&mut self) {
         let _ = self.finish();
     }
 }
-// #[inline]
-// fn write_level_vga(vga: &mut vga::Writer, level: &Level) -> fmt::Result {
-//     const DEFAULT_COLOR: vga::ColorSpec =
-//         vga::ColorSpec::new(vga::Color::LightGray, vga::Color::Black);
-//     const TRACE_COLOR: vga::ColorSpec = vga::ColorSpec::new(vga::Color::Black, vga::Color::Magenta);
-//     const DEBUG_COLOR: vga::ColorSpec =
-//         vga::ColorSpec::new(vga::Color::Black, vga::Color::LightBlue);
-//     const INFO_COLOR: vga::ColorSpec = vga::ColorSpec::new(vga::Color::Black, vga::Color::Green);
-//     const WARN_COLOR: vga::ColorSpec = vga::ColorSpec::new(vga::Color::Black, vga::Color::Yellow);
-//     const ERR_COLOR: vga::ColorSpec = vga::ColorSpec::new(vga::Color::Black, vga::Color::Red);
-//     vga.set_color(DEFAULT_COLOR);
-//     match *level {
-//         Level::TRACE => {
-//             vga.set_color(TRACE_COLOR);
-//             vga.write_str("TRACE")?;
-//             vga.set_color(DEFAULT_COLOR);
-//         }
-//         Level::DEBUG => {
-//             vga.set_color(DEBUG_COLOR);
-//             vga.write_str("DEBUG")?;
-//             vga.set_color(DEFAULT_COLOR);
-//         }
-//         Level::INFO => {
-//             vga.set_color(INFO_COLOR);
-//             vga.write_str("INFO").unwrap();
-//             vga.set_color(DEFAULT_COLOR);
-//         }
-//         Level::WARN => {
-//             vga.set_color(WARN_COLOR);
-//             vga.write_str("WARN")?;
-//             vga.set_color(DEFAULT_COLOR);
-//         }
-//         Level::ERROR => {
-//             vga.set_color(ERR_COLOR);
-//             vga.write_str("ERROR")?;
-//             vga.set_color(DEFAULT_COLOR);
-//         }
-//     };
-
-//     vga.write_char(' ')?;
-//     Ok(())
-// }
 
 #[inline]
 fn write_level(w: &mut impl fmt::Write, level: &Level) -> fmt::Result {
@@ -268,69 +229,66 @@ fn write_level(w: &mut impl fmt::Write, level: &Level) -> fmt::Result {
     Ok(())
 }
 
-// impl<'a> Writer<'a> {
-//     fn indent_span(&mut self) -> fmt::Result {
-//         self.indent_vga()?;
-//         self.indent_serial(true)?;
-//         Ok(())
-//     }
+impl<'writer, W: fmt::Write> Visitor<'writer, W> {
+    fn new(writer: &'writer mut W, fields: &tracing::field::FieldSet) -> Self {
+        Self {
+            writer: writer.with_indent(2),
+            seen: false,
+            comma: false,
+            newline: fields.iter().filter(|f| f.name() != "message").count() > 1,
+        }
+    }
 
-//     // #[inline]
-//     // fn indent_vga(&mut self) -> fmt::Result {
-//     //     if let Some((ref mut vga, indent)) = self.vga {
-//     //         for _ in 0..indent.load(Ordering::Relaxed) {
-//     //             vga.write_char(' ')?;
-//     //         }
-//     //     }
-//     //     Ok(())
-//     // }
-
-//     // #[inline]
-//     // fn indent_serial(&mut self, span: bool) -> fmt::Result {
-//     //     if let Some((ref mut serial, indent)) = self.serial {
-//     //         let indent = indent.load(Ordering::Relaxed);
-//     //         if indent > 0 {
-//     //             for _ in 0..indent {
-//     //                 serial.write_str(" |")?;
-//     //             }
-//     //             if !span {
-//     //                 serial.write_char('-')?;
-//     //             }
-//     //         }
-//     //         serial.write_char(' ')?;
-//     //     }
-//     //     Ok(())
-//     // }
-
-//     fn write_level(&mut self, level: &Level) -> fmt::Result {
-//         if let Some(ref mut vga) = self.vga {
-//             write_level_vga(vga, level)?;
-//         }
-
-//         if let Some(ref mut serial, _)) = self.serial {
-//             write_level_serial(serial, level)?;
-//         }
-
-//         Ok(())
-//     }
-// }
-
-impl<'a, W: Write> field::Visit for Visitor<'a, W> {
-    fn record_debug(&mut self, field: &field::Field, val: &dyn fmt::Debug) {
-        let nl = if self.newline { "\n  " } else { " " };
+    fn record_inner(&mut self, field: &field::Field, val: &dyn fmt::Debug, nl: &'static str) {
         if field.name() == "message" {
             if self.seen {
                 let _ = write!(self.writer, ",{}{:?}", nl, val);
             } else {
                 let _ = write!(self.writer, "{:?}", val);
-                self.seen = true;
             }
-        } else if self.seen {
-            let _ = write!(self.writer, ",{}{}={:?}", nl, field, val);
-        } else {
-            let _ = write!(self.writer, "{}{}={:?}", nl, field, val);
             self.seen = true;
+            return;
         }
+
+        if self.comma {
+            let _ = self.writer.write_char(',');
+        } else {
+            self.seen = true;
+            self.comma = true;
+        }
+
+        let _ = write!(self.writer, "{}{}={:?}", nl, field, val);
+    }
+}
+
+impl<'writer, W: fmt::Write> field::Visit for Visitor<'writer, W> {
+    fn record_u64(&mut self, field: &field::Field, val: u64) {
+        let nl = if self.newline { "\n" } else { " " };
+        self.record_inner(field, &val, nl)
+    }
+
+    fn record_i64(&mut self, field: &field::Field, val: i64) {
+        let nl = if self.newline { "\n" } else { " " };
+        self.record_inner(field, &val, nl)
+    }
+
+    fn record_bool(&mut self, field: &field::Field, val: bool) {
+        let nl = if self.newline { "\n" } else { " " };
+        self.record_inner(field, &val, nl)
+    }
+
+    fn record_str(&mut self, field: &field::Field, val: &str) {
+        let nl = if self.newline || val.len() > 70 {
+            "\n"
+        } else {
+            " "
+        };
+        self.record_inner(field, &val, nl)
+    }
+
+    fn record_debug(&mut self, field: &field::Field, val: &dyn fmt::Debug) {
+        let nl = if self.newline || self.seen { "\n" } else { " " };
+        self.record_inner(field, &fmt::alt(val), nl)
     }
 }
 
@@ -350,14 +308,8 @@ impl tracing::Subscriber for Subscriber {
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent(true);
         let _ = write!(&mut writer, "{}", meta.name());
-        {
-            let mut visitor = Visitor {
-                writer: &mut writer,
-                seen: true,
-                newline: meta.fields().len() > 1,
-            };
-            span.record(&mut visitor);
-        }
+
+        span.record(&mut Visitor::new(&mut writer, meta.fields()));
 
         let mut id = self.next_id.fetch_add(1, Ordering::Acquire);
         if id & SERIAL_BIT != 0 {
@@ -393,19 +345,8 @@ impl tracing::Subscriber for Subscriber {
         // let _ = writer.indent_vga();
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent(false);
-
-        if let Some(ref mut serial) = writer.serial {
-            use io::Write;
-            let _ = write!(serial, "{}: ", meta.target());
-        }
-        {
-            let mut visitor = Visitor {
-                writer: &mut writer,
-                seen: false,
-                newline: meta.fields().len() > 1,
-            };
-            event.record(&mut visitor);
-        }
+        let _ = write!(writer, "{}: ", meta.target());
+        event.record(&mut Visitor::new(&mut writer, meta.fields()));
     }
 
     fn enter(&self, span: &span::Id) {
