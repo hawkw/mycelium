@@ -81,8 +81,13 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
-        use mycelium_trace::Subscriber;
-        let display = Subscriber::display_only(mycelium_util::io::sink);
+        use mycelium_trace::{
+            writer::{self, MakeWriterExt},
+            Subscriber,
+        };
+        let display_writer = writer::NoWriter::default() // TODO(eliza): framebuf
+            .with_max_level(tracing::Level::INFO);
+        let display = Subscriber::display_only(display_writer);
         let dispatch = if let Some(serial) = serial::com1() {
             tracing::Dispatch::new(display.with_serial(serial))
         } else {

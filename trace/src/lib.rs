@@ -3,14 +3,11 @@ pub mod writer;
 
 use crate::writer::MakeWriter;
 use core::sync::atomic::{AtomicU64, Ordering};
-use mycelium_util::{
-    fmt::{self, Write, WriteExt},
-    io,
-};
-use tracing_core::{field, span, Event, Level, LevelFilter, Metadata};
+use mycelium_util::fmt::{self, Write, WriteExt};
+use tracing_core::{field, span, Event, Level, Metadata};
 
 #[derive(Debug)]
-pub struct Subscriber<D, S = fn() -> io::Sink> {
+pub struct Subscriber<D, S = writer::NoWriter> {
     display: Output<D, VGA_BIT>,
     serial: Output<S, SERIAL_BIT>,
     next_id: AtomicU64,
@@ -19,7 +16,6 @@ pub struct Subscriber<D, S = fn() -> io::Sink> {
 #[derive(Debug)]
 struct Output<W, const BIT: u64> {
     make_writer: W,
-    max_level: LevelFilter,
     cfg: OutputCfg,
 }
 
@@ -31,14 +27,14 @@ struct OutputCfg {
 }
 
 #[derive(Debug)]
-struct Writer<'a, W: io::Write> {
+struct Writer<'a, W: Write> {
     cfg: &'a OutputCfg,
     current_line: usize,
     writer: W,
 }
 
 #[derive(Debug)]
-struct WriterPair<'a, D: io::Write, S: io::Write> {
+struct WriterPair<'a, D: Write, S: Write> {
     display: Option<Writer<'a, D>>,
     serial: Option<Writer<'a, S>>,
 }
@@ -67,7 +63,6 @@ impl<D> Subscriber<D> {
         Self {
             display: Output {
                 make_writer: display,
-                max_level: LevelFilter::INFO,
                 cfg: OutputCfg {
                     line_len: 80,
                     indent: AtomicU64::new(0),
@@ -75,8 +70,7 @@ impl<D> Subscriber<D> {
                 },
             },
             serial: Output {
-                make_writer: io::sink,
-                max_level: LevelFilter::OFF,
+                make_writer: writer::none(),
                 cfg: OutputCfg {
                     line_len: 120,
                     indent: AtomicU64::new(0),
@@ -94,7 +88,6 @@ impl<D> Subscriber<D> {
         Subscriber {
             serial: Output {
                 make_writer: port,
-                max_level: LevelFilter::TRACE,
                 cfg: self.serial.cfg,
             },
             display: self.display,
@@ -104,16 +97,6 @@ impl<D> Subscriber<D> {
 }
 
 impl<D, S> Subscriber<D, S> {
-    pub fn display_max_level(self, max_level: impl Into<LevelFilter>) -> Self {
-        Self {
-            display: Output {
-                max_level: max_level.into(),
-                ..self.display
-            },
-            ..self
-        }
-    }
-
     fn writer<'a>(&'a self, meta: &Metadata<'_>) -> WriterPair<'a, D::Writer, S::Writer>
     where
         D: MakeWriter<'a>,
@@ -197,8 +180,11 @@ where
 
 impl<W, const BIT: u64> Output<W, BIT> {
     #[inline]
-    fn enabled(&self, metadata: &tracing_core::Metadata<'_>) -> bool {
-        metadata.level() <= &self.max_level
+    fn enabled<'a>(&'a self, metadata: &tracing_core::Metadata<'_>) -> bool
+    where
+        W: MakeWriter<'a>,
+    {
+        self.make_writer.enabled(metadata)
     }
 
     #[inline]
@@ -219,15 +205,12 @@ impl<W, const BIT: u64> Output<W, BIT> {
     where
         W: MakeWriter<'a>,
     {
-        if self.enabled(meta) {
-            return Some(Writer {
-                current_line: 0,
-                writer: self.make_writer.make_writer_for(meta),
-                cfg: &self.cfg,
-            });
-        }
-
-        None
+        let writer = self.make_writer.make_writer_for(meta)?;
+        Some(Writer {
+            current_line: 0,
+            writer,
+            cfg: &self.cfg,
+        })
     }
 }
 
@@ -235,124 +218,125 @@ impl<W, const BIT: u64> Output<W, BIT> {
 
 impl<'a, D, S> Write for WriterPair<'a, D, S>
 where
-    D: io::Write,
-    S: io::Write,
+    D: Write,
+    S: Write,
 {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        use io::Write;
-        if let Some(ref mut display) = self.display {
-            display.write(s.as_bytes()).map_err(|_| fmt::Error)?;
-        }
+        let err = if let Some(ref mut display) = self.display {
+            display.write_str(s)
+        } else {
+            Ok(())
+        };
         if let Some(ref mut serial) = self.serial {
-            serial.write(s.as_bytes()).map_err(|_| fmt::Error)?;
+            serial.write_str(s)?;
         }
-        Ok(())
+        err
     }
 
     fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
-        use io::Write;
-        if let Some(ref mut display) = self.display {
-            write!(display, "{:?}", args).map_err(|_| fmt::Error)?;
-        }
+        let err = if let Some(ref mut display) = self.display {
+            display.write_fmt(args)
+        } else {
+            Ok(())
+        };
         if let Some(ref mut serial) = self.serial {
-            write!(serial, "{:?}", args).map_err(|_| fmt::Error)?;
+            serial.write_fmt(args)?;
         }
-        Ok(())
+        err
     }
 }
 
 impl<'a, D, S> WriterPair<'a, D, S>
 where
-    D: io::Write,
-    S: io::Write,
+    D: Write,
+    S: Write,
 {
     fn indent(&mut self, is_span: bool) -> fmt::Result {
-        use io::Write;
-        if let Some(ref mut display) = self.display {
-            display.indent().map_err(|_| fmt::Error)?;
-        }
+        let err = if let Some(ref mut display) = self.display {
+            display.indent()
+        } else {
+            Ok(())
+        };
         if let Some(ref mut serial) = self.serial {
-            serial.indent().map_err(|_| fmt::Error)?;
-            let chars = if is_span { b"-" } else { b" " };
+            serial.indent()?;
+            let chars = if is_span { '-' } else { ' ' };
 
-            serial.write(chars).map_err(|_| fmt::Error)?;
+            serial.write_char(chars)?;
         }
-        Ok(())
+        err
     }
 }
 
 // ==== impl Writer ===
 
-impl<'a, W: io::Write> Writer<'a, W> {
-    fn indent(&mut self) -> io::Result<()> {
+impl<'a, W: Write> Writer<'a, W> {
+    fn indent(&mut self) -> fmt::Result {
         for _ in 0..self.cfg.indent.load(Ordering::Acquire) {
-            self.writer
-                .write_all(self.cfg.span_indent_chars.as_bytes())?;
+            self.writer.write_str(self.cfg.span_indent_chars)?;
             self.current_line += self.cfg.span_indent_chars.len();
         }
         Ok(())
     }
 
-    fn write_newline(&mut self) -> io::Result<()> {
-        self.writer.write_all(b"   ")?;
+    fn write_newline(&mut self) -> fmt::Result {
+        self.writer.write_str("   ")?;
         self.current_line = 3;
         self.indent()
     }
 
-    fn finish(&mut self) -> io::Result<()> {
-        self.writer.write(b"\n")?;
-        self.writer.flush()
+    fn finish(&mut self) -> fmt::Result {
+        self.writer.write_char('\n')
     }
 }
 
-impl<'a, W> io::Write for Writer<'a, W>
+impl<'a, W> Write for Writer<'a, W>
 where
-    W: io::Write,
+    W: Write,
 {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.write_all(buf)?;
-        Ok(buf.len())
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        let lines = buf.split_inclusive(|&c| c == b'\n');
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let lines = s.split_inclusive('\n');
         for line in lines {
             let mut line = line;
             while self.current_line + line.len() >= self.cfg.line_len {
                 let offset = if let Some(last_ws) = line[..self.cfg.line_len - self.current_line]
-                    .iter()
+                    .chars()
                     .rev()
-                    .position(|&c| c.is_ascii_whitespace())
+                    .position(|c| c.is_whitespace())
                 {
                     // found a nice whitespace to break on!
-                    self.writer.write(&line[..last_ws])?;
+                    self.writer.write_str(&line[..last_ws])?;
                     last_ws
                 } else {
                     0
                 };
-                self.writer.write(b"\n")?;
+                self.writer.write_char('\n')?;
                 self.write_newline()?;
-                self.writer.write(b"  ")?;
+                self.writer.write_str("  ")?;
                 self.current_line += 2;
                 line = &line[offset..];
             }
-            let wrote = self.writer.write(line)?;
-            if line.last().map(|x| x == &b'\n').unwrap_or(false) {
+            self.writer.write_str(line)?;
+            if line.ends_with('\n') {
                 self.write_newline()?;
-                self.writer.write(b" ")?;
+                self.writer.write_char(' ')?;
             }
-            self.current_line += wrote;
+            self.current_line += line.len();
         }
 
         Ok(())
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
+    fn write_char(&mut self, ch: char) -> fmt::Result {
+        self.writer.write_char(ch)?;
+        if ch == '\n' {
+            self.write_newline()
+        } else {
+            Ok(())
+        }
     }
 }
 
-impl<'a, W: io::Write> Drop for Writer<'a, W> {
+impl<'a, W: Write> Drop for Writer<'a, W> {
     fn drop(&mut self) {
         let _ = self.finish();
     }

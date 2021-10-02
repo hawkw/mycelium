@@ -1,19 +1,18 @@
-//! Abstractions for creating [`io::Write`] instances.
+//! Abstractions for creating [`fmt::Write`] instances.
 //!
-//! [`io::Write`]: mycelium_util::io::Write
+//! [`fmt::Write`]: mycelium_util::fmt::Write
 use mycelium_util::{
     fmt::{self, Debug},
-    io::{self, Write},
     sync::spin::{Mutex, MutexGuard},
 };
 use tracing_core::Metadata;
 
-/// A type that can create [`io::Write`] instances.
+/// A type that can create [`fmt::Write`] instances.
 ///
 /// This trait is already implemented for function pointers and
-/// immutably-borrowing closures that return an instance of [`io::Write`],
+/// immutably-borrowing closures that return an instance of [`fmt::Write`],
 /// Additionally, it is implemented for [`mycelium_util::sync::spin::Mutex`]
-/// when the type inside the mutex implements [`io::Write`].
+/// when the type inside the mutex implements [`fmt::Write`].
 ///
 /// The [`MakeWriter::make_writer_for`] method takes [`Metadata`] describing a
 /// span or event and returns a writer. `MakeWriter`s can optionally provide
@@ -27,18 +26,18 @@ use tracing_core::Metadata;
 /// passing in that metadata, so that the `MakeWriter` implementation can choose
 /// the appropriate behavior.
 ///
-/// [`io::Write`]: mycelium_util::io::Write
+/// [`fmt::Write`]: mycelium_util::fmt::Write
 /// [`Event`]: tracing_core::event::Event
 /// [`MakeWriter::make_writer_for`]: MakeWriter::make_writer_for
 /// [`Metadata`]: tracing_core::Metadata
 /// [levels]: tracing_core::Level
 /// [targets]: tracing_core::Metadata::target
 pub trait MakeWriter<'a> {
-    /// The concrete [`io::Write`] implementation returned by [`make_writer`].
+    /// The concrete [`fmt::Write`] implementation returned by [`make_writer`].
     ///
-    /// [`io::Write`]: mycelium_util::io::Write
+    /// [`fmt::Write`]: mycelium_util::fmt::Write
     /// [`make_writer`]: MakeWriter::make_writer
-    type Writer: io::Write;
+    type Writer: fmt::Write;
 
     /// Returns an instance of [`Writer`].
     ///
@@ -47,14 +46,19 @@ pub trait MakeWriter<'a> {
     /// [`fmt::Subscriber`] or [`fmt::Collector`] will call this method each
     /// time an event is recorded. Ensure any state that must be saved across
     /// writes is not lost when the [`Writer`] instance is dropped. If creating
-    /// a [`io::Write`] instance is expensive, be sure to cache it when
+    /// a [`fmt::Write`] instance is expensive, be sure to cache it when
     /// implementing [`MakeWriter`] to improve performance.
     ///
     /// [`Writer`]: MakeWriter::Writer
     /// [`fmt::Subscriber`]: super::super::fmt::Subscriber
     /// [`fmt::Collector`]: super::super::fmt::Collector
-    /// [`io::Write`]: mycelium_util::io::Write
+    /// [`fmt::Write`]: mycelium_util::fmt::Write
     fn make_writer(&'a self) -> Self::Writer;
+
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        let _ = meta;
+        true
+    }
 
     /// Returns a [`Writer`] for writing data from the span or event described
     /// by the provided [`Metadata`].
@@ -74,9 +78,13 @@ pub trait MakeWriter<'a> {
     /// [make_writer]: MakeWriter::make_writer
     /// [`WARN`]: tracing_core::Level::WARN
     /// [`ERROR`]: tracing_core::Level::ERROR
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        let _ = meta;
-        self.make_writer()
+    #[inline]
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        if self.enabled(meta) {
+            return Some(self.make_writer());
+        }
+
+        None
     }
 }
 
@@ -95,7 +103,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// output will be written.
     ///
     /// [`Level`]: tracing_core::Level
-    /// [`io::Write`]: mycelium_util::io::Write
+    /// [`fmt::Write`]: mycelium_util::fmt::Write
     fn with_max_level(self, level: tracing_core::Level) -> WithMaxLevel<Self>
     where
         Self: Sized,
@@ -110,7 +118,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// output will be written.
     ///
     /// [`Level`]: tracing_core::Level
-    /// [`io::Write`]: mycelium_util::io::Write
+    /// [`fmt::Write`]: mycelium_util::fmt::Write
     fn with_min_level(self, level: tracing_core::Level) -> WithMinLevel<Self>
     where
         Self: Sized,
@@ -150,7 +158,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// the error is returned, so it is possible for one writer to fail while
     /// the other is written to successfully.
     ///
-    /// [writers]: mycelium_util::io::Write
+    /// [writers]: mycelium_util::fmt::Write
     fn and<B>(self, other: B) -> Tee<Self, B>
     where
         Self: Sized,
@@ -164,26 +172,25 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// `make_writer` returns [`OptionalWriter::none`].
     ///
     /// [`make_writer`]: MakeWriter::make_writer
-    fn or_else<W, B>(self, other: B) -> OrElse<Self, B>
+    fn or_else<B>(self, other: B) -> OrElse<Self, B>
     where
-        Self: MakeWriter<'a, Writer = OptionalWriter<W>> + Sized,
+        Self: MakeWriter<'a> + Sized,
         B: MakeWriter<'a> + Sized,
-        W: Write,
     {
         OrElse::new(self, other)
     }
 }
 
-/// A type implementing [`io::Write`] for a [`MutexGuard`] where the type
-/// inside the [`Mutex`] implements [`io::Write`].
+/// A type implementing [`fmt::Write`] for a [`MutexGuard`] where the type
+/// inside the [`Mutex`] implements [`fmt::Write`].
 ///
 /// This is used by the [`MakeWriter`] implementation for [`Mutex`], because
-/// [`MutexGuard`] itself will not implement [`io::Write`] — instead, it
-/// _dereferences_ to a type implementing [`io::Write`]. Because [`MakeWriter`]
-/// requires the `Writer` type to implement [`io::Write`], it's necessary to add
+/// [`MutexGuard`] itself will not implement [`fmt::Write`] — instead, it
+/// _dereferences_ to a type implementing [`fmt::Write`]. Because [`MakeWriter`]
+/// requires the `Writer` type to implement [`fmt::Write`], it's necessary to add
 /// a newtype that forwards the trait implementation.
 ///
-/// [`io::Write`]: mycelium_util::io::Write
+/// [`fmt::Write`]: mycelium_util::fmt::Write
 /// [`MutexGuard`]: mycelium_util::sync::spin::MutexGuard
 /// [`Mutex`]: mycelium_util::sync::spin::Mutex
 /// [`MakeWriter`]: trait.MakeWriter.html
@@ -192,7 +199,7 @@ pub struct MutexGuardWriter<'a, W>(MutexGuard<'a, W>);
 
 // TODO(eliza): put this back if needed
 /*
-/// A writer that erases the specific [`io::Write`] and [`MakeWriter`] types being used.
+/// A writer that erases the specific [`fmt::Write`] and [`MakeWriter`] types being used.
 ///
 /// This is useful in cases where the concrete type of the writer cannot be known
 /// until runtime.
@@ -217,19 +224,19 @@ pub struct MutexGuardWriter<'a, W>(MutexGuard<'a, W>);
 /// ```
 ///
 /// [`Collect`]: tracing::Collect
-/// [`io::Write`]: mycelium_util::io::Write
+/// [`fmt::Write`]: mycelium_util::fmt::Write
 pub struct BoxMakeWriter {
     inner: Box<dyn for<'a> MakeWriter<'a, Writer = Box<dyn Write + 'a>> + Send + Sync>,
     name: &'static str,
 }
  */
 
-/// A [writer] that is one of two types implementing [`io::Write`][writer].
+/// A [writer] that is one of two types implementing [`fmt::Write`][writer].
 ///
 /// This may be used by [`MakeWriter`] implementations that may conditionally
 /// return one of two writers.
 ///
-/// [writer]: mycelium_util::io::Write
+/// [writer]: mycelium_util::fmt::Write
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum EitherWriter<A, B> {
     /// A writer of type `A`.
@@ -238,22 +245,13 @@ pub enum EitherWriter<A, B> {
     B(B),
 }
 
-/// A [writer] which may or may not be enabled.
-///
-/// This may be used by [`MakeWriter`] implementations that wish to
-/// conditionally enable or disable the returned writer based on a span or
-/// event's [`Metadata`].
-///
-/// [writer]: mycelium_util::io::Write
-pub type OptionalWriter<T> = EitherWriter<T, io::Sink>;
-
 /// A [`MakeWriter`] combinator that only returns an enabled [writer] for spans
 /// and events with metadata at or below a specified verbosity [`Level`].
 ///
 /// This is returned by the [`MakeWriterExt::with_max_level] method. See the
 /// method documentation for details.
 ///
-/// [writer]: mycelium_util::io::Write
+/// [writer]: mycelium_util::fmt::Write
 /// [`Level`]: tracing_core::Level
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct WithMaxLevel<M> {
@@ -267,7 +265,7 @@ pub struct WithMaxLevel<M> {
 /// This is returned by the [`MakeWriterExt::with_min_level] method. See the
 /// method documentation for details.
 ///
-/// [writer]: mycelium_util::io::Write
+/// [writer]: mycelium_util::fmt::Write
 /// [`Level`]: tracing_core::Level
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct WithMinLevel<M> {
@@ -302,7 +300,7 @@ pub struct OrElse<A, B> {
     or_else: B,
 }
 
-/// Combines two types implementing [`MakeWriter`] (or [`mycelium_util::io::Write`]) to
+/// Combines two types implementing [`MakeWriter`] (or [`mycelium_util::fmt::Write`]) to
 /// produce a writer that writes to both [`MakeWriter`]'s returned writers.
 ///
 /// This is returned by the [`MakeWriterExt::and`] method. See the method
@@ -313,10 +311,17 @@ pub struct Tee<A, B> {
     b: B,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+pub struct NoWriter(());
+
+pub const fn none() -> NoWriter {
+    NoWriter(())
+}
+
 impl<'a, F, W> MakeWriter<'a> for F
 where
     F: Fn() -> W,
-    W: io::Write,
+    W: fmt::Write,
 {
     type Writer = W;
 
@@ -324,69 +329,12 @@ where
         (self)()
     }
 }
-/*
-
-// === impl BoxMakeWriter ===
-
-impl BoxMakeWriter {
-    /// Constructs a `BoxMakeWriter` wrapping a type implementing [`MakeWriter`].
-    ///
-    pub fn new<M>(make_writer: M) -> Self
-    where
-        M: for<'a> MakeWriter<'a> + Send + Sync + 'static,
-    {
-        Self {
-            inner: Box::new(Boxed(make_writer)),
-            name: core::any::type_name::<M>(),
-        }
-    }
-}
-
-impl Debug for BoxMakeWriter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("BoxMakeWriter")
-            .field(&format_args!("<{}>", self.name))
-            .finish()
-    }
-}
-
-impl<'a> MakeWriter<'a> for BoxMakeWriter {
-    type Writer = Box<dyn Write + 'a>;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        self.inner.make_writer()
-    }
-
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        self.inner.make_writer_for(meta)
-    }
-}
-
-struct Boxed<M>(M);
-
-impl<'a, M> MakeWriter<'a> for Boxed<M>
-where
-    M: MakeWriter<'a>,
-{
-    type Writer = Box<dyn Write + 'a>;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        let w = self.0.make_writer();
-        Box::new(w)
-    }
-
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        let w = self.0.make_writer_for(meta);
-        Box::new(w)
-    }
-}
-*/
 
 // === impl Mutex/MutexGuardWriter ===
 
 impl<'a, W> MakeWriter<'a> for Mutex<W>
 where
-    W: io::Write + 'a,
+    W: fmt::Write + 'a,
 {
     type Writer = MutexGuardWriter<'a, W>;
 
@@ -395,99 +343,41 @@ where
     }
 }
 
-impl<'a, W> io::Write for MutexGuardWriter<'a, W>
+impl<'a, W> fmt::Write for MutexGuardWriter<'a, W>
 where
-    W: io::Write,
+    W: fmt::Write,
 {
     #[inline]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.write(buf)
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.0.write_str(s)
     }
 
     #[inline]
-    fn flush(&mut self) -> io::Result<()> {
-        self.0.flush()
-    }
-
-    #[inline]
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.0.write_all(buf)
-    }
-
-    #[inline]
-    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
+    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> fmt::Result {
         self.0.write_fmt(fmt)
     }
 }
 
 // === impl EitherWriter ===
 
-impl<A, B> io::Write for EitherWriter<A, B>
+impl<A, B> fmt::Write for EitherWriter<A, B>
 where
-    A: io::Write,
-    B: io::Write,
+    A: fmt::Write,
+    B: fmt::Write,
 {
     #[inline]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
         match self {
-            EitherWriter::A(a) => a.write(buf),
-            EitherWriter::B(b) => b.write(buf),
+            EitherWriter::A(a) => a.write_str(s),
+            EitherWriter::B(b) => b.write_str(s),
         }
     }
 
     #[inline]
-    fn flush(&mut self) -> io::Result<()> {
-        match self {
-            EitherWriter::A(a) => a.flush(),
-            EitherWriter::B(b) => b.flush(),
-        }
-    }
-
-    #[inline]
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        match self {
-            EitherWriter::A(a) => a.write_all(buf),
-            EitherWriter::B(b) => b.write_all(buf),
-        }
-    }
-
-    #[inline]
-    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
+    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> fmt::Result {
         match self {
             EitherWriter::A(a) => a.write_fmt(fmt),
             EitherWriter::B(b) => b.write_fmt(fmt),
-        }
-    }
-}
-
-impl<T> OptionalWriter<T> {
-    /// Returns a [disabled writer].
-    ///
-    /// Any bytes written to the returned writer are discarded.
-    ///
-    /// This is equivalent to returning [`Option::None`].
-    ///
-    /// [disabled writer]: mycelium_util::io::sink
-    #[inline]
-    pub fn none() -> Self {
-        EitherWriter::B(mycelium_util::io::sink())
-    }
-
-    /// Returns an enabled writer of type `T`.
-    ///
-    /// This is equivalent to returning [`Option::Some`].
-    #[inline]
-    pub fn some(t: T) -> Self {
-        EitherWriter::A(t)
-    }
-}
-
-impl<T> From<Option<T>> for OptionalWriter<T> {
-    #[inline]
-    fn from(opt: Option<T>) -> Self {
-        match opt {
-            Some(writer) => Self::some(writer),
-            None => Self::none(),
         }
     }
 }
@@ -508,20 +398,24 @@ impl<M> WithMaxLevel<M> {
 }
 
 impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMaxLevel<M> {
-    type Writer = OptionalWriter<M::Writer>;
+    type Writer = M::Writer;
 
     #[inline]
     fn make_writer(&'a self) -> Self::Writer {
-        // If we don't know the level, assume it's disabled.
-        OptionalWriter::none()
+        self.make.make_writer()
+    }
+
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        meta.level() <= &self.level && self.make.enabled(meta)
     }
 
     #[inline]
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        if meta.level() <= &self.level {
-            return OptionalWriter::some(self.make.make_writer_for(meta));
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        if self.enabled(meta) {
+            return self.make.make_writer_for(meta);
         }
-        OptionalWriter::none()
+
+        None
     }
 }
 
@@ -541,20 +435,24 @@ impl<M> WithMinLevel<M> {
 }
 
 impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMinLevel<M> {
-    type Writer = OptionalWriter<M::Writer>;
+    type Writer = M::Writer;
 
     #[inline]
     fn make_writer(&'a self) -> Self::Writer {
-        // If we don't know the level, assume it's disabled.
-        OptionalWriter::none()
+        self.make.make_writer()
+    }
+
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        meta.level() >= &self.level && self.make.enabled(meta)
     }
 
     #[inline]
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        if meta.level() >= &self.level {
-            return OptionalWriter::some(self.make.make_writer_for(meta));
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        if self.enabled(meta) {
+            return self.make.make_writer_for(meta);
         }
-        OptionalWriter::none()
+
+        None
     }
 }
 
@@ -582,20 +480,25 @@ where
     M: MakeWriter<'a>,
     F: Fn(&Metadata<'_>) -> bool,
 {
-    type Writer = OptionalWriter<M::Writer>;
+    type Writer = M::Writer;
 
     #[inline]
     fn make_writer(&'a self) -> Self::Writer {
-        OptionalWriter::some(self.make.make_writer())
+        self.make.make_writer()
     }
 
     #[inline]
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        if (self.filter)(meta) {
-            OptionalWriter::some(self.make.make_writer_for(meta))
-        } else {
-            OptionalWriter::none()
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        (self.filter)(meta) && self.make.enabled(meta)
+    }
+
+    #[inline]
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        if self.enabled(meta) {
+            return self.make.make_writer_for(meta);
         }
+
+        None
     }
 }
 
@@ -612,100 +515,132 @@ impl<A, B> Tee<A, B> {
     }
 }
 
-impl<'a, A, B> MakeWriter<'a> for Tee<A, B>
-where
-    A: MakeWriter<'a>,
-    B: MakeWriter<'a>,
-{
-    type Writer = Tee<A::Writer, B::Writer>;
+// impl<'a, A, B> MakeWriter<'a> for Tee<A, B>
+// where
+//     A: MakeWriter<'a>,
+//     B: MakeWriter<'a>,
+// {
+//     type Writer = Tee<A::Writer, B::Writer>;
 
-    #[inline]
-    fn make_writer(&'a self) -> Self::Writer {
-        Tee::new(self.a.make_writer(), self.b.make_writer())
-    }
+//     #[inline]
+//     fn make_writer(&'a self) -> Self::Writer {
+//         Tee::new(self.a.make_writer(), self.b.make_writer())
+//     }
 
-    #[inline]
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        Tee::new(self.a.make_writer_for(meta), self.b.make_writer_for(meta))
-    }
-}
+//     #[inline]
+//     fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
+//         Tee::new(self.a.make_writer_for(meta), self.b.make_writer_for(meta))
+//     }
+// }
 
-macro_rules! impl_tee {
-    ($self_:ident.$f:ident($($arg:ident),*)) => {
-        {
-            let res_a = $self_.a.$f($($arg),*);
-            let res_b = $self_.b.$f($($arg),*);
-            (res_a?, res_b?)
-        }
-    }
-}
+// macro_rules! impl_tee {
+//     ($self_:ident.$f:ident($($arg:ident),*)) => {
+//         {
+//             let res_a = $self_.a.$f($($arg),*);
+//             let res_b = $self_.b.$f($($arg),*);
+//             (res_a?, res_b?)
+//         }
+//     }
+// }
 
-impl<A, B> io::Write for Tee<A, B>
-where
-    A: io::Write,
-    B: io::Write,
-{
-    #[inline]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let (a, b) = impl_tee!(self.write(buf));
-        Ok(core::cmp::max(a, b))
-    }
+// impl<A, B> fmt::Write for Tee<A, B>
+// where
+//     A: fmt::Write,
+//     B: fmt::Write,
+// {
+//     #[inline]
+//     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+//         let (a, b) = impl_tee!(self.write(buf));
+//         Ok(core::cmp::max(a, b))
+//     }
 
-    #[inline]
-    fn flush(&mut self) -> io::Result<()> {
-        impl_tee!(self.flush());
-        Ok(())
-    }
+//     #[inline]
+//     fn flush(&mut self) -> io::Result<()> {
+//         impl_tee!(self.flush());
+//         Ok(())
+//     }
 
-    #[inline]
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        impl_tee!(self.write_all(buf));
-        Ok(())
-    }
+//     #[inline]
+//     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+//         impl_tee!(self.write_all(buf));
+//         Ok(())
+//     }
 
-    #[inline]
-    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
-        impl_tee!(self.write_fmt(fmt));
-        Ok(())
-    }
-}
+//     #[inline]
+//     fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
+//         impl_tee!(self.write_fmt(fmt));
+//         Ok(())
+//     }
+// }
 
 // === impl OrElse ===
 
 impl<A, B> OrElse<A, B> {
     /// Combines
-    pub fn new<'a, W>(inner: A, or_else: B) -> Self
+    pub fn new<'a>(inner: A, or_else: B) -> Self
     where
-        A: MakeWriter<'a, Writer = OptionalWriter<W>>,
+        A: MakeWriter<'a>,
         B: MakeWriter<'a>,
-        W: Write,
     {
         Self { inner, or_else }
     }
 }
 
-impl<'a, A, B, W> MakeWriter<'a> for OrElse<A, B>
+impl<'a, A, B> MakeWriter<'a> for OrElse<A, B>
 where
-    A: MakeWriter<'a, Writer = OptionalWriter<W>>,
+    A: MakeWriter<'a>,
     B: MakeWriter<'a>,
-    W: io::Write,
 {
-    type Writer = EitherWriter<W, B::Writer>;
+    type Writer = EitherWriter<A::Writer, B::Writer>;
 
     #[inline]
     fn make_writer(&'a self) -> Self::Writer {
-        match self.inner.make_writer() {
-            EitherWriter::A(writer) => EitherWriter::A(writer),
-            EitherWriter::B(_) => EitherWriter::B(self.or_else.make_writer()),
-        }
+        EitherWriter::A(self.inner.make_writer())
     }
 
     #[inline]
-    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        match self.inner.make_writer_for(meta) {
-            EitherWriter::A(writer) => EitherWriter::A(writer),
-            EitherWriter::B(_) => EitherWriter::B(self.or_else.make_writer_for(meta)),
-        }
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        self.inner.enabled(meta) || self.or_else.enabled(meta)
+    }
+
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        self.inner
+            .make_writer_for(meta)
+            .map(EitherWriter::A)
+            .or_else(|| self.or_else.make_writer_for(meta).map(EitherWriter::B))
+    }
+}
+
+// === impl NoWriter ===
+
+impl fmt::Write for NoWriter {
+    #[inline]
+    fn write_str(&mut self, _: &str) -> fmt::Result {
+        Ok(())
+    }
+
+    #[inline]
+    fn write_fmt(&mut self, _: fmt::Arguments<'_>) -> fmt::Result {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for NoWriter {
+    type Writer = Self;
+
+    #[inline]
+    fn make_writer(&'a self) -> Self::Writer {
+        Self(())
+    }
+
+    #[inline]
+    fn enabled(&self, _: &Metadata<'_>) -> bool {
+        false
+    }
+
+    #[inline]
+    fn make_writer_for(&'a self, _: &Metadata<'_>) -> Option<Self::Writer> {
+        None
     }
 }
 
