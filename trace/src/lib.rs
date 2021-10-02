@@ -78,7 +78,7 @@ impl<D> Subscriber<D> {
                 make_writer: io::sink,
                 max_level: LevelFilter::OFF,
                 cfg: OutputCfg {
-                    line_len: 80,
+                    line_len: 120,
                     indent: AtomicU64::new(0),
                     span_indent_chars: " |",
                 },
