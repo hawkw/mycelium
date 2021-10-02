@@ -319,15 +319,17 @@ where
         for line in lines {
             let mut line = line;
             while self.current_line + line.len() >= self.cfg.line_len {
-                let mut offset = self.cfg.line_len - self.current_line;
-                if let Some(last_ws) = &line[..offset]
+                let offset = if let Some(last_ws) = line[..self.cfg.line_len - self.current_line]
                     .iter()
                     .rev()
                     .position(|&c| c.is_ascii_whitespace())
                 {
-                    offset = *last_ws;
-                }
-                self.writer.write(&line[..offset])?;
+                    // found a nice whitespace to break on!
+                    self.writer.write(&line[..last_ws])?;
+                    last_ws
+                } else {
+                    0
+                };
                 self.writer.write(b"\n")?;
                 self.write_newline()?;
                 self.writer.write(b"  ")?;
