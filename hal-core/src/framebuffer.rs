@@ -6,7 +6,6 @@ mod embedded_graphics;
 #[cfg(feature = "embedded-graphics-core")]
 #[doc(cfg(feature = "embedded-graphics-core"))]
 pub use self::embedded_graphics::*;
-
 pub trait Draw {
     /// Return the width of the framebuffer in pixels.
     fn width(&self) -> usize;

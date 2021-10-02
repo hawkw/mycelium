@@ -1,4 +1,8 @@
 #![no_std]
+
+#[cfg(feature = "embedded-graphics-core")]
+#[doc(cfg(feature = "embedded-graphics-core"))]
+pub mod embedded_graphics;
 pub mod writer;
 
 use crate::writer::MakeWriter;
@@ -48,7 +52,11 @@ struct Visitor<'writer, W> {
 
 // === impl Subscriber ===
 
-impl<D: Default> Default for Subscriber<D> {
+impl<D> Default for Subscriber<D>
+where
+    for<'a> D: MakeWriter<'a>,
+    D: Default,
+{
     fn default() -> Self {
         Self::display_only(D::default())
     }
@@ -59,24 +67,13 @@ const VGA_BIT: u64 = 1 << 63;
 const _ACTUAL_ID_BITS: u64 = !(SERIAL_BIT | VGA_BIT);
 
 impl<D> Subscriber<D> {
-    pub fn display_only(display: D) -> Self {
+    pub fn display_only(display: D) -> Self
+    where
+        for<'a> D: MakeWriter<'a>,
+    {
         Self {
-            display: Output {
-                make_writer: display,
-                cfg: OutputCfg {
-                    line_len: 80,
-                    indent: AtomicU64::new(0),
-                    span_indent_chars: " ",
-                },
-            },
-            serial: Output {
-                make_writer: writer::none(),
-                cfg: OutputCfg {
-                    line_len: 120,
-                    indent: AtomicU64::new(0),
-                    span_indent_chars: " |",
-                },
-            },
+            display: Output::new(display, " "),
+            serial: Output::new(writer::none(), " |"),
             next_id: AtomicU64::new(0),
         }
     }
@@ -86,10 +83,7 @@ impl<D> Subscriber<D> {
         for<'a> S: MakeWriter<'a>,
     {
         Subscriber {
-            serial: Output {
-                make_writer: port,
-                cfg: self.serial.cfg,
-            },
+            serial: Output::new(port, " |"),
             display: self.display,
             next_id: self.next_id,
         }
@@ -179,6 +173,18 @@ where
 // === impl Output ===
 
 impl<W, const BIT: u64> Output<W, BIT> {
+    fn new<'a>(make_writer: W, span_indent_chars: &'static str) -> Self
+    where
+        W: MakeWriter<'a>,
+    {
+        let cfg = OutputCfg {
+            line_len: make_writer.line_len(),
+            indent: AtomicU64::new(0),
+            span_indent_chars,
+        };
+        Self { make_writer, cfg }
+    }
+
     #[inline]
     fn enabled<'a>(&'a self, metadata: &tracing_core::Metadata<'_>) -> bool
     where

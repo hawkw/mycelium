@@ -86,6 +86,10 @@ pub trait MakeWriter<'a> {
 
         None
     }
+
+    fn line_len(&self) -> usize {
+        80
+    }
 }
 
 /// Extension trait adding combinators for working with types implementing
@@ -178,6 +182,13 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
         B: MakeWriter<'a> + Sized,
     {
         OrElse::new(self, other)
+    }
+
+    fn with_line_len(self, len: usize) -> WithLineLen<Self>
+    where
+        Self: MakeWriter<'a> + Sized,
+    {
+        WithLineLen::new(self, len)
     }
 }
 
@@ -311,6 +322,12 @@ pub struct Tee<A, B> {
     b: B,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct WithLineLen<W> {
+    make: W,
+    len: usize,
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 pub struct NoWriter(());
 
@@ -417,6 +434,11 @@ impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMaxLevel<M> {
 
         None
     }
+
+    #[inline]
+    fn line_len(&self) -> usize {
+        self.make.line_len()
+    }
 }
 
 // === impl WithMinLevel ===
@@ -453,6 +475,11 @@ impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMinLevel<M> {
         }
 
         None
+    }
+
+    #[inline]
+    fn line_len(&self) -> usize {
+        self.make.line_len()
     }
 }
 
@@ -499,6 +526,11 @@ where
         }
 
         None
+    }
+
+    #[inline]
+    fn line_len(&self) -> usize {
+        self.make.line_len()
     }
 }
 
@@ -608,6 +640,47 @@ where
             .make_writer_for(meta)
             .map(EitherWriter::A)
             .or_else(|| self.or_else.make_writer_for(meta).map(EitherWriter::B))
+    }
+
+    #[inline]
+    fn line_len(&self) -> usize {
+        core::cmp::min(self.inner.line_len(), self.or_else.line_len())
+    }
+}
+
+// === impl WithLineLen ===
+
+impl<W> WithLineLen<W> {
+    /// Combines
+    pub fn new(make: W, len: usize) -> Self {
+        Self { make, len }
+    }
+}
+
+impl<'a, W> MakeWriter<'a> for WithLineLen<W>
+where
+    W: MakeWriter<'a>,
+{
+    type Writer = W::Writer;
+
+    #[inline]
+    fn make_writer(&'a self) -> Self::Writer {
+        self.make.make_writer()
+    }
+
+    #[inline]
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        self.make.enabled(meta)
+    }
+
+    #[inline]
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        self.make.make_writer_for(meta)
+    }
+
+    #[inline]
+    fn line_len(&self) -> usize {
+        self.len
     }
 }
 
