@@ -81,9 +81,14 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
-        Some(tracing::Dispatch::new(
-            hal_x86_64::tracing::Subscriber::default(),
-        ))
+        use mycelium_trace::Subscriber;
+        let display = Subscriber::display_only(mycelium_util::io::sink);
+        let dispatch = if let Some(serial) = serial::com1() {
+            tracing::Dispatch::new(display.with_serial(serial))
+        } else {
+            tracing::Dispatch::new(display)
+        };
+        Some(dispatch)
     }
 
     fn bootloader_name(&self) -> &str {

@@ -384,3 +384,10 @@ impl<'a> Drop for LockInner<'a> {
         }
     }
 }
+
+impl<'a> mycelium_trace::writer::MakeWriter<'a> for &'static Port {
+    type Writer = Lock<'a, Blocking>;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.lock()
+    }
+}
