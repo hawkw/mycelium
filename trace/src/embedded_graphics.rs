@@ -4,16 +4,16 @@ use core::{
 };
 use embedded_graphics::{
     geometry::Point,
-    pixelcolor,
-    text::{mono_font, MonoTextStyle},
+    mono_font::{self, MonoTextStyle},
+    pixelcolor::{self, RgbColor},
+    text::Text,
+    Drawable,
 };
 use hal_core::framebuffer::{Draw, DrawTarget};
-use mycelium_util::sync::spin;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MakeTextWriter<D> {
-    lock: &'static spin::Mutex<D>,
-    text_style: MonoTextStyle,
+    mk: fn() -> D,
     next_point: AtomicU64,
     pixel_width: usize,
     char_width: usize,
@@ -21,7 +21,7 @@ pub struct MakeTextWriter<D> {
 
 #[derive(Clone, Debug)]
 pub struct TextWriter<'mk, D> {
-    target: DrawTarget<spin::MutexGuard<'static, D>>,
+    target: DrawTarget<D>,
     mk: &'mk MakeTextWriter<D>,
 }
 
@@ -42,9 +42,10 @@ where
 {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let curr_point = self.mk.next_point.load(Ordering::Relaxed);
-        let next_point = Text::new(s, unpack_point(curr_point), &self.mk.text_style)
+        let draw = Text::new(s, unpack_point(curr_point), default_text_style())
             .draw(&mut self.target)
-            .map_err(|_| fmt::Error)?;
+            .map_err(|_| fmt::Error);
+        let next_point = draw?;
         match self.mk.next_point.compare_exchange(
             curr_point,
             pack_point(next_point),
@@ -63,45 +64,36 @@ where
     }
 }
 
-impl<D> MakeTextWriter<D> {
-    pub fn default_text_style() -> MonoTextStyle {
-        MonoTextStyle::new(&mono_font::ascii::FONT_6X10, pixelcolor::Rgb888::WHITE)
-    }
-}
-
-impl<D: Draw> MakeTextWriter {
-    pub fn new(framebuffer: &'static spin::Mutex<D>) -> Self {
-        let pixel_width = framebuffer.lock().width();
-        let text_style = Self::default_text_style();
-        let char_width = char_width(pixel_width, &text_style);
+impl<D: Draw> MakeTextWriter<D> {
+    pub fn new(mk: fn() -> D) -> Self {
+        let pixel_width = (mk)().width();
+        let text_style = default_text_style();
+        let char_width = Self::char_width(pixel_width, &text_style);
         Self {
             next_point: AtomicU64::new(pack_point(Point { x: 0, y: 0 })),
-            lock: framebuffer,
+            mk,
             char_width,
             pixel_width,
         }
     }
 
-    pub fn with_text_style(self, text_style: MonoTextStyle) -> Self {
-        let char_width = char_width(self.pixel_width, &text_style);
-        Self {
-            text_style,
-            char_width,
-            ..self
-        }
-    }
-
-    fn char_width(pixel_width: usize, text_style: &MonoTextStyle) -> usize {
-        pixel_width / text_style.font.size.width
+    fn char_width(
+        pixel_width: usize,
+        text_style: &MonoTextStyle<'static, pixelcolor::Rgb888>,
+    ) -> usize {
+        pixel_width / (text_style.font.character_size.width as usize)
     }
 }
 
-impl<'a, D: Draw> MakeWriter<'a> for MakeTextWriter<D> {
+impl<'a, D> crate::writer::MakeWriter<'a> for MakeTextWriter<D>
+where
+    D: Draw + 'a,
+{
     type Writer = TextWriter<'a, D>;
 
     fn make_writer(&'a self) -> Self::Writer {
         TextWriter {
-            target: self.lock.lock().into_draw_target(),
+            target: (self.mk)().into_draw_target(),
             mk: self,
         }
     }
@@ -109,4 +101,8 @@ impl<'a, D: Draw> MakeWriter<'a> for MakeTextWriter<D> {
     fn line_len(&self) -> usize {
         self.char_width
     }
+}
+
+fn default_text_style() -> MonoTextStyle<'static, pixelcolor::Rgb888> {
+    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, pixelcolor::Rgb888::WHITE)
 }

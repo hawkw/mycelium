@@ -417,16 +417,17 @@ impl<M> WithMaxLevel<M> {
 impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMaxLevel<M> {
     type Writer = M::Writer;
 
-    #[inline]
+    #[inline(always)]
     fn make_writer(&'a self) -> Self::Writer {
         self.make.make_writer()
     }
 
+    #[inline(always)]
     fn enabled(&self, meta: &Metadata<'_>) -> bool {
         meta.level() <= &self.level && self.make.enabled(meta)
     }
 
-    #[inline]
+    #[inline(always)]
     fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
         if self.enabled(meta) {
             return self.make.make_writer_for(meta);
@@ -435,7 +436,7 @@ impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMaxLevel<M> {
         None
     }
 
-    #[inline]
+    #[inline(always)]
     fn line_len(&self) -> usize {
         self.make.line_len()
     }

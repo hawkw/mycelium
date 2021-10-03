@@ -1,4 +1,4 @@
-use bootloader::boot_info;
+use bootloader::boot_info::{self, FrameBuffer};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
 use hal_x86_64::{
@@ -71,13 +71,7 @@ impl BootInfo for RustbootBootInfo {
             return None;
         }
 
-        let (cfg, buf) = unsafe {
-            // Safety: we can reasonably assume this will only be called
-            // after `arch_entry`, so if we've failed to initialize the
-            // framebuffer...things have gone horribly wrong...
-            FRAMEBUFFER.get_unchecked()
-        };
-        Some(Framebuffer::new(cfg, buf.lock()))
+        Some(unsafe { Self::mk_framebuf() })
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
@@ -85,8 +79,14 @@ impl BootInfo for RustbootBootInfo {
             writer::{self, MakeWriterExt},
             Subscriber,
         };
-        let display_writer = writer::NoWriter::default() // TODO(eliza): framebuf
-            .with_max_level(tracing::Level::INFO);
+        if !self.has_framebuffer {
+            return None;
+        }
+
+        let display_writer = mycelium_trace::embedded_graphics::MakeTextWriter::new(|| unsafe {
+            Self::mk_framebuf()
+        })
+        .with_max_level(tracing::Level::INFO);
         let display = Subscriber::display_only(display_writer);
         let dispatch = if let Some(serial) = serial::com1() {
             tracing::Dispatch::new(display.with_serial(serial))
@@ -106,6 +106,16 @@ impl BootInfo for RustbootBootInfo {
 }
 
 impl RustbootBootInfo {
+    unsafe fn mk_framebuf() -> Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>> {
+        let (cfg, buf) = unsafe {
+            // Safety: we can reasonably assume this will only be called
+            // after `arch_entry`, so if we've failed to initialize the
+            // framebuffer...things have gone horribly wrong...
+            FRAMEBUFFER.get_unchecked()
+        };
+        Framebuffer::new(cfg, buf.lock())
+    }
+
     fn vm_offset(&self) -> VAddr {
         VAddr::from_u64(
             self.inner
@@ -260,6 +270,11 @@ pub fn oops(
 
         // unlock the VGA buffer.
         vga.force_unlock();
+
+        // unlock the frame buffer
+        if let Some((_, fb)) = FRAMEBUFFER.try_get() {
+            fb.force_unlock();
+        }
     }
 
     let registers = if let Some(fault) = fault {

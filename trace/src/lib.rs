@@ -1,7 +1,8 @@
 #![no_std]
+#![feature(doc_cfg)]
 
-#[cfg(feature = "embedded-graphics-core")]
-#[doc(cfg(feature = "embedded-graphics-core"))]
+#[cfg(feature = "embedded-graphics")]
+#[doc(cfg(feature = "embedded-graphics"))]
 pub mod embedded_graphics;
 pub mod writer;
 
