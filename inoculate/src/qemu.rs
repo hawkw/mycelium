@@ -232,28 +232,30 @@ impl Cmd {
                     Some(status) => {
                         if let Some(code) = status.code() {
                             if code == 33 {
-                                println!("tests completed successfully");
-                                return Ok(());
+                                Ok(())
+                            } else {
+                                Err(format_err!("QEMU exited with status code {}", code))
                             }
-
-                            Err(format_err!("QEMU exited with status code {}", code))
                         } else {
                             Err(format_err!("QEMU exited without a status code, wtf?"))
                         }
                     }
                 }
                 .context("tests failed");
+                tracing::debug!("tests done");
+
                 if let Some(res) = stdout {
                     tracing::trace!("collecting stdout");
                     let res = res.join().unwrap()?;
                     eprintln!("{}", res);
-
                     // exit with an error if the tests failed.
                     if !res.failed.is_empty() {
                         std::process::exit(1);
                     }
+
                     Ok(())
                 } else {
+                    tracing::warn!("no stdout from QEMU process?");
                     res
                 }
             }
