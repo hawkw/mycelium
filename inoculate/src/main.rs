@@ -25,27 +25,16 @@ fn main() -> Result<()> {
         "inoculating...",
     };
 
-    let bootloader_manifest = opts.wheres_bootloader()?;
-    tracing::info!(path = %bootloader_manifest.display(), "found bootloader manifest");
-
-    let kernel_manifest = opts.wheres_the_kernel()?;
-    tracing::info!(path = %kernel_manifest.display(), "found kernel manifest");
-
-    let kernel_bin = opts.wheres_the_kernel_bin()?;
-    tracing::info!(path = %kernel_bin.display(), "found kernel binary");
+    let paths = opts.paths()?;
 
     let image = opts
-        .make_image(
-            bootloader_manifest.as_ref(),
-            kernel_manifest.as_ref(),
-            kernel_bin.as_ref(),
-        )
+        .make_image(&paths)
         .context("making the mycelium image didnt work")
         .note("this sucks T_T")?;
     tracing::info!(image = %image.display());
 
     if let Some(cmd) = opts.cmd {
-        return cmd.run(image.as_ref(), kernel_bin.as_ref());
+        return cmd.run(image.as_ref(), &paths);
     }
 
     Ok(())

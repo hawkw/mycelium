@@ -75,11 +75,19 @@ pub enum Subcommand {
     Gdb,
 }
 
+#[derive(Debug)]
+pub struct Paths {
+    pub pwd: PathBuf,
+    pub kernel_bin: PathBuf,
+    pub kernel_manifest: PathBuf,
+    pub bootloader_manifest: PathBuf,
+}
+
 impl Subcommand {
-    pub fn run(&self, image: &Path, kernel_bin: &Path) -> Result<()> {
+    pub fn run(&self, image: &Path, paths: &Paths) -> Result<()> {
         match self {
-            Subcommand::Qemu(qemu) => qemu.run_qemu(image, kernel_bin),
-            Subcommand::Gdb => crate::gdb::run_gdb(kernel_bin, 1234).map(|_| ()),
+            Subcommand::Qemu(qemu) => qemu.run_qemu(image, paths),
+            Subcommand::Gdb => crate::gdb::run_gdb(paths.kernel_bin(), 1234).map(|_| ()),
         }
     }
 }
@@ -122,51 +130,77 @@ impl Options {
             .note("it should work")
     }
 
-    pub fn make_image(
-        &self,
-        bootloader_manifest: &Path,
-        kernel_manifest: &Path,
-        kernel_bin: &Path,
-    ) -> Result<PathBuf> {
+    pub fn paths(&self) -> Result<Paths> {
+        let bootloader_manifest = self.wheres_bootloader()?;
+        tracing::info!(path = %bootloader_manifest.display(), "found bootloader manifest");
+
+        let kernel_manifest = self.wheres_the_kernel()?;
+        tracing::info!(path = %kernel_manifest.display(), "found kernel manifest");
+
+        let kernel_bin = self.wheres_the_kernel_bin()?;
+        tracing::info!(path = %kernel_bin.display(), "found kernel binary");
+
+        let pwd = std::env::current_dir().unwrap_or_else(|error| {
+            tracing::warn!(?error, "error getting current dir");
+            Default::default()
+        });
+        tracing::debug!(path = %pwd.display(), "pwd");
+
+        Ok(Paths {
+            bootloader_manifest,
+            kernel_manifest,
+            kernel_bin,
+            pwd,
+        })
+    }
+
+    pub fn make_image(&self, paths: &Paths) -> Result<PathBuf> {
         let _span = tracing::info_span!("make_image").entered();
 
-        cargo_log!("Building", "disk image for `{}``s", kernel_bin.display());
+        cargo_log!(
+            "Building",
+            "kernel disk image ({})",
+            paths.relative(paths.kernel_bin()).display()
+        );
 
-        tracing::debug!(kernel_bin = %kernel_bin.display(), "making boot image...");
+        tracing::debug!(kernel_bin = %paths.kernel_bin().display(), "making boot image...");
         let out_dir = self
             .out_dir
             .as_ref()
             .map(|path| path.as_ref())
-            .or_else(|| kernel_bin.parent())
+            .or_else(|| paths.kernel_bin().parent())
             .ok_or_else(|| format_err!("can't find out dir, wtf"))
             .context("determining out dir")
             .note("somethings messed up lol")?;
         let target_dir = self
             .target_dir
             .clone()
-            .or_else(|| Some(kernel_manifest.parent()?.join("target")))
+            .or_else(|| Some(paths.kernel_manifest().parent()?.join("target")))
             .ok_or_else(|| format_err!("can't find target dir, wtf"))
             .context("determining target dir")
             .note("somethings messed up lol")?;
-        let run_dir = bootloader_manifest
+        let run_dir = paths
+            .bootloader_manifest()
             .parent()
             .ok_or_else(|| format_err!("bootloader manifest path doesn't have a parent dir"))
             .note("thats messed up lol")
             .suggestion("maybe dont run this in `/`???")?;
-        let output = cargo::cmd("builder")?
-            .current_dir(run_dir)
+
+        tracing::trace!(?run_dir);
+        let mut cmd = cargo::cmd("builder")?;
+        cmd.current_dir(run_dir)
             .arg("--kernel-manifest")
-            .arg(&kernel_manifest)
+            .arg(&paths.kernel_manifest())
             .arg("--kernel-binary")
-            .arg(&kernel_bin)
+            .arg(&paths.kernel_bin())
             .arg("--out-dir")
             .arg(out_dir)
             .arg("--target-dir")
             .arg(target_dir)
             .stderr(Stdio::inherit())
-            .stdout(Stdio::piped())
-            .status()
-            .context("run builder command")?;
+            .stdout(Stdio::piped());
+        tracing::debug!(?cmd);
+        let output = cmd.status().context("run builder command")?;
         // TODO(eliza): modes for capturing/piping stdout?
 
         if !output.success() {
@@ -183,8 +217,36 @@ impl Options {
             "disk image should probably exist after running bootloader build command"
         );
 
-        cargo_log!("Created", "bootable disk image at `{}`", image.display());
+        cargo_log!(
+            "Created",
+            "bootable disk image ({})",
+            paths.relative(&image).display()
+        );
 
         Ok(image)
+    }
+}
+
+// === impl Paths ===
+
+impl Paths {
+    pub fn kernel_bin(&self) -> &Path {
+        self.kernel_bin.as_ref()
+    }
+
+    pub fn kernel_manifest(&self) -> &Path {
+        self.kernel_manifest.as_ref()
+    }
+
+    pub fn bootloader_manifest(&self) -> &Path {
+        self.bootloader_manifest.as_ref()
+    }
+
+    pub fn pwd(&self) -> &Path {
+        self.pwd.as_ref()
+    }
+
+    pub fn relative<'path>(&self, path: &'path Path) -> &'path Path {
+        path.strip_prefix(self.pwd()).unwrap_or(path)
     }
 }
