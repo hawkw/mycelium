@@ -128,7 +128,7 @@ impl Cmd {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn run_qemu(&self, image: &Path, binary: &Path) -> Result<()> {
+    pub fn run_qemu(&self, image: &Path, paths: &crate::Paths) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
             .arg(format!("format=raw,file={}", image.display()))
@@ -139,6 +139,11 @@ impl Cmd {
                 serial,
                 qemu_settings,
             } => {
+                cargo_log!(
+                    "Running",
+                    "mycelium in QEMU ({})",
+                    paths.relative(image).display()
+                );
                 tracing::info!("running QEMU in normal mode");
                 if *serial {
                     tracing::debug!("configured QEMU to output serial on stdio");
@@ -148,7 +153,7 @@ impl Cmd {
                 qemu_settings.configure(&mut qemu);
                 qemu.arg("--no-shutdown");
 
-                let mut child = self.spawn_qemu(&mut qemu, binary)?;
+                let mut child = self.spawn_qemu(&mut qemu, paths.kernel_bin())?;
                 if child.stdout.is_some() {
                     tracing::debug!("should capture qemu output");
                     let out = child.wait_with_output()?;
@@ -191,12 +196,16 @@ impl Cmd {
                     "-serial",
                     "stdio",
                 ];
-                cargo_log!("Running", "kernel tests ({})", image.display());
+                cargo_log!(
+                    "Running",
+                    "kernel tests ({})",
+                    paths.relative(image).display()
+                );
                 tracing::info!("running QEMU in test mode");
                 qemu_settings.configure(&mut qemu);
                 qemu.args(TEST_ARGS);
 
-                let mut child = self.spawn_qemu(&mut qemu, binary)?;
+                let mut child = self.spawn_qemu(&mut qemu, paths.kernel_bin())?;
                 let stdout = child
                     .stdout
                     .take()
