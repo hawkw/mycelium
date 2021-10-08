@@ -464,6 +464,7 @@ dependencies = [
  "embedded-graphics",
  "hal-core",
  "mycelium-util",
+ "tracing",
  "tracing-core",
 ]
 

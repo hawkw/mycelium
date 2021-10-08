@@ -38,6 +38,7 @@ where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(geometry::Point { x, y }, color) in pixels {
+            // tracing::trace!(x, y, "set_pixel");
             self.0.set_pixel(x as usize, y as usize, color.into());
         }
 

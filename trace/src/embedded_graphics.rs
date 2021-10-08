@@ -15,8 +15,10 @@ use hal_core::framebuffer::{Draw, DrawTarget};
 pub struct MakeTextWriter<D> {
     mk: fn() -> D,
     next_point: AtomicU64,
+    // next_point: mycelium_util::sync::spin::Mutex<Point>,
     pixel_width: usize,
-    char_width: usize,
+    line_len: usize,
+    char_height: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -41,18 +43,23 @@ where
     D: Draw,
 {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        let curr_point = self.mk.next_point.load(Ordering::Relaxed);
-        let draw = Text::with_alignment(
-            s,
-            unpack_point(curr_point),
-            default_text_style(),
-            text::Alignment::Left,
-        )
-        .draw(&mut self.target)
-        .map_err(|_| fmt::Error);
-        let next_point = draw?;
+        let curr_packed = self.mk.next_point.load(Ordering::Relaxed);
+        let mut curr_point = unpack_point(curr_packed);
+        if s.len() > 1 && s.starts_with('\n') {
+            curr_point.y += self.mk.char_height as i32;
+        }
+        let draw = Text::with_alignment(s, curr_point, default_text_style(), text::Alignment::Left)
+            .draw(&mut self.target)
+            .map_err(|_| fmt::Error);
+        let mut next_point = draw?;
+        if s.ends_with('\n') {
+            next_point = Point {
+                y: next_point.y + self.mk.char_height as i32,
+                x: 10,
+            };
+        }
         match self.mk.next_point.compare_exchange(
-            curr_point,
+            curr_packed,
             pack_point(next_point),
             Ordering::Relaxed,
             Ordering::Relaxed,
@@ -61,7 +68,7 @@ where
             Err(actual_point) => unsafe {
                 mycelium_util::unreachable_unchecked!(
                     "lock should guard this, could actually be totally unsync; curr_point={}; actual_point={}",
-                    unpack_point(curr_point),
+                    unpack_point(curr_packed),
                     unpack_point(actual_point)
                 );
             },
@@ -73,16 +80,17 @@ impl<D: Draw> MakeTextWriter<D> {
     pub fn new(mk: fn() -> D) -> Self {
         let pixel_width = (mk)().width();
         let text_style = default_text_style();
-        let char_width = Self::char_width(pixel_width, &text_style);
+        let line_len = Self::line_len(pixel_width, &text_style);
         Self {
             next_point: AtomicU64::new(pack_point(Point { x: 10, y: 10 })),
+            char_height: text_style.font.character_size.height,
             mk,
-            char_width,
+            line_len,
             pixel_width,
         }
     }
 
-    fn char_width(
+    fn line_len(
         pixel_width: usize,
         text_style: &MonoTextStyle<'static, pixelcolor::Rgb888>,
     ) -> usize {
@@ -104,7 +112,7 @@ where
     }
 
     fn line_len(&self) -> usize {
-        self.char_width
+        self.line_len
     }
 }
 
