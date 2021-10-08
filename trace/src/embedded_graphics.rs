@@ -6,7 +6,7 @@ use embedded_graphics::{
     geometry::Point,
     mono_font::{self, MonoTextStyle},
     pixelcolor::{self, RgbColor},
-    text::Text,
+    text::{self, Text},
     Drawable,
 };
 use hal_core::framebuffer::{Draw, DrawTarget};
@@ -42,9 +42,14 @@ where
 {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let curr_point = self.mk.next_point.load(Ordering::Relaxed);
-        let draw = Text::new(s, unpack_point(curr_point), default_text_style())
-            .draw(&mut self.target)
-            .map_err(|_| fmt::Error);
+        let draw = Text::with_alignment(
+            s,
+            unpack_point(curr_point),
+            default_text_style(),
+            text::Alignment::Left,
+        )
+        .draw(&mut self.target)
+        .map_err(|_| fmt::Error);
         let next_point = draw?;
         match self.mk.next_point.compare_exchange(
             curr_point,
@@ -70,7 +75,7 @@ impl<D: Draw> MakeTextWriter<D> {
         let text_style = default_text_style();
         let char_width = Self::char_width(pixel_width, &text_style);
         Self {
-            next_point: AtomicU64::new(pack_point(Point { x: 0, y: 0 })),
+            next_point: AtomicU64::new(pack_point(Point { x: 10, y: 10 })),
             mk,
             char_width,
             pixel_width,
