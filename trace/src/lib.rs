@@ -260,7 +260,14 @@ where
 {
     fn indent(&mut self, is_span: bool) -> fmt::Result {
         let err = if let Some(ref mut display) = self.display {
-            display.indent()
+            // "rust has try-catch syntax lol"
+            (|| {
+                display.indent()?;
+                if is_span {
+                    display.write_char(' ')?;
+                };
+                Ok(())
+            })()
         } else {
             Ok(())
         };

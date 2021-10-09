@@ -1,4 +1,4 @@
-use bootloader::boot_info::{self, FrameBuffer};
+use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
 use hal_x86_64::{
@@ -75,11 +75,10 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
-        use mycelium_trace::{
-            writer::{self, MakeWriterExt},
-            Subscriber,
-        };
+        use mycelium_trace::{writer::MakeWriterExt, Subscriber};
         if !self.has_framebuffer {
+            // TODO(eliza): we should probably write to just the serial port if
+            // there's no framebuffer...
             return None;
         }
 
