@@ -77,12 +77,15 @@ where
         self.set_pixel_rgb(x, y, color)
     }
 
-    fn scroll_vert(&mut self, amount: usize) -> &mut Self {
-        let one_line = self.cfg.line_len * self.cfg.px_bytes;
-        let amount_px = one_line * amount;
+    fn scroll_vert(&mut self, amount: isize) -> &mut Self {
+        if amount < 0 {
+            todo!("eliza: handle negatives!")
+        }
+        let amount_px = (amount as usize * self.cfg.line_len) * self.cfg.px_bytes;
         let buf = self.buf.as_mut();
-        buf[..amount_px].fill(0);
-        buf.rotate_right(amount_px);
+        let len = buf.len();
+        buf.rotate_left(amount_px);
+        buf[(len - amount_px)..].fill(0);
         self
     }
 }

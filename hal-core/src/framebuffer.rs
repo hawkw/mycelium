@@ -72,7 +72,7 @@ pub trait Draw {
         self
     }
 
-    fn scroll_vert(&mut self, px: usize) -> &mut Self;
+    fn scroll_vert(&mut self, px: isize) -> &mut Self;
 
     #[cfg(feature = "embedded-graphics-core")]
     #[doc(cfg(feature = "embedded-graphics-core"))]
@@ -166,7 +166,7 @@ macro_rules! deref_draw_body {
         }
 
         #[inline]
-        fn scroll_vert(&mut self, px: usize) -> &mut Self {
+        fn scroll_vert(&mut self, px: isize) -> &mut Self {
             self.deref_mut().scroll_vert(px);
             self
         }

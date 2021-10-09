@@ -18,6 +18,7 @@ pub struct MakeTextWriter<D> {
     pixel_height: usize,
     line_len: usize,
     char_height: u32,
+    last_line: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -41,73 +42,51 @@ impl<'mk, D> fmt::Write for TextWriter<'mk, D>
 where
     D: Draw,
 {
-    fn write_str(&mut self, mut s: &str) -> fmt::Result {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
         let curr_packed = self.mk.next_point.load(Ordering::Relaxed);
         let mut curr_point = unpack_point(curr_packed);
 
         // The embedded-graphics crate doesn't handle strings beginning and
         // ending with newlines, so we have to do it ourselves.
-        let mut leading_newlines = 0;
-        while s.starts_with('\n') {
-            leading_newlines += 1;
-            s = &s[1..];
-        }
-
-        if leading_newlines > 0 {
-            let new_y = curr_point
-                .y
-                .saturating_add(self.mk.char_height as i32 * leading_newlines);
-            if new_y >= self.mk.pixel_height as i32 {
-                curr_point = Point {
-                    y: (self.mk.pixel_height - self.mk.char_height as usize) as i32,
-                    x: 10,
-                };
-                self.target
-                    .inner_mut()
-                    .scroll_vert(self.mk.pixel_height - new_y as usize);
-            } else {
-                curr_point = Point { y: new_y, x: 10 };
+        for mut line in s.split_inclusive('\n') {
+            let has_newline = line.ends_with('\n');
+            if has_newline {
+                line = &line[..line.len() - 1];
             }
-        }
 
-        let mut trailing_newlines = 0;
-        while s.ends_with('\n') {
-            trailing_newlines += 1;
-            s = &s[..s.len() - 1];
-        }
-
-        let mut next_point = if s.is_empty() {
-            // If the string is now empty (e.g. it was all newlines), don't
-            // bother drawing anything.
-            curr_point
-        } else {
-            // Otherwise, actually draw the text.
-            Text::with_alignment(s, curr_point, default_text_style(), text::Alignment::Left)
-                .draw(&mut self.target)
-                .map_err(|_| fmt::Error)?
-        };
-
-        // Handle trailing newlines by advancing the next position to draw at.
-        if trailing_newlines > 0 {
-            let new_y = next_point
-                .y
-                .saturating_add(self.mk.char_height as i32 * trailing_newlines);
-            if new_y >= self.mk.pixel_height as i32 {
-                next_point = Point {
-                    y: (self.mk.pixel_height - self.mk.char_height as usize) as i32,
+            if curr_point.y > self.mk.last_line {
+                // let ydiff = curr_point.y - self.mk.last_line;
+                curr_point = Point {
+                    y: self.mk.last_line,
                     x: 10,
                 };
                 self.target
                     .inner_mut()
-                    .scroll_vert(self.mk.pixel_height - new_y as usize);
+                    .scroll_vert(self.mk.char_height as isize);
+            }
+
+            let next_point = if line.is_empty() {
+                curr_point
             } else {
-                next_point = Point { y: new_y, x: 10 };
+                // Otherwise, actually draw the text.
+                Text::with_alignment(s, curr_point, default_text_style(), text::Alignment::Left)
+                    .draw(&mut self.target)
+                    .map_err(|_| fmt::Error)?
+            };
+
+            if has_newline {
+                curr_point = Point {
+                    y: curr_point.y + self.mk.char_height as i32,
+                    x: 10,
+                };
+            } else {
+                curr_point = next_point;
             }
         }
 
         match self.mk.next_point.compare_exchange(
             curr_packed,
-            pack_point(next_point),
+            pack_point(curr_point),
             Ordering::Relaxed,
             Ordering::Relaxed,
         ) {
@@ -131,13 +110,16 @@ impl<D: Draw> MakeTextWriter<D> {
         };
         let text_style = default_text_style();
         let line_len = Self::line_len(pixel_width, &text_style);
+        let char_height = text_style.font.character_size.height;
+        let last_line = (pixel_height as u32 - char_height) as i32 - 10;
         Self {
             next_point: AtomicU64::new(pack_point(Point { x: 10, y: 10 })),
-            char_height: text_style.font.character_size.height,
+            char_height,
             mk,
             line_len,
             pixel_width,
             pixel_height,
+            last_line,
         }
     }
 
