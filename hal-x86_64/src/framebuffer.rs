@@ -76,6 +76,15 @@ where
     fn set_pixel(&mut self, x: usize, y: usize, color: RgbColor) -> &mut Self {
         self.set_pixel_rgb(x, y, color)
     }
+
+    fn scroll_vert(&mut self, amount: usize) -> &mut Self {
+        let one_line = self.cfg.line_len * self.cfg.px_bytes;
+        let amount_px = one_line * amount;
+        let buf = self.buf.as_mut();
+        buf[..amount_px].fill(0);
+        buf.rotate_right(amount_px);
+        self
+    }
 }
 
 impl PixelKind {

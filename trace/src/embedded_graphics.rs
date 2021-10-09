@@ -15,6 +15,7 @@ pub struct MakeTextWriter<D> {
     mk: fn() -> D,
     next_point: AtomicU64,
     pixel_width: usize,
+    pixel_height: usize,
     line_len: usize,
     char_height: u32,
 }
@@ -53,12 +54,20 @@ where
         }
 
         if leading_newlines > 0 {
-            curr_point = Point {
-                y: curr_point
-                    .y
-                    .saturating_add(self.mk.char_height as i32 * leading_newlines),
-                x: 10,
-            };
+            let new_y = curr_point
+                .y
+                .saturating_add(self.mk.char_height as i32 * leading_newlines);
+            if new_y >= self.mk.pixel_height as i32 {
+                curr_point = Point {
+                    y: (self.mk.pixel_height - self.mk.char_height as usize) as i32,
+                    x: 10,
+                };
+                self.target
+                    .inner_mut()
+                    .scroll_vert(self.mk.pixel_height - new_y as usize);
+            } else {
+                curr_point = Point { y: new_y, x: 10 };
+            }
         }
 
         let mut trailing_newlines = 0;
@@ -80,12 +89,20 @@ where
 
         // Handle trailing newlines by advancing the next position to draw at.
         if trailing_newlines > 0 {
-            next_point = Point {
-                y: next_point
-                    .y
-                    .saturating_add(self.mk.char_height as i32 * trailing_newlines),
-                x: 10,
-            };
+            let new_y = next_point
+                .y
+                .saturating_add(self.mk.char_height as i32 * trailing_newlines);
+            if new_y >= self.mk.pixel_height as i32 {
+                next_point = Point {
+                    y: (self.mk.pixel_height - self.mk.char_height as usize) as i32,
+                    x: 10,
+                };
+                self.target
+                    .inner_mut()
+                    .scroll_vert(self.mk.pixel_height - new_y as usize);
+            } else {
+                next_point = Point { y: new_y, x: 10 };
+            }
         }
 
         match self.mk.next_point.compare_exchange(
@@ -108,7 +125,10 @@ where
 
 impl<D: Draw> MakeTextWriter<D> {
     pub fn new(mk: fn() -> D) -> Self {
-        let pixel_width = (mk)().width();
+        let (pixel_width, pixel_height) = {
+            let buf = (mk)();
+            (buf.width(), buf.height())
+        };
         let text_style = default_text_style();
         let line_len = Self::line_len(pixel_width, &text_style);
         Self {
@@ -117,6 +137,7 @@ impl<D: Draw> MakeTextWriter<D> {
             mk,
             line_len,
             pixel_width,
+            pixel_height,
         }
     }
 

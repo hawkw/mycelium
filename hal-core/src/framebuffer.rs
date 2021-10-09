@@ -72,6 +72,8 @@ pub trait Draw {
         self
     }
 
+    fn scroll_vert(&mut self, px: usize) -> &mut Self;
+
     #[cfg(feature = "embedded-graphics-core")]
     #[doc(cfg(feature = "embedded-graphics-core"))]
     fn into_draw_target(self) -> DrawTarget<Self>
@@ -160,6 +162,12 @@ macro_rules! deref_draw_body {
         #[inline]
         fn fill_col(&mut self, x: usize, color: RgbColor) -> &mut Self {
             self.deref_mut().fill_col(x, color);
+            self
+        }
+
+        #[inline]
+        fn scroll_vert(&mut self, px: usize) -> &mut Self {
+            self.deref_mut().scroll_vert(px);
             self
         }
 
