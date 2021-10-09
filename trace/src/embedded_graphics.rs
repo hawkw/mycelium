@@ -55,14 +55,12 @@ where
             }
 
             if curr_point.y > self.mk.last_line {
-                // let ydiff = curr_point.y - self.mk.last_line;
+                let ydiff = curr_point.y - self.mk.last_line;
                 curr_point = Point {
                     y: self.mk.last_line,
                     x: 10,
                 };
-                self.target
-                    .inner_mut()
-                    .scroll_vert(self.mk.char_height as isize);
+                self.target.inner_mut().scroll_vert(ydiff as isize);
             }
 
             let next_point = if line.is_empty() {
