@@ -10,10 +10,10 @@ edition = "2018"
 alloc = []
 
 [dependencies]
-tracing = { version = "0.1.25", default_features = false, features = ["attributes"] }
+tracing = { version = "0.1.29", default_features = false, features = ["attributes"] }
 
 [dev-dependencies]
 loom = "0.4"
 proptest = "1"
 tracing-subscriber = "0.2"
-tracing = { version = "0.1.25", default_features = false, features = ["attributes", "std"] }
+tracing = { version = "0.1.29", default_features = false, features = ["attributes", "std"] }

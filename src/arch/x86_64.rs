@@ -278,12 +278,13 @@ pub fn oops(
         }
     }
 
+    tracing::trace!(%cause, fault = fault.as_ref().map(|cx| tracing::field::debug(cx.registers())), "oops");
     let registers = if let Some(fault) = fault {
         let registers = fault.registers();
-        tracing::error!(message = "OOPS! a CPU fault occurred", %cause, ?registers);
+        tracing::error!(%cause, ?registers, "OOPS! a CPU fault occurred");
         Some(registers)
     } else {
-        tracing::error!(message = "OOPS! a panic occurred", %cause);
+        tracing::error!(%cause, "OOPS! a panic occurred", );
         None
     };
 
