@@ -10,12 +10,10 @@ use embedded_graphics::{
     Drawable,
 };
 use hal_core::framebuffer::{Draw, DrawTarget};
-
 #[derive(Debug)]
 pub struct MakeTextWriter<D> {
     mk: fn() -> D,
     next_point: AtomicU64,
-    // next_point: mycelium_util::sync::spin::Mutex<Point>,
     pixel_width: usize,
     line_len: usize,
     char_height: u32,
@@ -42,22 +40,54 @@ impl<'mk, D> fmt::Write for TextWriter<'mk, D>
 where
     D: Draw,
 {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
+    fn write_str(&mut self, mut s: &str) -> fmt::Result {
         let curr_packed = self.mk.next_point.load(Ordering::Relaxed);
         let mut curr_point = unpack_point(curr_packed);
-        if s.len() > 1 && s.starts_with('\n') {
-            curr_point.y += self.mk.char_height as i32;
+
+        // The embedded-graphics crate doesn't handle strings beginning and
+        // ending with newlines, so we have to do it ourselves.
+        let mut leading_newlines = 0;
+        while s.starts_with('\n') {
+            leading_newlines += 1;
+            s = &s[1..];
         }
-        let draw = Text::with_alignment(s, curr_point, default_text_style(), text::Alignment::Left)
-            .draw(&mut self.target)
-            .map_err(|_| fmt::Error);
-        let mut next_point = draw?;
-        if s.ends_with('\n') {
-            next_point = Point {
-                y: next_point.y + self.mk.char_height as i32,
+
+        if leading_newlines > 0 {
+            curr_point = Point {
+                y: curr_point
+                    .y
+                    .saturating_add(self.mk.char_height as i32 * leading_newlines),
                 x: 10,
             };
         }
+
+        let mut trailing_newlines = 0;
+        while s.ends_with('\n') {
+            trailing_newlines += 1;
+            s = &s[..s.len() - 1];
+        }
+
+        let mut next_point = if s.is_empty() {
+            // If the string is now empty (e.g. it was all newlines), don't
+            // bother drawing anything.
+            curr_point
+        } else {
+            // Otherwise, actually draw the text.
+            Text::with_alignment(s, curr_point, default_text_style(), text::Alignment::Left)
+                .draw(&mut self.target)
+                .map_err(|_| fmt::Error)?
+        };
+
+        // Handle trailing newlines by advancing the next position to draw at.
+        if trailing_newlines > 0 {
+            next_point = Point {
+                y: next_point
+                    .y
+                    .saturating_add(self.mk.char_height as i32 * trailing_newlines),
+                x: 10,
+            };
+        }
+
         match self.mk.next_point.compare_exchange(
             curr_packed,
             pack_point(next_point),
