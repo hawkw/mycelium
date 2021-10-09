@@ -38,7 +38,7 @@ pub trait WriteExt: Write {
 /// let some_ref = &something;
 ///
 /// debug!(x = ?some_ref);            // will format the pointed value ("a string")
-/// debug!(x = trace::ptr(some_ref)); // will format the address.
+/// debug!(x = fmt::ptr(some_ref)); // will format the address.
 ///
 /// ```
 #[inline]
@@ -59,7 +59,7 @@ pub fn ptr<T: Pointer>(value: T) -> tracing::field::DebugValue<FormatWith<T>> {
 /// let n = 0xf00;
 ///
 /// debug!(some_number = ?n);            // will be formatted as "some_number=3840"
-/// debug!(some_number = trace::hex(n)); //will be formatted as "some_number=0xf00"
+/// debug!(some_number = fmt::hex(n)); //will be formatted as "some_number=0xf00"
 ///
 /// ```
 #[inline]
@@ -80,7 +80,7 @@ pub fn hex<T: LowerHex>(value: T) -> tracing::field::DebugValue<FormatWith<T>> {
 /// let n = 42;
 ///
 /// debug!(some_number = ?n);            // will be formatted as "some_number=42"
-/// debug!(some_number = trace::bin(n)); //will be formatted as "some_number=0b101010"
+/// debug!(some_number = fmt::bin(n)); //will be formatted as "some_number=0b101010"
 ///
 /// ```
 #[inline]
@@ -110,7 +110,7 @@ pub fn bin<T: Binary>(value: T) -> tracing::field::DebugValue<FormatWith<T>> {
 /// };
 ///
 /// debug!(something = ?thing);             // will be formatted on the current line
-/// debug!(something = trace::alt(&thing)); // will be formatted with newlines and indentation
+/// debug!(something = fmt::alt(&thing)); // will be formatted with newlines and indentation
 ///
 /// ```
 #[inline]
