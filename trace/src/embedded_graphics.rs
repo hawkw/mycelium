@@ -14,9 +14,7 @@ use hal_core::framebuffer::{Draw, DrawTarget};
 pub struct MakeTextWriter<D> {
     mk: fn() -> D,
     next_point: AtomicU64,
-    pixel_width: usize,
-    pixel_height: usize,
-    line_len: usize,
+    line_len: u32,
     char_height: u32,
     last_line: i32,
 }
@@ -104,28 +102,23 @@ impl<D: Draw> MakeTextWriter<D> {
     pub fn new(mk: fn() -> D) -> Self {
         let (pixel_width, pixel_height) = {
             let buf = (mk)();
-            (buf.width(), buf.height())
+            (buf.width() as u32, buf.height() as u32)
         };
         let text_style = default_text_style();
         let line_len = Self::line_len(pixel_width, &text_style);
         let char_height = text_style.font.character_size.height;
-        let last_line = (pixel_height as u32 - char_height) as i32 - 10;
+        let last_line = (pixel_height - char_height - 10) as i32;
         Self {
             next_point: AtomicU64::new(pack_point(Point { x: 10, y: 10 })),
             char_height,
             mk,
             line_len,
-            pixel_width,
-            pixel_height,
             last_line,
         }
     }
 
-    fn line_len(
-        pixel_width: usize,
-        text_style: &MonoTextStyle<'static, pixelcolor::Rgb888>,
-    ) -> usize {
-        pixel_width / (text_style.font.character_size.width as usize)
+    fn line_len(pixel_width: u32, text_style: &MonoTextStyle<'static, pixelcolor::Rgb888>) -> u32 {
+        pixel_width / text_style.font.character_size.width
     }
 }
 
@@ -143,7 +136,7 @@ where
     }
 
     fn line_len(&self) -> usize {
-        self.line_len
+        self.line_len as usize
     }
 }
 
