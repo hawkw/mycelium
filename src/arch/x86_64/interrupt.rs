@@ -1,6 +1,6 @@
 use hal_core::VAddr;
 pub use hal_x86_64::interrupt::*;
-use mycelium_util::{sync, trace};
+use mycelium_util::{fmt, sync};
 
 // TODO(eliza): put this somewhere good.
 type StackFrame = [u8; 4096];
@@ -47,16 +47,16 @@ pub(super) fn init_gdt() {
     let code_segment = segment::Descriptor::code().with_ring(Ring::Ring0);
     let code_selector = gdt.add_user_segment(code_segment);
     tracing::trace!(
-        descriptor = trace::alt(code_segment),
-        selector = trace::alt(code_selector),
+        descriptor = fmt::alt(code_segment),
+        selector = fmt::alt(code_selector),
         "added code segment"
     );
 
     // add the TSS.
     let tss_selector = gdt.add_sys_segment(tss);
     tracing::trace!(
-        descriptor = trace::alt(tss),
-        selector = trace::alt(tss_selector),
+        descriptor = fmt::alt(tss),
+        selector = fmt::alt(tss_selector),
         "added TSS"
     );
 
@@ -71,7 +71,7 @@ pub(super) fn init_gdt() {
 
     // set new segment selectors
     let code_selector = segment::Selector::cs();
-    tracing::trace!(code_selector = trace::alt(code_selector));
+    tracing::trace!(code_selector = fmt::alt(code_selector));
     unsafe {
         code_selector.set_cs();
         task::StateSegment::load_tss(tss_selector);

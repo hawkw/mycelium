@@ -211,32 +211,32 @@ impl Selector {
             options(preserves_flags),
         );
 
-        tracing::trace!(selector = trace::alt(self), "set code segment");
+        tracing::trace!(selector = fmt::alt(self), "set code segment");
     }
 
     pub unsafe fn set_ss(self) {
         asm!("mov ss, {:x}", in(reg) self.0, options(nostack, preserves_flags));
-        tracing::trace!(selector = trace::alt(self), "set stack segment");
+        tracing::trace!(selector = fmt::alt(self), "set stack segment");
     }
 
     pub unsafe fn set_ds(self) {
         asm!("mov ds, {:x}", in(reg) self.0, options(nostack, preserves_flags));
-        tracing::trace!(selector = trace::alt(self), "set data segment");
+        tracing::trace!(selector = fmt::alt(self), "set data segment");
     }
 
     pub unsafe fn set_es(self) {
         asm!("mov es, {:x}", in(reg) self.0, options(nostack, preserves_flags));
-        tracing::trace!(selector = trace::alt(self), "set extra segment");
+        tracing::trace!(selector = fmt::alt(self), "set extra segment");
     }
 
     pub unsafe fn set_fs(self) {
         asm!("mov fs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
-        tracing::trace!(selector = trace::alt(self), "set fs");
+        tracing::trace!(selector = fmt::alt(self), "set fs");
     }
 
     pub unsafe fn set_gs(self) {
         asm!("mov gs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
-        tracing::trace!(selector = trace::alt(self), "set gs");
+        tracing::trace!(selector = fmt::alt(self), "set gs");
     }
 }
 
