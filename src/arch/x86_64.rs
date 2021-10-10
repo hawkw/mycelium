@@ -71,19 +71,28 @@ impl BootInfo for RustbootBootInfo {
             return None;
         }
 
-        let (cfg, buf) = unsafe {
-            // Safety: we can reasonably assume this will only be called
-            // after `arch_entry`, so if we've failed to initialize the
-            // framebuffer...things have gone horribly wrong...
-            FRAMEBUFFER.get_unchecked()
-        };
-        Some(Framebuffer::new(cfg, buf.lock()))
+        Some(unsafe { Self::mk_framebuf() })
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
-        Some(tracing::Dispatch::new(
-            hal_x86_64::tracing::Subscriber::default(),
-        ))
+        use mycelium_trace::{writer::MakeWriterExt, Subscriber};
+        if !self.has_framebuffer {
+            // TODO(eliza): we should probably write to just the serial port if
+            // there's no framebuffer...
+            return None;
+        }
+
+        let display_writer = mycelium_trace::embedded_graphics::MakeTextWriter::new(|| unsafe {
+            Self::mk_framebuf()
+        })
+        .with_max_level(tracing::Level::INFO);
+        let display = Subscriber::display_only(display_writer);
+        let dispatch = if let Some(serial) = serial::com1() {
+            tracing::Dispatch::new(display.with_serial(serial))
+        } else {
+            tracing::Dispatch::new(display)
+        };
+        Some(dispatch)
     }
 
     fn bootloader_name(&self) -> &str {
@@ -96,6 +105,16 @@ impl BootInfo for RustbootBootInfo {
 }
 
 impl RustbootBootInfo {
+    unsafe fn mk_framebuf() -> Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>> {
+        let (cfg, buf) = unsafe {
+            // Safety: we can reasonably assume this will only be called
+            // after `arch_entry`, so if we've failed to initialize the
+            // framebuffer...things have gone horribly wrong...
+            FRAMEBUFFER.get_unchecked()
+        };
+        Framebuffer::new(cfg, buf.lock())
+    }
+
     fn vm_offset(&self) -> VAddr {
         VAddr::from_u64(
             self.inner
@@ -234,6 +253,7 @@ pub fn oops(
 ) -> ! {
     use core::fmt::Write;
     let mut vga = vga::writer();
+
     // /!\ disable all interrupts, unlock everything to prevent deadlock /!\
     //
     // Safety: it is okay to do this because we are oopsing and everything
@@ -249,14 +269,31 @@ pub fn oops(
 
         // unlock the VGA buffer.
         vga.force_unlock();
+
+        // unlock the frame buffer
+        if let Some((_, fb)) = FRAMEBUFFER.try_get() {
+            fb.force_unlock();
+        }
     }
 
+    // emit a DEBUG event first. with the default tracing configuration, these
+    // will go to the serial port and *not* get written to the framebuffer. this
+    // is important, since it lets us still get information about the oops on
+    // the serial port, even if the oops was due to a bug in eliza's framebuffer
+    // code, which (it turns out) is surprisingly janky...
+    tracing::debug!(
+        %cause,
+        registers = fault.as_ref().map(|cx| tracing::field::debug(cx.registers())),
+        "oops"
+    );
+    // okay, we've dumped the oops to serial, now try to log a nicer event at
+    // the ERROR level.
     let registers = if let Some(fault) = fault {
         let registers = fault.registers();
-        tracing::error!(message = "OOPS! a CPU fault occurred", %cause, ?registers);
+        tracing::error!(%cause, ?registers, "OOPS! a CPU fault occurred");
         Some(registers)
     } else {
-        tracing::error!(message = "OOPS! a panic occurred", %cause);
+        tracing::error!(%cause, "OOPS! a panic occurred", );
         None
     };
 

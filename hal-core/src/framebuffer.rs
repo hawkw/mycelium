@@ -6,7 +6,6 @@ mod embedded_graphics;
 #[cfg(feature = "embedded-graphics-core")]
 #[doc(cfg(feature = "embedded-graphics-core"))]
 pub use self::embedded_graphics::*;
-
 pub trait Draw {
     /// Return the width of the framebuffer in pixels.
     fn width(&self) -> usize;
@@ -72,6 +71,8 @@ pub trait Draw {
         self.fill(RgbColor::BLACK);
         self
     }
+
+    fn scroll_vert(&mut self, px: isize) -> &mut Self;
 
     #[cfg(feature = "embedded-graphics-core")]
     #[doc(cfg(feature = "embedded-graphics-core"))]
@@ -161,6 +162,12 @@ macro_rules! deref_draw_body {
         #[inline]
         fn fill_col(&mut self, x: usize, color: RgbColor) -> &mut Self {
             self.deref_mut().fill_col(x, color);
+            self
+        }
+
+        #[inline]
+        fn scroll_vert(&mut self, px: isize) -> &mut Self {
+            self.deref_mut().scroll_vert(px);
             self
         }
 

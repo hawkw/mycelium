@@ -389,29 +389,7 @@ pub trait Write {
     ///
     /// This function will return any I/O error reported while formatting.
     fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> Result<()> {
-        // Create a shim which translates a Write to a fmt::Write and saves
-        // off I/O errors. instead of discarding them
-        struct Adaptor<'a, T: ?Sized + 'a> {
-            inner: &'a mut T,
-            error: Result<()>,
-        }
-
-        impl<T: Write + ?Sized> fmt::Write for Adaptor<'_, T> {
-            fn write_str(&mut self, s: &str) -> fmt::Result {
-                match self.inner.write_all(s.as_bytes()) {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        self.error = Err(e);
-                        Err(fmt::Error)
-                    }
-                }
-            }
-        }
-
-        let mut output = Adaptor {
-            inner: self,
-            error: Ok(()),
-        };
+        let mut output = WriteFmtAdaptor::new(self);
         match fmt::write(&mut output, fmt) {
             Ok(()) => Ok(()),
             Err(..) => {
@@ -1082,6 +1060,34 @@ fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>) -> R
         read += used;
         if done || used == 0 {
             return Ok(read);
+        }
+    }
+}
+
+// Create a shim which translates a Write to a fmt::Write and saves
+// off I/O errors. instead of discarding them
+pub(crate) struct WriteFmtAdaptor<'a, T: ?Sized + 'a> {
+    inner: &'a mut T,
+    error: Result<()>,
+}
+
+impl<'a, T: ?Sized + 'a> WriteFmtAdaptor<'a, T> {
+    pub(crate) fn new(inner: &'a mut T) -> Self {
+        Self {
+            inner,
+            error: Ok(()),
+        }
+    }
+}
+
+impl<T: Write + ?Sized> fmt::Write for WriteFmtAdaptor<'_, T> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        match self.inner.write_all(s.as_bytes()) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.error = Err(e);
+                Err(fmt::Error)
+            }
         }
     }
 }

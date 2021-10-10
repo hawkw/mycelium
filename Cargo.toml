@@ -6,6 +6,7 @@ members = [
     "hal-x86_64",
     "inoculate",
     "mycotest",
+    "trace",
 ]
 
 [package]
@@ -23,10 +24,14 @@ name = "mycelium_kernel"
 path = "src/main.rs"
 test = false
 
+[profile.dev]
+opt-level = 3
+
 [dependencies]
 hal-core = { path = "hal-core", features = ["embedded-graphics-core"] }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
 mycelium-util = { path = "util" }
+mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
 rlibc = "1.0"
 # NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`

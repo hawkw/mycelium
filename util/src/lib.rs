@@ -12,12 +12,12 @@ extern crate alloc;
 pub mod bits;
 pub mod cell;
 pub mod error;
+pub mod fmt;
 pub mod intrusive;
 pub mod io;
 mod macros;
 pub mod math;
 pub mod sync;
 pub mod testing;
-pub mod trace;
 
 pub use self::macros::*;

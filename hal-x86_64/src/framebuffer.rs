@@ -76,6 +76,18 @@ where
     fn set_pixel(&mut self, x: usize, y: usize, color: RgbColor) -> &mut Self {
         self.set_pixel_rgb(x, y, color)
     }
+
+    fn scroll_vert(&mut self, amount: isize) -> &mut Self {
+        if amount < 0 {
+            todo!("eliza: handle negatives!")
+        }
+        let amount_px = (amount as usize * self.cfg.line_len) * self.cfg.px_bytes;
+        let buf = self.buf.as_mut();
+        let len = buf.len();
+        buf.copy_within(amount_px.., 0);
+        buf[(len - amount_px)..].fill(0);
+        self
+    }
 }
 
 impl PixelKind {

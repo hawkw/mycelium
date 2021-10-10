@@ -15,6 +15,10 @@ impl<D: Draw> DrawTarget<D> {
             width: self.0.width() as u32,
         }
     }
+
+    pub fn inner_mut(&mut self) -> &mut D {
+        &mut self.0
+    }
 }
 
 impl<D: Draw> geometry::Dimensions for DrawTarget<D> {
