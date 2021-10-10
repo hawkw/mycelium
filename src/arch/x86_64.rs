@@ -277,7 +277,18 @@ pub fn oops(
         }
     }
 
-    tracing::trace!(%cause, fault = fault.as_ref().map(|cx| tracing::field::debug(cx.registers())), "oops");
+    // emit a DEBUG event first. with the default tracing configuration, these
+    // will go to the serial port and *not* get written to the framebuffer. this
+    // is important, since it lets us still get information about the oops on
+    // the serial port, even if the oops was due to a bug in eliza's framebuffer
+    // code, which (it turns out) is surprisingly janky...
+    tracing::debug!(
+        %cause,
+        registers = fault.as_ref().map(|cx| tracing::field::debug(cx.registers())),
+        "oops"
+    );
+    // okay, we've dumped the oops to serial, now try to log a nicer event at
+    // the ERROR level.
     let registers = if let Some(fault) = fault {
         let registers = fault.registers();
         tracing::error!(%cause, ?registers, "OOPS! a CPU fault occurred");
