@@ -21,17 +21,13 @@ pub struct Test<'a, S = &'a str> {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Outcome {
-    Pass,
-    Fail,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Failure {
     Fail,
     Panic,
     Fault,
 }
+
+pub type Outcome = Result<(), Failure>;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParseError(&'static str);
@@ -54,19 +50,33 @@ impl<'a> Test<'a> {
         Self::parse(line.strip_prefix(START_TEST)?)
     }
 
-    pub fn parse_outcome(line: &'a str) -> Option<(Self, Result<(), Failure>)> {
-        let line = line.strip_prefix("MYCELIUM_TEST_")?;
+    #[tracing::instrument(level = "trace")]
+    pub fn parse_outcome(line: &'a str) -> Result<Option<(Self, Outcome)>, ParseError> {
+        let line = match line.strip_prefix("MYCELIUM_TEST_") {
+            None => {
+                tracing::trace!("not a test outcome");
+                return Ok(None);
+            }
+            Some(line) => line,
+        };
+        tracing::trace!(?line);
         let (line, result) = if let Some(line) = line.strip_prefix("PASS:") {
             (line, Ok(()))
         } else if let Some(line) = line.strip_prefix("FAIL:") {
-            let failure = line.parse::<Failure>().ok()?;
-            let line = line.strip_prefix(failure.as_str())?;
+            let line = line.trim();
+            tracing::trace!(?line);
+            let failure = line.parse::<Failure>();
+            tracing::trace!(?failure);
+            let failure = failure?;
+            let line = line.strip_prefix(failure.as_str()).unwrap_or(line);
             (line, Err(failure))
         } else {
-            return None;
+            tracing::trace!("this is a test start, not an outcome");
+            return Ok(None);
         };
-
-        Some((Self::parse(line)?, result))
+        let test = Self::parse(line.trim()).ok_or(ParseError("failed to parse test"));
+        tracing::trace!(?test);
+        Ok(Some((test?, result)))
     }
 
     #[cfg(feature = "alloc")]
@@ -117,9 +127,9 @@ impl core::str::FromStr for Failure {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
-            s if s.eq_ignore_ascii_case("panic") => Ok(Self::Panic),
-            s if s.eq_ignore_ascii_case("fail") => Ok(Self::Fail),
-            s if s.eq_ignore_ascii_case("fault") => Ok(Self::Fault),
+            s if s.starts_with("panic") => Ok(Self::Panic),
+            s if s.starts_with("fail") => Ok(Self::Fail),
+            s if s.starts_with("fault") => Ok(Self::Fault),
             _ => Err(ParseError(
                 "invalid failure kind: expected one of `panic`, `fail`, or `fault`",
             )),
@@ -140,5 +150,11 @@ impl Failure {
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad(self.as_str())
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.0, f)
     }
 }
