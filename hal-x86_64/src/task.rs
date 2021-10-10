@@ -38,7 +38,9 @@ impl StateSegment {
     }
 
     pub unsafe fn load_tss(sel: segment::Selector) {
+        tracing::trace!("setting TSS...");
         cpu::intrinsics::ltr(sel);
+        tracing::debug!(selector = ?sel, "TSS set");
     }
 }
 

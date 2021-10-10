@@ -1,8 +1,8 @@
 use crate::{cpu, task};
-use core::{fmt, mem};
+use core::mem;
 use mycelium_util::{
     bits::{self, Pack16, Pack64},
-    trace,
+    fmt,
 };
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -184,6 +184,8 @@ impl Selector {
         Self(sel)
     }
 
+    /// # Safety
+    /// lol
     #[inline]
     pub unsafe fn set_cs(self) {
         // because x86 is a very well designed and normal CPU architecture, you
@@ -214,26 +216,36 @@ impl Selector {
         tracing::trace!(selector = fmt::alt(self), "set code segment");
     }
 
+    /// # Safety
+    /// lol
     pub unsafe fn set_ss(self) {
         asm!("mov ss, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set stack segment");
     }
 
+    /// # Safety
+    /// lol
     pub unsafe fn set_ds(self) {
         asm!("mov ds, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set data segment");
     }
 
+    /// # Safety
+    /// lol
     pub unsafe fn set_es(self) {
         asm!("mov es, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set extra segment");
     }
 
+    /// # Safety
+    /// lol
     pub unsafe fn set_fs(self) {
         asm!("mov fs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set fs");
     }
 
+    /// # Safety
+    /// lol
     pub unsafe fn set_gs(self) {
         asm!("mov gs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set gs");
