@@ -7,11 +7,18 @@ use hal_x86_64::{
     interrupt::Registers as X64Registers,
     serial, vga,
 };
-pub use hal_x86_64::{interrupt, mm, NAME};
+pub use hal_x86_64::{mm, NAME};
 use mycelium_util::{
     fmt,
     sync::{spin, InitOnce},
 };
+
+pub mod interrupt;
+
+pub fn init_interrupts() {
+    interrupt::init_gdt();
+    interrupt::init::<InterruptHandlers>();
+}
 
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};

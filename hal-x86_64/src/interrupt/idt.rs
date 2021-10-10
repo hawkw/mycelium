@@ -123,8 +123,12 @@ impl Idt {
     }
 
     pub fn load(&'static self) {
-        let ptr = crate::cpu::DtablePtr::new(self);
-        unsafe { asm!("lidt [{0}]", in(reg) &ptr) }
+        let ptr = cpu::DtablePtr::new(self);
+        unsafe {
+            // Safety: the `'static` bound ensures the IDT isn't going away
+            // unless you did something really evil.
+            cpu::intrinsics::lidt(ptr)
+        }
     }
 }
 

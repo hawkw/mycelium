@@ -1,5 +1,4 @@
-use core::fmt;
-use core::mem;
+use core::{fmt, mem};
 
 pub mod intrinsics;
 
@@ -78,6 +77,19 @@ impl DtablePtr {
         let base = t as *const _ as *const ();
 
         Self { limit, base }
+    }
+}
+
+impl fmt::Debug for DtablePtr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // avoid creating misaligned references by moving these i guess? idk why
+        // rustc is okay with this but i'll trust it.
+        let limit = self.limit;
+        let base = self.base;
+        f.debug_struct("DtablePtr")
+            .field("base", &format_args!("{:0p}", base))
+            .field("limit", &limit)
+            .finish()
     }
 }
 

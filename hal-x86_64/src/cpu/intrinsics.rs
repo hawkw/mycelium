@@ -43,3 +43,13 @@ pub unsafe fn cli() {
 pub unsafe fn sti() {
     asm!("sti")
 }
+
+#[inline(always)]
+pub(crate) unsafe fn lidt(ptr: super::DtablePtr) {
+    asm!("lidt [{0}]", in(reg) &ptr)
+}
+
+#[inline(always)]
+pub(crate) unsafe fn lgdt(ptr: super::DtablePtr) {
+    asm!("lgdt [{0}]", in(reg) &ptr)
+}
