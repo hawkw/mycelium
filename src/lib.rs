@@ -4,7 +4,7 @@
 #![cfg_attr(target_os = "none", feature(panic_info_message))]
 #![allow(unused_unsafe)]
 // we need the SPICY version of const-eval apparently
-#![feature(const_raw_ptr_to_usize_cast, const_mut_refs)]
+#![feature(const_mut_refs)]
 extern crate alloc;
 extern crate rlibc;
 

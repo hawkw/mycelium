@@ -453,12 +453,8 @@ impl DescriptorFlags {
 }
 
 impl SystemDescriptor {
-    pub const fn tss(tss: &'static task::StateSegment) -> Self {
-        let tss_addr = unsafe {
-            // Safety: this is unsafe to do in const fn i guess? idk why but
-            // this is probably fine.
-            tss as *const _ as u64
-        };
+    pub fn tss(tss: &'static task::StateSegment) -> Self {
+        let tss_addr = tss as *const _ as u64;
 
         // limit (-1 because the bound is inclusive)
         let limit = (mem::size_of::<task::StateSegment>() - 1) as u64;
@@ -521,7 +517,6 @@ mod tests {
         Descriptor::BASE_LOW_PAIR.assert_valid();
         Descriptor::BASE_MID_PAIR.assert_valid();
         Descriptor::BASE_HIGH_PAIR.assert_valid();
-
 
         Descriptor::LIMIT_LOW_PAIR.assert_valid();
         Descriptor::LIMIT_HIGH_PAIR.assert_valid();

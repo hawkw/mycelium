@@ -14,17 +14,12 @@ use mycelium_util::{
 };
 
 pub mod interrupt;
-
-pub fn init_interrupts() {
-    interrupt::init_gdt();
-    interrupt::init::<InterruptHandlers>();
-}
-
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};
 
 pub type MinPageSize = mm::size::Size4Kb;
 
+#[tracing::instrument]
 pub fn init_interrupts() {
     interrupt::init_gdt();
     interrupt::init::<InterruptHandlers>();
