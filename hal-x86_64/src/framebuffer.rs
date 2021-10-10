@@ -84,7 +84,7 @@ where
         let amount_px = (amount as usize * self.cfg.line_len) * self.cfg.px_bytes;
         let buf = self.buf.as_mut();
         let len = buf.len();
-        buf.rotate_left(amount_px);
+        buf.copy_within(amount_px.., 0);
         buf[(len - amount_px)..].fill(0);
         self
     }

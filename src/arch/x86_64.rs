@@ -112,7 +112,6 @@ impl RustbootBootInfo {
             // framebuffer...things have gone horribly wrong...
             FRAMEBUFFER.get_unchecked()
         };
-        buf.force_unlock();
         Framebuffer::new(cfg, buf.lock())
     }
 
