@@ -70,6 +70,8 @@ struct TestResults {
     tests: usize,
     completed: usize,
     failed: BTreeMap<mycotest::Test<'static, String>, Vec<String>>,
+    panicked: usize,
+    faulted: usize,
     total: usize,
 }
 
@@ -291,15 +293,17 @@ impl TestResults {
             completed: 0,
             failed: BTreeMap::new(),
             total: 0,
+            panicked: 0,
+            faulted: 0,
         };
         let mut lines = BufReader::new(output).lines();
         let colors = ColorMode::default();
         let green = colors.if_color(owo_colors::style().green());
         let red = colors.if_color(owo_colors::style().red());
 
-        'all_tests: while let Some(line) = lines.next() {
+        while let Some(line) = lines.next() {
+            tracing::trace!(message = ?line);
             let line = line?;
-            tracing::trace!(message = %line);
 
             if let Some(count) = line.strip_prefix(mycotest::TEST_COUNT) {
                 results.total = count
@@ -309,48 +313,80 @@ impl TestResults {
             }
 
             if let Some(test) = Test::parse_start(&line) {
-                tracing::debug!(?test, "found test");
+                let _span =
+                    tracing::debug_span!("test", "{}::{}", test.module(), test.name()).entered();
+                tracing::debug!(?test, "found a test...");
                 eprint!("test {} ...", test);
                 results.tests += 1;
 
                 let mut curr_output = Vec::new();
+                let mut curr_outcome = None;
                 for line in &mut lines {
-                    let line = line?;
-                    tracing::trace!(message = %line);
-
-                    if let Some((completed_test, outcome)) = Test::parse_outcome(&line) {
-                        ensure!(
-                            test == completed_test,
-                            "an unexpected test completed (actual: {}, expected: {}, outcome={:?})",
-                            completed_test,
-                            test,
-                            outcome,
-                        );
-
-                        match outcome {
-                            Ok(()) => eprintln!(" {}", "ok".style(green)),
-                            Err(mycotest::Failure::Fail) => {
-                                eprintln!(" {}", "not ok!".style(red));
-                                results.failed.insert(test.to_static(), curr_output);
-                            }
-                            Err(mycotest::Failure::Panic) => {
-                                eprintln!(" {}", "PANIC".style(red));
-                                results.failed.insert(test.to_static(), curr_output);
-                            }
-                            Err(mycotest::Failure::Fault) => {
-                                eprintln!(" {}", "FAULT".style(red));
-                                results.failed.insert(test.to_static(), curr_output);
-                            }
+                    tracing::trace!(message = ?line);
+                    let line = match line {
+                        Err(err) => {
+                            tracing::debug!(?err, "unexpected qemu error");
+                            curr_output.push(err.to_string());
+                            break;
                         }
+                        Ok(line) => line,
+                    };
 
-                        results.completed += 1;
-                        continue 'all_tests;
+                    match Test::parse_outcome(&line) {
+                        Ok(None) => {}
+                        Ok(Some((completed_test, outcome))) => {
+                            ensure!(
+                                test == completed_test,
+                                "an unexpected test completed (actual: {}, expected: {}, outcome={:?})",
+                                completed_test,
+                                test,
+                                outcome,
+                            );
+                            tracing::debug!(?outcome);
+                            curr_outcome = Some(outcome);
+                            break;
+                        }
+                        Err(err) => {
+                            tracing::error!(?line, ?err, "failed to parse test outcome!");
+                            return Err(format_err!("failed to parse test outcome")
+                                .note(format!("{}", err)))
+                            .note(format!("line: {:?}", line));
+                        }
                     }
 
                     curr_output.push(line);
                 }
+
+                match curr_outcome {
+                    Some(Ok(())) => eprintln!(" {}", "ok".style(green)),
+                    Some(Err(mycotest::Failure::Fail)) => {
+                        eprintln!(" {}", "not ok!".style(red));
+                        results.failed.insert(test.to_static(), curr_output);
+                    }
+                    Some(Err(mycotest::Failure::Panic)) => {
+                        eprintln!(" {}", "panic!".style(red));
+                        results.failed.insert(test.to_static(), curr_output);
+                        results.panicked += 1;
+                    }
+                    Some(Err(mycotest::Failure::Fault)) => {
+                        eprintln!(" {}", "FAULT".style(red));
+                        results.failed.insert(test.to_static(), curr_output);
+                        results.faulted += 1;
+                    }
+                    None => {
+                        tracing::info!("qemu exited unexpectedly! wtf!");
+                        curr_output.push("<AND THEN QEMU EXITS???>".to_string());
+                        eprintln!(" {}", "exit!".style(red));
+                        results.failed.insert(test.to_static(), curr_output);
+                        break;
+                    }
+                };
+
+                results.completed += 1;
             }
         }
+
+        tracing::trace!("lines ended");
 
         Ok(results)
     }
@@ -382,11 +418,17 @@ impl fmt::Display for TestResults {
         };
 
         let num_missed = self.total - (self.completed + num_failed);
+        let panicked_faulted = if self.panicked > 0 || self.faulted > 0 {
+            format!(" ({} panicked, {} faulted)", self.panicked, self.faulted)
+        } else {
+            String::new()
+        };
         writeln!(
             f,
-            "\ntest result: {}. {} passed; {} failed; {} missed; {} total",
+            "\ntest result: {}. {} passed{}; {} failed; {} missed; {} total",
             res,
             self.completed - num_failed,
+            panicked_faulted,
             num_failed,
             num_missed,
             self.total
@@ -396,7 +438,7 @@ impl fmt::Display for TestResults {
             writeln!(
                 f,
                 "\n{}: {} tests didn't get to run due to a panic/fault",
-                "note".style(colors.if_color(owo_colors::style().yellow().bold())),
+                "warning".style(colors.if_color(owo_colors::style().yellow().bold())),
                 num_missed
             )?;
         }
