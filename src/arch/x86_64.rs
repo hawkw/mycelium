@@ -10,7 +10,7 @@ use hal_x86_64::{
 pub use hal_x86_64::{interrupt, mm, NAME};
 use mycelium_util::{
     sync::{spin, InitOnce},
-    trace,
+    fmt,
 };
 
 #[cfg(test)]
@@ -317,7 +317,7 @@ pub fn oops(
         let _ = writeln!(vga, "Disassembly:");
         let mut ptr = fault_addr as u64;
         let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
-        let _span = tracing::debug_span!("disassembly", "%rip" = trace::hex(ptr)).entered();
+        let _span = tracing::debug_span!("disassembly", "%rip" = fmt::hex(ptr)).entered();
         for _ in 0..10 {
             // Safety: who cares! At worst this might double-fault by reading past the end of valid
             // memory. whoopsie.
