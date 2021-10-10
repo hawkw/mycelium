@@ -45,7 +45,7 @@ SUBCOMMANDS:
     test    Builds a bootable disk image with tests enabled, and runs the tests in QEMU
 ```
 
-[`inoculate`]: tree/main/inoculate
+[`inoculate`]: https://github.com/hawkw/mycelium/tree/main/inoculate
 
 ### cargo aliases
 
@@ -58,7 +58,7 @@ the following [cargo aliases] are provided for development:
 - `cargo clippy-x64` runs the [clippy] linter with the kernel x86_64 target
   enabled (rather than the build host's target triple).
 
-[cargo aliases]: blob/main/.cargo/config
+[cargo aliases]: https://github.com/hawkw/mycelium/blob/main/.cargo/config
 [clippy]: https://github.com/rust-lang/rust-clippy
 
 ### build dependencies
@@ -77,7 +77,7 @@ them manually with:
 rustup component add rust-src llvm-tools-preview
 ```
 
-[`rust-toolchain.toml`]: blob/main/rust-toolchain.toml
+[`rust-toolchain.toml`]: https://github.com/hawkw/mycelium/blob/main/rust-toolchain.toml
 
 ### runtime dependencies & tools
 
@@ -100,6 +100,6 @@ config file, i'd welcome a PR to add support for your preferred package manager.
 
 [QEMU]: https://www.qemu.org/
 [`gdb`]: https://www.gnu.org/software/gdb/
-[`shell.nix`]: tree/main/rust-toolchain.toml
+[`shell.nix`]: https://github.com/hawkw/mycelium/blob/main/shell.nix
 [`nix-shell`]: https://nixos.wiki/wiki/Development_environment_with_nix-shell
 [`direnv`]: https://direnv.net/
