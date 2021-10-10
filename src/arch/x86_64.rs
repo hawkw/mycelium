@@ -8,7 +8,10 @@ use hal_x86_64::{
     serial, vga,
 };
 pub use hal_x86_64::{interrupt, mm, NAME};
-use mycelium_util::sync::{spin, InitOnce};
+use mycelium_util::{
+    sync::{spin, InitOnce},
+    trace,
+};
 
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};
@@ -277,6 +280,7 @@ pub fn oops(
         let _ = writeln!(vga, "Disassembly:");
         let mut ptr = fault_addr as u64;
         let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
+        let _span = tracing::debug_span!("disassembly", "%rip" = trace::hex(ptr)).entered();
         for _ in 0..10 {
             // Safety: who cares! At worst this might double-fault by reading past the end of valid
             // memory. whoopsie.
@@ -285,10 +289,12 @@ pub fn oops(
             match decoder.decode_slice(bytes) {
                 Ok(inst) => {
                     let _ = writeln!(vga, "{}", inst);
+                    tracing::debug!("{:016x}: {}", ptr, inst);
                     ptr += inst.len();
                 }
                 Err(e) => {
                     let _ = writeln!(vga, "{}", e);
+                    tracing::debug!("{:016x}: {}", ptr, e);
                     break;
                 }
             }
