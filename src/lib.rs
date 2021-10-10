@@ -31,6 +31,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         tracing::dispatcher::set_global_default(subscriber).unwrap();
     }
 
+    #[cfg(not(test))]
     if let Some(mut framebuf) = bootinfo.framebuffer() {
         use hal_core::framebuffer::{Draw, RgbColor};
         tracing::trace!("framebuffer exists!");
