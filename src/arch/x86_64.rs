@@ -9,8 +9,8 @@ use hal_x86_64::{
 };
 pub use hal_x86_64::{interrupt, mm, NAME};
 use mycelium_util::{
-    sync::{spin, InitOnce},
     fmt,
+    sync::{spin, InitOnce},
 };
 
 #[cfg(test)]
