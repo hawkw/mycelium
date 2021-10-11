@@ -1,7 +1,8 @@
 use crate::{cpu, segment, VAddr};
+use mycelium_util::fmt;
 
 /// A 64-bit mode task-state segment (TSS).
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 #[repr(C, packed)]
 pub struct StateSegment {
     _reserved_1: u32,
@@ -38,7 +39,7 @@ impl StateSegment {
     }
 
     pub unsafe fn load_tss(sel: segment::Selector) {
-        tracing::trace!("setting TSS...");
+        tracing::trace!(selector = ?sel, "setting TSS...");
         cpu::intrinsics::ltr(sel);
         tracing::debug!(selector = ?sel, "TSS set");
     }
@@ -47,5 +48,22 @@ impl StateSegment {
 impl Default for StateSegment {
     fn default() -> Self {
         Self::empty()
+    }
+}
+
+impl fmt::Debug for StateSegment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("task::StateSegment")
+            .field(
+                "privilege_stacks",
+                &format_args!("{:?}", &{ self.privilege_stacks }),
+            )
+            .field(
+                "interrupt_stacks",
+                &format_args!("{:?}", &{ self.interrupt_stacks }),
+            )
+            .field("iomap_offset", &fmt::hex(self.iomap_offset))
+            .field("iomap_addr", &self.iomap_addr())
+            .finish()
     }
 }

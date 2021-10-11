@@ -8,6 +8,7 @@ type StackFrame = [u8; 4096];
 const DOUBLE_FAULT_IST: usize = 6;
 
 #[inline]
+#[tracing::instrument(level = "debug")]
 pub(super) fn init_gdt() {
     use hal_x86_64::{
         cpu::Ring,
@@ -30,15 +31,13 @@ pub(super) fn init_gdt() {
         let mut tss = task::StateSegment::empty();
         tss.interrupt_stacks[DOUBLE_FAULT_IST] = unsafe {
             // safety: asdf
-            VAddr::from_usize_unchecked(&DOUBLE_FAULT_STACK as *const _ as usize)
+            VAddr::of(&DOUBLE_FAULT_STACK[7][4095])
         };
         tracing::debug!(?tss, "TSS initialized");
         tss
     });
 
     static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
-
-    let tss = segment::SystemDescriptor::tss(&TSS);
 
     tracing::trace!("initializing GDT...");
     let mut gdt = Gdt::new();
@@ -53,10 +52,12 @@ pub(super) fn init_gdt() {
     );
 
     // add the TSS.
+
+    let tss = segment::SystemDescriptor::tss(&TSS);
     let tss_selector = gdt.add_sys_segment(tss);
-    tracing::trace!(
-        descriptor = fmt::alt(tss),
-        selector = fmt::alt(tss_selector),
+    tracing::debug!(
+        tss.descriptor = fmt::alt(tss),
+        tss.selector = fmt::alt(tss_selector),
         "added TSS"
     );
 
@@ -74,6 +75,7 @@ pub(super) fn init_gdt() {
     tracing::trace!(code_selector = fmt::alt(code_selector));
     unsafe {
         code_selector.set_cs();
+        tracing::trace!("setting tss segment...");
         task::StateSegment::load_tss(tss_selector);
     }
 
