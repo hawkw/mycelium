@@ -13,3 +13,6 @@ mycelium-util = { path = "../util" }
 mycelium-trace = { path = "../trace" }
 tracing = {version = "0.1", default_features = false, features = ["attributes"] }
 bitflags = "1.2"
+
+[dev-dependencies]
+proptest = "1"

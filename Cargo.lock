@@ -282,6 +282,7 @@ dependencies = [
  "hal-core",
  "mycelium-trace",
  "mycelium-util",
+ "proptest",
  "tracing",
 ]
 

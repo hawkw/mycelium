@@ -33,7 +33,7 @@ pub struct Gdt<const SIZE: usize = 8> {
 
 /// A 64-bit mode descriptor for a system segment (such as an LDT or TSS
 /// descriptor).
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct SystemDescriptor {
     low: u64,
     high: u64,
@@ -292,31 +292,28 @@ impl fmt::Binary for Selector {
 impl Descriptor {
     /// First 16 bits of the limit field (ignored in 64-bit mode)
     const LIMIT_LOW: Pack64 = Pack64::least_significant(16);
-    /// First 16 bits of the base field (ignored in 64-bit mode)
-    const BASE_LOW: Pack64 = Self::LIMIT_LOW.next(16);
-    /// Next 8 bits of the base field (ignored in 64-bit mode)
-    const BASE_MID: Pack64 = Self::BASE_LOW.next(8);
+    /// First 24 bits of the base field (ignored in 64-bit mode)
+    const BASE_LOW: Pack64 = Self::LIMIT_LOW.next(24);
     /// In order, least to most significant:
     /// - accessed bit
     /// - readable bit for code/writable bit for data
     /// - direction/conforming for code/data
     /// - executable bit (code segment if 1)
     /// - descriptor type (1 for user, 0 for system segments)
-    const ACCESS_FLAGS: Pack64 = Self::BASE_MID.next(5);
+    const ACCESS_FLAGS: Pack64 = Self::BASE_LOW.next(5);
     const RING: Pack64 = Self::ACCESS_FLAGS.next(2);
     const PRESENT_BIT: Pack64 = Self::RING.next(1);
     /// High 4 bits of the limit (ignored in 64-bit mode)
     const LIMIT_HIGH: Pack64 = Self::PRESENT_BIT.next(4);
     const FLAGS: Pack64 = Self::LIMIT_HIGH.next(4);
     /// Highest 8 bits of the base field
-    const BASE_HIGH: Pack64 = Self::FLAGS.next(8);
+    const BASE_MID: Pack64 = Self::FLAGS.next(8);
 
     const LIMIT_LOW_PAIR: bits::Pair64 = Self::LIMIT_LOW.pair_with(limit::LOW);
     const LIMIT_HIGH_PAIR: bits::Pair64 = Self::LIMIT_HIGH.pair_with(limit::HIGH);
 
     const BASE_LOW_PAIR: bits::Pair64 = Self::BASE_LOW.pair_with(base::LOW);
     const BASE_MID_PAIR: bits::Pair64 = Self::BASE_MID.pair_with(base::MID);
-    const BASE_HIGH_PAIR: bits::Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
 
     // hahaha lol no limits
     const DEFAULT_BITS: u64 = Self::LIMIT_LOW.set_all(Self::LIMIT_HIGH.set_all(0));
@@ -358,7 +355,6 @@ impl Descriptor {
         Pack64::pack_in(0)
             .pack_from_src(self.0, &Self::BASE_LOW_PAIR)
             .pack_from_src(self.0, &Self::BASE_MID_PAIR)
-            .pack_from_src(self.0, &Self::BASE_HIGH_PAIR)
             .bits()
     }
 
@@ -465,27 +461,73 @@ impl DescriptorFlags {
 }
 
 impl SystemDescriptor {
+    const BASE_HIGH: bits::Pack64 = bits::Pack64::least_significant(32);
+    const BASE_HIGH_PAIR: bits::Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
+
     pub fn tss(tss: &'static task::StateSegment) -> Self {
         let tss_addr = tss as *const _ as u64;
+        tracing::trace!(tss_addr = fmt::hex(tss_addr), "making TSS descriptor...");
 
         // limit (-1 because the bound is inclusive)
         let limit = (mem::size_of::<task::StateSegment>() - 1) as u64;
 
         let low = Pack64::pack_in(DescriptorFlags::PRESENT.bits())
             .pack_from_dst(limit, &Descriptor::LIMIT_LOW_PAIR)
-            // base addr (low half)
+            // base addr (low 24 bits)
             .pack_from_dst(tss_addr, &Descriptor::BASE_LOW_PAIR)
-            // base addr (mid half)
+            .pack_from_dst(limit, &Descriptor::LIMIT_HIGH_PAIR)
+            .pack_truncating(0b1001, &Descriptor::ACCESS_FLAGS)
+            // base addr (mid 8 bits)
             .pack_from_dst(tss_addr, &Descriptor::BASE_MID_PAIR)
-            .pack_truncating(0b1001, &Descriptor::FLAGS)
             .bits();
 
         let high = Pack64::pack_in(0)
-            // base addr (high half)
-            .pack_from_dst(tss_addr, &Descriptor::BASE_HIGH_PAIR)
+            // base addr (highest 32 bits)
+            .pack_from_dst(tss_addr, &Self::BASE_HIGH_PAIR)
             .bits();
 
         Self { high, low }
+    }
+
+    pub fn base(&self) -> u64 {
+        Pack64::pack_in(0)
+            .pack_from_src(self.low, &Descriptor::BASE_LOW_PAIR)
+            .pack_from_src(self.low, &Descriptor::BASE_MID_PAIR)
+            .pack_from_src(self.high, &Self::BASE_HIGH_PAIR)
+            .bits()
+    }
+
+    pub const fn limit(&self) -> u64 {
+        Pack64::pack_in(0)
+            .pack_from_src(self.low, &Descriptor::LIMIT_LOW_PAIR)
+            .pack_from_src(self.low, &Descriptor::LIMIT_HIGH_PAIR)
+            .bits()
+    }
+}
+
+impl fmt::Debug for SystemDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("segment::SystemDescriptor")
+            .field(
+                "limit_low",
+                &fmt::hex(Descriptor::LIMIT_LOW.unpack(self.low)),
+            )
+            .field("base_low", &fmt::hex(Descriptor::BASE_LOW.unpack(self.low)))
+            .field("type", &fmt::bin(Descriptor::ACCESS_FLAGS.unpack(self.low)))
+            .field("ring", &fmt::bin(Descriptor::RING.unpack(self.low)))
+            .field(
+                "present",
+                &fmt::bin(Descriptor::PRESENT_BIT.unpack(self.low)),
+            )
+            .field(
+                "limit_high",
+                &fmt::bin(Descriptor::LIMIT_HIGH.unpack(self.low)),
+            )
+            .field("base_mid", &fmt::hex(Descriptor::BASE_MID.unpack(self.low)))
+            .field("base_high", &fmt::hex(Self::BASE_HIGH.unpack(self.high)))
+            .field("low_bits", &fmt::hex(self.low))
+            .field("high_bits", &fmt::hex(self.high))
+            .finish()
     }
 }
 
@@ -497,15 +539,16 @@ mod limit {
 
 mod base {
     use mycelium_util::bits::Pack64;
-    pub(super) const LOW: Pack64 = Pack64::least_significant(16);
+    pub(super) const LOW: Pack64 = Pack64::least_significant(24);
     pub(super) const MID: Pack64 = LOW.next(8);
-    pub(super) const HIGH: Pack64 = MID.next(8);
+    pub(super) const HIGH: Pack64 = MID.next(32);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::mem::size_of;
+    use proptest::prelude::*;
 
     #[test]
     fn segment_selector_is_correct_size() {
@@ -528,7 +571,7 @@ mod tests {
 
         Descriptor::BASE_LOW_PAIR.assert_valid();
         Descriptor::BASE_MID_PAIR.assert_valid();
-        Descriptor::BASE_HIGH_PAIR.assert_valid();
+        SystemDescriptor::BASE_HIGH_PAIR.assert_valid();
 
         Descriptor::LIMIT_LOW_PAIR.assert_valid();
         Descriptor::LIMIT_HIGH_PAIR.assert_valid();
@@ -562,5 +605,27 @@ mod tests {
             dbg!(Descriptor::data().with_ring(Ring3)),
             Descriptor(0x00cff3000000ffff)
         );
+    }
+
+    proptest! {
+        #[test]
+        fn system_segment_tss_base(addr: u64) {
+            let tss_addr = unsafe {
+                // safety: this address will never be dereferenced...
+                &*(addr as *const task::StateSegment)
+            };
+            let tss_descr = SystemDescriptor::tss(tss_addr);
+            prop_assert_eq!(tss_descr.base(), addr, "expected={:x}; actual={:x}", tss_descr.base(), addr);
+        }
+
+        #[test]
+        fn system_segment_tss_limit(addr: u64) {
+            let tss_addr = unsafe {
+                // safety: this address will never be dereferenced...
+                &*(addr as *const task::StateSegment)
+            };
+            let tss_descr = SystemDescriptor::tss(tss_addr);
+            prop_assert_eq!(tss_descr.limit(), mem::size_of::<task::StateSegment>() as u64 - 1);
+        }
     }
 }
