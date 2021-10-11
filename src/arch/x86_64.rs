@@ -260,8 +260,8 @@ pub fn oops(
     cause: &dyn core::fmt::Display,
     fault: Option<&dyn hal_core::interrupt::ctx::Context<Registers = X64Registers>>,
 ) -> ! {
-    use core::fmt::Write;
-    let mut vga = vga::writer();
+    // use core::fmt::Write;
+    // let mut vga = vga::writer();
 
     // /!\ disable all interrupts, unlock everything to prevent deadlock /!\
     //
@@ -276,8 +276,8 @@ pub fn oops(
             com1.force_unlock();
         }
 
-        // unlock the VGA buffer.
-        vga.force_unlock();
+        // // unlock the VGA buffer.
+        // vga.force_unlock();
 
         // unlock the frame buffer
         if let Some((_, fb)) = FRAMEBUFFER.try_get() {
@@ -306,21 +306,21 @@ pub fn oops(
         None
     };
 
-    const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
-    vga.set_color(RED_BG);
-    vga.clear();
-    let _ = vga.write_str("\n  ");
-    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
-    let _ = vga.write_str("OOPSIE WOOPSIE");
-    vga.set_color(RED_BG);
+    // const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
+    // vga.set_color(RED_BG);
+    // vga.clear();
+    // let _ = vga.write_str("\n  ");
+    // vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
+    // let _ = vga.write_str("OOPSIE WOOPSIE");
+    // vga.set_color(RED_BG);
 
-    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
+    // let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
     if let Some(registers) = registers {
-        let _ = writeln!(vga, "\n{}\n", registers);
+        // let _ = writeln!(vga, "\n{}\n", registers);
 
         let fault_addr = registers.instruction_ptr.as_usize();
         use yaxpeax_arch::LengthedInstruction;
-        let _ = writeln!(vga, "Disassembly:");
+        // let _ = writeln!(vga, "Disassembly:");
         let mut ptr = fault_addr as u64;
         let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
         let _span = tracing::debug_span!("disassembly", "%rip" = fmt::hex(ptr)).entered();
@@ -328,22 +328,22 @@ pub fn oops(
             // Safety: who cares! At worst this might double-fault by reading past the end of valid
             // memory. whoopsie.
             let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
-            let _ = write!(vga, "  {:016x}: ", ptr).unwrap();
+            // let _ = write!(vga, "  {:016x}: ", ptr).unwrap();
             match decoder.decode_slice(bytes) {
                 Ok(inst) => {
-                    let _ = writeln!(vga, "{}", inst);
+                    // let _ = writeln!(vga, "{}", inst);
                     tracing::debug!("{:016x}: {}", ptr, inst);
                     ptr += inst.len();
                 }
                 Err(e) => {
-                    let _ = writeln!(vga, "{}", e);
+                    // let _ = writeln!(vga, "{}", e);
                     tracing::debug!("{:016x}: {}", ptr, e);
                     break;
                 }
             }
         }
     }
-    let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
+    // let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
     #[cfg(test)]
     {
