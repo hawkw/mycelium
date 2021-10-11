@@ -346,15 +346,15 @@ impl Descriptor {
 
     pub const fn limit(&self) -> u64 {
         Pack64::pack_in(0)
-            .pack_from_src(self.0, &Self::LIMIT_LOW_PAIR)
-            .pack_from_src(self.0, &Self::LIMIT_HIGH_PAIR)
+            .pack_from_dst(self.0, &Self::LIMIT_LOW_PAIR)
+            .pack_from_dst(self.0, &Self::LIMIT_HIGH_PAIR)
             .bits()
     }
 
     pub const fn base(&self) -> u64 {
         Pack64::pack_in(0)
-            .pack_from_src(self.0, &Self::BASE_LOW_PAIR)
-            .pack_from_src(self.0, &Self::BASE_MID_PAIR)
+            .pack_from_dst(self.0, &Self::BASE_LOW_PAIR)
+            .pack_from_dst(self.0, &Self::BASE_MID_PAIR)
             .bits()
     }
 
@@ -472,18 +472,18 @@ impl SystemDescriptor {
         let limit = (mem::size_of::<task::StateSegment>() - 1) as u64;
 
         let low = Pack64::pack_in(DescriptorFlags::PRESENT.bits())
-            .pack_from_dst(limit, &Descriptor::LIMIT_LOW_PAIR)
+            .pack_from_src(limit, &Descriptor::LIMIT_LOW_PAIR)
             // base addr (low 24 bits)
-            .pack_from_dst(tss_addr, &Descriptor::BASE_LOW_PAIR)
-            .pack_from_dst(limit, &Descriptor::LIMIT_HIGH_PAIR)
+            .pack_from_src(tss_addr, &Descriptor::BASE_LOW_PAIR)
+            .pack_from_src(limit, &Descriptor::LIMIT_HIGH_PAIR)
             .pack_truncating(0b1001, &Descriptor::ACCESS_FLAGS)
             // base addr (mid 8 bits)
-            .pack_from_dst(tss_addr, &Descriptor::BASE_MID_PAIR)
+            .pack_from_src(tss_addr, &Descriptor::BASE_MID_PAIR)
             .bits();
 
         let high = Pack64::pack_in(0)
             // base addr (highest 32 bits)
-            .pack_from_dst(tss_addr, &Self::BASE_HIGH_PAIR)
+            .pack_from_src(tss_addr, &Self::BASE_HIGH_PAIR)
             .bits();
 
         Self { high, low }
@@ -491,16 +491,16 @@ impl SystemDescriptor {
 
     pub fn base(&self) -> u64 {
         Pack64::pack_in(0)
-            .pack_from_src(self.low, &Descriptor::BASE_LOW_PAIR)
-            .pack_from_src(self.low, &Descriptor::BASE_MID_PAIR)
-            .pack_from_src(self.high, &Self::BASE_HIGH_PAIR)
+            .pack_from_dst(self.low, &Descriptor::BASE_LOW_PAIR)
+            .pack_from_dst(self.low, &Descriptor::BASE_MID_PAIR)
+            .pack_from_dst(self.high, &Self::BASE_HIGH_PAIR)
             .bits()
     }
 
     pub const fn limit(&self) -> u64 {
         Pack64::pack_in(0)
-            .pack_from_src(self.low, &Descriptor::LIMIT_LOW_PAIR)
-            .pack_from_src(self.low, &Descriptor::LIMIT_HIGH_PAIR)
+            .pack_from_dst(self.low, &Descriptor::LIMIT_LOW_PAIR)
+            .pack_from_dst(self.low, &Descriptor::LIMIT_HIGH_PAIR)
             .bits()
     }
 }
@@ -527,6 +527,8 @@ impl fmt::Debug for SystemDescriptor {
             .field("base_high", &fmt::hex(Self::BASE_HIGH.unpack(self.high)))
             .field("low_bits", &fmt::hex(self.low))
             .field("high_bits", &fmt::hex(self.high))
+            .field("limit", &self.limit())
+            .field("base", &fmt::hex(self.base()))
             .finish()
     }
 }
@@ -607,6 +609,13 @@ mod tests {
         );
     }
 
+    #[test]
+    fn debug_base_pack_pairs() {
+        dbg!(Descriptor::BASE_LOW_PAIR);
+        dbg!(Descriptor::BASE_MID_PAIR);
+        dbg!(SystemDescriptor::BASE_HIGH_PAIR);
+    }
+
     proptest! {
         #[test]
         fn system_segment_tss_base(addr: u64) {
@@ -615,7 +624,12 @@ mod tests {
                 &*(addr as *const task::StateSegment)
             };
             let tss_descr = SystemDescriptor::tss(tss_addr);
-            prop_assert_eq!(tss_descr.base(), addr, "expected={:x}; actual={:x}", tss_descr.base(), addr);
+            let base = tss_descr.base();
+            prop_assert_eq!(
+                base, addr,
+                "expected={:x}; actual={:x}\ndescr={:#?}",
+                addr, base, tss_descr,
+            );
         }
 
         #[test]
@@ -625,7 +639,11 @@ mod tests {
                 &*(addr as *const task::StateSegment)
             };
             let tss_descr = SystemDescriptor::tss(tss_addr);
-            prop_assert_eq!(tss_descr.limit(), mem::size_of::<task::StateSegment>() as u64 - 1);
+            prop_assert_eq!(
+                tss_descr.limit(),
+                mem::size_of::<task::StateSegment>() as u64 - 1,
+                "limit; descr={:#?}", tss_descr
+            );
         }
     }
 }
