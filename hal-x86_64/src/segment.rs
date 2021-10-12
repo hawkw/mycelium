@@ -28,6 +28,7 @@ pub struct Descriptor(u64);
 #[rustfmt::skip]
 pub struct Gdt<const SIZE: usize = 8> {
     entries: [u64; SIZE],
+    sys_segments: [bool; SIZE],
     push_at: usize,
 }
 
@@ -65,6 +66,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
     pub const fn new() -> Self {
         Gdt {
             entries: [0; SIZE],
+            sys_segments: [false; SIZE],
             push_at: 1,
         }
     }
@@ -81,6 +83,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
         // XXX(eliza): cant have this because const fn lol
         // tracing::trace!(?segment, "Gdt::add_system_descriptor");
         let idx = self.push(segment.low);
+        self.sys_segments[idx as usize] = true;
         self.push(segment.high);
         // sys segments are always ring 0
         Selector::new(idx, cpu::Ring::Ring0)
@@ -96,18 +99,33 @@ impl<const SIZE: usize> Gdt<SIZE> {
 
 impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct GdtEntries<'a>(&'a [u64]);
-        impl fmt::Debug for GdtEntries<'_> {
+        struct GdtEntries<'a, const SIZE: usize>(&'a Gdt<SIZE>);
+        impl<const SIZE: usize> fmt::Debug for GdtEntries<'_, SIZE> {
             #[inline]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_list().entries(self.0.iter().map(fmt::hex)).finish()
+                let mut sys0 = None;
+                let mut entries = f.debug_list();
+                for (&entry, &is_sys) in self.0.entries[..self.0.push_at]
+                    .iter()
+                    .zip(self.0.sys_segments.iter())
+                {
+                    if let Some(low) = sys0.take() {
+                        entries.entry(&SystemDescriptor { low, high: entry });
+                    } else if is_sys {
+                        sys0 = Some(entry);
+                    } else {
+                        entries.entry(&Descriptor(entry));
+                    }
+                }
+
+                entries.finish()
             }
         }
 
         f.debug_struct("Gdt")
             .field("capacity", &SIZE)
-            .field("len", &self.push_at)
-            .field("entries", &GdtEntries(&self.entries[..self.push_at]))
+            .field("len", &self.push_at - 1)
+            .field("entries", &GdtEntries(self))
             .finish()
     }
 }
