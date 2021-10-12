@@ -63,10 +63,11 @@ pub(super) fn init_gdt() {
 
     // all done! long mode barely uses this thing lol.
     GDT.init(gdt);
-    tracing::debug!(?GDT, "GDT initialized");
 
     // load the GDT
-    GDT.get().load();
+    let gdt = GDT.get();
+    tracing::debug!(GDT = ?gdt, "GDT initialized");
+    gdt.load();
 
     tracing::trace!("GDT loaded");
 

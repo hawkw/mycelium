@@ -124,7 +124,7 @@ impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
 
         f.debug_struct("Gdt")
             .field("capacity", &SIZE)
-            .field("len", &self.push_at - 1)
+            .field("len", &(self.push_at - 1))
             .field("entries", &GdtEntries(self))
             .finish()
     }

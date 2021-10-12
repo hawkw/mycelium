@@ -1,11 +1,12 @@
+use crate::{segment, VAddr};
+use core::marker::PhantomData;
+use hal_core::interrupt::{ctx, Handlers};
+use mycelium_util::fmt;
+
 pub mod idt;
 pub mod pic;
-use crate::{segment, VAddr};
-use core::{fmt, marker::PhantomData};
 pub use idt::Idt;
 pub use pic::CascadedPic;
-
-use hal_core::interrupt::{ctx, Handlers};
 
 pub type Control = &'static mut Idt;
 
@@ -46,12 +47,9 @@ pub struct Registers {
 static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
 
+#[tracing::instrument(level = "info", name = "interrupts::init")]
 pub fn init<H: Handlers<Registers>>() -> Control {
     use hal_core::interrupt::Control;
-
-    let span = tracing::info_span!("interrupts::init");
-    let _enter = span.enter();
-
     tracing::info!("configuring 8259 PIC interrupts...");
 
     unsafe {
@@ -188,7 +186,10 @@ impl hal_core::interrupt::Control for Idt {
                     com1.force_unlock();
                 }
             }
-            tracing::error!(code = ?&format_args!("{:x}", code), "lmao, a general protection fault is happening");
+            tracing::error!(
+                segment_selector = if code > 0 { Some(code) } else { None },
+                "lmao, a general protection fault is happening"
+            );
             H::code_fault(Context { registers, code });
         }
 
