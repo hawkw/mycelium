@@ -22,7 +22,7 @@ pub struct Descriptor(u64);
 // TODO(eliza): i'd like to make the size a u16 to enforce this limit and cast
 //   it to `usize` in the array, but this requires unstable const generics
 //   features and i didn't want to mess with it...
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 // rustfmt eats default parameters in const generics for some reason (probably a
 // bug...)
 #[rustfmt::skip]
@@ -91,6 +91,24 @@ impl<const SIZE: usize> Gdt<SIZE> {
         self.entries[idx] = entry;
         self.push_at += 1;
         idx as u16
+    }
+}
+
+impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct GdtEntries<'a>(&'a [u64]);
+        impl fmt::Debug for GdtEntries<'_> {
+            #[inline]
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_list().entries(self.0.iter().map(fmt::hex)).finish()
+            }
+        }
+
+        f.debug_struct("Gdt")
+            .field("capacity", &SIZE)
+            .field("len", &self.push_at)
+            .field("entries", &GdtEntries(&self.entries[..self.push_at]))
+            .finish()
     }
 }
 
