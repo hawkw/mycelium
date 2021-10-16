@@ -74,7 +74,7 @@ impl<D> Subscriber<D> {
     {
         Self {
             display: Output::new(display, " "),
-            serial: Output::new(writer::none(), " |"),
+            serial: Output::new(writer::none(), " │"),
             next_id: AtomicU64::new(0),
         }
     }
@@ -84,7 +84,7 @@ impl<D> Subscriber<D> {
         for<'a> S: MakeWriter<'a>,
     {
         Subscriber {
-            serial: Output::new(port, " |"),
+            serial: Output::new(port, " │"),
             display: self.display,
             next_id: self.next_id,
         }
@@ -272,10 +272,14 @@ where
             Ok(())
         };
         if let Some(ref mut serial) = self.serial {
-            serial.indent()?;
-            let chars = if is_span { '-' } else { ' ' };
+            if is_span {
+                serial.indent_by(serial.cfg.indent.load(Ordering::Acquire).saturating_sub(1))?;
+                serial.write_str(" ├─")?;
+                return err;
+            }
 
-            serial.write_char(chars)?;
+            serial.indent()?;
+            serial.write_char(' ')?;
         }
         err
     }
@@ -285,7 +289,11 @@ where
 
 impl<'a, W: Write> Writer<'a, W> {
     fn indent(&mut self) -> fmt::Result {
-        for _ in 0..self.cfg.indent.load(Ordering::Acquire) {
+        self.indent_by(self.cfg.indent.load(Ordering::Acquire))
+    }
+
+    fn indent_by(&mut self, amount: u64) -> fmt::Result {
+        for _ in 0..amount {
             self.writer.write_str(self.cfg.span_indent_chars)?;
             self.current_line += self.cfg.span_indent_chars.len();
         }
