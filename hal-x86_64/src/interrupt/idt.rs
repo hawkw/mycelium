@@ -37,12 +37,13 @@ impl Descriptor {
         }
     }
 
-    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
+    pub(crate) fn set_handler(&mut self, handler: *const (), ist_offset: u8) -> &mut Attrs {
         self.segment = segment::code_segment();
         let addr = handler as u64;
         self.offset_low = addr as u16;
         self.offset_mid = (addr >> 16) as u16;
         self.offset_hi = (addr >> 32) as u32;
+        self.ist_offset = ist_offset;
         self.attrs
             .set_present(true)
             .set_32_bit(true)
@@ -111,6 +112,8 @@ impl Idt {
 
     pub const SECURITY_EXCEPTION: usize = 30;
 
+    pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
+
     pub const fn new() -> Self {
         Self {
             descriptors: [Descriptor::null(); Self::NUM_VECTORS],
@@ -118,8 +121,13 @@ impl Idt {
     }
 
     pub(super) fn set_isr(&mut self, vector: usize, isr: *const ()) {
-        let attrs = self.descriptors[vector].set_handler(isr);
-        tracing::debug!(vector, isr = ?isr, ?attrs, "set isr");
+        let ist_index = if vector == Self::DOUBLE_FAULT {
+            Self::DOUBLE_FAULT_IST_OFFSET as u8
+        } else {
+            0
+        };
+        let attrs = self.descriptors[vector].set_handler(isr, ist_index);
+        tracing::debug!(vector, isr = ?isr, ?attrs, ist_index, "set isr");
     }
 
     pub fn load(&'static self) {

@@ -5,8 +5,6 @@ use mycelium_util::{fmt, sync};
 // TODO(eliza): put this somewhere good.
 type StackFrame = [u8; 4096];
 
-const DOUBLE_FAULT_IST: usize = 5;
-
 #[inline]
 #[tracing::instrument(level = "debug")]
 pub(super) fn init_gdt() {
@@ -29,9 +27,9 @@ pub(super) fn init_gdt() {
     static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
         tracing::trace!("initializing TSS..");
         let mut tss = task::StateSegment::empty();
-        tss.interrupt_stacks[DOUBLE_FAULT_IST] = unsafe {
+        tss.interrupt_stacks[Idt::DOUBLE_FAULT_IST_OFFSET] = unsafe {
             // safety: asdf
-            VAddr::of(&DOUBLE_FAULT_STACK[4][4095])
+            VAddr::of(&DOUBLE_FAULT_STACK[DOUBLE_FAULT_STACK_SIZE - 1][4095])
         };
         tracing::debug!(?tss, "TSS initialized");
         tss
