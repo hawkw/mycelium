@@ -71,22 +71,25 @@ impl<const SIZE: usize> Gdt<SIZE> {
         }
     }
 
-    pub const fn add_user_segment(&mut self, segment: Descriptor) -> Selector {
-        // XXX(eliza): cant have this because const fn lol
-        // tracing::trace!(?segment, "Gdt::add_user_segment");
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn add_segment(&mut self, segment: Descriptor) -> Selector {
         let ring = segment.ring_bits();
         let idx = self.push(segment.0);
-        Selector::from_raw(Selector::from_index(idx).0 | ring as u16)
+        let selector = Selector::from_raw(Selector::from_index(idx).0 | ring as u16);
+        tracing::trace!(idx, ?selector, "added segment");
+        selector
     }
 
-    pub const fn add_sys_segment(&mut self, segment: SystemDescriptor) -> Selector {
-        // XXX(eliza): cant have this because const fn lol
-        // tracing::trace!(?segment, "Gdt::add_system_descriptor");
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn add_sys_segment(&mut self, segment: SystemDescriptor) -> Selector {
+        tracing::trace!(?segment, "Gdt::add_add_sys_segment");
         let idx = self.push(segment.low);
         self.sys_segments[idx as usize] = true;
         self.push(segment.high);
         // sys segments are always ring 0
-        Selector::new(idx, cpu::Ring::Ring0)
+        let selector = Selector::new(idx, cpu::Ring::Ring0);
+        tracing::trace!(idx, ?selector, "added system segment");
+        selector
     }
 
     const fn push(&mut self, entry: u64) -> u16 {
@@ -147,8 +150,13 @@ impl Selector {
         Self(0)
     }
 
-    pub const fn new(idx: u16, ring: cpu::Ring) -> Self {
-        Self(Self::INDEX.pack_truncating(idx, Self::RING.pack_truncating(ring as u8 as u16, 0)))
+    pub fn new(idx: u16, ring: cpu::Ring) -> Self {
+        Self(
+            Pack16::pack_in(0)
+                .pack(idx, &Self::INDEX)
+                .pack(ring as u8 as u16, &Self::RING)
+                .bits(),
+        )
     }
 
     pub const fn from_index(u: u16) -> Self {
@@ -197,7 +205,9 @@ impl Selector {
     }
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
+        tracing::trace!("before set_ring: {:b}", self.0);
         Self::RING.pack_into(ring as u16, &mut self.0);
+        tracing::trace!("after set_ring: {:b}", self.0);
         self
     }
 

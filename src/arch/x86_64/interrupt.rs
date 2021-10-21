@@ -42,8 +42,8 @@ pub(super) fn init_gdt() {
 
     // add one kernel code segment
     let code_segment = segment::Descriptor::code().with_ring(Ring::Ring0);
-    let code_selector = gdt.add_user_segment(code_segment);
-    tracing::trace!(
+    let code_selector = gdt.add_segment(code_segment);
+    tracing::debug!(
         descriptor = fmt::alt(code_segment),
         selector = fmt::alt(code_selector),
         "added code segment"
