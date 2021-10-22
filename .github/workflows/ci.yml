@@ -99,10 +99,28 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    # try to restore the installed QEMU version from cache...
+    - name: cache qemu
+      uses: actions/cache@v2
+      id: cache-qemu
+      with:
+          path: ""~/qemu""
+          key: ${{secrets.QEMU_VERSION}}
+    # if we don't have a QEMU installation cached, install QEMU
     - name: install qemu
+      env:
+        CACHE_HIT: ${{steps.cache-qemu.outputs.cache-hit}}
+        QEMU_VERSION: ${{secrets.QEMU_VERSION}}
+        QEMU_DIR: "~/qemu"
       run: |
-        sudo apt-get update
-        sudo apt-get install qemu-system-x86
+          if [[ "$CACHE_HIT" == 'true' ]]; then
+            sudo cp --verbose --force --recursive "$QEMU_DIR"/* /
+          else
+            sudo apt-get update
+            sudo apt-get install --yes qemu-system-x64="$QEMU_VERSION"
+            mkdir -p "$QEMU_DIR"
+            sudo dpkg -L qemu-system-x64 | while IFS= read -r f; do if test -f $f; then echo $f; fi; done | xargs cp --parents --target-directory "$QEMU_DIR"/
+          fi
     - name: run tests
       uses: actions-rs/cargo@v1.0.1
       with:
