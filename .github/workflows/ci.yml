@@ -105,7 +105,7 @@ jobs:
       id: cache-qemu
       with:
         path: "~/qemu"
-        key: ${{secrets.QEMU_VERSION}}
+        key: ${{ secrets.QEMU_VERSION }}
     # if we don't have a QEMU installation cached, install QEMU
     - name: install qemu
       env:
