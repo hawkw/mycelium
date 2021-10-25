@@ -64,6 +64,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: Swatinem/rust-cache@v1
     - name: run clippy
       uses: actions-rs/clippy-check@v1.0.5
       with:
@@ -80,6 +81,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: Swatinem/rust-cache@v1
     - name: run cargo clippy
       uses: actions-rs/clippy-check@v1.0.5
       with:

@@ -32,6 +32,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: Swatinem/rust-cache@v1
     - name: run cargo check
       uses: actions-rs/cargo@v1.0.1
       with:
@@ -45,6 +46,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: Swatinem/rust-cache@v1
     - name: run rustfmt
       uses: actions-rs/cargo@v1.0.1
       with:
@@ -69,6 +71,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: Swatinem/rust-cache@v1
     - name: run host tests
       uses: actions-rs/cargo@v1.0.1
       with:
@@ -84,6 +87,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: Swatinem/rust-cache@v1
     - name: x86_64 boot image
       uses: actions-rs/cargo@v1.0.1
       with:
@@ -105,6 +109,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install --yes qemu-system-x64="$QEMU_VERSION"
+
+    - uses: Swatinem/rust-cache@v1
 
     # run kernel tests in QEMU
     - name: run tests
