@@ -360,6 +360,22 @@ impl<T: ?Sized> PartialEq for Links<T> {
     }
 }
 
+/// # Safety
+///
+/// Types containing [`Links`] may be `Send`: the pointers within the `Links` may
+/// mutably alias another value, but the links can only be _accessed_ by the
+/// owner of the [`List`] itself, because the pointers are private. As long as
+/// [`List`] upholds its own invariants, `Links` should not make a type `!Send`.
+unsafe impl<T: Send> Send for Links<T> {}
+
+/// # Safety
+///
+/// Types containing [`Links`] may be `Sync`: the pointers within the `Links` may
+/// mutably alias another value, but the links can only be _accessed_ by the
+/// owner of the [`List`] itself, because the pointers are private. As long as
+/// [`List`] upholds its own invariants, `Links` should not make a type `!Sync`.
+unsafe impl<T: Sync> Sync for Links<T> {}
+
 // === impl Cursor ====
 
 impl<'a, T: Linked + ?Sized> Iterator for Cursor<'a, T> {
