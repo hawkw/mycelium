@@ -5,7 +5,7 @@ use std::{
     process::{Command, ExitStatus},
 };
 
-#[tracing::instrument]
+#[tracing::instrument(level = "debug")]
 pub fn run_gdb(binary: &Path, gdb_port: u16) -> Result<ExitStatus> {
     let gdb_path = wheres_gdb().context("failed to find gdb executable")?;
     tracing::info!("Found {}", gdb_path);

@@ -4,7 +4,7 @@ use std::fmt;
 use tracing::{field::Field, Event, Level, Subscriber};
 use tracing_subscriber::{
     field::Visit,
-    fmt::{format::Writer, FmtContext, FormatEvent, FormatFields},
+    fmt::{format::Writer, FmtContext, FormatEvent, FormatFields, FormattedFields},
     registry::LookupSpan,
 };
 
@@ -18,16 +18,53 @@ where
 {
     fn format_event(
         &self,
-        _ctx: &FmtContext<'_, S, N>,
+        ctx: &FmtContext<'_, S, N>,
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
-        let level = event.metadata().level();
+        let metadata = event.metadata();
+        let level = metadata.level();
+        let color = ColorMode::default().should_color_stdout();
 
-        let mut visitor = Visitor::new(*level, writer.by_ref());
-        event.record(&mut visitor);
+        let include_spans = {
+            let mut visitor = Visitor::new(*level, writer.by_ref(), color);
+            event.record(&mut visitor);
+            !visitor.did_cargo_format && ctx.lookup_current().is_some()
+        };
 
         writer.write_char('\n')?;
+
+        if include_spans {
+            let pipe_style = if color {
+                style().blue().bold()
+            } else {
+                style()
+            };
+            let span_name = if color { style().bold() } else { style() };
+            writeln!(
+                writer,
+                "   {} {}",
+                "-->".style(pipe_style),
+                metadata.file().unwrap_or_else(|| metadata.target()),
+            )?;
+            ctx.visit_spans(|span| {
+                let exts = span.extensions();
+                let fields = exts
+                    .get::<FormattedFields<N>>()
+                    .map(|f| f.fields.as_str())
+                    .unwrap_or("");
+                writeln!(
+                    writer,
+                    "    {}  {}{}{}",
+                    "|".style(pipe_style),
+                    span.name().style(span_name),
+                    if fields.is_empty() { "" } else { ": " },
+                    fields
+                )
+            })?;
+
+            writer.write_char('\n')?;
+        }
 
         Ok(())
     }
@@ -38,18 +75,20 @@ struct Visitor<'writer> {
     writer: Writer<'writer>,
     is_empty: bool,
     color: bool,
+    did_cargo_format: bool,
 }
 
 impl<'writer> Visitor<'writer> {
     const MESSAGE: &'static str = "message";
     const INDENT: usize = 12;
 
-    fn new(level: Level, writer: Writer<'writer>) -> Self {
+    fn new(level: Level, writer: Writer<'writer>, color: bool) -> Self {
         Self {
             level,
             writer,
             is_empty: true,
-            color: ColorMode::default().should_color_stdout(),
+            did_cargo_format: false,
+            color,
         }
     }
 }
@@ -57,11 +96,11 @@ impl<'writer> Visitor<'writer> {
 impl Visit for Visitor<'_> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         if self.is_empty {
-            if matches!(self.level, Level::INFO | Level::DEBUG) && field.name() == Self::MESSAGE {
+            if self.level >= Level::INFO && field.name() == Self::MESSAGE {
                 let message = format!("{:?}", value);
                 if let Some((tag, message)) = message.as_str().split_once(' ') {
-                    let tag = tag.to_title_case();
-                    if tag.len() <= Self::INDENT {
+                    if tag.len() <= Self::INDENT && tag.ends_with("ing") || tag.ends_with('d') {
+                        let tag = tag.to_title_case();
                         let style = match (self.level, self.color) {
                             (Level::DEBUG, true) => style().bright_blue().bold(),
                             (_, true) => style().green().bold(),
@@ -77,6 +116,7 @@ impl Visit for Visitor<'_> {
 
                         let _ = self.writer.write_str(message);
                         self.is_empty = false;
+                        self.did_cargo_format = true;
                         return;
                     }
                 }
@@ -102,7 +142,7 @@ impl Visit for Visitor<'_> {
                 (Level::WARN, false) => self.writer.write_str("warning: "),
                 (Level::INFO, false) => self.writer.write_str("info: "),
                 (Level::DEBUG, false) => self.writer.write_str("debug: "),
-                (Level::TRACE, false) => self.writer.write_str("TRACE: "),
+                (Level::TRACE, false) => self.writer.write_str("trace: "),
             };
         }
 
@@ -110,10 +150,10 @@ impl Visit for Visitor<'_> {
             let _ = self.writer.write_str(", ");
         }
 
+        let bold = if self.color { style().bold() } else { style() };
         if field.name() == Self::MESSAGE {
-            let _ = write!(self.writer, "{:?}", value);
+            let _ = write!(self.writer, "{:?}", value.style(bold));
         } else {
-            let bold = if self.color { style().bold() } else { style() };
             let _ = write!(
                 self.writer,
                 "{}{} {:?}",

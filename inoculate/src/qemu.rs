@@ -102,7 +102,7 @@ impl Cmd {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "debug")]
     fn spawn_qemu(&self, qemu: &mut Command, binary: &Path) -> Result<Child> {
         let (Cmd::Run { qemu_settings, .. } | Cmd::Test { qemu_settings, .. }) = self;
 
@@ -129,7 +129,7 @@ impl Cmd {
         Ok(child)
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, paths), level = "debug")]
     pub fn run_qemu(&self, image: &Path, paths: &crate::Paths) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
