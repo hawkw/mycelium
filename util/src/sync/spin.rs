@@ -78,8 +78,8 @@ impl<T> Mutex<T> {
     }
 }
 
-unsafe impl<T> Send for Mutex<T> {}
-unsafe impl<T> Sync for Mutex<T> {}
+unsafe impl<T: Send> Send for Mutex<T> {}
+unsafe impl<T: Send> Sync for Mutex<T> {}
 
 // === impl MutexGuard ===
 

@@ -5,6 +5,25 @@ use core::{
     ptr::{self, NonNull},
 };
 
+/// Trait implemented by types which can be members of an intrusive linked list.
+///
+/// # Safety
+///
+/// This is unsafe to implement because it's the implementation's responsibility
+/// to ensure that the `Node` associated type is a valid linked list node. In
+/// particular:
+///
+/// - Implementations must ensure that `Node`s are pinned in memory while they
+///   are in a linked list. While a given `Node` is in a linked list, it may not
+///   be deallocated or moved to a different memory location.
+/// - The `Node` type may not be [`Unpin`].
+/// - Additional safety requirements for individual methods on this trait are
+///   documented on those methods.
+///
+/// Failure to uphold these invariants will result in list corruption, including
+/// dangling pointers.
+///
+/// [`Unpin`]: core::pin::Unpin
 pub unsafe trait Linked {
     /// The handle owning nodes in the linked list.
     type Handle;
@@ -16,7 +35,9 @@ pub unsafe trait Linked {
     ///
     /// # Safety
     ///
-    /// This type may not be `Unpin`.
+    /// This type may not be [`Unpin`].
+    ///
+    ///  [`Unpin`]: core::pin::Unpin
     type Node: ?Sized;
 
     /// Convert a `Handle` to a raw pointer, without consuming it.
@@ -338,6 +359,22 @@ impl<T: ?Sized> PartialEq for Links<T> {
         self.next == other.next && self.prev == other.prev
     }
 }
+
+/// # Safety
+///
+/// Types containing [`Links`] may be `Send`: the pointers within the `Links` may
+/// mutably alias another value, but the links can only be _accessed_ by the
+/// owner of the [`List`] itself, because the pointers are private. As long as
+/// [`List`] upholds its own invariants, `Links` should not make a type `!Send`.
+unsafe impl<T: Send> Send for Links<T> {}
+
+/// # Safety
+///
+/// Types containing [`Links`] may be `Sync`: the pointers within the `Links` may
+/// mutably alias another value, but the links can only be _accessed_ by the
+/// owner of the [`List`] itself, because the pointers are private. As long as
+/// [`List`] upholds its own invariants, `Links` should not make a type `!Sync`.
+unsafe impl<T: Sync> Sync for Links<T> {}
 
 // === impl Cursor ====
 

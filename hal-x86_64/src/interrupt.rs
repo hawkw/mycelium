@@ -84,7 +84,7 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
     /// Mutating the value of saved interrupt registers can cause
     /// undefined behavior.
     unsafe fn registers_mut(&mut self) -> &mut Registers {
-        &mut self.registers
+        self.registers
     }
 }
 
