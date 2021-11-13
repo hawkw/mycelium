@@ -104,7 +104,7 @@ jobs:
     - name: install qemu
       run: |
         sudo apt-get update
-        sudo apt-get install --yes qemu-system-x64="$QEMU_VERSION"
+        sudo apt-get install qemu-system-x86
 
     # run kernel tests in QEMU
     - name: run tests
