@@ -9,11 +9,11 @@ use std::{
 use structopt::StructOpt;
 
 pub use color_eyre::eyre::Result;
-
 pub mod cargo;
 pub mod gdb;
 pub mod qemu;
 pub mod term;
+pub mod trace;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -28,7 +28,7 @@ pub struct Options {
     pub cmd: Option<Subcommand>,
 
     /// Configures build logging.
-    #[structopt(short, long, env = "RUST_LOG", default_value = "warn")]
+    #[structopt(short, long, env = "RUST_LOG", default_value = "inoculate=info,warn")]
     pub log: String,
 
     /// The path to the kernel binary.
@@ -144,7 +144,7 @@ impl Options {
             tracing::warn!(?error, "error getting current dir");
             Default::default()
         });
-        tracing::debug!(path = %pwd.display(), "pwd");
+        tracing::debug!(path = %pwd.display(), "found pwd");
 
         Ok(Paths {
             bootloader_manifest,
@@ -157,13 +157,11 @@ impl Options {
     pub fn make_image(&self, paths: &Paths) -> Result<PathBuf> {
         let _span = tracing::info_span!("make_image").entered();
 
-        cargo_log!(
-            "Building",
-            "kernel disk image ({})",
+        tracing::info!(
+            "Building kernel disk image ({})",
             paths.relative(paths.kernel_bin()).display()
         );
 
-        tracing::debug!(kernel_bin = %paths.kernel_bin().display(), "making boot image...");
         let out_dir = self
             .out_dir
             .as_ref()
@@ -199,7 +197,7 @@ impl Options {
             .arg(target_dir)
             .stderr(Stdio::inherit())
             .stdout(Stdio::piped());
-        tracing::debug!(?cmd);
+        tracing::debug!(?cmd, "running bootimage builder");
         let output = cmd.status().context("run builder command")?;
         // TODO(eliza): modes for capturing/piping stdout?
 
@@ -217,9 +215,8 @@ impl Options {
             "disk image should probably exist after running bootloader build command"
         );
 
-        cargo_log!(
-            "Created",
-            "bootable disk image ({})",
+        tracing::info!(
+            "created bootable disk image ({})",
             paths.relative(&image).display()
         );
 

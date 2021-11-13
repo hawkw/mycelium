@@ -10,20 +10,24 @@ fn main() -> Result<()> {
     let color = opts.color;
     color.set_global();
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_ansi(color.should_color_stdout()))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .event_format(inoculate::trace::CargoFormatter::default()),
+        )
         .with(tracing_error::ErrorLayer::default())
         .with(opts.log.parse::<tracing_subscriber::EnvFilter>()?)
         .init();
 
-    tracing::info! {
+    tracing::info!("inoculating mycelium!");
+    tracing::debug!(
         ?opts.cmd,
         ?opts.kernel_bin,
         ?opts.bootloader_manifest,
         ?opts.kernel_manifest,
         ?opts.target_dir,
         ?opts.out_dir,
-        "inoculating...",
-    };
+        "inoculate configuration"
+    );
 
     let paths = opts.paths()?;
 
@@ -31,7 +35,6 @@ fn main() -> Result<()> {
         .make_image(&paths)
         .context("making the mycelium image didnt work")
         .note("this sucks T_T")?;
-    tracing::info!(image = %image.display());
 
     if let Some(cmd) = opts.cmd {
         return cmd.run(image.as_ref(), &paths);

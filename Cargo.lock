@@ -315,6 +315,7 @@ dependencies = [
  "atty",
  "bootloader-locator",
  "color-eyre",
+ "heck",
  "locate-cargo-manifest",
  "mycotest",
  "owo-colors 2.1.0",

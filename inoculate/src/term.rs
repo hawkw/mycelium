@@ -7,17 +7,6 @@ use std::{
 
 pub const CARGO_LOG_WIDTH: usize = 12;
 pub use owo_colors::{style, OwoColorize};
-#[macro_export]
-macro_rules! cargo_log {
-    ($tag:expr, $($arg:tt)+) => {
-        if $crate::term::ColorMode::default().should_color_stderr() {
-            use $crate::term::OwoColorize;
-            eprintln!("{:>width$} {}", $tag.green().bold(), format_args!($($arg)+), width = $crate::term::CARGO_LOG_WIDTH);
-        } else {
-            eprintln!("{:>width$} {}", $tag, format_args!($($arg)+), width = $crate::term::CARGO_LOG_WIDTH);
-        }
-    };
-}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
