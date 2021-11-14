@@ -131,13 +131,13 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
         // If we're writing the first field of the event, either emit cargo
         // formatting, or a level header.
         if self.is_empty {
-            // If the level is `INFO` or `DEBUG` and it has a message that's
+            // If the level is `INFO` and it has a message that's
             // shaped like a cargo log tag, emit the cargo tag followed by the
             // rest of the message.
-            if self.level >= Level::INFO && field.name() == Self::MESSAGE {
+            if self.level == Level::INFO && field.name() == Self::MESSAGE {
                 let message = format!("{:?}", value);
                 if let Some((tag, message)) = message.as_str().split_once(' ') {
-                    if tag.len() <= Self::INDENT && tag.ends_with("ing") || tag.ends_with('d') {
+                    if tag.len() <= Self::INDENT {
                         let tag = tag.to_title_case();
                         let style = match self.level {
                             Level::DEBUG => self.styles.debug,
