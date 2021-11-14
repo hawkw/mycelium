@@ -128,7 +128,12 @@ impl<'styles, 'writer> Visitor<'styles, 'writer> {
 
 impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        // If we're writing the first field of the event, either emit cargo
+        // formatting, or a level header.
         if self.is_empty {
+            // If the level is `INFO` or `DEBUG` and it has a message that's
+            // shaped like a cargo log tag, emit the cargo tag followed by the
+            // rest of the message.
             if self.level >= Level::INFO && field.name() == Self::MESSAGE {
                 let message = format!("{:?}", value);
                 if let Some((tag, message)) = message.as_str().split_once(' ') {
@@ -154,6 +159,7 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
                 }
             }
 
+            // Otherwise, emit a level tag.
             let _ = match self.level {
                 Level::ERROR => write!(
                     self.writer,
@@ -186,9 +192,9 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
                     ":".style(self.styles.bold)
                 ),
             };
-        }
-
-        if !self.is_empty {
+        } else {
+            // If this is *not* the first field of the event, prefix it with a
+            // comma for the preceding field, instead of a cargo tag or level tag.
             let _ = self.writer.write_str(", ");
         }
 
