@@ -93,6 +93,10 @@ impl Subcommand {
 }
 
 impl Options {
+    pub fn trace_init(&self) -> Result<()> {
+        trace::try_init(self)
+    }
+
     pub fn is_test(&self) -> bool {
         matches!(self.cmd, Some(Subcommand::Qemu(qemu::Cmd::Test { .. })))
     }

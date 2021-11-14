@@ -6,7 +6,7 @@ use std::{
 };
 
 pub const CARGO_LOG_WIDTH: usize = 12;
-pub use owo_colors::{style, OwoColorize};
+pub use owo_colors::{style, OwoColorize, Style};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]

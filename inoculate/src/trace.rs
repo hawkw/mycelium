@@ -1,5 +1,5 @@
 use crate::{
-    term::{style, ColorMode, OwoColorize},
+    term::{style, ColorMode, OwoColorize, Style},
     Options, Result,
 };
 use heck::TitleCase;
@@ -11,10 +11,12 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-pub fn try_init(opts: &Options) -> Result<()> {
+pub(crate) fn try_init(opts: &Options) -> Result<()> {
     use tracing_subscriber::prelude::*;
     let fmt = tracing_subscriber::fmt::layer()
-        .event_format(CargoFormatter::default())
+        .event_format(CargoFormatter {
+            styles: Styles::new(opts.color),
+        })
         .with_writer(std::io::stderr);
 
     tracing_subscriber::registry()
@@ -25,9 +27,28 @@ pub fn try_init(opts: &Options) -> Result<()> {
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Debug)]
 struct CargoFormatter {
-    colors: ColorMode,
+    styles: Styles,
+}
+
+struct Visitor<'styles, 'writer> {
+    level: Level,
+    writer: Writer<'writer>,
+    is_empty: bool,
+    styles: &'styles Styles,
+    did_cargo_format: bool,
+}
+
+#[derive(Debug)]
+struct Styles {
+    error: Style,
+    warn: Style,
+    info: Style,
+    debug: Style,
+    trace: Style,
+    pipes: Style,
+    bold: Style,
 }
 
 impl<S, N> FormatEvent<S, N> for CargoFormatter
@@ -43,10 +64,9 @@ where
     ) -> fmt::Result {
         let metadata = event.metadata();
         let level = metadata.level();
-        let color = self.colors.should_color_stderr();
 
         let include_spans = {
-            let mut visitor = Visitor::new(*level, writer.by_ref(), color);
+            let mut visitor = self.visitor(*level, writer.by_ref());
             event.record(&mut visitor);
             !visitor.did_cargo_format && ctx.lookup_current().is_some()
         };
@@ -54,16 +74,10 @@ where
         writer.write_char('\n')?;
 
         if include_spans {
-            let pipe_style = if color {
-                style().blue().bold()
-            } else {
-                style()
-            };
-            let span_name = if color { style().bold() } else { style() };
             writeln!(
                 writer,
                 "   {} {}",
-                "-->".style(pipe_style),
+                "-->".style(self.styles.pipes),
                 metadata.file().unwrap_or_else(|| metadata.target()),
             )?;
             ctx.visit_spans(|span| {
@@ -75,8 +89,8 @@ where
                 writeln!(
                     writer,
                     "    {}  {}{}{}",
-                    "|".style(pipe_style),
-                    span.name().style(span_name),
+                    "|".style(self.styles.pipes),
+                    span.name().style(self.styles.bold),
                     if fields.is_empty() { "" } else { ": " },
                     fields
                 )
@@ -89,30 +103,30 @@ where
     }
 }
 
-struct Visitor<'writer> {
-    level: Level,
-    writer: Writer<'writer>,
-    is_empty: bool,
-    color: bool,
-    did_cargo_format: bool,
-}
-
-impl<'writer> Visitor<'writer> {
-    const MESSAGE: &'static str = "message";
-    const INDENT: usize = 12;
-
-    fn new(level: Level, writer: Writer<'writer>, color: bool) -> Self {
-        Self {
+impl CargoFormatter {
+    fn visitor<'styles, 'writer>(
+        &'styles self,
+        level: Level,
+        writer: Writer<'writer>,
+    ) -> Visitor<'styles, 'writer> {
+        Visitor {
             level,
             writer,
             is_empty: true,
+            styles: &self.styles,
             did_cargo_format: false,
-            color,
         }
     }
 }
 
-impl Visit for Visitor<'_> {
+// === impl Visitor ===
+
+impl<'styles, 'writer> Visitor<'styles, 'writer> {
+    const MESSAGE: &'static str = "message";
+    const INDENT: usize = 12;
+}
+
+impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         if self.is_empty {
             if self.level >= Level::INFO && field.name() == Self::MESSAGE {
@@ -120,10 +134,9 @@ impl Visit for Visitor<'_> {
                 if let Some((tag, message)) = message.as_str().split_once(' ') {
                     if tag.len() <= Self::INDENT && tag.ends_with("ing") || tag.ends_with('d') {
                         let tag = tag.to_title_case();
-                        let style = match (self.level, self.color) {
-                            (Level::DEBUG, true) => style().bright_blue().bold(),
-                            (_, true) => style().green().bold(),
-                            (_, false) => style(),
+                        let style = match self.level {
+                            Level::DEBUG => self.styles.debug,
+                            _ => self.styles.info,
                         };
 
                         let _ = write!(
@@ -141,27 +154,37 @@ impl Visit for Visitor<'_> {
                 }
             }
 
-            let _ = match (self.level, self.color) {
-                (Level::ERROR, true) => {
-                    write!(self.writer, "{}{} ", "error".red().bold(), ":".bold())
-                }
-                (Level::WARN, true) => {
-                    write!(self.writer, "{}{} ", "warning".yellow().bold(), ":".bold())
-                }
-                (Level::INFO, true) => {
-                    write!(self.writer, "{}{} ", "info".green().bold(), ":".bold())
-                }
-                (Level::DEBUG, true) => {
-                    write!(self.writer, "{}{} ", "debug".blue().bold(), ":".bold())
-                }
-                (Level::TRACE, true) => {
-                    write!(self.writer, "{}{} ", "trace".purple().bold(), ":".bold())
-                }
-                (Level::ERROR, false) => self.writer.write_str("error: "),
-                (Level::WARN, false) => self.writer.write_str("warning: "),
-                (Level::INFO, false) => self.writer.write_str("info: "),
-                (Level::DEBUG, false) => self.writer.write_str("debug: "),
-                (Level::TRACE, false) => self.writer.write_str("trace: "),
+            let _ = match self.level {
+                Level::ERROR => write!(
+                    self.writer,
+                    "{}{} ",
+                    "error".style(self.styles.error),
+                    ":".style(self.styles.bold)
+                ),
+                Level::WARN => write!(
+                    self.writer,
+                    "{}{} ",
+                    "warning".style(self.styles.warn),
+                    ":".style(self.styles.bold),
+                ),
+                Level::INFO => write!(
+                    self.writer,
+                    "{}{} ",
+                    "info".style(self.styles.info),
+                    ":".style(self.styles.bold)
+                ),
+                Level::DEBUG => write!(
+                    self.writer,
+                    "{}{} ",
+                    "debug".style(self.styles.debug),
+                    ":".style(self.styles.bold)
+                ),
+                Level::TRACE => write!(
+                    self.writer,
+                    "{}{} ",
+                    "trace".style(self.styles.trace),
+                    ":".style(self.styles.bold)
+                ),
             };
         }
 
@@ -169,19 +192,34 @@ impl Visit for Visitor<'_> {
             let _ = self.writer.write_str(", ");
         }
 
-        let bold = if self.color { style().bold() } else { style() };
         if field.name() == Self::MESSAGE {
-            let _ = write!(self.writer, "{:?}", value.style(bold));
+            let _ = write!(self.writer, "{:?}", value.style(self.styles.bold));
         } else {
             let _ = write!(
                 self.writer,
                 "{}{} {:?}",
-                field.name().style(bold),
-                ":".style(bold),
+                field.name().style(self.styles.bold),
+                ":".style(self.styles.bold),
                 value
             );
         }
 
         self.is_empty = false;
+    }
+}
+
+// === impl Styles ===
+
+impl Styles {
+    fn new(colors: ColorMode) -> Self {
+        Self {
+            error: colors.if_color(style().red().bold()),
+            warn: colors.if_color(style().yellow().bold()),
+            info: colors.if_color(style().green().bold()),
+            debug: colors.if_color(style().blue().bold()),
+            trace: colors.if_color(style().purple().bold()),
+            bold: colors.if_color(style().bold()),
+            pipes: colors.if_color(style().blue().bold()),
+        }
     }
 }

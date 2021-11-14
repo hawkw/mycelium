@@ -6,12 +6,12 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     let opts = Options::from_args();
+    opts.trace_init()?;
     let color = opts.color;
     color.set_global();
-    inoculate::trace::try_init(&opts)?;
 
     tracing::info!("inoculating mycelium!");
-    tracing::debug!(
+    tracing::trace!(
         ?opts.cmd,
         ?opts.kernel_bin,
         ?opts.bootloader_manifest,
