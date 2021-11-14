@@ -51,6 +51,11 @@ struct Styles {
     bold: Style,
 }
 
+struct Prefixed<T> {
+    prefix: &'static str,
+    val: T,
+}
+
 impl<S, N> FormatEvent<S, N> for CargoFormatter
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
@@ -76,9 +81,10 @@ where
         if include_spans {
             writeln!(
                 writer,
-                "   {} {}",
+                "   {} {}{}",
                 "-->".style(self.styles.pipes),
                 metadata.file().unwrap_or_else(|| metadata.target()),
+                DisplayOpt(metadata.line().map(Prefixed::prefix(":"))),
             )?;
             ctx.visit_spans(|span| {
                 let exts = span.extensions();
@@ -88,7 +94,7 @@ where
                     .unwrap_or("");
                 writeln!(
                     writer,
-                    "    {}  {}{}{}",
+                    "    {} {}{}{}",
                     "|".style(self.styles.pipes),
                     span.name().style(self.styles.bold),
                     if fields.is_empty() { "" } else { ": " },
@@ -227,5 +233,44 @@ impl Styles {
             bold: colors.if_color(style().bold()),
             pipes: colors.if_color(style().blue().bold()),
         }
+    }
+}
+
+impl<T> Prefixed<T> {
+    fn prefix(prefix: &'static str) -> impl Fn(T) -> Prefixed<T> {
+        move |val| Prefixed { val, prefix }
+    }
+}
+
+impl<T> fmt::Display for Prefixed<T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.prefix, self.val)
+    }
+}
+
+impl<T> fmt::Debug for Prefixed<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{:?}", self.prefix, self.val)
+    }
+}
+
+struct DisplayOpt<T>(Option<T>);
+
+impl<T> fmt::Display for DisplayOpt<T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(ref val) = self.0 {
+            fmt::Display::fmt(val, f)?;
+        }
+
+        Ok(())
     }
 }
