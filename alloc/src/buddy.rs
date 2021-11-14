@@ -199,67 +199,71 @@ where
     L: AsRef<[spin::Mutex<List<Free>>]>,
 {
     /// Adds a memory region to the heap from which pages may be allocated.
-    #[tracing::instrument(skip(self), level = "trace")]
-    pub unsafe fn add_region(&self, mut region: Region) -> core::result::Result<(), ()> {
+    #[tracing::instrument(skip(self), level = "debug")]
+    pub unsafe fn add_region(&self, region: Region) -> core::result::Result<(), ()> {
         // Is the region in use?
         if region.kind() != RegionKind::FREE {
             tracing::warn!(?region, "cannot add to page allocator, region is not free");
             return Err(());
         }
+        let mut next_region = Some(region);
+        while let Some(mut region) = next_region.take() {
+            let size = region.size();
+            let base = region.base_addr();
+            let _span = tracing::trace_span!("adding_region", size, ?base).entered();
+            tracing::info!(region.size = size, region.base_addr = ?base, "adding region");
 
-        let size = region.size();
-        let base = region.base_addr();
-        tracing::info!(region.size = size, region.base_addr = ?base, "adding region");
-
-        // Is the region aligned on the heap's minimum page size? If not, we
-        // need to align it.
-        if !base.is_aligned(self.min_size) {
-            let new_base = base.align_up(self.min_size);
-            tracing::trace!(region.new_base = ?new_base, "base address not aligned!");
-            region = Region::new(new_base, region.size(), RegionKind::FREE);
-        }
-
-        // Is the size of the region a power of two? The buddy block algorithm
-        // requires each free block to be a power of two.
-        if !size.is_power_of_two() {
-            // If the region is not a power of two, split it down to the nearest
-            // power of two.
-            let prev_power_of_two = prev_power_of_two(size);
-            tracing::debug!(prev_power_of_two, "not a power of two!");
-            let region2 = region.split_back(prev_power_of_two).unwrap();
-
-            // If the region we split off is larger than the minimum page size,
-            // we can try to add it as well.
-            if region2.size() >= self.min_size {
-                tracing::debug!("adding split-off region");
-                self.add_region(region2)?;
-            } else {
-                // Otherwise, we can't use it --- we'll have to leak it.
-                // TODO(eliza):
-                //  figure out a nice way to use stuff that won't fit for "some
-                //  other purpose"?
-                // NOTE:
-                //  in practice these might just be the two "bonus bytes" that
-                //  the free regions in our memory map have for some kind of
-                //  reason (on x84).
-                // TODO(eliza):
-                //  figure out why free regions in the memory map are all
-                //  misaligned by two bytes.
-                tracing::debug!(
-                    region = ?region2,
-                    min_size = self.min_size,
-                    "leaking a region smaller than min page size"
-                );
+            // Is the region aligned on the heap's minimum page size? If not, we
+            // need to align it.
+            if !base.is_aligned(self.min_size) {
+                let new_base = base.align_up(self.min_size);
+                tracing::trace!(region.new_base = ?new_base, "base address not aligned!");
+                region = Region::new(new_base, region.size(), RegionKind::FREE);
             }
+
+            // Is the size of the region a power of two? The buddy block algorithm
+            // requires each free block to be a power of two.
+            if !size.is_power_of_two() {
+                // If the region is not a power of two, split it down to the nearest
+                // power of two.
+                let prev_power_of_two = prev_power_of_two(size);
+                tracing::debug!(prev_power_of_two, "not a power of two!");
+                let region2 = region.split_back(prev_power_of_two).unwrap();
+
+                // If the region we split off is larger than the minimum page size,
+                // we can try to add it as well.
+                if region2.size() >= self.min_size {
+                    tracing::debug!("adding split-off region");
+                    next_region = Some(region2);
+                } else {
+                    // Otherwise, we can't use it --- we'll have to leak it.
+                    // TODO(eliza):
+                    //  figure out a nice way to use stuff that won't fit for "some
+                    //  other purpose"?
+                    // NOTE:
+                    //  in practice these might just be the two "bonus bytes" that
+                    //  the free regions in our memory map have for some kind of
+                    //  reason (on x84).
+                    // TODO(eliza):
+                    //  figure out why free regions in the memory map are all
+                    //  misaligned by two bytes.
+                    tracing::debug!(
+                        region = ?region2,
+                        min_size = self.min_size,
+                        "leaking a region smaller than min page size"
+                    );
+                }
+            }
+
+            // Update the base virtual address of the heap.
+            let region_vaddr = region.base_addr().as_usize() + self.offset();
+            self.base_vaddr.fetch_min(region_vaddr, AcqRel);
+
+            // ...and actually add the block to a free list.
+            let block = Free::new(region, self.offset());
+            unsafe { self.push_block(block) };
         }
 
-        // Update the base virtual address of the heap.
-        let region_vaddr = region.base_addr().as_usize() + self.offset();
-        self.base_vaddr.fetch_min(region_vaddr, AcqRel);
-
-        // ...and actually add the block to a free list.
-        let block = Free::new(region, self.offset());
-        unsafe { self.push_block(block) };
         Ok(())
     }
 
