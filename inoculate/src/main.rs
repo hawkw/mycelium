@@ -3,20 +3,12 @@ use inoculate::{Options, Result};
 use structopt::StructOpt;
 
 fn main() -> Result<()> {
-    use tracing_subscriber::prelude::*;
     color_eyre::install()?;
 
     let opts = Options::from_args();
     let color = opts.color;
     color.set_global();
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .event_format(inoculate::trace::CargoFormatter::default()),
-        )
-        .with(tracing_error::ErrorLayer::default())
-        .with(opts.log.parse::<tracing_subscriber::EnvFilter>()?)
-        .init();
+    inoculate::trace::try_init(&opts)?;
 
     tracing::info!("inoculating mycelium!");
     tracing::debug!(

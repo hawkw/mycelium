@@ -1,4 +1,7 @@
-use crate::term::{style, ColorMode, OwoColorize};
+use crate::{
+    term::{style, ColorMode, OwoColorize},
+    Options, Result,
+};
 use heck::TitleCase;
 use std::fmt;
 use tracing::{field::Field, Event, Level, Subscriber};
@@ -8,8 +11,24 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
+pub fn try_init(opts: &Options) -> Result<()> {
+    use tracing_subscriber::prelude::*;
+    let fmt = tracing_subscriber::fmt::layer()
+        .event_format(CargoFormatter::default())
+        .with_writer(std::io::stderr);
+
+    tracing_subscriber::registry()
+        .with(fmt)
+        .with(tracing_error::ErrorLayer::default())
+        .with(opts.log.parse::<tracing_subscriber::EnvFilter>()?)
+        .try_init()?;
+    Ok(())
+}
+
 #[derive(Default)]
-pub struct CargoFormatter(());
+struct CargoFormatter {
+    colors: ColorMode,
+}
 
 impl<S, N> FormatEvent<S, N> for CargoFormatter
 where
@@ -24,7 +43,7 @@ where
     ) -> fmt::Result {
         let metadata = event.metadata();
         let level = metadata.level();
-        let color = ColorMode::default().should_color_stdout();
+        let color = self.colors.should_color_stderr();
 
         let include_spans = {
             let mut visitor = Visitor::new(*level, writer.by_ref(), color);
