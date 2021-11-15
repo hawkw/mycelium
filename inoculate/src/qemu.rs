@@ -1,5 +1,5 @@
 use crate::term::{ColorMode, OwoColorize};
-use crate::{cargo_log, Result};
+use crate::Result;
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
@@ -102,7 +102,7 @@ impl Cmd {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "debug")]
     fn spawn_qemu(&self, qemu: &mut Command, binary: &Path) -> Result<Child> {
         let (Cmd::Run { qemu_settings, .. } | Cmd::Test { qemu_settings, .. }) = self;
 
@@ -129,7 +129,7 @@ impl Cmd {
         Ok(child)
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, paths), level = "debug")]
     pub fn run_qemu(&self, image: &Path, paths: &crate::Paths) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
@@ -141,12 +141,10 @@ impl Cmd {
                 serial,
                 qemu_settings,
             } => {
-                cargo_log!(
-                    "Running",
-                    "mycelium in QEMU ({})",
+                tracing::info!(
+                    "running mycelium in QEMU ({})",
                     paths.relative(image).display()
                 );
-                tracing::info!("running QEMU in normal mode");
                 if *serial {
                     tracing::debug!("configured QEMU to output serial on stdio");
                     qemu.arg("-serial").arg("stdio");
@@ -198,12 +196,7 @@ impl Cmd {
                     "-serial",
                     "stdio",
                 ];
-                cargo_log!(
-                    "Running",
-                    "kernel tests ({})",
-                    paths.relative(image).display()
-                );
-                tracing::info!("running QEMU in test mode");
+                tracing::info!("running kernel tests ({})", paths.relative(image).display());
                 qemu_settings.configure(&mut qemu);
                 qemu.args(TEST_ARGS);
 
@@ -268,12 +261,13 @@ impl Cmd {
 impl Settings {
     fn configure(&self, cmd: &mut Command) {
         if self.gdb {
-            tracing::debug!(gdb_port = self.gdb_port, "configured QEMU to wait for GDB");
+            tracing::debug!(gdb_port = self.gdb_port, "configuring QEMU to wait for GDB");
             cmd.arg("-S")
                 .arg("-gdb")
                 .arg(format!("tcp::{}", self.gdb_port));
         }
 
+        tracing::debug!(qemu.args = ?self.qemu_args, "configuring qemu");
         cmd.args(&self.qemu_args[..]);
     }
 }
@@ -315,7 +309,7 @@ impl TestResults {
             if let Some(test) = Test::parse_start(&line) {
                 let _span =
                     tracing::debug_span!("test", "{}::{}", test.module(), test.name()).entered();
-                tracing::debug!(?test, "found a test...");
+                tracing::debug!(?test, "found a test");
                 eprint!("test {} ...", test);
                 results.tests += 1;
 
@@ -342,7 +336,7 @@ impl TestResults {
                                 test,
                                 outcome,
                             );
-                            tracing::debug!(?outcome);
+                            tracing::trace!(?outcome);
                             curr_outcome = Some(outcome);
                             break;
                         }

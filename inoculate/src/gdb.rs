@@ -1,14 +1,14 @@
-use crate::{cargo_log, Result};
+use crate::Result;
 use color_eyre::eyre::WrapErr;
 use std::{
     path::Path,
     process::{Command, ExitStatus},
 };
 
-#[tracing::instrument]
+#[tracing::instrument(level = "debug")]
 pub fn run_gdb(binary: &Path, gdb_port: u16) -> Result<ExitStatus> {
     let gdb_path = wheres_gdb().context("failed to find gdb executable")?;
-    cargo_log!("Found", "{}", gdb_path);
+    tracing::info!("Found {}", gdb_path);
     let mut gdb = Command::new(gdb_path);
 
     // Set the file, and connect to the given remote, then advance to `kernel_main`.
@@ -25,7 +25,7 @@ pub fn run_gdb(binary: &Path, gdb_port: u16) -> Result<ExitStatus> {
     gdb.arg("-ex").arg("tbreak mycelium_kernel::kernel_main");
     gdb.arg("-ex").arg("continue");
 
-    cargo_log!("Running", "{:?}", gdb);
+    tracing::info!("Running {:?}", gdb);
     // Try to run gdb.
     let status = gdb.status().context("failed to run gdb")?;
 

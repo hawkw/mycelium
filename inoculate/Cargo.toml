@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 structopt = "0.3"
 tracing = "0.1.23"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.1", features = ["env-filter"] }
 tracing-error = "0.2"
 color-eyre = "0.5"
 bootloader-locator = "0.0.4"
@@ -18,3 +18,4 @@ wait-timeout = "0.2"
 owo-colors = "2.0.0"
 atty = "0.2"
 mycotest = { path = "../mycotest", features = ["alloc"] }
+heck = "0.3.3"

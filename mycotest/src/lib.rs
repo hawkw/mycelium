@@ -13,7 +13,7 @@ pub const PASS_TEST: &str = "MYCELIUM_TEST_PASS:";
 extern crate alloc;
 
 use core::{cmp, fmt, marker::PhantomData};
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Test<'a, S = &'a str> {
     name: S,
     module: S,
@@ -112,6 +112,16 @@ impl<S: Ord> cmp::Ord for Test<'_, S> {
         self.module
             .cmp(&other.module)
             .then_with(|| self.name.cmp(&other.name))
+    }
+}
+
+// Custom impl to skip `PhantomData` field.
+impl<S: fmt::Debug> fmt::Debug for Test<'_, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Test")
+            .field("name", &self.name)
+            .field("module", &self.module)
+            .finish()
     }
 }
 
