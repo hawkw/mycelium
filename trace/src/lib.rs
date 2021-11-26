@@ -104,7 +104,7 @@ impl<D, S> Subscriber<D, S> {
     }
 }
 
-impl<D, S> tracing_core::Subscriber for Subscriber<D, S>
+impl<D, S> tracing_core::Collect for Subscriber<D, S>
 where
     for<'a> D: MakeWriter<'a> + 'static,
     for<'a> S: MakeWriter<'a> + 'static,
@@ -168,6 +168,11 @@ where
         let bits = span.into_u64();
         self.display.exit(bits);
         self.serial.exit(bits);
+    }
+
+    fn current_span(&self) -> tracing_core::span::Current {
+        // TODO(eliza): fix
+        tracing_core::span::Current::none()
     }
 }
 

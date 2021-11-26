@@ -286,7 +286,7 @@ pub fn oops(
     // code, which (it turns out) is surprisingly janky...
     tracing::debug!(
         %cause,
-        registers = fault.as_ref().map(|cx| tracing::field::debug(cx.registers())),
+        registers = ?fault.as_ref().map(|cx| tracing::field::debug(cx.registers())),
         "oops"
     );
     // okay, we've dumped the oops to serial, now try to log a nicer event at

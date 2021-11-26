@@ -48,9 +48,9 @@ yaxpeax-x86 = { version = "1.0.0", default-features = false, features = ["fmt"] 
 yaxpeax-arch = { version = "0.2.0", default-features = false }
 
 [dependencies.tracing]
-version = "0.1"
 default_features = false
-features = ["attributes"]
+features = ["attributes", "alloc"]
+git = "https://github.com/tokio-rs/tracing"
 
 [dependencies.wasmi]
 git = "https://github.com/mystor/wasmi"
@@ -74,3 +74,7 @@ map-page-table-recursively = true
 [package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
 memcpy = true
 sysroot_path = "target/x86_64/sysroot"
+
+[patch.crates-io]
+tracing = { git = "https://github.com/tokio-rs/tracing" }
+tracing-core = { git = "https://github.com/tokio-rs/tracing" }

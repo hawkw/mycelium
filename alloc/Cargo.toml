@@ -12,6 +12,6 @@ bump = []
 buddy = ["hal-core", "mycelium-util", "tracing"]
 
 [dependencies]
-tracing = { version = "0.1", default_features = false, optional = true }
+tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, optional = true }
 mycelium-util = { path = "../util", optional = true }
 hal-core = { path = "../hal-core", optional = true }
