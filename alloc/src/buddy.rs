@@ -161,10 +161,19 @@ impl<L> Alloc<L> {
         }
 
         // Is the size a power of two?
-        debug_assert!(
-            size.is_power_of_two(),
-            "somebody constructed a bad layout! don't do that!"
-        );
+        if !size.is_power_of_two() {
+            let next_pow2 = size.next_power_of_two();
+            tracing::trace!(
+                layout.size = size,
+                next_pow2,
+                "size is not a power of two, rounding up..."
+            );
+            size = next_pow2;
+        }
+        // debug_assert!(
+        //     size.is_power_of_two(),
+        //     "somebody constructed a bad layout! don't do that!"
+        // );
 
         // Is there enough room to meet this allocation request?
         let available = self.heap_size.load(Acquire);
@@ -207,7 +216,16 @@ where
             return Err(());
         }
         let mut next_region = Some(region);
+        let mut _i = 0;
         while let Some(mut region) = next_region.take() {
+            tracing::trace!(
+                i = {
+                    let i = _i;
+                    _i += 1;
+                    i
+                },
+                "looping..."
+            );
             let size = region.size();
             let base = region.base_addr();
             let _span = tracing::trace_span!("adding_region", size, ?base).entered();
@@ -691,12 +709,18 @@ impl Free {
 unsafe impl list::Linked for Free {
     type Handle = ptr::NonNull<Free>;
     type Node = Self;
+
+    #[inline]
     fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {
         *r
     }
+
+    #[inline]
     unsafe fn from_ptr(ptr: ptr::NonNull<Self>) -> Self::Handle {
         ptr
     }
+
+    #[inline]
     unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
         ptr::NonNull::from(&ptr.as_ref().links)
     }

@@ -167,7 +167,7 @@ impl<T: Linked + ?Sized> List<T> {
             let mut links = T::links(ptr);
             links.as_mut().next = self.head;
             links.as_mut().prev = None;
-
+            tracing::trace!(?links);
             if let Some(head) = self.head {
                 T::links(head).as_mut().prev = Some(ptr);
                 tracing::trace!(head.links = ?T::links(head).as_ref(), "set head prev ptr",);

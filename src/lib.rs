@@ -13,6 +13,7 @@ use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 use mycelium_alloc::buddy;
 
+mod heap;
 mod wasm;
 
 static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(32);
@@ -29,7 +30,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     writeln!(&mut writer, "booting via {}", bootinfo.bootloader_name()).unwrap();
 
     if let Some(subscriber) = bootinfo.subscriber() {
-        tracing::dispatcher::set_global_default(subscriber).unwrap();
+        tracing::dispatch::set_global_default(subscriber).unwrap();
     }
 
     #[cfg(not(test))]
@@ -151,21 +152,6 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
 }
 
 mycelium_util::decl_test! {
-    fn basic_alloc() {
-        // Let's allocate something, for funsies
-        use alloc::vec::Vec;
-        let mut v = Vec::new();
-        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
-        v.push(5u64);
-        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
-        v.push(10u64);
-        tracing::info!(vec=?v, vec.addr=?v.as_ptr());
-        assert_eq!(v.pop(), Some(10));
-        assert_eq!(v.pop(), Some(5));
-    }
-}
-
-mycelium_util::decl_test! {
     fn wasm_hello_world() -> Result<(), wasmi::Error> {
         const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
         wasm::run_wasm(HELLOWORLD_WASM)
@@ -174,7 +160,7 @@ mycelium_util::decl_test! {
 
 #[global_allocator]
 #[cfg(target_os = "none")]
-pub static GLOBAL: mycelium_alloc::bump::Alloc = mycelium_alloc::bump::Alloc;
+pub static GLOBAL: heap::Heap = heap::Heap::new(&PAGE_ALLOCATOR);
 
 #[alloc_error_handler]
 #[cfg(target_os = "none")]
