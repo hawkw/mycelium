@@ -15,7 +15,7 @@ use mycelium_alloc::buddy;
 
 mod wasm;
 
-static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
+static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(32);
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();

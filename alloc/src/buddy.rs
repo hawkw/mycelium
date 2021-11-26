@@ -475,17 +475,6 @@ where
         let span = tracing::trace_span!("alloc_range", size = size.as_usize(), len);
         let _e = span.enter();
 
-        // Determine the layout to allocate this page range...
-        if size.as_usize() > self.min_size {
-            // TODO(eliza): huge pages should work!
-            tracing::error!(
-                requested.size = size.as_usize(),
-                requested.len = len,
-                "cannot allocate; huge pages are not currently supported!"
-            );
-            return Err(AllocErr::oom());
-        }
-
         debug_assert!(
             size.as_usize().is_power_of_two(),
             "page size must be a power of 2; size={}",
