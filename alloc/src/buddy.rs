@@ -1,6 +1,6 @@
 use core::{
     alloc::{GlobalAlloc, Layout},
-    cmp, ptr,
+    cmp, mem, ptr,
 };
 use hal_core::{
     mem::{
@@ -101,7 +101,17 @@ impl Alloc {
 
 impl<L> Alloc<L> {
     #[cfg(not(loom))]
-    pub const fn new(min_size: usize, free_lists: L) -> Self {
+    pub const fn new(mut min_size: usize, free_lists: L) -> Self {
+        // ensure we don't split memory into regions too small to fit the free
+        // block header in them.
+        let free_block_size = mem::size_of::<Free>();
+        if min_size < free_block_size {
+            min_size = free_block_size;
+        }
+        // round the minimum block size up to the next power of two, if it isn't
+        // a power of two (`size_of::<Free>` is *probably* 48 bytes on 64-bit
+        // architectures...)
+        min_size = min_size.next_power_of_two();
         Self {
             min_size,
             base_vaddr: AtomicUsize::new(core::usize::MAX),
