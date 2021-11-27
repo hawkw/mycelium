@@ -339,6 +339,8 @@ pub fn oops(
     }
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
+    crate::PAGE_ALLOCATOR.dump_free_lists();
+
     #[cfg(test)]
     {
         if let Some(test) = ptr::NonNull::new(CURRENT_TEST.load(Ordering::Acquire)) {

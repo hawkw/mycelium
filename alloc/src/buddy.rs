@@ -217,6 +217,28 @@ impl<L> Alloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
 {
+    pub fn dump_free_lists(&self) {
+        struct ListEntries<'a>(&'a List<Free>);
+        impl fmt::Debug for ListEntries<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_list().entries(self.0.iter()).finish()
+            }
+        }
+
+        for (order, list) in self.free_lists.as_ref().iter().enumerate() {
+            let _span = tracing::debug_span!("free_list", order).entered();
+            match list.try_lock() {
+                Some(list) => {
+                    tracing::trace!(?list);
+                    tracing::debug!(entries = ?ListEntries(&*list));
+                }
+                None => {
+                    tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
+                }
+            }
+        }
+    }
+
     /// Adds a memory region to the heap from which pages may be allocated.
     #[tracing::instrument(skip(self), level = "debug")]
     pub unsafe fn add_region(&self, region: Region) -> core::result::Result<(), ()> {
