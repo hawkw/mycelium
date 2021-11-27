@@ -226,14 +226,14 @@ where
         }
 
         for (order, list) in self.free_lists.as_ref().iter().enumerate() {
-            let _span = tracing::info_span!("free_list", order).entered();
+            let _span = tracing::debug_span!("free_list", order).entered();
             match list.try_lock() {
                 Some(list) => {
-                    tracing::info!(?list);
+                    tracing::trace!(?list);
                     tracing::debug!(entries = ?ListEntries(&*list));
                 }
                 None => {
-                    tracing::info!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
+                    tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
                 }
             }
         }
@@ -363,13 +363,13 @@ where
         tracing::trace!(?min_order);
         let min_order = min_order.ok_or_else(AllocErr::oom)?;
 
+        let size = self.size_for(layout).expect(
+            "couldn't determine the correct layout for an allocation \
+                we previously allocated successfully, what the actual fuck!",
+        );
         // Construct a new free block.
-        let mut block = unsafe {
-            Free::new(
-                Region::new(paddr, layout.size(), RegionKind::FREE),
-                self.offset(),
-            )
-        };
+        let mut block =
+            unsafe { Free::new(Region::new(paddr, size, RegionKind::FREE), self.offset()) };
 
         // Starting at the minimum order on which the freed range will fit
         for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
@@ -490,7 +490,11 @@ where
     #[tracing::instrument(skip(self), level = "trace")]
     fn split_down(&self, block: &mut Free, mut order: usize, target_order: usize) {
         let mut size = block.size();
-        debug_assert_eq!(size, self.size_for_order(order));
+        debug_assert_eq!(
+            size,
+            self.size_for_order(order),
+            "a block was a weird size for some reason"
+        );
 
         let free_lists = self.free_lists.as_ref();
         while order > target_order {
