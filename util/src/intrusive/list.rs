@@ -508,7 +508,7 @@ mod tests {
         const _: List<&Entry> = List::new();
     }
 
-    fn trace_init() -> tracing::dispatcher::DefaultGuard {
+    fn trace_init() -> tracing::dispatch::DefaultGuard {
         use tracing_subscriber::prelude::*;
         tracing_subscriber::fmt()
             .with_test_writer()
@@ -796,7 +796,8 @@ mod tests {
         #[test]
         fn fuzz_linked_list(ops: Vec<usize>) {
             let _trace = trace_init();
-            let _span = tracing::info_span!("fuzz", ?ops).entered();
+            let _span = tracing::info_span!("fuzz").entered();
+            tracing::info!(?ops);
             run_fuzz(ops);
         }
     }
@@ -827,6 +828,7 @@ mod tests {
         let entries: Vec<_> = (0..ops.len()).map(|i| entry(i as i32)).collect();
 
         for (i, op) in ops.iter().enumerate() {
+            let _span = tracing::info_span!("op", ?i, ?op).entered();
             match op {
                 Op::Push => {
                     reference.push_front(i as i32);
@@ -858,6 +860,7 @@ mod tests {
                     }
                 }
             }
+            ll.assert_valid();
         }
     }
 }
