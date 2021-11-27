@@ -513,6 +513,8 @@ mod tests {
         tracing_subscriber::fmt()
             .with_test_writer()
             .with_max_level(tracing::Level::TRACE)
+            .with_target(false)
+            .with_timer(())
             .set_default()
     }
 
