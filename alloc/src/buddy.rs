@@ -226,14 +226,14 @@ where
         }
 
         for (order, list) in self.free_lists.as_ref().iter().enumerate() {
-            let _span = tracing::debug_span!("free_list", order).entered();
+            let _span = tracing::info_span!("free_list", order).entered();
             match list.try_lock() {
                 Some(list) => {
-                    tracing::trace!(?list);
+                    tracing::info!(?list);
                     tracing::debug!(entries = ?ListEntries(&*list));
                 }
                 None => {
-                    tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
+                    tracing::info!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
                 }
             }
         }
@@ -686,14 +686,26 @@ impl Free {
     }
 
     pub fn split_front(&mut self, size: usize, offset: usize) -> Option<ptr::NonNull<Self>> {
-        debug_assert_eq!(self.magic, Self::MAGIC);
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
         let new_meta = self.meta.split_front(size)?;
         let new_free = unsafe { Self::new(new_meta, offset) };
         Some(new_free)
     }
 
     pub fn split_back(&mut self, size: usize, offset: usize) -> Option<ptr::NonNull<Self>> {
-        debug_assert_eq!(self.magic, Self::MAGIC);
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
 
         let new_meta = self.meta.split_back(size)?;
         debug_assert_ne!(new_meta, self.meta);
@@ -706,8 +718,20 @@ impl Free {
     }
 
     pub fn merge(&mut self, other: &mut Self) {
-        debug_assert_eq!(self.magic, Self::MAGIC, "self.magic={:x}", self.magic);
-        debug_assert_eq!(other.magic, Self::MAGIC, "self.magic={:x}", self.magic);
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "THEIR MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
         assert!(!other.links.is_linked());
         self.meta.merge(&mut other.meta)
     }
