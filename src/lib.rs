@@ -1,7 +1,7 @@
 #![cfg_attr(all(target_os = "none", test), no_main)]
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
-#![cfg_attr(target_os = "none", feature(panic_info_message))]
+#![feature(panic_info_message)]
 #![allow(unused_unsafe)]
 
 extern crate alloc;
@@ -158,20 +158,17 @@ mycelium_util::decl_test! {
     }
 }
 
-#[global_allocator]
-#[cfg(target_os = "none")]
+#[cfg_attr(target_os = "none", global_allocator)]
 pub static GLOBAL: heap::Heap = heap::Heap::new(&PAGE_ALLOCATOR);
 
-#[alloc_error_handler]
-#[cfg(target_os = "none")]
-fn alloc_error(layout: core::alloc::Layout) -> ! {
+#[cfg_attr(target_os = "none", alloc_error_handler)]
+pub fn alloc_error(layout: core::alloc::Layout) -> ! {
     panic!("alloc error: {:?}", layout);
 }
 
-#[cfg(target_os = "none")]
-#[panic_handler]
+#[cfg_attr(target_os = "none", panic_handler)]
 #[cold]
-fn panic(panic: &core::panic::PanicInfo) -> ! {
+pub fn panic(panic: &core::panic::PanicInfo) -> ! {
     use core::fmt;
     struct PrettyPanic<'a>(&'a core::panic::PanicInfo<'a>);
     impl<'a> fmt::Display for PrettyPanic<'a> {
