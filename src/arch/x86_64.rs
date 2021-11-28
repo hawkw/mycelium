@@ -27,6 +27,8 @@ pub struct RustbootBootInfo {
 #[derive(Debug)]
 pub struct LockedFramebuf(boot_info::FrameBuffer);
 
+type FramebufWriter = Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>>;
+
 type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
@@ -78,24 +80,34 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
-        use mycelium_trace::{writer::MakeWriterExt, Subscriber};
+        use mycelium_trace::{
+            embedded_graphics,
+            writer::{self, MakeWriterExt},
+            Subscriber,
+        };
+        static COLLECTOR: InitOnce<
+            Subscriber<
+                writer::WithMaxLevel<embedded_graphics::MakeTextWriter<FramebufWriter>>,
+                Option<&'static serial::Port>,
+            >,
+        > = InitOnce::uninitialized();
+
         if !self.has_framebuffer {
             // TODO(eliza): we should probably write to just the serial port if
             // there's no framebuffer...
             return None;
         }
 
-        let display_writer = mycelium_trace::embedded_graphics::MakeTextWriter::new(|| unsafe {
-            Self::mk_framebuf()
-        })
-        .with_max_level(tracing::Level::INFO);
-        let display = Subscriber::display_only(display_writer);
-        let dispatch = if let Some(serial) = serial::com1() {
-            tracing::Dispatch::new(display.with_serial(serial))
-        } else {
-            tracing::Dispatch::new(display)
-        };
-        Some(dispatch)
+        let collector = COLLECTOR.get_or_else(|| {
+            let display_writer =
+                mycelium_trace::embedded_graphics::MakeTextWriter::new(|| unsafe {
+                    Self::mk_framebuf()
+                })
+                .with_max_level(tracing::Level::INFO);
+            Subscriber::display_only(display_writer).with_serial(serial::com1())
+        });
+
+        Some(tracing::Dispatch::from_static(collector))
     }
 
     fn bootloader_name(&self) -> &str {
@@ -108,7 +120,7 @@ impl BootInfo for RustbootBootInfo {
 }
 
 impl RustbootBootInfo {
-    unsafe fn mk_framebuf() -> Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>> {
+    unsafe fn mk_framebuf() -> FramebufWriter {
         let (cfg, buf) = unsafe {
             // Safety: we can reasonably assume this will only be called
             // after `arch_entry`, so if we've failed to initialize the

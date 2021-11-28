@@ -12,7 +12,7 @@ use mycelium_util::fmt::{self, Write, WriteExt};
 use tracing_core::{field, span, Event, Level, Metadata};
 
 #[derive(Debug)]
-pub struct Subscriber<D, S = writer::NoWriter> {
+pub struct Subscriber<D, S = Option<writer::NoWriter>> {
     display: Output<D, VGA_BIT>,
     serial: Output<S, SERIAL_BIT>,
     next_id: AtomicU64,
@@ -67,19 +67,21 @@ const SERIAL_BIT: u64 = 1 << 62;
 const VGA_BIT: u64 = 1 << 63;
 const _ACTUAL_ID_BITS: u64 = !(SERIAL_BIT | VGA_BIT);
 
-impl<D> Subscriber<D> {
+impl<D, S> Subscriber<D, S> {
     pub fn display_only(display: D) -> Self
     where
         for<'a> D: MakeWriter<'a>,
+        for<'a> S: MakeWriter<'a>,
+        S: Default,
     {
         Self {
             display: Output::new(display, " "),
-            serial: Output::new(writer::none(), " |"),
+            serial: Output::new(S::default(), " |"),
             next_id: AtomicU64::new(0),
         }
     }
 
-    pub fn with_serial<S>(self, port: S) -> Subscriber<D, S>
+    pub fn with_serial(self, port: S) -> Subscriber<D, S>
     where
         for<'a> S: MakeWriter<'a>,
     {
