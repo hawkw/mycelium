@@ -196,20 +196,11 @@ impl<T: Linked + ?Sized> List<T> {
             );
 
             if let Some(prev) = tail_links.as_mut().prev {
-                debug_assert_ne!(
-                    self.head,
-                    Some(tail),
-                    "a node with a previous link should not be the list head"
-                );
                 T::links(prev).as_mut().next = None;
             } else {
-                debug_assert_eq!(
-                    self.head,
-                    Some(tail),
-                    "if the tail has no previous link, it must be the head"
-                );
                 self.head = None;
             }
+
             tail_links.as_mut().unlink();
             tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
             Some(T::from_ptr(tail))
