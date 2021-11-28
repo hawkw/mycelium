@@ -406,7 +406,7 @@ pub fn run_tests() {
         if (test.run)() {
             writeln!(
                 &mut com1.lock(),
-                "{}{} {}",
+                "{} {} {}",
                 mycotest::PASS_TEST,
                 test.module,
                 test.name
@@ -416,8 +416,9 @@ pub fn run_tests() {
         } else {
             writeln!(
                 &mut com1.lock(),
-                "{}{} {}",
+                "{} {} {} {}",
                 mycotest::FAIL_TEST,
+                mycotest::Failure::Fail.as_str(),
                 test.module,
                 test.name
             )
