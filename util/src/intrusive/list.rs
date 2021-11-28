@@ -1,5 +1,5 @@
+use crate::fmt;
 use core::{
-    fmt,
     marker::PhantomPinned,
     mem::ManuallyDrop,
     ptr::{self, NonNull},
@@ -250,6 +250,13 @@ impl<T: Linked + ?Sized> List<T> {
             list: self,
         }
     }
+
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            _list: self,
+            curr: self.head,
+        }
+    }
 }
 
 unsafe impl<T: Linked + ?Sized> Send for List<T> where T::Node: Send {}
@@ -258,8 +265,8 @@ unsafe impl<T: Linked + ?Sized> Sync for List<T> where T::Node: Sync {}
 impl<T: Linked + ?Sized> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("List")
-            .field("head", &self.head)
-            .field("tail", &self.tail)
+            .field("head", &fmt::opt(&self.head).or_else("None"))
+            .field("tail", &fmt::opt(&self.head).or_else("None"))
             .finish()
     }
 }
@@ -339,8 +346,8 @@ impl<T: ?Sized> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Links")
             .field("self", &format_args!("{:p}", self))
-            .field("next", &self.next)
-            .field("prev", &self.prev)
+            .field("next", &fmt::opt(&self.next).or_else("None"))
+            .field("prev", &fmt::opt(&self.prev).or_else("None"))
             .finish()
     }
 }

@@ -46,7 +46,6 @@ pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
 
 type Result<T> = core::result::Result<T, AllocErr>;
 
-#[derive(Debug)]
 pub struct Free {
     magic: usize,
     links: list::Links<Self>,
@@ -783,6 +782,16 @@ unsafe impl list::Linked for Free {
     #[inline]
     unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
         ptr::NonNull::from(&ptr.as_ref().links)
+    }
+}
+
+impl fmt::Debug for Free {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Free")
+            .field("magic", &fmt::hex(&self.magic))
+            .field("links", &self.links)
+            .field("meta", &self.meta)
+            .finish()
     }
 }
 

@@ -27,6 +27,11 @@ pub trait WriteExt: Write {
     }
 }
 
+pub struct FmtOption<'a, T> {
+    opt: Option<&'a T>,
+    or_else: &'a str,
+}
+
 /// Format the provided value using its [`core::Pointer`] implementation.
 ///
 /// # Examples
@@ -121,6 +126,10 @@ pub fn alt<T: Debug>(value: T) -> tracing::field::DebugValue<FormatWith<T>> {
     })
 }
 
+pub fn opt<T>(value: &Option<T>) -> FmtOption<'_, T> {
+    FmtOption::new(value)
+}
+
 impl<T, F> Debug for FormatWith<T, F>
 where
     F: Fn(&T, &mut Formatter<'_>) -> Result,
@@ -152,3 +161,36 @@ impl<'a, W: Write> Write for WithIndent<'a, W> {
 }
 
 impl<W> WriteExt for W where W: Write {}
+
+// === impl FmtOption ===
+
+impl<'a, T> FmtOption<'a, T> {
+    pub fn new(opt: &'a Option<T>) -> Self {
+        Self {
+            opt: opt.as_ref(),
+            or_else: "",
+        }
+    }
+
+    pub fn or_else(self, or_else: &'a str) -> Self {
+        Self { or_else, ..self }
+    }
+}
+
+impl<T: Debug> Debug for FmtOption<'_, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
+    }
+}
+
+impl<T: Display> Display for FmtOption<'_, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
+    }
+}
