@@ -13,8 +13,8 @@ macro_rules! try_null {
     };
 }
 
-// 640k is enough for anyone
-const HEAP_SIZE: usize = 1 * 1024;
+// 1k is enough for anyone
+const HEAP_SIZE: usize = 1024;
 
 #[repr(align(16))]
 struct Heap(UnsafeCell<MaybeUninit<[u8; HEAP_SIZE]>>);
