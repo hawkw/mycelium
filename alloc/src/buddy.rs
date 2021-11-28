@@ -113,7 +113,7 @@ impl<L> Alloc<L> {
         min_size = min_size.next_power_of_two();
         Self {
             min_size,
-            base_vaddr: AtomicUsize::new(core::usize::MAX),
+            base_vaddr: AtomicUsize::new(usize::MAX),
             vm_offset: AtomicUsize::new(0),
             min_size_log2: mycelium_util::math::usize_const_log2_ceil(min_size),
             heap_size: AtomicUsize::new(0),
@@ -220,16 +220,19 @@ where
         struct ListEntries<'a>(&'a List<Free>);
         impl fmt::Debug for ListEntries<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_list().entries(self.0.iter()).finish()
+                f.debug_list()
+                    .entries(self.0.iter().map(|val| unsafe { val.as_ref() }))
+                    .finish()
             }
         }
 
         for (order, list) in self.free_lists.as_ref().iter().enumerate() {
-            let _span = tracing::debug_span!("free_list", order).entered();
+            let _span = tracing::debug_span!("free_list", order, size = self.size_for_order(order))
+                .entered();
             match list.try_lock() {
                 Some(list) => {
                     tracing::trace!(?list);
-                    tracing::debug!(entries = ?ListEntries(&*list));
+                    tracing::debug!(entries = ?&ListEntries(&*list));
                 }
                 None => {
                     tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
@@ -246,17 +249,9 @@ where
             tracing::warn!(?region, "cannot add to page allocator, region is not free");
             return Err(());
         }
+
         let mut next_region = Some(region);
-        let mut _i = 0;
         while let Some(mut region) = next_region.take() {
-            tracing::trace!(
-                i = {
-                    let i = _i;
-                    _i += 1;
-                    i
-                },
-                "looping..."
-            );
             let size = region.size();
             let base = region.base_addr();
             let _span = tracing::trace_span!("adding_region", size, ?base).entered();
@@ -316,7 +311,6 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     unsafe fn alloc_inner(&self, layout: Layout) -> Option<ptr::NonNull<Free>> {
         // This is the minimum order necessary for the requested allocation ---
         // the first free list we'll check.
@@ -355,17 +349,23 @@ where
         None
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     unsafe fn dealloc_inner(&self, paddr: PAddr, layout: Layout) -> Result<()> {
         // Find the order of the free list on which the freed range belongs.
         let min_order = self.order_for(layout);
         tracing::trace!(?min_order);
         let min_order = min_order.ok_or_else(AllocErr::oom)?;
 
-        let size = self.size_for(layout).expect(
-            "couldn't determine the correct layout for an allocation \
-                we previously allocated successfully, what the actual fuck!",
-        );
+        let size = match self.size_for(layout) {
+            Some(size) => size,
+            // XXX(eliza): is it better to just leak it?
+            None => panic!(
+                "couldn't determine the correct layout for an allocation \
+                we previously allocated successfully, what the actual fuck!\n \
+                addr={:?}; layout={:?}; min_order={}",
+                paddr, layout, min_order,
+            ),
+        };
+
         // Construct a new free block.
         let mut block =
             unsafe { Free::new(Region::new(paddr, size, RegionKind::FREE), self.offset()) };
@@ -379,7 +379,7 @@ where
             if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, &mut free_list) } {
                 // Okay, merge the blocks, and try the next order!
                 if buddy < block {
-                    core::mem::swap(&mut block, &mut buddy);
+                    mem::swap(&mut block, &mut buddy);
                 }
                 unsafe {
                     block.as_mut().merge(buddy.as_mut());
@@ -432,7 +432,7 @@ where
         let size = self.size_for_order(order);
         let base = self.base_vaddr.load(Relaxed);
 
-        if base == core::usize::MAX {
+        if base == usize::MAX {
             // This is a bug.
             tracing::error!("cannot find buddy block; heap not initialized!");
             return None;
@@ -456,7 +456,7 @@ where
             buddy.addr = ?buddy,
         );
 
-        if core::ptr::eq(buddy as *const _, block.as_ptr() as *const _) {
+        if ptr::eq(buddy as *const _, block.as_ptr() as *const _) {
             tracing::trace!("buddy block is the same as self");
             return None;
         }
@@ -513,7 +513,7 @@ where
 unsafe impl<S, L> page::Alloc<S> for Alloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
-    S: Size + core::fmt::Display,
+    S: Size + fmt::Display,
 {
     /// Allocate a range of at least `len` pages.
     ///
