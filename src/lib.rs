@@ -13,10 +13,10 @@ use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 use mycelium_alloc::buddy;
 
-mod heap;
 mod wasm;
 
-static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(32);
+#[cfg_attr(target_os = "none", global_allocator)]
+static ALLOC: buddy::Alloc = buddy::Alloc::new_default(32);
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -101,7 +101,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     bootinfo.init_paging();
 
     // XXX(eliza): this sucks
-    PAGE_ALLOCATOR.set_vm_offset(arch::mm::vm_offset());
+    ALLOC.set_vm_offset(arch::mm::vm_offset());
 
     let mut regions = 0;
     let mut free_regions = 0;
@@ -125,7 +125,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
                 free_bytes += size;
                 unsafe {
                     tracing::trace!(?region, "adding to page allocator");
-                    let e = PAGE_ALLOCATOR.add_region(region);
+                    let e = ALLOC.add_region(region);
                     tracing::trace!(added = e.is_ok());
                 }
             }
@@ -158,8 +158,33 @@ mycelium_util::decl_test! {
     }
 }
 
-#[cfg_attr(target_os = "none", global_allocator)]
-pub static GLOBAL: heap::Heap = heap::Heap::new(&PAGE_ALLOCATOR);
+mycelium_util::decl_test! {
+    fn basic_alloc() {
+        // Let's allocate something, for funsies
+        use alloc::vec::Vec;
+        let mut v = Vec::new();
+        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
+        v.push(5u64);
+        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
+        v.push(10u64);
+        tracing::info!(vec=?v, vec.addr=?v.as_ptr());
+        assert_eq!(v.pop(), Some(10));
+        assert_eq!(v.pop(), Some(5));
+    }
+}
+
+mycelium_util::decl_test! {
+    fn alloc_big() {
+        use alloc::vec::Vec;
+        let mut v = Vec::new();
+
+        for i in 0..2048 {
+            v.push(i);
+        }
+
+        tracing::info!(vec = ?v);
+    }
+}
 
 #[cfg_attr(target_os = "none", alloc_error_handler)]
 pub fn alloc_error(layout: core::alloc::Layout) -> ! {
