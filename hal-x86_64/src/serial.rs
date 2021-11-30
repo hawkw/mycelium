@@ -390,4 +390,8 @@ impl<'a> mycelium_trace::writer::MakeWriter<'a> for &'static Port {
     fn make_writer(&'a self) -> Self::Writer {
         self.lock()
     }
+
+    fn line_len(&self) -> usize {
+        120
+    }
 }

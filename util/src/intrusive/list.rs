@@ -1,5 +1,5 @@
+use crate::fmt;
 use core::{
-    fmt,
     marker::PhantomPinned,
     mem::ManuallyDrop,
     ptr::{self, NonNull},
@@ -167,7 +167,7 @@ impl<T: Linked + ?Sized> List<T> {
             let mut links = T::links(ptr);
             links.as_mut().next = self.head;
             links.as_mut().prev = None;
-
+            tracing::trace!(?links);
             if let Some(head) = self.head {
                 T::links(head).as_mut().prev = Some(ptr);
                 tracing::trace!(head.links = ?T::links(head).as_ref(), "set head prev ptr",);
@@ -196,20 +196,11 @@ impl<T: Linked + ?Sized> List<T> {
             );
 
             if let Some(prev) = tail_links.as_mut().prev {
-                debug_assert_ne!(
-                    self.head,
-                    Some(tail),
-                    "a node with a previous link should not be the list head"
-                );
                 T::links(prev).as_mut().next = None;
             } else {
-                debug_assert_eq!(
-                    self.head,
-                    Some(tail),
-                    "if the tail has no previous link, it must be the head"
-                );
                 self.head = None;
             }
+
             tail_links.as_mut().unlink();
             tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
             Some(T::from_ptr(tail))
@@ -259,6 +250,13 @@ impl<T: Linked + ?Sized> List<T> {
             list: self,
         }
     }
+
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            _list: self,
+            curr: self.head,
+        }
+    }
 }
 
 unsafe impl<T: Linked + ?Sized> Send for List<T> where T::Node: Send {}
@@ -267,8 +265,8 @@ unsafe impl<T: Linked + ?Sized> Sync for List<T> where T::Node: Sync {}
 impl<T: Linked + ?Sized> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("List")
-            .field("head", &self.head)
-            .field("tail", &self.tail)
+            .field("head", &fmt::opt(&self.head).or_else("None"))
+            .field("tail", &fmt::opt(&self.head).or_else("None"))
             .finish()
     }
 }
@@ -348,8 +346,8 @@ impl<T: ?Sized> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Links")
             .field("self", &format_args!("{:p}", self))
-            .field("next", &self.next)
-            .field("prev", &self.prev)
+            .field("next", &fmt::opt(&self.next).or_else("None"))
+            .field("prev", &fmt::opt(&self.prev).or_else("None"))
             .finish()
     }
 }
@@ -508,11 +506,13 @@ mod tests {
         const _: List<&Entry> = List::new();
     }
 
-    fn trace_init() -> tracing::dispatcher::DefaultGuard {
+    fn trace_init() -> tracing::dispatch::DefaultGuard {
         use tracing_subscriber::prelude::*;
         tracing_subscriber::fmt()
             .with_test_writer()
             .with_max_level(tracing::Level::TRACE)
+            .with_target(false)
+            .with_timer(())
             .set_default()
     }
 
@@ -796,7 +796,8 @@ mod tests {
         #[test]
         fn fuzz_linked_list(ops: Vec<usize>) {
             let _trace = trace_init();
-            let _span = tracing::info_span!("fuzz", ?ops).entered();
+            let _span = tracing::info_span!("fuzz").entered();
+            tracing::info!(?ops);
             run_fuzz(ops);
         }
     }
@@ -827,6 +828,7 @@ mod tests {
         let entries: Vec<_> = (0..ops.len()).map(|i| entry(i as i32)).collect();
 
         for (i, op) in ops.iter().enumerate() {
+            let _span = tracing::info_span!("op", ?i, ?op).entered();
             match op {
                 Op::Push => {
                     reference.push_front(i as i32);
@@ -858,6 +860,7 @@ mod tests {
                     }
                 }
             }
+            ll.assert_valid();
         }
     }
 }

@@ -347,6 +347,39 @@ where
     }
 }
 
+impl<'a, M> MakeWriter<'a> for Option<M>
+where
+    M: MakeWriter<'a>,
+{
+    type Writer = EitherWriter<M::Writer, NoWriter>;
+    #[inline]
+    fn make_writer(&'a self) -> Self::Writer {
+        self.as_ref()
+            .map(MakeWriter::make_writer)
+            .map(EitherWriter::A)
+            .unwrap_or(EitherWriter::B(NoWriter(())))
+    }
+
+    #[inline]
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        self.as_ref()
+            .map(|make| make.enabled(meta))
+            .unwrap_or(false)
+    }
+
+    #[inline]
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        self.as_ref()
+            .and_then(|make| make.make_writer_for(meta))
+            .map(EitherWriter::A)
+    }
+
+    #[inline]
+    fn line_len(&self) -> usize {
+        self.as_ref().map(MakeWriter::line_len).unwrap_or(80)
+    }
+}
+
 // === impl Mutex/MutexGuardWriter ===
 
 impl<'a, W> MakeWriter<'a> for Mutex<W>

@@ -1,7 +1,7 @@
 #![cfg_attr(all(target_os = "none", test), no_main)]
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
-#![cfg_attr(target_os = "none", feature(panic_info_message))]
+#![feature(panic_info_message)]
 #![allow(unused_unsafe)]
 
 extern crate alloc;
@@ -15,7 +15,8 @@ use mycelium_alloc::buddy;
 
 mod wasm;
 
-static PAGE_ALLOCATOR: buddy::Alloc = buddy::Alloc::new_default(arch::mm::MIN_PAGE_SIZE);
+#[cfg_attr(target_os = "none", global_allocator)]
+static ALLOC: buddy::Alloc = buddy::Alloc::new_default(32);
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -29,7 +30,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     writeln!(&mut writer, "booting via {}", bootinfo.bootloader_name()).unwrap();
 
     if let Some(subscriber) = bootinfo.subscriber() {
-        tracing::dispatcher::set_global_default(subscriber).unwrap();
+        tracing::dispatch::set_global_default(subscriber).unwrap();
     }
 
     #[cfg(not(test))]
@@ -100,7 +101,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     bootinfo.init_paging();
 
     // XXX(eliza): this sucks
-    PAGE_ALLOCATOR.set_vm_offset(arch::mm::vm_offset());
+    ALLOC.set_vm_offset(arch::mm::vm_offset());
 
     let mut regions = 0;
     let mut free_regions = 0;
@@ -124,7 +125,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
                 free_bytes += size;
                 unsafe {
                     tracing::trace!(?region, "adding to page allocator");
-                    let e = PAGE_ALLOCATOR.add_region(region);
+                    let e = ALLOC.add_region(region);
                     tracing::trace!(added = e.is_ok());
                 }
             }
@@ -151,6 +152,13 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
 }
 
 mycelium_util::decl_test! {
+    fn wasm_hello_world() -> Result<(), wasmi::Error> {
+        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
+        wasm::run_wasm(HELLOWORLD_WASM)
+    }
+}
+
+mycelium_util::decl_test! {
     fn basic_alloc() {
         // Let's allocate something, for funsies
         use alloc::vec::Vec;
@@ -166,26 +174,26 @@ mycelium_util::decl_test! {
 }
 
 mycelium_util::decl_test! {
-    fn wasm_hello_world() -> Result<(), wasmi::Error> {
-        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
-        wasm::run_wasm(HELLOWORLD_WASM)
+    fn alloc_big() {
+        use alloc::vec::Vec;
+        let mut v = Vec::new();
+
+        for i in 0..2048 {
+            v.push(i);
+        }
+
+        tracing::info!(vec = ?v);
     }
 }
 
-#[global_allocator]
-#[cfg(target_os = "none")]
-pub static GLOBAL: mycelium_alloc::bump::Alloc = mycelium_alloc::bump::Alloc;
-
-#[alloc_error_handler]
-#[cfg(target_os = "none")]
-fn alloc_error(layout: core::alloc::Layout) -> ! {
+#[cfg_attr(target_os = "none", alloc_error_handler)]
+pub fn alloc_error(layout: core::alloc::Layout) -> ! {
     panic!("alloc error: {:?}", layout);
 }
 
-#[cfg(target_os = "none")]
-#[panic_handler]
+#[cfg_attr(target_os = "none", panic_handler)]
 #[cold]
-fn panic(panic: &core::panic::PanicInfo) -> ! {
+pub fn panic(panic: &core::panic::PanicInfo) -> ! {
     use core::fmt;
     struct PrettyPanic<'a>(&'a core::panic::PanicInfo<'a>);
     impl<'a> fmt::Display for PrettyPanic<'a> {

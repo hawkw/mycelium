@@ -27,6 +27,8 @@ pub struct RustbootBootInfo {
 #[derive(Debug)]
 pub struct LockedFramebuf(boot_info::FrameBuffer);
 
+type FramebufWriter = Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>>;
+
 type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
@@ -78,24 +80,34 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
-        use mycelium_trace::{writer::MakeWriterExt, Subscriber};
+        use mycelium_trace::{
+            embedded_graphics,
+            writer::{self, MakeWriterExt},
+            Subscriber,
+        };
+        static COLLECTOR: InitOnce<
+            Subscriber<
+                writer::WithMaxLevel<embedded_graphics::MakeTextWriter<FramebufWriter>>,
+                Option<&'static serial::Port>,
+            >,
+        > = InitOnce::uninitialized();
+
         if !self.has_framebuffer {
             // TODO(eliza): we should probably write to just the serial port if
             // there's no framebuffer...
             return None;
         }
 
-        let display_writer = mycelium_trace::embedded_graphics::MakeTextWriter::new(|| unsafe {
-            Self::mk_framebuf()
-        })
-        .with_max_level(tracing::Level::INFO);
-        let display = Subscriber::display_only(display_writer);
-        let dispatch = if let Some(serial) = serial::com1() {
-            tracing::Dispatch::new(display.with_serial(serial))
-        } else {
-            tracing::Dispatch::new(display)
-        };
-        Some(dispatch)
+        let collector = COLLECTOR.get_or_else(|| {
+            let display_writer =
+                mycelium_trace::embedded_graphics::MakeTextWriter::new(|| unsafe {
+                    Self::mk_framebuf()
+                })
+                .with_max_level(tracing::Level::INFO);
+            Subscriber::display_only(display_writer).with_serial(serial::com1())
+        });
+
+        Some(tracing::Dispatch::from_static(collector))
     }
 
     fn bootloader_name(&self) -> &str {
@@ -108,7 +120,7 @@ impl BootInfo for RustbootBootInfo {
 }
 
 impl RustbootBootInfo {
-    unsafe fn mk_framebuf() -> Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>> {
+    unsafe fn mk_framebuf() -> FramebufWriter {
         let (cfg, buf) = unsafe {
             // Safety: we can reasonably assume this will only be called
             // after `arch_entry`, so if we've failed to initialize the
@@ -286,7 +298,7 @@ pub fn oops(
     // code, which (it turns out) is surprisingly janky...
     tracing::debug!(
         %cause,
-        registers = fault.as_ref().map(|cx| tracing::field::debug(cx.registers())),
+        registers = ?fault.as_ref().map(|cx| tracing::field::debug(cx.registers())),
         "oops"
     );
     // okay, we've dumped the oops to serial, now try to log a nicer event at
@@ -338,6 +350,8 @@ pub fn oops(
         }
     }
     let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
+
+    crate::ALLOC.dump_free_lists();
 
     #[cfg(test)]
     {
@@ -404,7 +418,7 @@ pub fn run_tests() {
         if (test.run)() {
             writeln!(
                 &mut com1.lock(),
-                "{}{} {}",
+                "{} {} {}",
                 mycotest::PASS_TEST,
                 test.module,
                 test.name
@@ -414,8 +428,9 @@ pub fn run_tests() {
         } else {
             writeln!(
                 &mut com1.lock(),
-                "{}{} {}",
+                "{} {} {} {}",
                 mycotest::FAIL_TEST,
+                mycotest::Failure::Fail.as_str(),
                 test.module,
                 test.name
             )
@@ -476,45 +491,45 @@ mycelium_util::decl_test! {
     fn alloc_some_4k_pages() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         let page2 = tracing::info_span!("alloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page1, page2);
         tracing::info_span!("dealloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page1);
+            let res = crate::ALLOC.dealloc(page1);
             tracing::info!(?res, "deallocated page 1");
             res
         })?;
         let page3 = tracing::info_span!("alloc page 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page2, page3);
         tracing::info_span!("dealloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page2);
+            let res = crate::ALLOC.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
             res
         })?;
         let page4 = tracing::info_span!("alloc page 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page3, page4);
         tracing::info_span!("dealloc page 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page3);
+            let res = crate::ALLOC.dealloc(page3);
             tracing::info!(?res, "deallocated page 3");
             res
         })?;
         tracing::info_span!("dealloc page 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page4);
+            let res = crate::ALLOC.dealloc(page4);
             tracing::info!(?res, "deallocated page 4");
             res
         })
@@ -525,42 +540,42 @@ mycelium_util::decl_test! {
     fn alloc_4k_pages_and_ranges() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let range1 = tracing::info_span!("alloc range 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc_range(mm::size::Size4Kb, 16);
+            let res = crate::ALLOC.alloc_range(mm::size::Size4Kb, 16);
             tracing::info!(?res);
             res
         })?;
         let page2 = tracing::info_span!("alloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         tracing::info_span!("dealloc range 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc_range(range1);
+            let res = crate::ALLOC.dealloc_range(range1);
             tracing::info!(?res, "deallocated range 1");
             res
         })?;
         let range3 = tracing::info_span!("alloc range 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc_range(mm::size::Size4Kb, 10);
+            let res = crate::ALLOC.alloc_range(mm::size::Size4Kb, 10);
             tracing::info!(?res);
             res
         })?;
         tracing::info_span!("dealloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page2);
+            let res = crate::ALLOC.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
             res
         })?;
         let range4 = tracing::info_span!("alloc range 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc_range(mm::size::Size4Kb, 8);
+            let res = crate::ALLOC.alloc_range(mm::size::Size4Kb, 8);
             tracing::info!(?res);
             res
         })?;
         tracing::info_span!("dealloc range 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc_range(range3);
+            let res = crate::ALLOC.dealloc_range(range3);
             tracing::info!(?res, "deallocated range 3");
             res
         })?;
         tracing::info_span!("dealloc range 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc_range(range4);
+            let res = crate::ALLOC.dealloc_range(range4);
             tracing::info!(?res, "deallocated range 4");
             res
         })
@@ -571,47 +586,47 @@ mycelium_util::decl_test! {
     fn alloc_some_pages() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         let page2 = tracing::info_span!("alloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page1, page2);
         tracing::info_span!("dealloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page1);
+            let res = crate::ALLOC.dealloc(page1);
             tracing::info!(?res, "deallocated page 1");
             res
         })?;
         // TODO(eliza): when 2mb pages work, test that too...
         // let page3 = tracing::info_span!("alloc page 3").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
+        //     let res = crate::ALLOC.alloc(mm::size::Size2Mb);
         //     tracing::info!(?res);
         //     res
         // })?;
         tracing::info_span!("dealloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page2);
+            let res = crate::ALLOC.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
             res
         })?;
         // let page4 = tracing::info_span!("alloc page 4").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
+        //     let res = crate::ALLOC.alloc(mm::size::Size2Mb);
         //     tracing::info!(?res);
         //     res
         // })?;
         // tracing::info_span!("dealloc page 3").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.dealloc(page3);
+        //     let res = crate::ALLOC.dealloc(page3);
         //     tracing::info!(?res, "deallocated page 3");
         //     res
         // })?;
         // tracing::info_span!("dealloc page 4").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.dealloc(page4);
+        //     let res = crate::ALLOC.dealloc(page4);
         //     tracing::info!(?res, "deallocated page 4");
         //     res
-        // })
+        // })?;
         Ok(())
     }
 }
