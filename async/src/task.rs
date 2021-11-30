@@ -1,8 +1,8 @@
 use crate::loom::UnsafeCell;
 use alloc::boxed::Box;
+use cordyceps::list;
 pub use core::task::{Context, Poll, Waker};
 use core::{future::Future, pin::Pin, ptr::NonNull};
-use cordyceps::list;
 
 mod task_list;
 
@@ -50,7 +50,9 @@ unsafe impl list::Linked for Task {
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
     unsafe fn links(ptr: NonNull<Self::Node>) -> NonNull<list::Links<Self::Node>> {
-        ptr.as_ref().task_list.with_mut(|links| NonNull::new_unchecked(links)
+        ptr.as_ref()
+            .task_list
+            .with_mut(|links| NonNull::new_unchecked(links))
     }
 }
 
