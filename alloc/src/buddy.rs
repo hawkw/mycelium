@@ -10,7 +10,7 @@ use hal_core::{
     Address, PAddr, VAddr,
 };
 use mycelium_util::fmt;
-use mycelium_util::intrusive::{list, List};
+use mycelium_util::intrusive::{list, Linked, List};
 use mycelium_util::math::Log2;
 use mycelium_util::sync::{
     atomic::{
@@ -765,9 +765,9 @@ impl Free {
     }
 }
 
-unsafe impl list::Linked for Free {
+unsafe impl Linked for Free {
     type Handle = ptr::NonNull<Free>;
-    type Node = Self;
+    type Links = list::Links<Self>;
 
     #[inline]
     fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {

@@ -1,3 +1,4 @@
+use super::Linked;
 use crate::fmt;
 use core::{
     marker::PhantomPinned,
@@ -5,69 +6,9 @@ use core::{
     ptr::{self, NonNull},
 };
 
-/// Trait implemented by types which can be members of an intrusive linked list.
-///
-/// # Safety
-///
-/// This is unsafe to implement because it's the implementation's responsibility
-/// to ensure that the `Node` associated type is a valid linked list node. In
-/// particular:
-///
-/// - Implementations must ensure that `Node`s are pinned in memory while they
-///   are in a linked list. While a given `Node` is in a linked list, it may not
-///   be deallocated or moved to a different memory location.
-/// - The `Node` type may not be [`Unpin`].
-/// - Additional safety requirements for individual methods on this trait are
-///   documented on those methods.
-///
-/// Failure to uphold these invariants will result in list corruption, including
-/// dangling pointers.
-///
-/// [`Unpin`]: core::pin::Unpin
-pub unsafe trait Linked {
-    /// The handle owning nodes in the linked list.
-    type Handle;
-
-    /// Type of nodes in the linked list.
-    ///
-    /// When the type implementing `Linked` is not itself a reference, this is
-    /// typically `Self`.
-    ///
-    /// # Safety
-    ///
-    /// This type may not be [`Unpin`].
-    ///
-    ///  [`Unpin`]: core::pin::Unpin
-    type Node: ?Sized;
-
-    /// Convert a `Handle` to a raw pointer, without consuming it.
-    #[allow(clippy::wrong_self_convention)]
-    fn as_ptr(r: &Self::Handle) -> NonNull<Self::Node>;
-
-    /// Convert a raw pointer to a `Handle`.
-    ///
-    /// # Safety
-    ///
-    /// This function is safe to call when:
-    /// - It is valid to construct a `Handle` from a`raw pointer
-    /// - The pointer points to a valid instance of `Self` (e.g. it does not
-    ///   dangle).
-    unsafe fn from_ptr(ptr: NonNull<Self::Node>) -> Self::Handle;
-
-    /// Return the links of the node pointed to by `ptr`.
-    ///
-    /// # Safety
-    ///
-    /// This function is safe to call when:
-    /// - It is valid to construct a `Handle` from a`raw pointer
-    /// - The pointer points to a valid instance of `Self` (e.g. it does not
-    ///   dangle).
-    unsafe fn links(ptr: NonNull<Self::Node>) -> NonNull<Links<Self::Node>>;
-}
-
-pub struct List<T: Linked + ?Sized> {
-    head: Option<NonNull<T::Node>>,
-    tail: Option<NonNull<T::Node>>,
+pub struct List<T: Linked<Links = Links<T>> + ?Sized> {
+    head: Option<NonNull<T>>,
+    tail: Option<NonNull<T>>,
 }
 
 pub struct Links<T: ?Sized> {
@@ -79,19 +20,19 @@ pub struct Links<T: ?Sized> {
     _unpin: PhantomPinned,
 }
 
-pub struct Cursor<'a, T: Linked + ?Sized> {
+pub struct Cursor<'a, T: Linked<Links = Links<T>> + ?Sized> {
     list: &'a mut List<T>,
-    curr: Option<NonNull<T::Node>>,
+    curr: Option<NonNull<T>>,
 }
 
-pub struct Iter<'a, T: Linked + ?Sized> {
+pub struct Iter<'a, T: Linked<Links = Links<T>> + ?Sized> {
     _list: &'a List<T>,
-    curr: Option<NonNull<T::Node>>,
+    curr: Option<NonNull<T>>,
 }
 
 // ==== impl List ====
 
-impl<T: Linked + ?Sized> List<T> {
+impl<T: Linked<Links = Links<T>> + ?Sized> List<T> {
     /// Returns a new empty list.
     pub const fn new() -> List<T> {
         List {
@@ -152,7 +93,7 @@ impl<T: Linked + ?Sized> List<T> {
         while let Some(node) = curr {
             let links = unsafe { T::links(node) };
             let links = unsafe { links.as_ref() };
-            links.assert_valid::<T>(head_links, tail_links);
+            links.assert_valid(head_links, tail_links);
             curr = links.next;
         }
     }
@@ -213,7 +154,7 @@ impl<T: Linked + ?Sized> List<T> {
     ///
     /// The caller *must* ensure that the removed node is an element of this
     /// linked list, and not any other linked list.
-    pub unsafe fn remove(&mut self, item: NonNull<T::Node>) -> Option<T::Handle> {
+    pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
         let mut links = T::links(item);
         let links = links.as_mut();
         tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
@@ -259,10 +200,10 @@ impl<T: Linked + ?Sized> List<T> {
     }
 }
 
-unsafe impl<T: Linked + ?Sized> Send for List<T> where T::Node: Send {}
-unsafe impl<T: Linked + ?Sized> Sync for List<T> where T::Node: Sync {}
+unsafe impl<T: Linked<Links = Links<T>> + ?Sized> Send for List<T> where T: Send {}
+unsafe impl<T: Linked<Links = Links<T>> + ?Sized> Sync for List<T> where T: Sync {}
 
-impl<T: Linked + ?Sized> fmt::Debug for List<T> {
+impl<T: Linked<Links = Links<T>> + ?Sized> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("List")
             .field("head", &fmt::opt(&self.head).or_else("None"))
@@ -291,9 +232,9 @@ impl<T: ?Sized> Links<T> {
         self.next.is_some() || self.prev.is_some()
     }
 
-    fn assert_valid<L>(&self, head: &Self, tail: &Self)
+    fn assert_valid(&self, head: &Self, tail: &Self)
     where
-        L: Linked<Node = T> + ?Sized,
+        T: Linked<Links = Self>,
     {
         if ptr::eq(self, head) {
             assert_eq!(
@@ -319,7 +260,7 @@ impl<T: ?Sized> Links<T> {
 
         if let Some(next) = self.next {
             assert_ne!(
-                unsafe { L::links(next) },
+                unsafe { T::links(next) },
                 NonNull::from(self),
                 "node's next link cannot be to itself; node={:#?}",
                 self
@@ -327,7 +268,7 @@ impl<T: ?Sized> Links<T> {
         }
         if let Some(prev) = self.prev {
             assert_ne!(
-                unsafe { L::links(prev) },
+                unsafe { T::links(prev) },
                 NonNull::from(self),
                 "node's prev link cannot be to itself; node={:#?}",
                 self
@@ -376,25 +317,22 @@ unsafe impl<T: Sync> Sync for Links<T> {}
 
 // === impl Cursor ====
 
-impl<'a, T: Linked + ?Sized> Iterator for Cursor<'a, T> {
+impl<'a, T: Linked<Links = Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_ptr().map(|ptr| unsafe { T::from_ptr(ptr) })
     }
 }
 
-impl<'a, T: Linked + ?Sized> Cursor<'a, T> {
-    fn next_ptr(&mut self) -> Option<NonNull<T::Node>> {
+impl<'a, T: Linked<Links = Links<T>> + ?Sized> Cursor<'a, T> {
+    fn next_ptr(&mut self) -> Option<NonNull<T>> {
         let curr = self.curr.take()?;
         self.curr = unsafe { T::links(curr).as_ref().next };
         Some(curr)
     }
 
     // Find and remove the first element matching a predicate.
-    pub fn remove_first(
-        &mut self,
-        mut predicate: impl FnMut(&T::Node) -> bool,
-    ) -> Option<T::Handle> {
+    pub fn remove_first(&mut self, mut predicate: impl FnMut(&T) -> bool) -> Option<T::Handle> {
         let mut item = None;
         while let Some(node) = self.next_ptr() {
             if predicate(unsafe { node.as_ref() }) {
@@ -410,7 +348,7 @@ impl<'a, T: Linked + ?Sized> Cursor<'a, T> {
 
 // === impl Iter ====
 
-impl<'a, T: Linked + ?Sized> Iterator for Iter<'a, T> {
+impl<'a, T: Linked<Links = Links<T>> + ?Sized> Iterator for Iter<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         let curr = self.curr.take()?;
@@ -429,20 +367,21 @@ mod tests {
     use std::pin::Pin;
 
     #[derive(Debug)]
-    struct Entry {
-        links: Links<Entry>,
+    struct Entry<'a> {
+        links: Links<Entry<'a>>,
         val: i32,
+        _lt: std::marker::PhantomData<&'a ()>,
     }
 
-    unsafe impl<'a> Linked for &'a Entry {
-        type Handle = Pin<&'a Entry>;
-        type Node = Entry;
+    unsafe impl<'a> Linked for Entry<'a> {
+        type Handle = Pin<&'a Entry<'a>>;
+        type Links = Links<Self>;
 
-        fn as_ptr(handle: &Pin<&'_ Entry>) -> NonNull<Entry> {
+        fn as_ptr(handle: &Pin<&'a Entry>) -> NonNull<Entry<'a>> {
             NonNull::from(handle.get_ref())
         }
 
-        unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<&'a Entry> {
+        unsafe fn from_ptr(ptr: NonNull<Entry<'a>>) -> Pin<&'a Entry<'a>> {
             // Safety: if this function is only called by the linked list
             // implementation (and it is not intended for external use), we can
             // expect that the `NonNull` was constructed from a reference which
@@ -455,23 +394,24 @@ mod tests {
             Pin::new_unchecked(&*ptr.as_ptr())
         }
 
-        unsafe fn links(mut target: NonNull<Entry>) -> NonNull<Links<Entry>> {
+        unsafe fn links(mut target: NonNull<Entry<'a>>) -> NonNull<Links<Entry<'a>>> {
             NonNull::from(&mut target.as_mut().links)
         }
     }
 
-    fn entry(val: i32) -> Pin<Box<Entry>> {
+    fn entry<'a>(val: i32) -> Pin<Box<Entry<'a>>> {
         Box::pin(Entry {
             links: Links::new(),
             val,
+            _lt: std::marker::PhantomData,
         })
     }
 
-    fn ptr(r: &Pin<Box<Entry>>) -> NonNull<Entry> {
+    fn ptr<'a>(r: &Pin<Box<Entry<'a>>>) -> NonNull<Entry<'a>> {
         r.as_ref().get_ref().into()
     }
 
-    fn collect_list(list: &mut List<&'_ Entry>) -> Vec<i32> {
+    fn collect_list(list: &mut List<Entry<'_>>) -> Vec<i32> {
         let mut ret = vec![];
 
         while let Some(entry) = list.pop_back() {
@@ -481,7 +421,7 @@ mod tests {
         ret
     }
 
-    fn push_all<'a>(list: &mut List<&'a Entry>, entries: &[Pin<&'a Entry>]) {
+    fn push_all<'a>(list: &mut List<Entry<'a>>, entries: &[Pin<&'a Entry<'a>>]) {
         for entry in entries.iter() {
             list.push_front(*entry);
         }
@@ -503,7 +443,7 @@ mod tests {
 
     #[test]
     fn const_new() {
-        const _: List<&Entry> = List::new();
+        const _: List<Entry> = List::new();
     }
 
     fn trace_init() -> tracing::dispatch::DefaultGuard {
@@ -549,7 +489,7 @@ mod tests {
         let a = entry(5);
         let b = entry(7);
 
-        let mut list = List::<&Entry>::new();
+        let mut list = List::<Entry>::new();
 
         list.push_front(a.as_ref());
         list.assert_valid();
@@ -761,7 +701,7 @@ mod tests {
             let c = entry(31);
             unsafe {
                 // Remove missing
-                let mut list = List::<&Entry>::new();
+                let mut list = List::<Entry<'_>>::new();
 
                 list.push_front(b.as_ref());
                 list.push_front(a.as_ref());
@@ -779,7 +719,7 @@ mod tests {
         let a = entry(5);
         let b = entry(7);
 
-        let mut list = List::<&Entry>::new();
+        let mut list = List::<Entry<'_>>::new();
 
         assert_eq!(0, list.cursor().count());
 
@@ -822,7 +762,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let mut ll = List::<&Entry>::new();
+        let mut ll = List::<Entry<'_>>::new();
         let mut reference = VecDeque::new();
 
         let entries: Vec<_> = (0..ops.len()).map(|i| entry(i as i32)).collect();
