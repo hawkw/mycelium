@@ -7,24 +7,22 @@ use color_eyre::{
 use mycotest::Test;
 use std::{
     collections::BTreeMap,
-    ffi::{OsStr, OsString},
     fmt,
     path::Path,
     process::{Child, Command, ExitStatus, Stdio},
     time::Duration,
 };
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Subcommand)]
 pub enum Cmd {
     /// Builds a bootable disk image and runs it in QEMU (implies: `build`).
     Run {
         /// Redirect the VM's serial output to stdout
-        #[structopt(long, short)]
+        #[clap(long, short)]
         serial: bool,
 
         /// Extra arguments passed to QEMU
-        #[structopt(flatten)]
+        #[clap(flatten)]
         qemu_settings: Settings,
     },
     /// Builds a bootable disk image with tests enabled, and runs the tests in QEMU.
@@ -33,35 +31,35 @@ pub enum Cmd {
         ///
         /// If a test run doesn't complete before this timeout has elapsed, it's
         /// considered to have failed.
-        #[structopt(long, short, parse(try_from_os_str = parse_secs), default_value = "60")]
+        #[clap(long, parse(try_from_str = parse_secs), default_value = "60")]
         timeout_secs: Duration,
 
         /// Disables capturing test serial output.
-        #[structopt(long)]
+        #[clap(long)]
         nocapture: bool,
 
         /// Show captured serial output of successful tests
-        #[structopt(long)]
+        #[clap(long)]
         show_output: bool,
 
         /// Extra arguments passed to QEMU
-        #[structopt(flatten)]
+        #[clap(flatten)]
         qemu_settings: Settings,
     },
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Args)]
 pub struct Settings {
     /// Listen for GDB connections.
-    #[structopt(long, short)]
+    #[clap(long, short)]
     gdb: bool,
 
     /// The TCP port to listen for debug connections on.
-    #[structopt(long, default_value = "1234")]
+    #[clap(long, default_value = "1234")]
     gdb_port: u16,
 
     /// Extra arguments passed to QEMU
-    #[structopt(raw = true)]
+    #[clap(raw = true)]
     qemu_args: Vec<String>,
 }
 
@@ -272,11 +270,10 @@ impl Settings {
     }
 }
 
-fn parse_secs(s: &OsStr) -> std::result::Result<Duration, OsString> {
-    s.to_str()
-        .ok_or_else(|| OsString::from(s))
-        .and_then(|s| s.parse::<u64>().map_err(|_| OsString::from(s)))
+fn parse_secs(s: &str) -> Result<Duration> {
+    s.parse::<u64>()
         .map(Duration::from_secs)
+        .context("not a valid number of seconds")
 }
 
 impl TestResults {

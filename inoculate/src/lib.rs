@@ -1,3 +1,4 @@
+use clap::Parser;
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help,
@@ -6,7 +7,6 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
 };
-use structopt::StructOpt;
 
 pub use color_eyre::eyre::Result;
 pub mod cargo;
@@ -15,46 +15,48 @@ pub mod qemu;
 pub mod term;
 pub mod trace;
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[clap(
     name = "inoculate",
-    about = "the horrible mycelium build tool (because that's a thing we have to have now apparently!)"
+    about,
+    version,
+    author = "Eliza Weisman <eliza@elizas.website>"
 )]
 pub struct Options {
     /// Which command to run?
     ///
     /// By default, an image is built but not run.
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     pub cmd: Option<Subcommand>,
 
     /// Configures build logging.
-    #[structopt(short, long, env = "RUST_LOG", default_value = "inoculate=info,warn")]
+    #[clap(short, long, env = "RUST_LOG", default_value = "inoculate=info,warn")]
     pub log: String,
 
     /// The path to the kernel binary.
-    #[structopt(parse(from_os_str))]
+    #[clap(parse(from_os_str))]
     pub kernel_bin: PathBuf,
 
     /// The path to the `bootloader` crate's Cargo manifest. If this is not
     /// provided, it will be located automatically.
-    #[structopt(long, parse(from_os_str))]
+    #[clap(long, parse(from_os_str))]
     pub bootloader_manifest: Option<PathBuf>,
 
     /// The path to the kernel's Cargo manifest. If this is not
     /// provided, it will be located automatically.
-    #[structopt(long, parse(from_os_str))]
+    #[clap(long, parse(from_os_str))]
     pub kernel_manifest: Option<PathBuf>,
 
     /// Overrides the directory in which to build the output image.
-    #[structopt(short, long, parse(from_os_str))]
+    #[clap(short, long, parse(from_os_str))]
     pub out_dir: Option<PathBuf>,
 
     /// Overrides the target directory for the kernel build.
-    #[structopt(short, long, parse(from_os_str))]
+    #[clap(short, long, parse(from_os_str))]
     pub target_dir: Option<PathBuf>,
 
     /// Whether to emit colors in output.
-    #[structopt(
+    #[clap(
         long,
         possible_values(&["auto", "always", "never"]),
         env = "CARGO_TERM_COLORS",
@@ -63,9 +65,9 @@ pub struct Options {
     pub color: term::ColorMode,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub enum Subcommand {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     Qemu(qemu::Cmd),
     /// Run `gdb` without launching the kernel in QEMU.
     ///
