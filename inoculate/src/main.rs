@@ -1,11 +1,11 @@
+use clap::Parser;
 use color_eyre::{eyre::WrapErr, Help};
 use inoculate::{Options, Result};
-use structopt::StructOpt;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let opts = Options::from_args();
+    let opts = Options::parse();
     opts.trace_init()?;
     let color = opts.color;
     color.set_global();
