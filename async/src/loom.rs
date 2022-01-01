@@ -6,7 +6,7 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::{cell::UnsafeCell, future, hint, sync, thread};
+    pub(crate) use loom::{cell::UnsafeCell, hint, sync, thread};
 
     pub(crate) fn model(f: impl Fn() + Sync + Send + 'static) {
         let iteration = core::sync::atomic::AtomicUsize::new(0);
