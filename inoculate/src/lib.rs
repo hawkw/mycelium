@@ -48,11 +48,11 @@ pub struct Options {
     pub kernel_manifest: Option<PathBuf>,
 
     /// Overrides the directory in which to build the output image.
-    #[clap(short, long, parse(from_os_str))]
+    #[clap(short, long, parse(from_os_str), env = "OUT_DIR")]
     pub out_dir: Option<PathBuf>,
 
     /// Overrides the target directory for the kernel build.
-    #[clap(short, long, parse(from_os_str))]
+    #[clap(short, long, parse(from_os_str), env = "CARGO_TARGET_DIR")]
     pub target_dir: Option<PathBuf>,
 
     /// Whether to emit colors in output.
