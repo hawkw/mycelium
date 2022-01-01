@@ -1,5 +1,6 @@
 pub trait Log2 {
     /// Returns `ceiling(log2(self))`.
+    #[must_use]
     fn log2_ceil(self) -> Self;
 }
 

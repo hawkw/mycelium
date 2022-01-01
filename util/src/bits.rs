@@ -199,11 +199,13 @@ macro_rules! make_packers {
                     stringify!($Packing),
                     "::new`], but only requires importing the packer type."
                 )]
+                #[must_use]
                 pub const fn pack_in(value: $Bits) -> $Packing {
                     $Packing::new(value)
                 }
 
                 /// Returns a packer for packing a value into the first `bits` bits.
+                #[must_use]
                 pub const fn least_significant(n: u32) -> Self {
                     Self {
                         mask: Self::mk_mask(n),
@@ -213,6 +215,7 @@ macro_rules! make_packers {
 
                 /// Returns a packer for packing a value into the next more-significant
                 /// `n` from `self`.
+                #[must_use]
                 pub const fn next(&self, n: u32) -> Self {
                     let shift = self.shift_next();
                     let mask = Self::mk_mask(n) << shift;
@@ -239,6 +242,7 @@ macro_rules! make_packers {
                 /// [`core::ops::Range`]s, and not with
                 /// [`core::ops::RangeInclusive`], [`core::ops::RangeTo`],
                 /// [`core::ops::RangeFrom`],  [`core::ops::RangeToInclusive`]. :(
+                #[must_use]
                 pub const fn from_const_range(range: Range<u32>) -> Self {
                     Self::starting_at(range.start, range.end.saturating_sub(range.start))
                 }
@@ -251,6 +255,7 @@ macro_rules! make_packers {
                 ///   by this packing spec.
                 /// - If the range's start > the range's end (although most
                 ///   range types should prevent this).
+                #[must_use]
                 pub fn from_range(range: impl RangeBounds<u32>) -> Self {
                     use Bound::*;
                     let start = match range.start_bound() {
@@ -290,6 +295,7 @@ macro_rules! make_packers {
                 ///
                 /// The packing pair can be used to pack bits from one location
                 /// into another location, and vice versa.
+                #[must_use]
                 pub const fn pair_at(&self, at: u32) -> $Pair {
                     let dst = Self::starting_at(at, self.bits());
                     let at = at.saturating_sub(1);
@@ -313,15 +319,18 @@ macro_rules! make_packers {
 
                 /// Returns a pair type for packing bits from the range
                 /// specified by `self` after the specified packing spec.
+                #[must_use]
                 pub const fn pair_after(&self, after: &Self) -> $Pair {
                     self.pair_at(after.shift_next())
                 }
 
                 /// Returns the number of bits needed to pack this value.
+                #[must_use]
                 pub const fn bits(&self) -> u32 {
                     Self::SIZE_BITS - (self.mask >> self.shift).leading_zeros()
                 }
 
+                #[must_use]
                 pub const fn max_value(&self) -> $Bits {
                     (1 << self.bits()) - 1
                 }
@@ -332,6 +341,7 @@ macro_rules! make_packers {
                 ///
                 /// [`self.bits()`]: Self::bits
                 #[inline]
+                #[must_use]
                 pub const fn pack_truncating(&self, value: $Bits, base: $Bits) -> $Bits {
                     let value = value & self.max_value();
                     // other bits from `base` we don't want to touch
@@ -347,6 +357,7 @@ macro_rules! make_packers {
                 /// in `value`.
                 ///
                 /// [`self.bits()`]: Self::bits
+                #[must_use]
                 pub fn pack(&self, value: $Bits, base: $Bits) -> $Bits {
                     assert!(
                         value <= self.max_value(),
@@ -366,6 +377,7 @@ macro_rules! make_packers {
                 /// in `value`.
                 ///
                 /// [`self.bits()`]: Self::bits
+                #[must_use]
                 pub fn pack_into<'base>(&self, value: $Bits, base: &'base mut $Bits) -> &'base mut $Bits {
                     assert!(
                         value <= self.max_value(),
@@ -385,6 +397,7 @@ macro_rules! make_packers {
                 ///
                 /// [`self.bits()`]: Self::bits
                 #[inline]
+                #[must_use]
                 pub fn pack_into_truncating<'base>(&self, value: $Bits, base: &'base mut $Bits) -> &'base mut $Bits {
                     let value = value & self.max_value();
                     *base &= !self.mask;
@@ -399,6 +412,7 @@ macro_rules! make_packers {
                 /// self.pack(self.max_value(), base)
                 /// ```
                 #[inline]
+                #[must_use]
                 pub const fn set_all(&self, base: $Bits) -> $Bits {
                     // Note: this will never truncate (the reason why is left
                     // as an exercise to the reader).
@@ -412,6 +426,7 @@ macro_rules! make_packers {
                 /// self.pack(0, base)
                 /// ```
                 #[inline]
+                #[must_use]
                 pub const fn unset_all(&self, base: $Bits) -> $Bits {
                     // may be slightly faster than actually calling
                     // `self.pack(0, base)` when not const-evaling
@@ -425,6 +440,7 @@ macro_rules! make_packers {
                 /// self.pack_into(self.max_value(), base)
                 /// ```
                 #[inline]
+                #[must_use]
                 pub fn set_all_in<'base>(&self, base: &'base mut $Bits) -> &'base mut $Bits {
                     // Note: this will never truncate (the reason why is left
                     // as an exercise to the reader).
@@ -438,6 +454,7 @@ macro_rules! make_packers {
                 /// self.pack_into(0, base)
                 /// ```
                 #[inline]
+                #[must_use]
                 pub fn unset_all_in<'base>(&self, base: &'base mut $Bits) ->  &'base mut $Bits {
                     // may be slightly faster than actually calling
                     // `self.pack(0, base)` when not const-evaling
@@ -448,6 +465,7 @@ macro_rules! make_packers {
 
                 /// Unpack this packer's bits from `source`.
                 #[inline]
+                #[must_use]
                 pub const fn unpack(&self, src: $Bits) -> $Bits {
                     (src & self.mask) >> self.shift
                 }
@@ -455,6 +473,7 @@ macro_rules! make_packers {
                 /// Returns `true` if **any** bits specified by this packing spec
                 /// are set in `src`.
                 #[inline]
+                #[must_use]
                 pub const fn contained_in_any(&self, bits: $Bits) -> bool {
                     bits & self.mask != 0
                 }
@@ -463,6 +482,7 @@ macro_rules! make_packers {
                 /// Returns `true` if **all** bits specified by this packing spec
                 /// are set in `src`.
                 #[inline]
+                #[must_use]
                 pub const fn contained_in_all(&self, bits: $Bits) -> bool {
                     bits & self.mask == self.mask
                 }
@@ -565,6 +585,7 @@ macro_rules! make_packers {
                     stringify!($Pack),
                     "`]."
                 )]
+                #[must_use]
                 pub const fn new(bits: $Bits) -> Self {
                     Self(bits)
                 }
@@ -575,6 +596,7 @@ macro_rules! make_packers {
                 /// Any bits in `value` outside the range specified by `packer`
                 /// are ignored.
                 #[inline]
+                #[must_use]
                 pub const fn pack_truncating(self, value: $Bits, packer: &$Pack) -> Self {
                     Self(packer.pack_truncating(value, self.0))
                 }
@@ -585,12 +607,14 @@ macro_rules! make_packers {
                 /// # Panics
                 ///
                 /// If `value` contains bits outside the range specified by `packer`.
+                #[must_use]
                 pub fn pack(self, value: $Bits, packer: &$Pack) -> Self {
                     Self(packer.pack(value, self.0))
                 }
 
                 /// Set _all_ bits in the range specified by `packer` to 1 in `self`.
                 #[inline]
+                #[must_use]
                 pub const fn set_all(self, packer: &$Pack) -> Self {
                     Self(packer.set_all(self.0))
                 }
@@ -598,6 +622,7 @@ macro_rules! make_packers {
                 /// Set _all_ bits in the range specified by `packer` to 0 in
                 /// `self`.
                 #[inline]
+                #[must_use]
                 pub const fn unset_all(self, packer: &$Pack) -> Self {
                     Self(packer.unset_all(self.0))
                 }
@@ -606,6 +631,7 @@ macro_rules! make_packers {
                 /// Returns `true` if **any** bits specified by `packer` are set
                 /// in `self`.
                 #[inline]
+                #[must_use]
                 pub const fn contains_any(self, packer: &$Pack) -> bool {
                     packer.contained_in_any(self.0)
                 }
@@ -614,6 +640,7 @@ macro_rules! make_packers {
                 /// Returns `true` if **any** bits specified by `packer` are set
                 /// in `self`.
                 #[inline]
+                #[must_use]
                 pub const fn contains_all(self, packer: &$Pack) -> bool {
                     packer.contained_in_all(self.0)
                 }
@@ -621,6 +648,7 @@ macro_rules! make_packers {
                 /// Finish packing bits into `self`, returning the wrapped
                 /// value.
                 #[inline]
+                #[must_use]
                 pub const fn bits(self) -> $Bits {
                     self.0
                 }

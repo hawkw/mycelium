@@ -23,6 +23,7 @@ pub trait Address:
     /// # Panics
     ///
     /// - If `align` is not a power of two.
+    #[must_use]
     fn align_up<A: Into<usize>>(self, align: A) -> Self {
         let align = align.into();
         assert!(align.is_power_of_two());
@@ -45,6 +46,7 @@ pub trait Address:
     /// # }
     /// ````
     #[inline]
+    #[must_use]
     fn align_up_for<T>(self) -> Self {
         self.align_up(core::mem::align_of::<T>())
     }
@@ -56,6 +58,7 @@ pub trait Address:
     /// # Panics
     ///
     /// - If `align` is not a power of two.
+    #[must_use]
     fn align_down<A: Into<usize>>(self, align: A) -> Self {
         let align = align.into();
         assert!(align.is_power_of_two());
@@ -73,6 +76,7 @@ pub trait Address:
     /// # }
     /// ````
     #[inline]
+    #[must_use]
     fn align_down_for<T>(self) -> Self {
         self.align_down(core::mem::align_of::<T>())
     }
@@ -80,6 +84,8 @@ pub trait Address:
     /// Offsets this address by `offset`.
     ///
     /// If the specified offset would overflow, this function saturates instead.
+
+    #[must_use]
     fn offset(self, offset: i32) -> Self {
         if offset > 0 {
             self + offset as usize
@@ -90,6 +96,7 @@ pub trait Address:
     }
 
     /// Returns the difference between `self` and `other`.
+    #[must_use]
     fn difference(self, other: Self) -> isize {
         if self > other {
             -(self.as_usize() as isize - other.as_usize() as isize)
@@ -102,6 +109,7 @@ pub trait Address:
     ///
     /// # Notes
     /// `align` must be a power of two. This is asserted in debug builds.
+    #[must_use]
     fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
         let align = align.into();
         debug_assert!(
@@ -115,6 +123,7 @@ pub trait Address:
     /// Returns `true` if `self` is aligned on the alignment of the specified
     /// type.
     #[inline]
+    #[must_use]
     fn is_aligned_for<T>(self) -> bool {
         self.is_aligned(core::mem::align_of::<T>())
     }
@@ -123,6 +132,7 @@ pub trait Address:
     ///
     /// - If `self` is not aligned for a `T`-typed value.
     #[track_caller]
+    #[must_use]
     fn as_ptr<T>(self) -> *mut T {
         // Some architectures permit unaligned reads, but Rust considers
         // dereferencing a pointer that isn't type-aligned to be UB.
@@ -261,6 +271,7 @@ macro_rules! impl_addrs {
                 /// * If debug assertions are enabled and the address is not
                 ///   valid for the target architecture.
                 #[cfg(target_pointer_width = "64")]
+                #[must_use]
                 pub fn from_u64(u: u64) -> Self {
                     Self::from_usize(u as usize)
                 }
@@ -270,6 +281,7 @@ macro_rules! impl_addrs {
                 /// * If debug assertions are enabled and the address is not
                 ///   valid for the target architecture.
                 #[cfg(target_pointer_width = "u32")]
+                #[must_use]
                 pub fn from_u32(u: u32) -> Self {
                     Self::from_usize(u as usize)
                 }
@@ -284,6 +296,7 @@ macro_rules! impl_addrs {
                 /// * If debug assertions are enabled and the aligned address is
                 ///   not valid for the target architecture.
                 #[inline]
+                #[must_use]
                 pub fn align_up<A: Into<usize>>(self, align: A) -> Self {
                     Address::align_up(self, align)
                 }
@@ -298,6 +311,7 @@ macro_rules! impl_addrs {
                 /// * If debug assertions are enabled and the aligned address is
                 ///   not valid for the target architecture.
                 #[inline]
+                #[must_use]
                 pub fn align_down<A: Into<usize>>(self, align: A) -> Self {
                     Address::align_down(self, align)
                 }
@@ -306,18 +320,21 @@ macro_rules! impl_addrs {
                 ///
                 /// If the specified offset would overflow, this function saturates instead.
                 #[inline]
+                #[must_use]
                 pub fn offset(self, offset: i32) -> Self {
                     Address::offset(self, offset)
                 }
 
                 /// Returns the difference between `self` and `other`.
                 #[inline]
+                #[must_use]
                 pub fn difference(self, other: Self) -> isize {
                     Address::difference(self, other)
                 }
 
                 /// Returns `true` if `self` is aligned on the specified alignment.
                 #[inline]
+                #[must_use]
                 pub fn is_aligned<A: Into<usize>>(self, align: A) -> bool {
                     Address::is_aligned(self, align)
                 }
@@ -325,6 +342,7 @@ macro_rules! impl_addrs {
                 /// Returns `true` if `self` is aligned on the alignment of the specified
                 /// type.
                 #[inline]
+                #[must_use]
                 pub fn is_aligned_for<T>(self) -> bool {
                     Address::is_aligned_for::<T>(self)
                 }
@@ -333,6 +351,7 @@ macro_rules! impl_addrs {
                 ///
                 /// - If `self` is not aligned for a `T`-typed value.
                 #[inline]
+                #[must_use]
                 pub fn as_ptr<T>(self) -> *mut T {
                     Address::as_ptr(self)
                 }

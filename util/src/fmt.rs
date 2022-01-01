@@ -165,6 +165,7 @@ impl<W> WriteExt for W where W: Write {}
 // === impl FmtOption ===
 
 impl<'a, T> FmtOption<'a, T> {
+    #[must_use]
     pub fn new(opt: &'a Option<T>) -> Self {
         Self {
             opt: opt.as_ref(),
@@ -172,6 +173,7 @@ impl<'a, T> FmtOption<'a, T> {
         }
     }
 
+    #[must_use]
     pub fn or_else(self, or_else: &'a str) -> Self {
         Self { or_else, ..self }
     }
