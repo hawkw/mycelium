@@ -894,7 +894,7 @@ pub(crate) mod tlb {
     // supporting 80386s from 1985?
     pub(crate) unsafe fn flush_page(addr: VAddr) {
         tracing::trace!(?addr, "flush_page");
-        asm!("invlpg [{0}]", in(reg) addr.as_usize() as u64);
+        core::arch::asm!("invlpg [{0}]", in(reg) addr.as_usize() as u64);
     }
 }
 

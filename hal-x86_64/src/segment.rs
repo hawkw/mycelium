@@ -1,5 +1,5 @@
 use crate::cpu;
-use core::fmt;
+use core::{arch::asm, fmt};
 use mycelium_util::bits::Pack16;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
