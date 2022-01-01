@@ -16,12 +16,7 @@ pub mod term;
 pub mod trace;
 
 #[derive(Debug, Parser)]
-#[clap(
-    name = "inoculate",
-    about,
-    version,
-    author = "Eliza Weisman <eliza@elizas.website>"
-)]
+#[clap(about, version, author = "Eliza Weisman <eliza@elizas.website>")]
 pub struct Options {
     /// Which command to run?
     ///
@@ -54,6 +49,17 @@ pub struct Options {
     /// Overrides the target directory for the kernel build.
     #[clap(short, long, parse(from_os_str), env = "CARGO_TARGET_DIR")]
     pub target_dir: Option<PathBuf>,
+
+    /// Overrides the path to the `cargo` executable.
+    ///
+    /// By default, this is read from the `CARGO` environment variable.
+    #[clap(
+        long = "cargo",
+        parse(from_os_str),
+        env = "CARGO",
+        default_value = "cargo"
+    )]
+    pub cargo_path: PathBuf,
 
     /// Whether to emit colors in output.
     #[clap(
@@ -191,7 +197,7 @@ impl Options {
             .suggestion("maybe dont run this in `/`???")?;
 
         tracing::trace!(?run_dir);
-        let mut cmd = cargo::cmd("builder")?;
+        let mut cmd = self.cargo_cmd("builder");
         cmd.current_dir(run_dir)
             .arg("--kernel-manifest")
             .arg(&paths.kernel_manifest())
