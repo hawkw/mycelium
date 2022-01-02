@@ -4,10 +4,13 @@
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 
 use super::Linked;
-use crate::sync::{
-    self,
-    atomic::{AtomicPtr, Ordering::*},
-    CachePadded,
+use crate::{
+    cell::UnsafeCell,
+    sync::{
+        self,
+        atomic::{AtomicBool, AtomicPtr, Ordering::*},
+        CachePadded,
+    },
 };
 use core::{
     marker::PhantomPinned,
@@ -21,9 +24,22 @@ pub struct Queue<T: Linked<Links = Links<T>>> {
     head: CachePadded<AtomicPtr<T>>,
 
     /// The tail of the queue. This is accessed only when dequeueing.
-    tail: CachePadded<AtomicPtr<T>>,
+    tail: CachePadded<UnsafeCell<*mut T>>,
+
+    /// Does a consumer handle to the queue exist? If not, it is safe to create a
+    /// new consumer.
+    has_consumer: CachePadded<AtomicBool>,
 
     stub: T::Handle,
+}
+
+/// A handle that holds the right to dequeue elements from the queue.
+///
+/// This can be used when one thread wishes to dequeue many elements at a time,
+/// to avoid the overhead of ensuring mutual exclusion on every `dequeue` or
+/// `try_dequeue` call.
+pub struct Consumer<'q, T: Linked<Links = Links<T>>> {
+    q: &'q Queue<T>,
 }
 
 #[derive(Debug, Default)]
@@ -44,6 +60,7 @@ pub struct Links<T> {
 pub enum TryDequeueError {
     Empty,
     Inconsistent,
+    Busy,
 }
 
 impl<T: Linked<Links = Links<T>>> Queue<T> {
@@ -66,7 +83,8 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
         let ptr = ptr.as_ptr();
         Self {
             head: CachePadded::new(AtomicPtr::new(ptr)),
-            tail: CachePadded::new(AtomicPtr::new(ptr)),
+            tail: CachePadded::new(UnsafeCell::new(ptr)),
+            has_consumer: CachePadded::new(AtomicBool::new(false)),
             stub,
         }
     }
@@ -91,6 +109,125 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     }
 
     /// Try to dequeue an element from the queue, without waiting if the queue
+    /// is in an inconsistent state, or until there is no other consumer trying
+    /// to read from the queue.
+    ///
+    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+    /// is possible for this queue design to enter an incosistent state if the
+    /// consumer tries to dequeue an element while a producer is in the middle
+    /// of enqueueing a new element. If this occurs, the consumer must briefly
+    /// wait before dequeueing an element. This method returns
+    /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
+    /// state.
+    ///
+    /// Additionally, because this is a multi-producer, _single-consumer_ queue,
+    /// only one thread may be dequeueing at a time. If another thread is
+    /// dequeueing, this method returns [`TryDequeueError::Busy`].
+    ///
+    /// The [`Queue::dequeue`] method will instead wait (by spinning with an
+    /// exponential backoff) when the queue is in an inconsistent state or busy.
+    ///
+    /// The unsafe [`Queue::try_dequeue_unchecked`] method will not check if the
+    /// queue is busy before dequeueing an element. This can be used when the
+    /// user code guarantees that no other threads will dequeue from the queue
+    /// concurrently, but this cannot be enforced by the compiler.
+    ///
+    /// # Returns
+    ///
+    /// - `T::Handle` if an element was successfully dequeued
+    /// - [`TryDequeueError::Empty`] if there are no elements in the queue
+    /// - [`TryDequeueError::Inconsistent`] if the queue is currently in an
+    ///   inconsistent state
+    /// - [`TryDequeueError::Busy`] if another thread is currently trying to
+    ///   dequeue a message.
+    pub fn try_dequeue(&self) -> Result<T::Handle, TryDequeueError> {
+        if self
+            .has_consumer
+            .compare_exchange(false, true, AcqRel, Acquire)
+            .is_err()
+        {
+            return Err(TryDequeueError::Busy);
+        }
+
+        let res = unsafe {
+            // Safety: the `has_consumer` flag ensures mutual exclusion of
+            // consumers.
+            self.try_dequeue_unchecked()
+        };
+
+        self.has_consumer.store(false, Release);
+        res
+    }
+
+    /// Dequeue an element from the queue.
+    ///
+    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+    /// is possible for this queue design to enter an incosistent state if the
+    /// consumer tries to dequeue an element while a producer is in the middle
+    /// of enqueueing a new element. If this occurs, the consumer must briefly
+    /// wait before dequeueing an element. This method will wait by spinning
+    /// with an exponential backoff if the queue is in an inconsistent state.
+    ///
+    /// Additionally, because this is a multi-producer, _single-consumer_ queue,
+    /// only one thread may be dequeueing at a time. If another thread is
+    /// dequeueing, this method will spin until the queue is no longer busy.
+    ///
+    /// The [`Queue::try_dequeue`] will return an error rather than waiting when
+    /// the queue is in an inconsistent state or busy.
+    ///
+    /// The unsafe [`Queue::dequeue_unchecked`] method will not check if the
+    /// queue is busy before dequeueing an element. This can be used when the
+    /// user code guarantees that no other threads will dequeue from the queue
+    /// concurrently, but this cannot be enforced by the compiler.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(T::Handle)` if an element was successfully dequeued
+    /// - `None` if the queue is empty or another thread is dequeueing
+    ///
+    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    pub fn dequeue(&self) -> Option<T::Handle> {
+        let mut boff = sync::Backoff::new();
+        loop {
+            match self.try_dequeue() {
+                Ok(val) => return Some(val),
+                Err(TryDequeueError::Empty) => return None,
+                Err(_) => boff.spin(),
+            }
+        }
+    }
+
+    /// Returns a [`Consumer`] handle that reserves the exclusive right to dequeue
+    /// elements from the queue until it is dropped.
+    ///
+    /// If another thread is dequeueing, this method spins until there is no
+    /// other thread dequeueing.
+    pub fn consume(&self) -> Consumer<'_, T> {
+        let mut boff = sync::Backoff::new();
+        loop {
+            if let Some(consumer) = self.try_consume() {
+                return consumer;
+            }
+            while self.has_consumer.load(Relaxed) {
+                boff.spin();
+            }
+        }
+    }
+
+    /// Attempts to reserve a [`Consumer`] handle that holds the exclusive right
+    /// to dequeue  elements from the queue until it is dropped.
+    ///
+    /// If another thread is dequeueing, this returns `None` instead.
+    pub fn try_consume(&self) -> Option<Consumer<'_, T>> {
+        // lock the consumer-side of the queue.
+        self.has_consumer
+            .compare_exchange(false, true, AcqRel, Acquire)
+            .ok()?;
+
+        Some(Consumer { q: self })
+    }
+
+    /// Try to dequeue an element from the queue, without waiting if the queue
     /// is in an inconsistent state.
     ///
     /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
@@ -101,7 +238,7 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
     /// state.
     ///
-    /// The [`Queue::dequeue`] method will instead wait (by spinning with an
+    /// The [`Queue::dequeue_unchecked`] method will instead wait (by spinning with an
     /// exponential backoff) when the queue is in an inconsistent state.
     ///
     /// # Returns
@@ -114,44 +251,46 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     /// # Safety
     ///
     /// This is a multi-producer, *single-consumer* queue. Only one thread/core
-    /// may call `try_dequeue` at a time!
+    /// may call `try_dequeue_unchecked` at a time!
     ///
     /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-    pub unsafe fn try_dequeue(&self) -> Result<T::Handle, TryDequeueError> {
-        let mut tail = NonNull::new(self.tail.load(Relaxed)).ok_or(TryDequeueError::Empty)?;
-        let mut next = T::links(tail).as_ref().next.load(Acquire);
+    pub unsafe fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
+        self.tail.with_mut(|tail| {
+            let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
+            let mut next = T::links(tail_node).as_ref().next.load(Acquire);
 
-        if tail == T::as_ptr(&self.stub) {
-            debug_assert!(T::links(tail).as_ref().is_stub);
+            if tail_node == T::as_ptr(&self.stub) {
+                debug_assert!(T::links(tail_node).as_ref().is_stub);
 
-            let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
-            self.tail.store(next, Relaxed);
-            tail = next_node;
-            next = T::links(next_node).as_ref().next.load(Acquire);
-        }
+                let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
+                *tail = next;
+                tail_node = next_node;
+                next = T::links(next_node).as_ref().next.load(Acquire);
+            }
 
-        if !next.is_null() {
-            self.tail.store(next, Relaxed);
-            return Ok(T::from_ptr(tail));
-        }
+            if !next.is_null() {
+                *tail = next;
+                return Ok(T::from_ptr(tail_node));
+            }
 
-        let head = self.head.load(Acquire);
+            let head = self.head.load(Acquire);
 
-        if tail.as_ptr() != head {
-            return Err(TryDequeueError::Inconsistent);
-        }
+            if tail_node.as_ptr() != head {
+                return Err(TryDequeueError::Inconsistent);
+            }
 
-        self.enqueue_inner(T::as_ptr(&self.stub));
+            self.enqueue_inner(T::as_ptr(&self.stub));
 
-        next = T::links(tail).as_ref().next.load(Acquire);
-        if next.is_null() {
-            return Err(TryDequeueError::Empty);
-        }
+            next = T::links(tail_node).as_ref().next.load(Acquire);
+            if next.is_null() {
+                return Err(TryDequeueError::Empty);
+            }
 
-        self.tail.store(next, Relaxed);
+            *tail = next;
 
-        debug_assert!(!T::links(tail).as_ref().is_stub);
-        Ok(T::from_ptr(tail))
+            debug_assert!(!T::links(tail_node).as_ref().is_stub);
+            Ok(T::from_ptr(tail_node))
+        })
     }
 
     /// Dequeue an element from the queue.
@@ -177,13 +316,16 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     /// may call `dequeue` at a time!
     ///
     /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-    pub unsafe fn dequeue(&self) -> Option<T::Handle> {
+    pub unsafe fn dequeue_unchecked(&self) -> Option<T::Handle> {
         let mut boff = sync::Backoff::new();
         loop {
-            match self.try_dequeue() {
+            match self.try_dequeue_unchecked() {
                 Ok(val) => return Some(val),
                 Err(TryDequeueError::Empty) => return None,
                 Err(TryDequeueError::Inconsistent) => boff.spin(),
+                Err(TryDequeueError::Busy) => {
+                    unreachable!("try_dequeue_unchecked never returns `Busy`!")
+                }
             }
         }
     }
@@ -191,10 +333,12 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
 
 impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
     fn drop(&mut self) {
-        // All atomic operations in the `Drop` impl can be `Relaxed`, because we
-        // have exclusive ownership of the queue --- if we are dropping it, no
-        // one else is enqueueing new nodes.
-        let mut current = self.tail.load(Relaxed);
+        let mut current = self.tail.with_mut(|tail| unsafe {
+            // Safety: because `Drop` is called with `&mut self`, we have
+            // exclusive ownership over the queue, so it's always okay to touch
+            // the tail cell.
+            *tail
+        });
         while let Some(node) = NonNull::new(current) {
             unsafe {
                 let links = T::links(node).as_ref();
@@ -235,6 +379,80 @@ where
 }
 unsafe impl<T: Send + Linked<Links = Links<T>>> Sync for Queue<T> {}
 
+// === impl Consumer ===
+
+impl<'q, T: Send + Linked<Links = Links<T>>> Consumer<'q, T> {
+    /// Dequeue an element from the queue.
+    ///
+    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+    /// is possible for this queue design to enter an incosistent state if the
+    /// consumer tries to dequeue an element while a producer is in the middle
+    /// of enqueueing a new element. If this occurs, the consumer must briefly
+    /// wait before dequeueing an element. This method will wait by spinning
+    /// with an exponential backoff if the queue is in an inconsistent state.
+    ///
+    /// The [`Consumer::try_dequeue`] will return an error rather than waiting when
+    /// the queue is in an inconsistent state.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(T::Handle)` if an element was successfully dequeued
+    /// - `None` if the queue is empty
+    ///
+    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    #[inline]
+    pub fn dequeue(&self) -> Option<T::Handle> {
+        debug_assert!(self.q.has_consumer.load(Acquire));
+        unsafe {
+            // Safety: we have reserved exclusive access to the queue.
+            self.q.dequeue_unchecked()
+        }
+    }
+
+    /// Try to dequeue an element from the queue, without waiting if the queue
+    /// is in an inconsistent state.
+    ///
+    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+    /// is possible for this queue design to enter an incosistent state if the
+    /// consumer tries to dequeue an element while a producer is in the middle
+    /// of enqueueing a new element. If this occurs, the consumer must briefly
+    /// wait before dequeueing an element. This method returns
+    /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
+    /// state.
+    ///
+    /// The [`Consumer::dequeue`] method will instead wait (by spinning with an
+    /// exponential backoff) when the queue is in an inconsistent state.
+    ///
+    /// # Returns
+    ///
+    /// - `T::Handle` if an element was successfully dequeued
+    /// - [`TryDequeueError::Empty`] if there are no elements in the queue
+    /// - [`TryDequeueError::Inconsistent`] if the queue is currently in an
+    ///   inconsistent state
+    ///
+    ///
+    /// # Returns
+    ///
+    /// - `Some(T::Handle)` if an element was successfully dequeued
+    /// - `None` if the queue is empty
+    ///
+    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    #[inline]
+    pub fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
+        debug_assert!(self.q.has_consumer.load(Acquire));
+        unsafe {
+            // Safety: we have reserved exclusive access to the queue.
+            self.q.try_dequeue_unchecked()
+        }
+    }
+}
+
+impl<'q, T: Linked<Links = Links<T>>> Drop for Consumer<'q, T> {
+    fn drop(&mut self) {
+        self.q.has_consumer.store(false, Release);
+    }
+}
+
 // === impl Links ===
 
 impl<T> Links<T> {
@@ -265,6 +483,8 @@ mod loom {
 
     #[test]
     fn doesnt_leak() {
+        // Test that dropping the queue drops any messages that haven't been
+        // consumed by the consumer.
         const THREADS: i32 = 2;
         const MSGS: i32 = THREADS * 2;
         // Only consume half as many messages as are sent, to ensure dropping
@@ -277,18 +497,9 @@ mod loom {
         loom::model(move || {
             let stub = entry(666);
             let q = Arc::new(Queue::<Entry>::new_with_stub(stub));
-            let q = Arc::new(q);
 
             let threads: Vec<_> = (0..threads)
-                .map(|thread| {
-                    let q = q.clone();
-                    thread::spawn(move || {
-                        for i in 0..msgs {
-                            q.enqueue(entry(i + (thread * 10)));
-                            info!(thread, "enqueue msg {}/{}", i, msgs);
-                        }
-                    })
-                })
+                .map(|thread| thread::spawn(do_tx(thread, msgs, &q)))
                 .collect();
 
             let mut i = 0;
@@ -304,6 +515,51 @@ mod loom {
                     }
                 }
             }
+
+            for thread in threads {
+                thread.join().unwrap();
+            }
+        })
+    }
+
+    fn do_tx(thread: i32, msgs: i32, q: &Arc<Queue<Entry>>) -> impl FnOnce() + Send + Sync {
+        let q = q.clone();
+        move || {
+            for i in 0..msgs {
+                q.enqueue(entry(i + (thread * 10)));
+                info!(thread, "enqueue msg {}/{}", i, msgs);
+            }
+        }
+    }
+
+    #[test]
+    fn mpmc() {
+        // Tests multiple consumers competing for access to the consume side of
+        // the queue.
+        const THREADS: i32 = 2;
+        const MSGS: i32 = THREADS * 2;
+
+        fn do_rx(thread: i32, q: Arc<Queue<Entry>>) {
+            let mut i = 0;
+            while let Some(val) = q.dequeue() {
+                info!(?val, ?thread, "dequeue {}/{}", i, THREADS * MSGS);
+                i += 1;
+            }
+        }
+
+        loom::model(|| {
+            let stub = entry(666);
+            let q = Arc::new(Queue::<Entry>::new_with_stub(stub));
+
+            let mut threads: Vec<_> = (0..THREADS)
+                .map(|thread| thread::spawn(do_tx(thread, MSGS, &q)))
+                .collect();
+
+            threads.push(thread::spawn({
+                let q = q.clone();
+                move || do_rx(THREADS + 1, q)
+            }));
+            do_rx(THREADS + 2, q);
 
             for thread in threads {
                 thread.join().unwrap();
