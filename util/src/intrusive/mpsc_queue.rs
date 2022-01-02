@@ -25,6 +25,11 @@ pub struct Queue<T: Linked<Links = Links<T>>> {
 #[derive(Debug, Default)]
 pub struct Links<T> {
     next: AtomicPtr<T>,
+
+    /// Used for debug mode consistency checking only.
+    #[cfg(debug_assertions)]
+    is_stub: bool,
+
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
     /// https://github.com/rust-lang/rust/issues/63818.
@@ -46,7 +51,15 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     }
 
     pub fn new_with_stub(stub: T::Handle) -> Self {
-        let ptr = T::as_ptr(&stub).as_ptr();
+        let ptr = T::as_ptr(&stub);
+
+        // In debug mode, set the stub flag for consistency checking.
+        #[cfg(debug_assertions)]
+        unsafe {
+            T::links(ptr).as_mut().is_stub = true;
+        }
+
+        let ptr = ptr.as_ptr();
         Self {
             head: AtomicPtr::new(ptr),
             tail: AtomicPtr::new(ptr),
@@ -56,7 +69,11 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
 
     pub fn enqueue(&self, node: T::Handle) {
         let node = ManuallyDrop::new(node);
-        self.enqueue_inner(T::as_ptr(&node))
+        let ptr = T::as_ptr(&node);
+
+        debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub);
+
+        self.enqueue_inner(ptr)
     }
 
     fn enqueue_inner(&self, ptr: NonNull<T>) {
@@ -101,6 +118,8 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
         let mut next = T::links(tail).as_ref().next.load(Acquire);
 
         if tail == T::as_ptr(&self.stub) {
+            debug_assert!(T::links(tail).as_ref().is_stub);
+
             let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
             self.tail.store(next, Relaxed);
             tail = next_node;
@@ -126,6 +145,8 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
         }
 
         self.tail.store(next, Relaxed);
+
+        debug_assert!(!T::links(tail).as_ref().is_stub);
         Ok(T::from_ptr(tail))
     }
 
@@ -164,22 +185,33 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     }
 }
 
-// impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
-//     fn drop(&mut self) {
-//         // All atomic operations in the `Drop` impl can be `Relaxed`, because we
-//         // have exclusive ownership of the queue --- if we are dropping it, no
-//         // one else is enqueueing new nodes.
-//         let mut current = self.tail.load(Relaxed);
-//         while let Some(node) = NonNull::new(current) {
-//             unsafe {
-//                 let next = T::links(node).as_ref().next.load(Relaxed);
-//                 // Convert the pointer to the owning handle and drop it.
-//                 drop(T::from_ptr(node));
-//                 current = next;
-//             }
-//         }
-//     }
-// }
+impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
+    fn drop(&mut self) {
+        // All atomic operations in the `Drop` impl can be `Relaxed`, because we
+        // have exclusive ownership of the queue --- if we are dropping it, no
+        // one else is enqueueing new nodes.
+        let mut current = self.tail.load(Relaxed);
+        while let Some(node) = NonNull::new(current) {
+            unsafe {
+                let links = T::links(node).as_ref();
+                let next = links.next.load(Relaxed);
+
+                // Skip dropping the stub node; it is owned by the queue and
+                // will be dropped when the queue is dropped. If we dropped it
+                // here, that would cause a double free!
+                if node != T::as_ptr(&self.stub) {
+                    // Convert the pointer to the owning handle and drop it.
+                    debug_assert!(!links.is_stub);
+                    drop(T::from_ptr(node));
+                } else {
+                    debug_assert!(links.is_stub);
+                }
+
+                current = next;
+            }
+        }
+    }
+}
 
 impl<T> Default for Queue<T>
 where
@@ -206,6 +238,8 @@ impl<T> Links<T> {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
             _unpin: PhantomPinned,
+            #[cfg(debug_assertions)]
+            is_stub: false,
         }
     }
 }
@@ -378,9 +412,5 @@ mod test_util {
             val,
             _track: alloc::Track::new(()),
         })
-    }
-
-    pub(super) fn ptr(r: &Pin<Box<Entry>>) -> NonNull<Entry> {
-        r.as_ref().get_ref().into()
     }
 }
