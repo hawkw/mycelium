@@ -164,22 +164,22 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     }
 }
 
-impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
-    fn drop(&mut self) {
-        // All atomic operations in the `Drop` impl can be `Relaxed`, because we
-        // have exclusive ownership of the queue --- if we are dropping it, no
-        // one else is enqueueing new nodes.
-        let mut current = self.tail.load(Relaxed);
-        while let Some(node) = NonNull::new(current) {
-            unsafe {
-                let next = T::links(node).as_ref().next.load(Relaxed);
-                // Convert the pointer to the owning handle and drop it.
-                drop(T::from_ptr(node));
-                current = next;
-            }
-        }
-    }
-}
+// impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
+//     fn drop(&mut self) {
+//         // All atomic operations in the `Drop` impl can be `Relaxed`, because we
+//         // have exclusive ownership of the queue --- if we are dropping it, no
+//         // one else is enqueueing new nodes.
+//         let mut current = self.tail.load(Relaxed);
+//         while let Some(node) = NonNull::new(current) {
+//             unsafe {
+//                 let next = T::links(node).as_ref().next.load(Relaxed);
+//                 // Convert the pointer to the owning handle and drop it.
+//                 drop(T::from_ptr(node));
+//                 current = next;
+//             }
+//         }
+//     }
+// }
 
 impl<T> Default for Queue<T>
 where
@@ -213,7 +213,65 @@ impl<T> Links<T> {
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
+    use crate::loom::{self, sync::Arc, thread};
     use test_util::*;
+    use tracing_01::info;
+
+    #[test]
+    fn basically_works_loom() {
+        const THREADS: i32 = 2;
+        const MSGS: i32 = THREADS * 2;
+        const TOTAL_MSGS: i32 = THREADS * MSGS;
+        basically_works_test(THREADS, MSGS, TOTAL_MSGS);
+    }
+
+    #[test]
+    fn doesnt_leak() {
+        const THREADS: i32 = 2;
+        const MSGS: i32 = THREADS * 2;
+        // Only consume half as many messages as are sent, to ensure dropping
+        // the queue does not leak.
+        const TOTAL_MSGS: i32 = (THREADS * MSGS) / 2;
+        basically_works_test(THREADS, MSGS, TOTAL_MSGS);
+    }
+
+    fn basically_works_test(threads: i32, msgs: i32, total_msgs: i32) {
+        loom::model(move || {
+            let stub = entry(666);
+            let q = Arc::new(Queue::<Entry>::new_with_stub(stub));
+            let q = Arc::new(q);
+
+            let threads: Vec<_> = (0..threads)
+                .map(|thread| {
+                    let q = q.clone();
+                    thread::spawn(move || {
+                        for i in 0..msgs {
+                            q.enqueue(entry(i));
+                            info!(thread, "enqueue msg {}/{}", i, msgs);
+                        }
+                    })
+                })
+                .collect();
+
+            let mut i = 0;
+            while i < total_msgs {
+                match unsafe { q.try_dequeue() } {
+                    Ok(val) => {
+                        i += 1;
+                        info!(?val, "dequeue {}/{}", i, total_msgs);
+                    }
+                    Err(err) => {
+                        info!(?err, "dequeue error");
+                        thread::yield_now();
+                    }
+                }
+            }
+
+            for thread in threads {
+                thread.join().unwrap();
+            }
+        })
+    }
 }
 
 #[cfg(all(test, not(loom)))]
@@ -256,7 +314,7 @@ mod tests {
 
         let mut i = 0;
         while i < THREADS * MSGS {
-            if dbg!(unsafe { q.try_dequeue() }).is_ok() {
+            if unsafe { q.try_dequeue() }.is_ok() {
                 i += 1;
                 println!("recv {}/{}", i, THREADS * MSGS);
             }
@@ -271,12 +329,15 @@ mod tests {
 #[cfg(test)]
 mod test_util {
     use super::*;
+    use crate::loom::alloc;
     use std::pin::Pin;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub(super) struct Entry {
         links: Links<Entry>,
         val: i32,
+        // participate in loom leak checking
+        _track: alloc::Track<()>,
     }
 
     impl std::cmp::PartialEq for Entry {
@@ -315,6 +376,7 @@ mod test_util {
         Box::pin(Entry {
             links: Links::new(),
             val,
+            _track: alloc::Track::new(()),
         })
     }
 
