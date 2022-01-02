@@ -1,5 +1,5 @@
 use super::atomic::{AtomicBool, Ordering::*};
-use crate::cell::CausalCell;
+use crate::cell::{MutPtr, UnsafeCell};
 use core::{
     fmt,
     ops::{Deref, DerefMut},
@@ -9,27 +9,28 @@ use core::{
 #[derive(Debug)]
 pub struct Mutex<T> {
     locked: AtomicBool,
-    data: CausalCell<T>,
+    data: UnsafeCell<T>,
 }
 
 pub struct MutexGuard<'a, T> {
-    mutex: &'a Mutex<T>,
+    ptr: MutPtr<T>,
+    locked: &'a AtomicBool,
 }
 
 impl<T> Mutex<T> {
-    #[cfg(not(test))]
+    #[cfg(not(loom))]
     pub const fn new(data: T) -> Self {
         Self {
             locked: AtomicBool::new(false),
-            data: CausalCell::new(data),
+            data: UnsafeCell::new(data),
         }
     }
 
-    #[cfg(test)]
+    #[cfg(loom)]
     pub fn new(data: T) -> Self {
         Self {
             locked: AtomicBool::new(false),
-            data: CausalCell::new(data),
+            data: UnsafeCell::new(data),
         }
     }
 
@@ -39,7 +40,10 @@ impl<T> Mutex<T> {
             .compare_exchange(false, true, Acquire, Acquire)
             .is_ok()
         {
-            Some(MutexGuard { mutex: self })
+            Some(MutexGuard {
+                ptr: self.data.get_mut(),
+                locked: &self.locked,
+            })
         } else {
             None
         }
@@ -56,7 +60,11 @@ impl<T> Mutex<T> {
                 boff.spin();
             }
         }
-        MutexGuard { mutex: self }
+
+        MutexGuard {
+            ptr: self.data.get_mut(),
+            locked: &self.locked,
+        }
     }
 
     /// Forcibly unlock the mutex.
@@ -85,14 +93,24 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 
 impl<'a, T> Deref for MutexGuard<'a, T> {
     type Target = T;
+    #[inline]
     fn deref(&self) -> &Self::Target {
-        self.mutex.data.with(|ptr| unsafe { &*ptr })
+        unsafe {
+            // Safety: we are holding the lock, so it is okay to dereference the
+            // mut pointer.
+            &*self.ptr.deref()
+        }
     }
 }
 
 impl<'a, T> DerefMut for MutexGuard<'a, T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.mutex.data.with_mut(|ptr| unsafe { &mut *ptr })
+        unsafe {
+            // Safety: we are holding the lock, so it is okay to dereference the
+            // mut pointer.
+            self.ptr.deref()
+        }
     }
 }
 
@@ -102,7 +120,7 @@ where
 {
     #[inline]
     fn as_ref(&self) -> &R {
-        self.mutex.data.with(|ptr| unsafe { &*ptr }.as_ref())
+        self.deref().as_ref()
     }
 }
 
@@ -112,15 +130,13 @@ where
 {
     #[inline]
     fn as_mut(&mut self) -> &mut R {
-        self.mutex
-            .data
-            .with_mut(|ptr| unsafe { &mut *ptr }.as_mut())
+        self.deref_mut().as_mut()
     }
 }
 
 impl<'a, T> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
-        self.mutex.locked.store(false, Release);
+        self.locked.store(false, Release);
     }
 }
 
@@ -136,7 +152,7 @@ impl<'a, T: fmt::Display> fmt::Display for MutexGuard<'a, T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, loom))]
 mod tests {
     use loom::thread;
     use std::prelude::v1::*;
