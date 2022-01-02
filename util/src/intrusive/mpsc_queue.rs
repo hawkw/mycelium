@@ -246,7 +246,7 @@ mod loom {
                     let q = q.clone();
                     thread::spawn(move || {
                         for i in 0..msgs {
-                            q.enqueue(entry(i));
+                            q.enqueue(entry(i + (thread * 10)));
                             info!(thread, "enqueue msg {}/{}", i, msgs);
                         }
                     })
