@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 pub(crate) use self::inner::*;
 
 #[cfg(loom)]

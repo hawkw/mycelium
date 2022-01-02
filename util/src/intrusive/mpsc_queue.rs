@@ -7,6 +7,7 @@ use super::Linked;
 use crate::sync::{
     self,
     atomic::{AtomicPtr, Ordering::*},
+    CachePadded,
 };
 use core::{
     marker::PhantomPinned,
@@ -17,8 +18,11 @@ use core::{
 #[derive(Debug)]
 pub struct Queue<T: Linked<Links = Links<T>>> {
     /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
-    head: AtomicPtr<T>,
-    tail: AtomicPtr<T>,
+    head: CachePadded<AtomicPtr<T>>,
+
+    /// The tail of the queue. This is accessed only when dequeueing.
+    tail: CachePadded<AtomicPtr<T>>,
+
     stub: T::Handle,
 }
 
@@ -61,8 +65,8 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
 
         let ptr = ptr.as_ptr();
         Self {
-            head: AtomicPtr::new(ptr),
-            tail: AtomicPtr::new(ptr),
+            head: CachePadded::new(AtomicPtr::new(ptr)),
+            tail: CachePadded::new(AtomicPtr::new(ptr)),
             stub,
         }
     }
