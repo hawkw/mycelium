@@ -10,6 +10,11 @@ pub mod once;
 pub mod spin;
 pub use self::once::{InitOnce, Lazy};
 
+use core::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
+
 pub mod hint {
     #[cfg(not(loom))]
     pub use core::hint::spin_loop;

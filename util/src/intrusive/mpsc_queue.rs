@@ -4,13 +4,9 @@
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 
 use super::Linked;
-use crate::{
-    cell::UnsafeCell,
-    fmt,
-    sync::{
-        self,
-        atomic::{AtomicPtr, Ordering::*},
-    },
+use crate::sync::{
+    self,
+    atomic::{AtomicPtr, Ordering::*},
 };
 use core::{
     marker::PhantomPinned,
@@ -22,7 +18,7 @@ use core::{
 pub struct Queue<T: Linked<Links = Links<T>>> {
     /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
     head: AtomicPtr<T>,
-    tail: UnsafeCell<*mut T>,
+    tail: AtomicPtr<T>,
     stub: T::Handle,
 }
 
@@ -174,18 +170,33 @@ impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
         // have exclusive ownership of the queue --- if we are dropping it, no
         // one else is enqueueing new nodes.
         let mut current = self.tail.load(Relaxed);
-        while !current.is_null() {
+        while let Some(node) = NonNull::new(current) {
             unsafe {
-                let next = (*current).next.load(Relaxed);
+                let next = T::links(node).as_ref().next.load(Relaxed);
                 // Convert the pointer to the owning handle and drop it.
-                drop(T::from_ptr(current));
+                drop(T::from_ptr(node));
                 current = next;
             }
         }
     }
 }
 
-unsafe impl<T: Send + Linked<Links = Links<T>>> Send for Queue<T> {}
+impl<T> Default for Queue<T>
+where
+    T: Linked<Links = Links<T>>,
+    T::Handle: Default,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+unsafe impl<T> Send for Queue<T>
+where
+    T: Send + Linked<Links = Links<T>>,
+    T::Handle: Send,
+{
+}
 unsafe impl<T: Send + Linked<Links = Links<T>>> Sync for Queue<T> {}
 
 // === impl Links ===
@@ -245,7 +256,7 @@ mod tests {
 
         let mut i = 0;
         while i < THREADS * MSGS {
-            if let Ok(_) = unsafe { q.try_dequeue() } {
+            if dbg!(unsafe { q.try_dequeue() }).is_ok() {
                 i += 1;
                 println!("recv {}/{}", i, THREADS * MSGS);
             }
