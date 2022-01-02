@@ -1,10 +1,9 @@
-# advisory CI jobs that are allowed to fail.
-#
-# these are intended as warnings about things that should be addressed in the
-# future, but aren't hard PR blockers.
-name: CI (warnings)
+# Check if we can build mycelium on whatever the most recent Rust nightly is.
+name: Latest nightly
 
-on: [push]
+on:
+  schedule:
+    - cron: "0 0 * * *"
 
 env:
   # disable incremental compilation.
@@ -29,33 +28,28 @@ env:
 
 jobs:
 
-  # are there any annoying clippy lints we ought to clean up (host build)?
-  clippy-host:
-    name: cargo clippy (host)
+  # check whether we can build mycelium on the *latest* Rust nightly.
+  #
+  # the actual build is run on a pinned nightly revision in the `rust-toolchain`
+  # file. this job checks to see if we can build mycelium on whatever the most
+  # recent nightly is. if this fails, there are breaking changes we need to
+  # address before updating to a newer nightly build.
+  clippy-nightly:
+    name: check latest nightly
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
-      run: rustup show
-    - uses: actions/checkout@v2
-    - name: run clippy
-      uses: actions-rs/clippy-check@v1.0.5
+      uses: actions-rs/toolchain@v1.0.6
       with:
-        name: clippy-host
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-features
-
-  # are there any annoying clippy lints we ought to clean up (x86-64 cross
-  # build)?
-  clippy-x64:
-    name: cargo clippy (cross x64)
-    runs-on: ubuntu-latest
-    steps:
-    - name: install rust toolchain
-      run: rustup show
+        profile: minimal
+        components: clippy
+        toolchain: nightly
+        override: true
     - uses: actions/checkout@v2
+    - name: print current nightly
+      run: rustc --version && cargo --version
     - name: run cargo clippy
-      uses: actions-rs/clippy-check@v1.0.5
+      uses: actions-rs/cargo@v1.0.1
       with:
-        name: clippy-x64
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: -Z build-std=core,alloc --target=x86_64-mycelium.json --all-features
+        command: clippy
+        args: --all --all-features
