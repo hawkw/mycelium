@@ -71,6 +71,33 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
         }
     }
 
+    /// Try to dequeue an element from the queue, without waiting if the queue
+    /// is in an inconsistent state.
+    ///
+    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+    /// is possible for this queue design to enter an incosistent state if the
+    /// consumer tries to dequeue an element while a producer is in the middle
+    /// of enqueueing a new element. If this occurs, the consumer must briefly
+    /// wait before dequeueing an element. This method returns
+    /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
+    /// state.
+    ///
+    /// The [`Queue::dequeue`] method will instead wait (by spinning with an
+    /// exponential backoff) when the queue is in an inconsistent state.
+    ///
+    /// # Returns
+    ///
+    /// - `T::Handle` if an element was successfully dequeued
+    /// - [`TryDequeueError::Empty`] if there are no elements in the queue
+    /// - [`TryDequeueError::Inconsistent`] if the queue is currently in an
+    ///   inconsistent state
+    ///
+    /// # Safety
+    ///
+    /// This is a multi-producer, *single-consumer* queue. Only one thread/core
+    /// may call `try_dequeue` at a time!
+    ///
+    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
     pub unsafe fn try_dequeue(&self) -> Result<T::Handle, TryDequeueError> {
         let mut tail = NonNull::new(self.tail.load(Relaxed)).ok_or(TryDequeueError::Empty)?;
         let mut next = T::links(tail).as_ref().next.load(Acquire);
@@ -104,6 +131,29 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
         Ok(T::from_ptr(tail))
     }
 
+    /// Dequeue an element from the queue.
+    ///
+    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+    /// is possible for this queue design to enter an incosistent state if the
+    /// consumer tries to dequeue an element while a producer is in the middle
+    /// of enqueueing a new element. If this occurs, the consumer must briefly
+    /// wait before dequeueing an element. This method will wait by spinning
+    /// with an exponential backoff if the queue is in an inconsistent state.
+    ///
+    /// The [`Queue::try_dequeue`] will return an error rather than waiting when
+    /// the queue is in an inconsistent state.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(T::Handle)` if an element was successfully dequeued
+    /// - `None` if the queue is empty
+    ///
+    /// # Safety
+    ///
+    /// This is a multi-producer, *single-consumer* queue. Only one thread/core
+    /// may call `dequeue` at a time!
+    ///
+    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
     pub unsafe fn dequeue(&self) -> Option<T::Handle> {
         let mut boff = sync::Backoff::new();
         loop {
