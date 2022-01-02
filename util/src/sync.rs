@@ -1,9 +1,9 @@
 //! Synchronization primitives.
 
-#[cfg(test)]
+#[cfg(loom)]
 pub use loom::sync::atomic;
 
-#[cfg(not(test))]
+#[cfg(not(loom))]
 pub use core::sync::atomic;
 
 pub mod once;
@@ -11,10 +11,10 @@ pub mod spin;
 pub use self::once::{InitOnce, Lazy};
 
 pub mod hint {
-    #[cfg(not(test))]
+    #[cfg(not(loom))]
     pub use core::hint::spin_loop;
 
-    #[cfg(test)]
+    #[cfg(loom)]
     pub use loom::sync::atomic::spin_loop_hint as spin_loop;
 }
 

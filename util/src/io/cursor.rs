@@ -234,7 +234,7 @@ impl Write for Cursor<Box<[u8]>> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use crate::io::prelude::*;
     use crate::io::{Cursor, SeekFrom};
