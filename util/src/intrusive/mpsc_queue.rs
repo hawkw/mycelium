@@ -19,7 +19,7 @@ use core::{
 };
 
 #[derive(Debug)]
-pub struct Queue<T: Linked<Links = Links<T>>> {
+pub struct Queue<T: Linked<Links<T>>> {
     /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
     head: CachePadded<AtomicPtr<T>>,
 
@@ -38,7 +38,7 @@ pub struct Queue<T: Linked<Links = Links<T>>> {
 /// This can be used when one thread wishes to dequeue many elements at a time,
 /// to avoid the overhead of ensuring mutual exclusion on every `dequeue` or
 /// `try_dequeue` call.
-pub struct Consumer<'q, T: Linked<Links = Links<T>>> {
+pub struct Consumer<'q, T: Linked<Links<T>>> {
     q: &'q Queue<T>,
 }
 
@@ -63,7 +63,7 @@ pub enum TryDequeueError {
     Busy,
 }
 
-impl<T: Linked<Links = Links<T>>> Queue<T> {
+impl<T: Linked<Links<T>>> Queue<T> {
     pub fn new() -> Self
     where
         T::Handle: Default,
@@ -331,7 +331,7 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     }
 }
 
-impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
+impl<T: Linked<Links<T>>> Drop for Queue<T> {
     fn drop(&mut self) {
         let mut current = self.tail.with_mut(|tail| unsafe {
             // Safety: because `Drop` is called with `&mut self`, we have
@@ -363,7 +363,7 @@ impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
 
 impl<T> Default for Queue<T>
 where
-    T: Linked<Links = Links<T>>,
+    T: Linked<Links<T>>,
     T::Handle: Default,
 {
     fn default() -> Self {
@@ -373,15 +373,15 @@ where
 
 unsafe impl<T> Send for Queue<T>
 where
-    T: Send + Linked<Links = Links<T>>,
+    T: Send + Linked<Links<T>>,
     T::Handle: Send,
 {
 }
-unsafe impl<T: Send + Linked<Links = Links<T>>> Sync for Queue<T> {}
+unsafe impl<T: Send + Linked<Links<T>>> Sync for Queue<T> {}
 
 // === impl Consumer ===
 
-impl<'q, T: Send + Linked<Links = Links<T>>> Consumer<'q, T> {
+impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     /// Dequeue an element from the queue.
     ///
     /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
@@ -447,7 +447,7 @@ impl<'q, T: Send + Linked<Links = Links<T>>> Consumer<'q, T> {
     }
 }
 
-impl<'q, T: Linked<Links = Links<T>>> Drop for Consumer<'q, T> {
+impl<'q, T: Linked<Links<T>>> Drop for Consumer<'q, T> {
     fn drop(&mut self) {
         self.q.has_consumer.store(false, Release);
     }
@@ -640,9 +640,8 @@ mod test_util {
         }
     }
 
-    unsafe impl Linked for Entry {
+    unsafe impl Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
-        type Links = Links<Self>;
 
         fn as_ptr(handle: &Pin<Box<Entry>>) -> NonNull<Entry> {
             NonNull::from(handle.as_ref().get_ref())

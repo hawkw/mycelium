@@ -22,10 +22,9 @@ use core::ptr::NonNull;
 /// dangling pointers.
 ///
 /// [`Unpin`]: core::pin::Unpin
-pub unsafe trait Linked {
+pub unsafe trait Linked<L> {
     /// The handle owning nodes in the linked list.
     type Handle;
-    type Links;
     // /// Type of nodes in the linked list.
     // ///
     // /// When the type implementing `Linked` is not itself a reference, this is
@@ -60,5 +59,5 @@ pub unsafe trait Linked {
     /// - It is valid to construct a `Handle` from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
-    unsafe fn links(ptr: NonNull<Self>) -> NonNull<Self::Links>;
+    unsafe fn links(ptr: NonNull<Self>) -> NonNull<L>;
 }

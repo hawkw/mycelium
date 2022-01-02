@@ -765,9 +765,8 @@ impl Free {
     }
 }
 
-unsafe impl Linked for Free {
+unsafe impl Linked<list::Links<Self>> for Free {
     type Handle = ptr::NonNull<Free>;
-    type Links = list::Links<Self>;
 
     #[inline]
     fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {

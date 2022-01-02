@@ -6,7 +6,7 @@ use core::{
     ptr::{self, NonNull},
 };
 
-pub struct List<T: Linked<Links = Links<T>> + ?Sized> {
+pub struct List<T: Linked<Links<T>> + ?Sized> {
     head: Option<NonNull<T>>,
     tail: Option<NonNull<T>>,
 }
@@ -20,19 +20,19 @@ pub struct Links<T: ?Sized> {
     _unpin: PhantomPinned,
 }
 
-pub struct Cursor<'a, T: Linked<Links = Links<T>> + ?Sized> {
+pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
     list: &'a mut List<T>,
     curr: Option<NonNull<T>>,
 }
 
-pub struct Iter<'a, T: Linked<Links = Links<T>> + ?Sized> {
+pub struct Iter<'a, T: Linked<Links<T>> + ?Sized> {
     _list: &'a List<T>,
     curr: Option<NonNull<T>>,
 }
 
 // ==== impl List ====
 
-impl<T: Linked<Links = Links<T>> + ?Sized> List<T> {
+impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Returns a new empty list.
     pub const fn new() -> List<T> {
         List {
@@ -200,10 +200,10 @@ impl<T: Linked<Links = Links<T>> + ?Sized> List<T> {
     }
 }
 
-unsafe impl<T: Linked<Links = Links<T>> + ?Sized> Send for List<T> where T: Send {}
-unsafe impl<T: Linked<Links = Links<T>> + ?Sized> Sync for List<T> where T: Sync {}
+unsafe impl<T: Linked<Links<T>> + ?Sized> Send for List<T> where T: Send {}
+unsafe impl<T: Linked<Links<T>> + ?Sized> Sync for List<T> where T: Sync {}
 
-impl<T: Linked<Links = Links<T>> + ?Sized> fmt::Debug for List<T> {
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("List")
             .field("head", &fmt::opt(&self.head).or_else("None"))
@@ -234,7 +234,7 @@ impl<T: ?Sized> Links<T> {
 
     fn assert_valid(&self, head: &Self, tail: &Self)
     where
-        T: Linked<Links = Self>,
+        T: Linked<Self>,
     {
         if ptr::eq(self, head) {
             assert_eq!(
@@ -317,14 +317,14 @@ unsafe impl<T: Sync> Sync for Links<T> {}
 
 // === impl Cursor ====
 
-impl<'a, T: Linked<Links = Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
+impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_ptr().map(|ptr| unsafe { T::from_ptr(ptr) })
     }
 }
 
-impl<'a, T: Linked<Links = Links<T>> + ?Sized> Cursor<'a, T> {
+impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     fn next_ptr(&mut self) -> Option<NonNull<T>> {
         let curr = self.curr.take()?;
         self.curr = unsafe { T::links(curr).as_ref().next };
@@ -348,7 +348,7 @@ impl<'a, T: Linked<Links = Links<T>> + ?Sized> Cursor<'a, T> {
 
 // === impl Iter ====
 
-impl<'a, T: Linked<Links = Links<T>> + ?Sized> Iterator for Iter<'a, T> {
+impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         let curr = self.curr.take()?;
@@ -373,9 +373,8 @@ mod tests {
         _lt: std::marker::PhantomData<&'a ()>,
     }
 
-    unsafe impl<'a> Linked for Entry<'a> {
+    unsafe impl<'a> Linked<Links<Self>> for Entry<'a> {
         type Handle = Pin<&'a Entry<'a>>;
-        type Links = Links<Self>;
 
         fn as_ptr(handle: &Pin<&'a Entry>) -> NonNull<Entry<'a>> {
             NonNull::from(handle.get_ref())
