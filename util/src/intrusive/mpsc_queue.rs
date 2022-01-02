@@ -1,5 +1,7 @@
-//! Based on Dmitry Vyukov's lock free intrusive queue:
-//! http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+//! A lock-free, intrusive singly-linked MPSC queue.
+//!
+//! Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
+//! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 
 use super::Linked;
 use crate::{
@@ -114,8 +116,27 @@ impl<T: Linked<Links = Links<T>>> Queue<T> {
     }
 }
 
+impl<T: Linked<Links = Links<T>>> Drop for Queue<T> {
+    fn drop(&mut self) {
+        // All atomic operations in the `Drop` impl can be `Relaxed`, because we
+        // have exclusive ownership of the queue --- if we are dropping it, no
+        // one else is enqueueing new nodes.
+        let mut current = self.tail.load(Relaxed);
+        while !current.is_null() {
+            unsafe {
+                let next = (*current).next.load(Relaxed);
+                // Convert the pointer to the owning handle and drop it.
+                drop(T::from_ptr(current));
+                current = next;
+            }
+        }
+    }
+}
+
 unsafe impl<T: Send + Linked<Links = Links<T>>> Send for Queue<T> {}
 unsafe impl<T: Send + Linked<Links = Links<T>>> Sync for Queue<T> {}
+
+// === impl Links ===
 
 impl<T> Links<T> {
     pub fn new() -> Self {
