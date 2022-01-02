@@ -1,43 +1,34 @@
-pub use self::causal::*;
-#[cfg(test)]
-mod causal {
-    // Clippy is trying to help us not hurt ourselves, but this is being renamed
-    // as an API compat stopgap b/c i haven't updated our stuff to the latest
-    // loom APIs...
-    #![allow(clippy::unsafe_removed_from_name)]
-    pub use loom::cell::UnsafeCell as CausalCell;
+pub use self::unsafe_cell::*;
+#[cfg(loom)]
+mod unsafe_cell {
+    pub use loom::cell::{ConstPtr, MutPtr, UnsafeCell};
 }
 
-#[cfg(not(test))]
-mod causal {
-    use core::cell::UnsafeCell;
+#[cfg(not(loom))]
+mod unsafe_cell {
+    use core::cell;
 
-    /// CausalCell ensures access to the inner value are valid under the Rust memory
+    /// `UnsafeCell` ensures access to the inner value are valid under the Rust memory
     /// model.
     ///
     /// When not running under `loom`, this is identical to an `UnsafeCell`.
     #[derive(Debug)]
-    pub struct CausalCell<T> {
-        data: UnsafeCell<T>,
+    pub struct UnsafeCell<T> {
+        data: cell::UnsafeCell<T>,
     }
 
-    unsafe impl<T> Sync for CausalCell<T> {}
-
-    /// Deferred causal cell check.
-    ///
-    /// When not running under `loom`, this does nothing.
     #[derive(Debug)]
-    #[must_use]
-    pub struct CausalCheck {
-        _p: (),
-    }
+    pub(crate) struct ConstPtr<T: ?Sized>(*const T);
 
-    impl<T> CausalCell<T> {
+    #[derive(Debug)]
+    pub(crate) struct MutPtr<T: ?Sized>(*mut T);
+
+    impl<T> UnsafeCell<T> {
         /// Construct a new instance of `CausalCell` which will wrap the specified
         /// value.
-        pub const fn new(data: T) -> CausalCell<T> {
+        pub const fn new(data: T) -> Self {
             Self {
-                data: UnsafeCell::new(data),
+                data: cell::UnsafeCell::new(data),
             }
         }
 
@@ -81,6 +72,54 @@ mod causal {
             F: FnOnce(*mut T) -> R,
         {
             f(self.data.get())
+        }
+
+        #[inline(always)]
+        pub(crate) fn get(&self) -> ConstPtr<T> {
+            ConstPtr(self.data.get())
+        }
+
+        #[inline(always)]
+        pub(crate) fn get_mut(&self) -> MutPtr<T> {
+            MutPtr(self.data.get())
+        }
+    }
+
+    // === impl MutPtr ===
+
+    impl<T: ?Sized> MutPtr<T> {
+        // Clippy knows that it's Bad and Wrong to construct a mutable reference
+        // from an immutable one...but this function is intended to simulate a raw
+        // pointer, so we have to do that here.
+        #[allow(clippy::mut_from_ref)]
+        #[inline(always)]
+        pub(crate) unsafe fn deref(&self) -> &mut T {
+            &mut *self.0
+        }
+
+        #[inline(always)]
+        pub fn with<F, R>(&self, f: F) -> R
+        where
+            F: FnOnce(*mut T) -> R,
+        {
+            f(self.0)
+        }
+    }
+
+    // === impl ConstPtr ===
+
+    impl<T: ?Sized> ConstPtr<T> {
+        #[inline(always)]
+        pub(crate) unsafe fn deref(&self) -> &T {
+            &*self.0
+        }
+
+        #[inline(always)]
+        pub fn with<F, R>(&self, f: F) -> R
+        where
+            F: FnOnce(*const T) -> R,
+        {
+            f(self.0)
         }
     }
 }
