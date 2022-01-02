@@ -25,6 +25,16 @@ pub(crate) struct Backoff {
     max: u8,
 }
 
+#[cfg_attr(any(target_arch = "x86_64", target_arch = "aarch64"), repr(align(128)))]
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    repr(align(64))
+)]
+#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
+pub struct CachePadded<T>(T);
+
+// === impl Backoff ===
+
 impl Backoff {
     pub(crate) const DEFAULT_MAX_EXPONENT: u8 = 8;
 
@@ -59,5 +69,39 @@ impl Backoff {
 impl Default for Backoff {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// === impl CachePadded ===
+
+impl<T> CachePadded<T> {
+    pub const fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> Deref for CachePadded<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for CachePadded<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for CachePadded<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }

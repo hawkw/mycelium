@@ -5,6 +5,7 @@
 
 use super::Linked;
 use crate::{
+    cell::UnsafeCell,
     fmt,
     sync::{
         self,
@@ -19,8 +20,9 @@ use core::{
 
 #[derive(Debug)]
 pub struct Queue<T: Linked<Links = Links<T>>> {
+    /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
     head: AtomicPtr<T>,
-    tail: AtomicPtr<T>,
+    tail: UnsafeCell<*mut T>,
     stub: T::Handle,
 }
 
