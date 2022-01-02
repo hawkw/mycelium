@@ -160,7 +160,7 @@ impl fmt::Debug for Sink {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use crate::io::prelude::*;
     use crate::io::{copy, empty, repeat, sink};

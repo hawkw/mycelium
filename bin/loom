@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -x
+
+RUSTFLAGS="--cfg loom ${RUSTFLAGS}" \
+LOOM_LOG="${LOOM_LOG:-info}" \
+LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" \
+cargo test \
+    --profile loom \
+    --lib \
+    "$@"
