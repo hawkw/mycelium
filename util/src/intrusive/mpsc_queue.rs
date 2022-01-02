@@ -98,13 +98,18 @@ impl<T: Linked<Links<T>>> Queue<T> {
         self.enqueue_inner(ptr)
     }
 
+    #[inline]
     fn enqueue_inner(&self, ptr: NonNull<T>) {
         let links = unsafe { T::links(ptr).as_ref() };
         links.next.store(ptr::null_mut(), Relaxed);
 
         let ptr = ptr.as_ptr();
-        if let Some(prev) = ptr::NonNull::new(self.head.swap(ptr, AcqRel)) {
-            unsafe { T::links(prev).as_ref().next.store(ptr, Release) }
+        let prev = self.head.swap(ptr, AcqRel);
+        unsafe {
+            // Safety: in release mode, we don't null check `prev`. This is
+            // because no pointer in the list should ever be a null pointer, due
+            // to the presence of the stub node.
+            T::links(non_null(prev)).as_ref().next.store(ptr, Release);
         }
     }
 
@@ -261,8 +266,8 @@ impl<T: Linked<Links<T>>> Queue<T> {
 
             if tail_node == T::as_ptr(&self.stub) {
                 debug_assert!(T::links(tail_node).as_ref().is_stub);
-
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
+
                 *tail = next;
                 tail_node = next_node;
                 next = T::links(next_node).as_ref().next.load(Acquire);
@@ -566,6 +571,23 @@ mod loom {
             }
         })
     }
+}
+
+#[cfg(debug_assertions)]
+#[track_caller]
+#[inline(always)]
+unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
+    NonNull::new(ptr).expect(
+        "/!\\ constructed a `NonNull` from a null pointer! /!\\ \n\
+        in release mode, this would have called `NonNull::new_unchecked`, \
+        violating the `NonNull` invariant! this is a bug in `mycelium-util`.",
+    )
+}
+
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
+    NonNull::new_unchecked(ptr)
 }
 
 #[cfg(all(test, not(loom)))]
