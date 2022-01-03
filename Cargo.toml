@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "alloc",
+    "cordyceps",
     "util",
     "hal-core",
     "hal-x86_64",

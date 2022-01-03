@@ -14,7 +14,6 @@ pub mod bits;
 pub mod cell;
 pub mod error;
 pub mod fmt;
-pub mod intrusive;
 pub mod io;
 mod macros;
 pub mod math;
@@ -24,3 +23,4 @@ pub mod testing;
 pub(crate) mod loom;
 
 pub use self::macros::*;
+pub use cordyceps as intrusive;

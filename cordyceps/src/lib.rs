@@ -1,7 +1,15 @@
-//! Intrusive collections.
+//! Mycelium intrusive data structures.
+//!
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
 pub mod list;
 pub use list::List;
 pub mod mpsc_queue;
+pub use mpsc_queue::Queue;
+
+pub(crate) mod loom;
+pub(crate) mod util;
 
 use core::ptr::NonNull;
 /// Trait implemented by types which can be members of an intrusive collection.
@@ -26,17 +34,6 @@ use core::ptr::NonNull;
 pub unsafe trait Linked<L> {
     /// The handle owning nodes in the linked list.
     type Handle;
-    // /// Type of nodes in the linked list.
-    // ///
-    // /// When the type implementing `Linked` is not itself a reference, this is
-    // /// typically `Self`.
-    // ///
-    // /// # Safety
-    // ///
-    // /// This type may not be [`Unpin`].
-    // ///
-    // ///  [`Unpin`]: core::pin::Unpin
-    // type Node: ?Sized;
 
     /// Convert a `Handle` to a raw pointer, without consuming it.
     #[allow(clippy::wrong_self_convention)]

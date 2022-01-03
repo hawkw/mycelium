@@ -4,17 +4,16 @@
 //!
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 
-use super::Linked;
 use crate::{
-    cell::UnsafeCell,
-    fmt,
-    sync::{
-        self,
-        atomic::{AtomicBool, AtomicPtr, Ordering::*},
-        CachePadded,
+    loom::{
+        cell::UnsafeCell,
+        sync::atomic::{AtomicBool, AtomicPtr, Ordering::*},
     },
+    util::{Backoff, CachePadded},
+    Linked,
 };
 use core::{
+    fmt,
     marker::PhantomPinned,
     mem::ManuallyDrop,
     ptr::{self, NonNull},
@@ -103,9 +102,9 @@ impl<T: Linked<Links<T>>> Queue<T> {
 
         let ptr = ptr.as_ptr();
         Self {
-            head: CachePadded::new(AtomicPtr::new(ptr)),
-            tail: CachePadded::new(UnsafeCell::new(ptr)),
-            has_consumer: CachePadded::new(AtomicBool::new(false)),
+            head: CachePadded(AtomicPtr::new(ptr)),
+            tail: CachePadded(UnsafeCell::new(ptr)),
+            has_consumer: CachePadded(AtomicBool::new(false)),
             stub,
         }
     }
@@ -213,7 +212,7 @@ impl<T: Linked<Links<T>>> Queue<T> {
     ///
     /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
     pub fn dequeue(&self) -> Option<T::Handle> {
-        let mut boff = sync::Backoff::new();
+        let mut boff = Backoff::new();
         loop {
             match self.try_dequeue() {
                 Ok(val) => return Some(val),
@@ -332,7 +331,7 @@ impl<T: Linked<Links<T>>> Queue<T> {
     ///
     /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
     pub unsafe fn dequeue_unchecked(&self) -> Option<T::Handle> {
-        let mut boff = sync::Backoff::new();
+        let mut boff = Backoff::new();
         loop {
             match self.try_dequeue_unchecked() {
                 Ok(val) => return Some(val),
@@ -347,7 +346,7 @@ impl<T: Linked<Links<T>>> Queue<T> {
 
     #[inline]
     fn lock_consumer(&self) {
-        let mut boff = sync::Backoff::new();
+        let mut boff = Backoff::new();
         while self
             .has_consumer
             .compare_exchange(false, true, AcqRel, Acquire)
@@ -404,7 +403,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Queue")
-            .field("head", &fmt::ptr(self.head.load(Acquire)))
+            .field("head", &format_args!("{:p}", self.head.load(Acquire)))
             // only the consumer can load the tail; trying to print it here
             // could be racy.
             // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
@@ -516,10 +515,10 @@ where
         let tail = self.q.tail.with(|tail| unsafe {
             // Safety: it's okay for the consumer to access the tail cell, since
             // we have exclusive access to it.
-            fmt::ptr(*tail)
+            *tail
         });
         f.debug_struct("Consumer")
-            .field("head", &fmt::ptr(self.q.head.load(Acquire)))
+            .field("head", &format_args!("{:p}", tail))
             // only the consumer can load the tail; trying to print it here
             // could be racy.
             // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
@@ -564,7 +563,7 @@ impl<T> Default for Links<T> {
 crate::feature! {
     #![feature = "alloc"]
 
-    use alloc::sync::Arc;
+    use crate::loom::sync::Arc;
 
     /// An owned handle that holds the right to dequeue elements from the queue.
     ///
@@ -668,10 +667,10 @@ crate::feature! {
             let tail = self.q.tail.with(|tail| unsafe {
                 // Safety: it's okay for the consumer to access the tail cell, since
                 // we have exclusive access to it.
-                fmt::ptr(*tail)
+               *tail
             });
             f.debug_struct("OwnedConsumer")
-                .field("head", &fmt::ptr(self.q.head.load(Acquire)))
+                .field("head", &self.q.head.load(Acquire))
                 // only the consumer can load the tail; trying to print it here
                 // could be racy.
                 // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
