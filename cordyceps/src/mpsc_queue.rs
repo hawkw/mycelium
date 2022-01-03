@@ -743,7 +743,7 @@ mod loom {
 
             let mut i = 0;
             while i < total_msgs {
-                match unsafe { q.try_dequeue() } {
+                match q.try_dequeue() {
                     Ok(val) => {
                         i += 1;
                         info!(?val, "dequeue {}/{}", i, total_msgs);
@@ -833,7 +833,7 @@ mod tests {
     fn dequeue_empty() {
         let stub = entry(666);
         let q = Queue::<Entry>::new_with_stub(stub);
-        assert_eq!(unsafe { q.dequeue() }, None)
+        assert_eq!(q.dequeue(), None)
     }
 
     #[test]
@@ -846,7 +846,7 @@ mod tests {
         let stub = entry(666);
         let q = Queue::<Entry>::new_with_stub(stub);
 
-        assert_eq!(unsafe { q.dequeue() }, None);
+        assert_eq!(q.dequeue(), None);
 
         let q = Arc::new(q);
 
@@ -864,7 +864,7 @@ mod tests {
 
         let mut i = 0;
         while i < THREADS * MSGS {
-            if unsafe { q.try_dequeue() }.is_ok() {
+            if q.try_dequeue().is_ok() {
                 i += 1;
                 println!("recv {}/{}", i, THREADS * MSGS);
             }
