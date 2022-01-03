@@ -1,9 +1,10 @@
+//! Intrusive collections.
 pub mod list;
 pub use list::List;
 pub mod mpsc_queue;
 
 use core::ptr::NonNull;
-/// Trait implemented by types which can be members of an intrusive linked list.
+/// Trait implemented by types which can be members of an intrusive collection.
 ///
 /// # Safety
 ///

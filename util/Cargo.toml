@@ -21,3 +21,7 @@ tracing = { git = "https://github.com/tokio-rs/tracing", default_features = fals
 loom = "0.5.4"
 tracing_01 = { package = "tracing", version = "0.1", default_features = false, features = ["attributes"] }
 tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3", features = ["fmt"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
