@@ -542,7 +542,7 @@ mod loom {
         // Tests multiple consumers competing for access to the consume side of
         // the queue.
         const THREADS: i32 = 2;
-        const MSGS: i32 = THREADS * 2;
+        const MSGS: i32 = THREADS;
 
         fn do_rx(thread: i32, q: Arc<Queue<Entry>>) {
             let mut i = 0;
