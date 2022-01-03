@@ -1,6 +1,7 @@
 //! An intrusive singly-linked lock-free MPSC queue.
 //!
 //! Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
+//!
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 
 use super::Linked;
@@ -22,6 +23,7 @@ use core::{
 /// An intrusive singly-linked lock-free MPSC queue.
 ///
 /// Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
+///
 /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 pub struct Queue<T: Linked<Links<T>>> {
     /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
@@ -37,11 +39,23 @@ pub struct Queue<T: Linked<Links<T>>> {
     stub: T::Handle,
 }
 
-/// A handle that holds the right to dequeue elements from the queue.
+/// A handle that holds the right to dequeue elements from a [`Queue`].
 ///
 /// This can be used when one thread wishes to dequeue many elements at a time,
-/// to avoid the overhead of ensuring mutual exclusion on every `dequeue` or
-/// `try_dequeue` call.
+/// to avoid the overhead of ensuring mutual exclusion on every [`dequeue`] or
+/// [`try_dequeue`] call.
+///
+/// This type is returned by the [`Queue::consume`] and [`Queue::try_consume`]
+/// methods.
+///
+/// If the right to dequeue elements needs to be reserved for longer than a
+/// single scope, an owned variant ([`OwnedConsumer`]) is also available, when
+/// the [`Queue`] is stored in an [`Arc`]. Since the [`Queue`] must be stored
+/// in an [`Arc`], the [`OwnedConsumer`] type requires the "alloc" feature flag.
+///
+/// [`dequeue`]: Consumer::dequeue
+/// [`try_dequeue`]: Consumer::try_dequeue
+/// [`Arc`]: alloc::sync::Arc
 pub struct Consumer<'q, T: Linked<Links<T>>> {
     q: &'q Queue<T>,
 }
@@ -215,15 +229,8 @@ impl<T: Linked<Links<T>>> Queue<T> {
     /// If another thread is dequeueing, this method spins until there is no
     /// other thread dequeueing.
     pub fn consume(&self) -> Consumer<'_, T> {
-        let mut boff = sync::Backoff::new();
-        loop {
-            if let Some(consumer) = self.try_consume() {
-                return consumer;
-            }
-            while self.has_consumer.load(Relaxed) {
-                boff.spin();
-            }
-        }
+        self.lock_consumer();
+        Consumer { q: self }
     }
 
     /// Attempts to reserve a [`Consumer`] handle that holds the exclusive right
@@ -232,11 +239,7 @@ impl<T: Linked<Links<T>>> Queue<T> {
     /// If another thread is dequeueing, this returns `None` instead.
     pub fn try_consume(&self) -> Option<Consumer<'_, T>> {
         // lock the consumer-side of the queue.
-        self.has_consumer
-            .compare_exchange(false, true, AcqRel, Acquire)
-            .ok()?;
-
-        Some(Consumer { q: self })
+        self.try_lock_consumer().map(|_| Consumer { q: self })
     }
 
     /// Try to dequeue an element from the queue, without waiting if the queue
@@ -340,6 +343,28 @@ impl<T: Linked<Links<T>>> Queue<T> {
                 }
             }
         }
+    }
+
+    #[inline]
+    fn lock_consumer(&self) {
+        let mut boff = sync::Backoff::new();
+        while self
+            .has_consumer
+            .compare_exchange(false, true, AcqRel, Acquire)
+            .is_err()
+        {
+            while self.has_consumer.load(Relaxed) {
+                boff.spin();
+            }
+        }
+    }
+
+    #[inline]
+    fn try_lock_consumer(&self) -> Option<()> {
+        self.has_consumer
+            .compare_exchange(false, true, AcqRel, Acquire)
+            .map(|_| ())
+            .ok()
     }
 }
 
@@ -533,6 +558,151 @@ impl<T> Links<T> {
 impl<T> Default for Links<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+crate::feature! {
+    #![feature = "alloc"]
+
+    use alloc::sync::Arc;
+
+    /// An owned handle that holds the right to dequeue elements from the queue.
+    ///
+    /// This can be used when one thread wishes to dequeue many elements at a time,
+    /// to avoid the overhead of ensuring mutual exclusion on every [`dequeue`] or
+    /// [`try_dequeue`] call.
+    ///
+    /// This type is returned by the [`Queue::consume_owned`] and
+    /// [`Queue::try_consume_owned`] methods.
+    ///
+    /// This is similar to the [`Consumer`] type, but the queue is stored in an
+    /// [`Arc`] rather than borrowed. This allows a single `OwnedConsumer`
+    /// instance to be stored in a struct and used indefinitely.
+    ///
+    /// Since the queue is stored in an [`Arc`], this requires the `alloc`
+    /// feature flag to be enabled.
+    ///
+    /// [`dequeue`]: OwnedConsumer::dequeue
+    /// [`try_dequeue`]: OwnedConsumer::try_dequeue
+    /// [`Arc`]: alloc::sync::Arc
+    pub struct OwnedConsumer<T: Linked<Links<T>>> {
+        q: Arc<Queue<T>>
+    }
+
+    // === impl Consumer ===
+
+    impl<T: Linked<Links<T>>> OwnedConsumer<T> {
+        /// Dequeue an element from the queue.
+        ///
+        /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+        /// is possible for this queue design to enter an incosistent state if the
+        /// consumer tries to dequeue an element while a producer is in the middle
+        /// of enqueueing a new element. If this occurs, the consumer must briefly
+        /// wait before dequeueing an element. This method will wait by spinning
+        /// with an exponential backoff if the queue is in an inconsistent state.
+        ///
+        /// The [`Consumer::try_dequeue`] will return an error rather than waiting when
+        /// the queue is in an inconsistent state.
+        ///
+        /// # Returns
+        ///
+        /// - `Some(T::Handle)` if an element was successfully dequeued
+        /// - `None` if the queue is empty
+        ///
+        /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+        #[inline]
+        pub fn dequeue(&self) -> Option<T::Handle> {
+            debug_assert!(self.q.has_consumer.load(Acquire));
+            unsafe {
+                // Safety: we have reserved exclusive access to the queue.
+                self.q.dequeue_unchecked()
+            }
+        }
+
+        /// Try to dequeue an element from the queue, without waiting if the queue
+        /// is in an inconsistent state.
+        ///
+        /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+        /// is possible for this queue design to enter an incosistent state if the
+        /// consumer tries to dequeue an element while a producer is in the middle
+        /// of enqueueing a new element. If this occurs, the consumer must briefly
+        /// wait before dequeueing an element. This method returns
+        /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
+        /// state.
+        ///
+        /// The [`Consumer::dequeue`] method will instead wait (by spinning with an
+        /// exponential backoff) when the queue is in an inconsistent state.
+        ///
+        /// # Returns
+        ///
+        /// - `T::Handle` if an element was successfully dequeued
+        /// - [`TryDequeueError::Empty`] if there are no elements in the queue
+        /// - [`TryDequeueError::Inconsistent`] if the queue is currently in an
+        ///   inconsistent state
+        ///
+        ///
+        /// # Returns
+        ///
+        /// - `Some(T::Handle)` if an element was successfully dequeued
+        /// - `None` if the queue is empty
+        ///
+        /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+        #[inline]
+        pub fn try_dequeue(&self) -> Result<T::Handle, TryDequeueError> {
+            debug_assert!(self.q.has_consumer.load(Acquire));
+            unsafe {
+                // Safety: we have reserved exclusive access to the queue.
+                self.q.try_dequeue_unchecked()
+            }
+        }
+    }
+
+    impl<T: Linked<Links<T>>> Drop for OwnedConsumer<T> {
+        fn drop(&mut self) {
+            self.q.has_consumer.store(false, Release);
+        }
+    }
+
+    impl<T: Linked<Links<T>>> fmt::Debug for OwnedConsumer<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let tail = self.q.tail.with(|tail| unsafe {
+                // Safety: it's okay for the consumer to access the tail cell, since
+                // we have exclusive access to it.
+                fmt::ptr(*tail)
+            });
+            f.debug_struct("OwnedConsumer")
+                .field("head", &fmt::ptr(self.q.head.load(Acquire)))
+                // only the consumer can load the tail; trying to print it here
+                // could be racy.
+                // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
+                // and then it would be okay to print the tail...but then we would
+                // lose loom checking for tail accesses...
+                .field("tail", &tail)
+                .field("has_consumer", &self.q.has_consumer.load(Acquire))
+                .finish()
+        }
+    }
+
+    // === impl Queue ===
+
+    impl<T: Linked<Links<T>>> Queue<T> {
+        /// Returns a [`OwnedConsumer`] handle that reserves the exclusive right to dequeue
+        /// elements from the queue until it is dropped.
+        ///
+        /// If another thread is dequeueing, this method spins until there is no
+        /// other thread dequeueing.
+        pub fn consume_owned(self: Arc<Self>) -> OwnedConsumer<T> {
+            self.lock_consumer();
+            OwnedConsumer { q: self }
+        }
+
+        /// Attempts to reserve an [`OwnedConsumer`] handle that holds the exclusive right
+        /// to dequeue  elements from the queue until it is dropped.
+        ///
+        /// If another thread is dequeueing, this returns `None` instead.
+        pub fn try_consume_owned(self: Arc<Self>) -> Option<OwnedConsumer<T>> {
+            self.try_lock_consumer().map(|_| OwnedConsumer { q: self })
+        }
     }
 }
 
