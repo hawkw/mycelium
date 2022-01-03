@@ -748,6 +748,9 @@ mod loom {
                         i += 1;
                         info!(?val, "dequeue {}/{}", i, total_msgs);
                     }
+                    Err(TryDequeueError::Busy) => panic!(
+                        "the queue should never be busy, as there is only a single consumer!"
+                    ),
                     Err(err) => {
                         info!(?err, "dequeue error");
                         thread::yield_now();
@@ -837,6 +840,35 @@ mod tests {
     }
 
     #[test]
+    fn try_dequeue_empty() {
+        let stub = entry(666);
+        let q = Queue::<Entry>::new_with_stub(stub);
+        assert_eq!(q.try_dequeue(), Err(TryDequeueError::Empty))
+    }
+
+    #[test]
+    fn try_dequeue_busy() {
+        let stub = entry(666);
+        let q = Queue::<Entry>::new_with_stub(stub);
+
+        let consumer = q.try_consume().expect("must acquire consumer");
+        assert_eq!(consumer.try_dequeue(), Err(TryDequeueError::Empty));
+
+        q.enqueue(entry(1));
+
+        assert_eq!(q.try_dequeue(), Err(TryDequeueError::Busy));
+
+        assert_eq!(consumer.try_dequeue(), Ok(entry(1)),);
+
+        assert_eq!(q.try_dequeue(), Err(TryDequeueError::Busy));
+
+        assert_eq!(consumer.try_dequeue(), Err(TryDequeueError::Empty));
+
+        drop(consumer);
+        assert_eq!(q.try_dequeue(), Err(TryDequeueError::Empty));
+    }
+
+    #[test]
     fn basically_works() {
         use std::{sync::Arc, thread};
 
@@ -864,9 +896,15 @@ mod tests {
 
         let mut i = 0;
         while i < THREADS * MSGS {
-            if q.try_dequeue().is_ok() {
-                i += 1;
-                println!("recv {}/{}", i, THREADS * MSGS);
+            match q.try_dequeue() {
+                Ok(msg) => {
+                    i += 1;
+                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
+                }
+                Err(TryDequeueError::Busy) => {
+                    panic!("the queue should never be busy, as there is only one consumer")
+                }
+                Err(e) => println!("recv error {:?}", e),
             }
         }
 
@@ -885,7 +923,7 @@ mod test_util {
     #[derive(Debug)]
     pub(super) struct Entry {
         links: Links<Entry>,
-        val: i32,
+        pub(super) val: i32,
         // participate in loom leak checking
         _track: alloc::Track<()>,
     }
