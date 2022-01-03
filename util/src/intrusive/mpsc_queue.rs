@@ -46,8 +46,9 @@ pub struct Consumer<'q, T: Linked<Links<T>>> {
     q: &'q Queue<T>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Links<T> {
+    /// The next node in the queue.
     next: AtomicPtr<T>,
 
     /// Used for debug mode consistency checking only.
@@ -508,6 +509,17 @@ where
 // === impl Links ===
 
 impl<T> Links<T> {
+    #[cfg(not(loom))]
+    pub const fn new() -> Self {
+        Self {
+            next: AtomicPtr::new(ptr::null_mut()),
+            _unpin: PhantomPinned,
+            #[cfg(debug_assertions)]
+            is_stub: false,
+        }
+    }
+
+    #[cfg(loom)]
     pub fn new() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
@@ -515,6 +527,12 @@ impl<T> Links<T> {
             #[cfg(debug_assertions)]
             is_stub: false,
         }
+    }
+}
+
+impl<T> Default for Links<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
