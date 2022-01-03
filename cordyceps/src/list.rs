@@ -78,7 +78,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         if head == tail {
             assert_eq!(
                 head_links, tail_links,
-                "this should just never fucking happen lol"
+                "if the head and tail nodes are the same, their links must be the same"
             );
             assert_eq!(
                 head_links.next, None,

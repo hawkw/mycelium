@@ -814,7 +814,7 @@ unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
     NonNull::new(ptr).expect(
         "/!\\ constructed a `NonNull` from a null pointer! /!\\ \n\
         in release mode, this would have called `NonNull::new_unchecked`, \
-        violating the `NonNull` invariant! this is a bug in `mycelium-util`.",
+        violating the `NonNull` invariant! this is a bug in `cordyceps!`.",
     )
 }
 
