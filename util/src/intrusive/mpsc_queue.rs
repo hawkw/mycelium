@@ -1,4 +1,4 @@
-//! A lock-free, intrusive singly-linked MPSC queue.
+//! An intrusive singly-linked lock-free MPSC queue.
 //!
 //! Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
@@ -6,6 +6,7 @@
 use super::Linked;
 use crate::{
     cell::UnsafeCell,
+    fmt,
     sync::{
         self,
         atomic::{AtomicBool, AtomicPtr, Ordering::*},
@@ -18,7 +19,10 @@ use core::{
     ptr::{self, NonNull},
 };
 
-#[derive(Debug)]
+/// An intrusive singly-linked lock-free MPSC queue.
+///
+/// Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
+/// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 pub struct Queue<T: Linked<Links<T>>> {
     /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
     head: CachePadded<AtomicPtr<T>>,
@@ -62,6 +66,8 @@ pub enum TryDequeueError {
     Inconsistent,
     Busy,
 }
+
+// === impl Queue ===
 
 impl<T: Linked<Links<T>>> Queue<T> {
     pub fn new() -> Self
@@ -366,6 +372,24 @@ impl<T: Linked<Links<T>>> Drop for Queue<T> {
     }
 }
 
+impl<T> fmt::Debug for Queue<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Queue")
+            .field("head", &fmt::ptr(self.head.load(Acquire)))
+            // only the consumer can load the tail; trying to print it here
+            // could be racy.
+            // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
+            // and then it would be okay to print the tail...but then we would
+            // lose loom checking for tail accesses...
+            .field("tail", &format_args!("..."))
+            .field("has_consumer", &self.has_consumer.load(Acquire))
+            .finish()
+    }
+}
+
 impl<T> Default for Queue<T>
 where
     T: Linked<Links<T>>,
@@ -443,7 +467,7 @@ impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     ///
     /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
     #[inline]
-    pub fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
+    pub fn try_dequeue(&self) -> Result<T::Handle, TryDequeueError> {
         debug_assert!(self.q.has_consumer.load(Acquire));
         unsafe {
             // Safety: we have reserved exclusive access to the queue.
@@ -452,9 +476,32 @@ impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     }
 }
 
-impl<'q, T: Linked<Links<T>>> Drop for Consumer<'q, T> {
+impl<T: Linked<Links<T>>> Drop for Consumer<'_, T> {
     fn drop(&mut self) {
         self.q.has_consumer.store(false, Release);
+    }
+}
+
+impl<T> fmt::Debug for Consumer<'_, T>
+where
+    T: Linked<Links<T>>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let tail = self.q.tail.with(|tail| unsafe {
+            // Safety: it's okay for the consumer to access the tail cell, since
+            // we have exclusive access to it.
+            fmt::ptr(*tail)
+        });
+        f.debug_struct("Consumer")
+            .field("head", &fmt::ptr(self.q.head.load(Acquire)))
+            // only the consumer can load the tail; trying to print it here
+            // could be racy.
+            // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
+            // and then it would be okay to print the tail...but then we would
+            // lose loom checking for tail accesses...
+            .field("tail", &tail)
+            .field("has_consumer", &self.q.has_consumer.load(Acquire))
+            .finish()
     }
 }
 
