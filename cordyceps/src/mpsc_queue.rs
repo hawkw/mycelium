@@ -563,7 +563,7 @@ impl<T> Default for Links<T> {
 crate::feature! {
     #![feature = "alloc"]
 
-    use crate::loom::sync::Arc;
+    use alloc::sync::Arc;
 
     /// An owned handle that holds the right to dequeue elements from the queue.
     ///
