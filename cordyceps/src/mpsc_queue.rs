@@ -710,7 +710,6 @@ mod loom {
     use super::*;
     use crate::loom::{self, sync::Arc, thread};
     use test_util::*;
-    use tracing_01::info;
 
     #[test]
     fn basically_works_loom() {
@@ -746,7 +745,7 @@ mod loom {
                 match q.try_dequeue() {
                     Ok(val) => {
                         i += 1;
-                        info!(?val, "dequeue {}/{}", i, total_msgs);
+                        tracing::info!(?val, "dequeue {}/{}", i, total_msgs);
                     }
                     Err(TryDequeueError::Busy) => panic!(
                         "the queue should never be busy, as there is only a single consumer!"
@@ -769,7 +768,7 @@ mod loom {
         move || {
             for i in 0..msgs {
                 q.enqueue(entry(i + (thread * 10)));
-                info!(thread, "enqueue msg {}/{}", i, msgs);
+                tracing::info!(thread, "enqueue msg {}/{}", i, msgs);
             }
         }
     }
@@ -784,7 +783,7 @@ mod loom {
         fn do_rx(thread: i32, q: Arc<Queue<Entry>>) {
             let mut i = 0;
             while let Some(val) = q.dequeue() {
-                info!(?val, ?thread, "dequeue {}/{}", i, THREADS * MSGS);
+                tracing::info!(?val, ?thread, "dequeue {}/{}", i, THREADS * MSGS);
                 i += 1;
             }
         }
