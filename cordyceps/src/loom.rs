@@ -8,7 +8,7 @@ mod inner {
         pub use std::sync::atomic::Ordering;
     }
 
-    pub(crate) use loom::{cell, future, hint, sync, thread};
+    pub(crate) use loom::{cell, hint, sync, thread};
     use std::{cell::RefCell, fmt::Write};
 
     pub(crate) mod model {
