@@ -6,7 +6,7 @@ extern crate alloc;
 pub mod list;
 pub use list::List;
 pub mod mpsc_queue;
-pub use mpsc_queue::Queue;
+pub use mpsc_queue::MpscQueue;
 
 pub(crate) mod loom;
 pub(crate) mod util;

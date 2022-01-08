@@ -24,7 +24,7 @@ use core::{
 /// Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
 ///
 /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-pub struct Queue<T: Linked<Links<T>>> {
+pub struct MpscQueue<T: Linked<Links<T>>> {
     /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
     head: CachePadded<AtomicPtr<T>>,
 
@@ -56,7 +56,7 @@ pub struct Queue<T: Linked<Links<T>>> {
 /// [`try_dequeue`]: Consumer::try_dequeue
 /// [`Arc`]: alloc::sync::Arc
 pub struct Consumer<'q, T: Linked<Links<T>>> {
-    q: &'q Queue<T>,
+    q: &'q MpscQueue<T>,
 }
 
 #[derive(Debug)]
@@ -83,7 +83,7 @@ pub enum TryDequeueError {
 
 // === impl Queue ===
 
-impl<T: Linked<Links<T>>> Queue<T> {
+impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub fn new() -> Self
     where
         T::Handle: Default,
@@ -367,7 +367,7 @@ impl<T: Linked<Links<T>>> Queue<T> {
     }
 }
 
-impl<T: Linked<Links<T>>> Drop for Queue<T> {
+impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
     fn drop(&mut self) {
         let mut current = self.tail.with_mut(|tail| unsafe {
             // Safety: because `Drop` is called with `&mut self`, we have
@@ -397,7 +397,7 @@ impl<T: Linked<Links<T>>> Drop for Queue<T> {
     }
 }
 
-impl<T> fmt::Debug for Queue<T>
+impl<T> fmt::Debug for MpscQueue<T>
 where
     T: Linked<Links<T>>,
 {
@@ -415,7 +415,7 @@ where
     }
 }
 
-impl<T> Default for Queue<T>
+impl<T> Default for MpscQueue<T>
 where
     T: Linked<Links<T>>,
     T::Handle: Default,
@@ -425,13 +425,13 @@ where
     }
 }
 
-unsafe impl<T> Send for Queue<T>
+unsafe impl<T> Send for MpscQueue<T>
 where
     T: Send + Linked<Links<T>>,
     T::Handle: Send,
 {
 }
-unsafe impl<T: Send + Linked<Links<T>>> Sync for Queue<T> {}
+unsafe impl<T: Send + Linked<Links<T>>> Sync for MpscQueue<T> {}
 
 // === impl Consumer ===
 
@@ -585,7 +585,7 @@ crate::feature! {
     /// [`try_dequeue`]: OwnedConsumer::try_dequeue
     /// [`Arc`]: alloc::sync::Arc
     pub struct OwnedConsumer<T: Linked<Links<T>>> {
-        q: Arc<Queue<T>>
+        q: Arc<MpscQueue<T>>
     }
 
     // === impl Consumer ===
@@ -684,7 +684,7 @@ crate::feature! {
 
     // === impl Queue ===
 
-    impl<T: Linked<Links<T>>> Queue<T> {
+    impl<T: Linked<Links<T>>> MpscQueue<T> {
         /// Returns a [`OwnedConsumer`] handle that reserves the exclusive right to dequeue
         /// elements from the queue until it is dropped.
         ///
@@ -734,7 +734,7 @@ mod loom {
     fn basically_works_test(threads: i32, msgs: i32, total_msgs: i32) {
         loom::model(move || {
             let stub = entry(666);
-            let q = Arc::new(Queue::<Entry>::new_with_stub(stub));
+            let q = Arc::new(MpscQueue::<Entry>::new_with_stub(stub));
 
             let threads: Vec<_> = (0..threads)
                 .map(|thread| thread::spawn(do_tx(thread, msgs, &q)))
@@ -763,7 +763,7 @@ mod loom {
         })
     }
 
-    fn do_tx(thread: i32, msgs: i32, q: &Arc<Queue<Entry>>) -> impl FnOnce() + Send + Sync {
+    fn do_tx(thread: i32, msgs: i32, q: &Arc<MpscQueue<Entry>>) -> impl FnOnce() + Send + Sync {
         let q = q.clone();
         move || {
             for i in 0..msgs {
@@ -780,7 +780,7 @@ mod loom {
         const THREADS: i32 = 2;
         const MSGS: i32 = THREADS;
 
-        fn do_rx(thread: i32, q: Arc<Queue<Entry>>) {
+        fn do_rx(thread: i32, q: Arc<MpscQueue<Entry>>) {
             let mut i = 0;
             while let Some(val) = q.dequeue() {
                 tracing::info!(?val, ?thread, "dequeue {}/{}", i, THREADS * MSGS);
@@ -790,7 +790,7 @@ mod loom {
 
         loom::model(|| {
             let stub = entry(666);
-            let q = Arc::new(Queue::<Entry>::new_with_stub(stub));
+            let q = Arc::new(MpscQueue::<Entry>::new_with_stub(stub));
 
             let mut threads: Vec<_> = (0..THREADS)
                 .map(|thread| thread::spawn(do_tx(thread, MSGS, &q)))
@@ -834,21 +834,21 @@ mod tests {
     #[test]
     fn dequeue_empty() {
         let stub = entry(666);
-        let q = Queue::<Entry>::new_with_stub(stub);
+        let q = MpscQueue::<Entry>::new_with_stub(stub);
         assert_eq!(q.dequeue(), None)
     }
 
     #[test]
     fn try_dequeue_empty() {
         let stub = entry(666);
-        let q = Queue::<Entry>::new_with_stub(stub);
+        let q = MpscQueue::<Entry>::new_with_stub(stub);
         assert_eq!(q.try_dequeue(), Err(TryDequeueError::Empty))
     }
 
     #[test]
     fn try_dequeue_busy() {
         let stub = entry(666);
-        let q = Queue::<Entry>::new_with_stub(stub);
+        let q = MpscQueue::<Entry>::new_with_stub(stub);
 
         let consumer = q.try_consume().expect("must acquire consumer");
         assert_eq!(consumer.try_dequeue(), Err(TryDequeueError::Empty));
@@ -875,7 +875,7 @@ mod tests {
         const MSGS: i32 = 1000;
 
         let stub = entry(666);
-        let q = Queue::<Entry>::new_with_stub(stub);
+        let q = MpscQueue::<Entry>::new_with_stub(stub);
 
         assert_eq!(q.dequeue(), None);
 
