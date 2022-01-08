@@ -751,7 +751,7 @@ mod loom {
                         "the queue should never be busy, as there is only a single consumer!"
                     ),
                     Err(err) => {
-                        info!(?err, "dequeue error");
+                        tracing::info!(?err, "dequeue error");
                         thread::yield_now();
                     }
                 }
