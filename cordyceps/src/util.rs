@@ -1,26 +1,20 @@
-//! Synchronization primitives.
-
-#[cfg(loom)]
-pub use loom::sync::atomic;
-
-#[cfg(not(loom))]
-pub use core::sync::atomic;
-
-pub mod once;
-pub mod spin;
-pub use self::once::{InitOnce, Lazy};
-
+use crate::loom::hint;
 use core::{
     fmt,
     ops::{Deref, DerefMut},
 };
 
-pub mod hint {
-    #[cfg(not(loom))]
-    pub use core::hint::spin_loop;
-
-    #[cfg(loom)]
-    pub use loom::sync::atomic::spin_loop_hint as spin_loop;
+#[macro_export]
+macro_rules! feature {
+    (
+        #![$meta:meta]
+        $($item:item)*
+    ) => {
+        $(
+            #[cfg($meta)]
+            $item
+        )*
+    }
 }
 
 /// An exponential backoff for spin loops
@@ -36,7 +30,12 @@ pub(crate) struct Backoff {
     repr(align(64))
 )]
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
-pub struct CachePadded<T>(T);
+pub(crate) struct CachePadded<T>(pub(crate) T);
+
+pub(crate) struct FmtOption<'a, T> {
+    opt: Option<&'a T>,
+    or_else: &'a str,
+}
 
 // === impl Backoff ===
 
@@ -79,16 +78,6 @@ impl Default for Backoff {
 
 // === impl CachePadded ===
 
-impl<T> CachePadded<T> {
-    pub const fn new(value: T) -> Self {
-        Self(value)
-    }
-
-    pub fn into_inner(self) -> T {
-        self.0
-    }
-}
-
 impl<T> Deref for CachePadded<T> {
     type Target = T;
 
@@ -108,5 +97,34 @@ impl<T> DerefMut for CachePadded<T> {
 impl<T: fmt::Debug> fmt::Debug for CachePadded<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+// === impl FmtOption ===
+
+impl<'a, T> FmtOption<'a, T> {
+    pub(crate) fn new(opt: &'a Option<T>) -> Self {
+        Self {
+            opt: opt.as_ref(),
+            or_else: "None",
+        }
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for FmtOption<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for FmtOption<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
     }
 }

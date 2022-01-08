@@ -1,73 +1,15 @@
-use crate::fmt;
+use super::Linked;
+use crate::util::FmtOption;
 use core::{
+    fmt,
     marker::PhantomPinned,
     mem::ManuallyDrop,
     ptr::{self, NonNull},
 };
 
-/// Trait implemented by types which can be members of an intrusive linked list.
-///
-/// # Safety
-///
-/// This is unsafe to implement because it's the implementation's responsibility
-/// to ensure that the `Node` associated type is a valid linked list node. In
-/// particular:
-///
-/// - Implementations must ensure that `Node`s are pinned in memory while they
-///   are in a linked list. While a given `Node` is in a linked list, it may not
-///   be deallocated or moved to a different memory location.
-/// - The `Node` type may not be [`Unpin`].
-/// - Additional safety requirements for individual methods on this trait are
-///   documented on those methods.
-///
-/// Failure to uphold these invariants will result in list corruption, including
-/// dangling pointers.
-///
-/// [`Unpin`]: core::pin::Unpin
-pub unsafe trait Linked {
-    /// The handle owning nodes in the linked list.
-    type Handle;
-
-    /// Type of nodes in the linked list.
-    ///
-    /// When the type implementing `Linked` is not itself a reference, this is
-    /// typically `Self`.
-    ///
-    /// # Safety
-    ///
-    /// This type may not be [`Unpin`].
-    ///
-    ///  [`Unpin`]: core::pin::Unpin
-    type Node: ?Sized;
-
-    /// Convert a `Handle` to a raw pointer, without consuming it.
-    #[allow(clippy::wrong_self_convention)]
-    fn as_ptr(r: &Self::Handle) -> NonNull<Self::Node>;
-
-    /// Convert a raw pointer to a `Handle`.
-    ///
-    /// # Safety
-    ///
-    /// This function is safe to call when:
-    /// - It is valid to construct a `Handle` from a`raw pointer
-    /// - The pointer points to a valid instance of `Self` (e.g. it does not
-    ///   dangle).
-    unsafe fn from_ptr(ptr: NonNull<Self::Node>) -> Self::Handle;
-
-    /// Return the links of the node pointed to by `ptr`.
-    ///
-    /// # Safety
-    ///
-    /// This function is safe to call when:
-    /// - It is valid to construct a `Handle` from a`raw pointer
-    /// - The pointer points to a valid instance of `Self` (e.g. it does not
-    ///   dangle).
-    unsafe fn links(ptr: NonNull<Self::Node>) -> NonNull<Links<Self::Node>>;
-}
-
-pub struct List<T: Linked + ?Sized> {
-    head: Option<NonNull<T::Node>>,
-    tail: Option<NonNull<T::Node>>,
+pub struct List<T: ?Sized> {
+    head: Option<NonNull<T>>,
+    tail: Option<NonNull<T>>,
 }
 
 pub struct Links<T: ?Sized> {
@@ -79,19 +21,18 @@ pub struct Links<T: ?Sized> {
     _unpin: PhantomPinned,
 }
 
-pub struct Cursor<'a, T: Linked + ?Sized> {
+pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
     list: &'a mut List<T>,
-    curr: Option<NonNull<T::Node>>,
+    curr: Option<NonNull<T>>,
 }
 
-pub struct Iter<'a, T: Linked + ?Sized> {
+pub struct Iter<'a, T: Linked<Links<T>> + ?Sized> {
     _list: &'a List<T>,
-    curr: Option<NonNull<T::Node>>,
+    curr: Option<NonNull<T>>,
 }
 
 // ==== impl List ====
-
-impl<T: Linked + ?Sized> List<T> {
+impl<T: ?Sized> List<T> {
     /// Returns a new empty list.
     pub const fn new() -> List<T> {
         List {
@@ -111,7 +52,9 @@ impl<T: Linked + ?Sized> List<T> {
 
         false
     }
+}
 
+impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Asserts as many of the linked list's invariants as possible.
     pub fn assert_valid(&self) {
         let head = match self.head {
@@ -135,7 +78,7 @@ impl<T: Linked + ?Sized> List<T> {
         if head == tail {
             assert_eq!(
                 head_links, tail_links,
-                "this should just never fucking happen lol"
+                "if the head and tail nodes are the same, their links must be the same"
             );
             assert_eq!(
                 head_links.next, None,
@@ -152,7 +95,7 @@ impl<T: Linked + ?Sized> List<T> {
         while let Some(node) = curr {
             let links = unsafe { T::links(node) };
             let links = unsafe { links.as_ref() };
-            links.assert_valid::<T>(head_links, tail_links);
+            links.assert_valid(head_links, tail_links);
             curr = links.next;
         }
     }
@@ -161,16 +104,16 @@ impl<T: Linked + ?Sized> List<T> {
     pub fn push_front(&mut self, item: T::Handle) {
         let item = ManuallyDrop::new(item);
         let ptr = T::as_ptr(&*item);
-        tracing::trace!(?self, ?ptr, "push_front");
+        // tracing::trace!(?self, ?ptr, "push_front");
         assert_ne!(self.head, Some(ptr));
         unsafe {
             let mut links = T::links(ptr);
             links.as_mut().next = self.head;
             links.as_mut().prev = None;
-            tracing::trace!(?links);
+            // tracing::trace!(?links);
             if let Some(head) = self.head {
                 T::links(head).as_mut().prev = Some(ptr);
-                tracing::trace!(head.links = ?T::links(head).as_ref(), "set head prev ptr",);
+                // tracing::trace!(head.links = ?T::links(head).as_ref(), "set head prev ptr",);
             }
         }
 
@@ -180,14 +123,14 @@ impl<T: Linked + ?Sized> List<T> {
             self.tail = Some(ptr);
         }
 
-        tracing::trace!(?self, "push_front: pushed");
+        // tracing::trace!(?self, "push_front: pushed");
     }
 
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
         unsafe {
             let mut tail_links = T::links(tail);
-            tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
+            // tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
             self.tail = tail_links.as_ref().prev;
             debug_assert_eq!(
                 tail_links.as_ref().next,
@@ -202,7 +145,7 @@ impl<T: Linked + ?Sized> List<T> {
             }
 
             tail_links.as_mut().unlink();
-            tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
+            // tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
             Some(T::from_ptr(tail))
         }
     }
@@ -213,17 +156,17 @@ impl<T: Linked + ?Sized> List<T> {
     ///
     /// The caller *must* ensure that the removed node is an element of this
     /// linked list, and not any other linked list.
-    pub unsafe fn remove(&mut self, item: NonNull<T::Node>) -> Option<T::Handle> {
+    pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
         let mut links = T::links(item);
         let links = links.as_mut();
-        tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
+        // tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
         let prev = links.prev.take();
         let next = links.next.take();
 
         if let Some(prev) = prev {
             T::links(prev).as_mut().next = next;
         } else if self.head != Some(item) {
-            tracing::trace!(?self.head, "item is not head, but has no prev; return None");
+            // tracing::trace!(?self.head, "item is not head, but has no prev; return None");
             return None;
         } else {
             debug_assert_ne!(Some(item), next, "node must not be linked to itself");
@@ -233,14 +176,14 @@ impl<T: Linked + ?Sized> List<T> {
         if let Some(next) = next {
             T::links(next).as_mut().prev = prev;
         } else if self.tail != Some(item) {
-            tracing::trace!(?self.tail, "item is not tail, but has no prev; return None");
+            // tracing::trace!(?self.tail, "item is not tail, but has no prev; return None");
             return None;
         } else {
             debug_assert_ne!(Some(item), prev, "node must not be linked to itself");
             self.tail = prev;
         }
 
-        tracing::trace!(?self, item.addr = ?item, "remove: done");
+        // tracing::trace!(?self, item.addr = ?item, "remove: done");
         Some(T::from_ptr(item))
     }
 
@@ -259,14 +202,14 @@ impl<T: Linked + ?Sized> List<T> {
     }
 }
 
-unsafe impl<T: Linked + ?Sized> Send for List<T> where T::Node: Send {}
-unsafe impl<T: Linked + ?Sized> Sync for List<T> where T::Node: Sync {}
+unsafe impl<T: Linked<Links<T>> + ?Sized> Send for List<T> where T: Send {}
+unsafe impl<T: Linked<Links<T>> + ?Sized> Sync for List<T> where T: Sync {}
 
-impl<T: Linked + ?Sized> fmt::Debug for List<T> {
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("List")
-            .field("head", &fmt::opt(&self.head).or_else("None"))
-            .field("tail", &fmt::opt(&self.head).or_else("None"))
+            .field("head", &FmtOption::new(&self.head))
+            .field("tail", &FmtOption::new(&self.tail))
             .finish()
     }
 }
@@ -291,9 +234,9 @@ impl<T: ?Sized> Links<T> {
         self.next.is_some() || self.prev.is_some()
     }
 
-    fn assert_valid<L>(&self, head: &Self, tail: &Self)
+    fn assert_valid(&self, head: &Self, tail: &Self)
     where
-        L: Linked<Node = T> + ?Sized,
+        T: Linked<Self>,
     {
         if ptr::eq(self, head) {
             assert_eq!(
@@ -319,7 +262,7 @@ impl<T: ?Sized> Links<T> {
 
         if let Some(next) = self.next {
             assert_ne!(
-                unsafe { L::links(next) },
+                unsafe { T::links(next) },
                 NonNull::from(self),
                 "node's next link cannot be to itself; node={:#?}",
                 self
@@ -327,7 +270,7 @@ impl<T: ?Sized> Links<T> {
         }
         if let Some(prev) = self.prev {
             assert_ne!(
-                unsafe { L::links(prev) },
+                unsafe { T::links(prev) },
                 NonNull::from(self),
                 "node's prev link cannot be to itself; node={:#?}",
                 self
@@ -346,8 +289,8 @@ impl<T: ?Sized> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Links")
             .field("self", &format_args!("{:p}", self))
-            .field("next", &fmt::opt(&self.next).or_else("None"))
-            .field("prev", &fmt::opt(&self.prev).or_else("None"))
+            .field("next", &FmtOption::new(&self.next))
+            .field("prev", &FmtOption::new(&self.prev))
             .finish()
     }
 }
@@ -376,25 +319,22 @@ unsafe impl<T: Sync> Sync for Links<T> {}
 
 // === impl Cursor ====
 
-impl<'a, T: Linked + ?Sized> Iterator for Cursor<'a, T> {
+impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_ptr().map(|ptr| unsafe { T::from_ptr(ptr) })
     }
 }
 
-impl<'a, T: Linked + ?Sized> Cursor<'a, T> {
-    fn next_ptr(&mut self) -> Option<NonNull<T::Node>> {
+impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
+    fn next_ptr(&mut self) -> Option<NonNull<T>> {
         let curr = self.curr.take()?;
         self.curr = unsafe { T::links(curr).as_ref().next };
         Some(curr)
     }
 
     // Find and remove the first element matching a predicate.
-    pub fn remove_first(
-        &mut self,
-        mut predicate: impl FnMut(&T::Node) -> bool,
-    ) -> Option<T::Handle> {
+    pub fn remove_first(&mut self, mut predicate: impl FnMut(&T) -> bool) -> Option<T::Handle> {
         let mut item = None;
         while let Some(node) = self.next_ptr() {
             if predicate(unsafe { node.as_ref() }) {
@@ -410,7 +350,7 @@ impl<'a, T: Linked + ?Sized> Cursor<'a, T> {
 
 // === impl Iter ====
 
-impl<'a, T: Linked + ?Sized> Iterator for Iter<'a, T> {
+impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
     type Item = T::Handle;
     fn next(&mut self) -> Option<Self::Item> {
         let curr = self.curr.take()?;
@@ -429,20 +369,20 @@ mod tests {
     use std::pin::Pin;
 
     #[derive(Debug)]
-    struct Entry {
-        links: Links<Entry>,
+    struct Entry<'a> {
+        links: Links<Entry<'a>>,
         val: i32,
+        _lt: std::marker::PhantomData<&'a ()>,
     }
 
-    unsafe impl<'a> Linked for &'a Entry {
-        type Handle = Pin<&'a Entry>;
-        type Node = Entry;
+    unsafe impl<'a> Linked<Links<Self>> for Entry<'a> {
+        type Handle = Pin<&'a Entry<'a>>;
 
-        fn as_ptr(handle: &Pin<&'_ Entry>) -> NonNull<Entry> {
+        fn as_ptr(handle: &Pin<&'a Entry>) -> NonNull<Entry<'a>> {
             NonNull::from(handle.get_ref())
         }
 
-        unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<&'a Entry> {
+        unsafe fn from_ptr(ptr: NonNull<Entry<'a>>) -> Pin<&'a Entry<'a>> {
             // Safety: if this function is only called by the linked list
             // implementation (and it is not intended for external use), we can
             // expect that the `NonNull` was constructed from a reference which
@@ -455,23 +395,24 @@ mod tests {
             Pin::new_unchecked(&*ptr.as_ptr())
         }
 
-        unsafe fn links(mut target: NonNull<Entry>) -> NonNull<Links<Entry>> {
+        unsafe fn links(mut target: NonNull<Entry<'a>>) -> NonNull<Links<Entry<'a>>> {
             NonNull::from(&mut target.as_mut().links)
         }
     }
 
-    fn entry(val: i32) -> Pin<Box<Entry>> {
+    fn entry<'a>(val: i32) -> Pin<Box<Entry<'a>>> {
         Box::pin(Entry {
             links: Links::new(),
             val,
+            _lt: std::marker::PhantomData,
         })
     }
 
-    fn ptr(r: &Pin<Box<Entry>>) -> NonNull<Entry> {
+    fn ptr<'a>(r: &Pin<Box<Entry<'a>>>) -> NonNull<Entry<'a>> {
         r.as_ref().get_ref().into()
     }
 
-    fn collect_list(list: &mut List<&'_ Entry>) -> Vec<i32> {
+    fn collect_list(list: &mut List<Entry<'_>>) -> Vec<i32> {
         let mut ret = vec![];
 
         while let Some(entry) = list.pop_back() {
@@ -481,7 +422,7 @@ mod tests {
         ret
     }
 
-    fn push_all<'a>(list: &mut List<&'a Entry>, entries: &[Pin<&'a Entry>]) {
+    fn push_all<'a>(list: &mut List<Entry<'a>>, entries: &[Pin<&'a Entry<'a>>]) {
         for entry in entries.iter() {
             list.push_front(*entry);
         }
@@ -503,10 +444,10 @@ mod tests {
 
     #[test]
     fn const_new() {
-        const _: List<&Entry> = List::new();
+        const _: List<Entry> = List::new();
     }
 
-    fn trace_init() -> tracing::dispatch::DefaultGuard {
+    fn trace_init() -> tracing::dispatcher::DefaultGuard {
         use tracing_subscriber::prelude::*;
         tracing_subscriber::fmt()
             .with_test_writer()
@@ -549,7 +490,7 @@ mod tests {
         let a = entry(5);
         let b = entry(7);
 
-        let mut list = List::<&Entry>::new();
+        let mut list = List::<Entry>::new();
 
         list.push_front(a.as_ref());
         list.assert_valid();
@@ -761,7 +702,7 @@ mod tests {
             let c = entry(31);
             unsafe {
                 // Remove missing
-                let mut list = List::<&Entry>::new();
+                let mut list = List::<Entry<'_>>::new();
 
                 list.push_front(b.as_ref());
                 list.push_front(a.as_ref());
@@ -779,7 +720,7 @@ mod tests {
         let a = entry(5);
         let b = entry(7);
 
-        let mut list = List::<&Entry>::new();
+        let mut list = List::<Entry<'_>>::new();
 
         assert_eq!(0, list.cursor().count());
 
@@ -822,7 +763,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let mut ll = List::<&Entry>::new();
+        let mut ll = List::<Entry<'_>>::new();
         let mut reference = VecDeque::new();
 
         let entries: Vec<_> = (0..ops.len()).map(|i| entry(i as i32)).collect();

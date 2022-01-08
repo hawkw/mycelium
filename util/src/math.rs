@@ -15,6 +15,7 @@ pub const fn usize_const_log2_ceil(u: usize) -> usize {
 }
 
 #[cfg(all(test, not(loom)))]
+#[test]
 fn test_log2_ceil() {
     assert_eq!(0, 0.log2_ceil());
     assert_eq!(0, 1.log2_ceil());

@@ -176,6 +176,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cordyceps"
+version = "0.1.0"
+dependencies = [
+ "loom",
+ "proptest",
+ "tracing 0.1.29",
+ "tracing-subscriber 0.3.1",
+]
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -479,10 +489,13 @@ dependencies = [
 name = "mycelium-util"
 version = "0.1.0"
 dependencies = [
+ "cordyceps",
  "loom",
  "proptest",
+ "tracing 0.1.29",
  "tracing 0.2.0",
  "tracing-subscriber 0.3.0",
+ "tracing-subscriber 0.3.1",
 ]
 
 [[package]]

@@ -1,3 +1,17 @@
+#[macro_export]
+macro_rules! feature {
+    (
+        #![$meta:meta]
+        $($item:item)*
+    ) => {
+        $(
+            #[cfg($meta)]
+            #[cfg_attr(docsrs, doc(cfg($meta)))]
+            $item
+        )*
+    }
+}
+
 /// Indicates unreachable code that we are confident is *truly* unreachable.
 ///
 /// This is essentially a compromise between `core::unreachable!()` and

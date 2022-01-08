@@ -5,6 +5,7 @@ set -x
 RUSTFLAGS="--cfg loom ${RUSTFLAGS}" \
 LOOM_LOG="${LOOM_LOG:-info}" \
 LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" \
+LOOM_LOCATION=true \
 cargo test \
     --profile loom \
     --lib \

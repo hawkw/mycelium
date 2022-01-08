@@ -6,6 +6,7 @@ mod unsafe_cell {
 
 #[cfg(not(loom))]
 mod unsafe_cell {
+    #![allow(dead_code)]
     use core::cell;
 
     /// `UnsafeCell` ensures access to the inner value are valid under the Rust memory
