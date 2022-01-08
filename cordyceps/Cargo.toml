@@ -27,3 +27,6 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 [target.'cfg(loom)'.dev-dependencies]
 loom = "0.5.4"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

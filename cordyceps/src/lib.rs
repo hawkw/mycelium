@@ -1,6 +1,6 @@
-//! Mycelium intrusive data structures.
-//!
+#![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
 #[cfg(feature = "alloc")]
 extern crate alloc;
 pub mod list;
@@ -17,18 +17,19 @@ use core::ptr::NonNull;
 /// # Safety
 ///
 /// This is unsafe to implement because it's the implementation's responsibility
-/// to ensure that the `Node` associated type is a valid linked list node. In
-/// particular:
+/// to ensure that types implementing this trait are valid intrusive collection
+/// nodes. In particular:
 ///
-/// - Implementations must ensure that `Node`s are pinned in memory while they
-///   are in a linked list. While a given `Node` is in a linked list, it may not
-///   be deallocated or moved to a different memory location.
-/// - The `Node` type may not be [`Unpin`].
+/// - Implementations **must** ensure that implementorss are pinned in memory while they
+///   are in an intrusive collection. While a given `Linked` type is in an intrusive
+///   data structure, it may not be deallocated or moved to a different memory
+///   location.
+/// - The type implementing this trait **must not** implement [`Unpin`].
 /// - Additional safety requirements for individual methods on this trait are
 ///   documented on those methods.
 ///
-/// Failure to uphold these invariants will result in list corruption, including
-/// dangling pointers.
+/// Failure to uphold these invariants will result in corruption of the
+/// intrusive data structure, including dangling pointers.
 ///
 /// [`Unpin`]: core::pin::Unpin
 pub unsafe trait Linked<L> {
