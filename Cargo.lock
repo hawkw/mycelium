@@ -87,9 +87,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bootloader"
-version = "0.10.9"
+version = "0.10.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61ee1938693d0a8a0b8398328d5632254e84ef42c095ef0b585fd903a8e19d20"
+checksum = "f2d9b14b92a825ecc3b24e4c163a578af473fbba5f190bfaf48092b29b604504"
 
 [[package]]
 name = "bootloader-locator"

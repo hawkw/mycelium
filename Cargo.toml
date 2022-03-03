@@ -37,7 +37,7 @@ rlibc = "1.0"
 # NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`
 # instead of normal [dependencies]. don't move this.
-bootloader = { version = "0.10.6" }
+bootloader = { version = "0.10.12" }
 embedded-graphics = "0.7"
 
 [dev-dependencies]
