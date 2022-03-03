@@ -369,6 +369,7 @@ mod tests {
     use std::pin::Pin;
 
     #[derive(Debug)]
+    #[repr(C)]
     struct Entry<'a> {
         links: Links<Entry<'a>>,
         val: i32,
@@ -395,8 +396,10 @@ mod tests {
             Pin::new_unchecked(&*ptr.as_ptr())
         }
 
-        unsafe fn links(mut target: NonNull<Entry<'a>>) -> NonNull<Links<Entry<'a>>> {
-            NonNull::from(&mut target.as_mut().links)
+        unsafe fn links(target: NonNull<Entry<'a>>) -> NonNull<Links<Entry<'a>>> {
+            // Safety: this is safe because the `links` are the first field of
+            // `Entry`, and `Entry` is `repr(C)`.
+            target.cast()
         }
     }
 
