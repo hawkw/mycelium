@@ -1,7 +1,7 @@
 pub mod idt;
 pub mod pic;
 use crate::{segment, VAddr};
-use core::{fmt, marker::PhantomData};
+use core::{arch::asm, fmt, marker::PhantomData};
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
