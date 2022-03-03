@@ -1,5 +1,6 @@
 pub mod cr3 {
     use crate::{mm::size::Size4Kb, PAddr};
+    use core::arch::asm;
     use hal_core::{mem::page::Page, Address};
 
     #[derive(Copy, Clone, Eq, PartialEq)]

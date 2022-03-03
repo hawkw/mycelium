@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 /// Perform one x86 `hlt` instruction.
 ///
 /// # Safety

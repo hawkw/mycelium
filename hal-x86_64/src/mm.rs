@@ -881,6 +881,7 @@ pub mod level {
 pub(crate) mod tlb {
     use crate::control_regs::cr3;
     use crate::VAddr;
+    use core::arch::asm;
     use hal_core::Address;
 
     #[allow(dead_code)] // we'll need this later

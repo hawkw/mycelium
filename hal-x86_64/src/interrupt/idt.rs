@@ -1,5 +1,5 @@
 use crate::{cpu, segment};
-use core::fmt;
+use core::{arch::asm, fmt};
 use mycelium_util::bits;
 
 #[repr(C)]
