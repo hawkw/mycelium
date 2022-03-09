@@ -107,9 +107,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         // tracing::trace!(?self, ?ptr, "push_front");
         assert_ne!(self.head, Some(ptr));
         unsafe {
-            let mut links = T::links(ptr);
-            links.as_mut().next = self.head;
-            links.as_mut().prev = None;
+            T::links(ptr).as_mut().next = self.head;
+            T::links(ptr).as_mut().prev = None;
             // tracing::trace!(?links);
             if let Some(head) = self.head {
                 T::links(head).as_mut().prev = Some(ptr);
@@ -716,29 +715,47 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cursor() {
-        let _trace = trace_init();
+    // #[test]
+    // fn cursor() {
+    //     let _trace = trace_init();
 
-        let a = entry(5);
-        let b = entry(7);
+    //     let a = entry(5);
+    //     let b = entry(7);
 
-        let mut list = List::<Entry<'_>>::new();
+    //     let mut list = List::<Entry<'_>>::new();
 
-        assert_eq!(0, list.cursor().count());
+    //     assert_eq!(0, list.cursor().count());
 
-        list.push_front(a.as_ref());
-        list.push_front(b.as_ref());
+    //     list.push_front(a.as_ref());
+    //     list.push_front(b.as_ref());
 
-        let mut i = list.cursor();
-        assert_eq!(7, i.next().unwrap().val);
-        assert_eq!(5, i.next().unwrap().val);
-        assert!(i.next().is_none());
+    //     let mut i = list.cursor();
+    //     assert_eq!(7, i.next().unwrap().val);
+    //     assert_eq!(5, i.next().unwrap().val);
+    //     assert!(i.next().is_none());
+    // }
+
+    #[derive(Debug)]
+    enum Op {
+        Push,
+        Pop,
+        Remove(usize),
     }
 
     proptest::proptest! {
         #[test]
         fn fuzz_linked_list(ops: Vec<usize>) {
+
+        let ops = ops
+        .iter()
+        .map(|i| match i % 3 {
+            0 => Op::Push,
+            1 => Op::Pop,
+            2 => Op::Remove(i / 3),
+            _ => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+
             let _trace = trace_init();
             let _span = tracing::info_span!("fuzz").entered();
             tracing::info!(?ops);
@@ -746,25 +763,8 @@ mod tests {
         }
     }
 
-    fn run_fuzz(ops: Vec<usize>) {
+    fn run_fuzz(ops: Vec<Op>) {
         use std::collections::VecDeque;
-
-        #[derive(Debug)]
-        enum Op {
-            Push,
-            Pop,
-            Remove(usize),
-        }
-
-        let ops = ops
-            .iter()
-            .map(|i| match i % 3 {
-                0 => Op::Push,
-                1 => Op::Pop,
-                2 => Op::Remove(i / 3),
-                _ => unreachable!(),
-            })
-            .collect::<Vec<_>>();
 
         let mut ll = List::<Entry<'_>>::new();
         let mut reference = VecDeque::new();
@@ -773,6 +773,7 @@ mod tests {
 
         for (i, op) in ops.iter().enumerate() {
             let _span = tracing::info_span!("op", ?i, ?op).entered();
+            tracing::info!(?op);
             match op {
                 Op::Push => {
                     reference.push_front(i as i32);
@@ -783,6 +784,7 @@ mod tests {
                 Op::Pop => {
                     if reference.is_empty() {
                         assert!(ll.is_empty());
+                        tracing::debug!("skipping pop; list is empty");
                         continue;
                     }
 
@@ -792,6 +794,8 @@ mod tests {
                 Op::Remove(n) => {
                     if reference.is_empty() {
                         assert!(ll.is_empty());
+
+                        tracing::debug!("skipping re; list is empty");
                         continue;
                     }
 

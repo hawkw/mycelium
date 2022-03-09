@@ -7,4 +7,5 @@ set -x
 cd "$(dirname "$0")"/..
 
 MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-tag-raw-pointers ${MIRIFLAGS:-}" \
+    PROPTEST_CASES="${PROPTEST_CASES:-10}" \
     cargo miri test --lib --workspace "${@}"
