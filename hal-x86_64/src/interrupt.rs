@@ -30,7 +30,7 @@ pub struct Interrupt<T = ()> {
 
 #[derive(Copy, Clone)]
 #[repr(transparent)]
-pub struct PageFaultCode(u64);
+pub struct PageFaultCode(u32);
 
 #[repr(C)]
 pub struct Registers {
@@ -91,6 +91,10 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
 impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
     fn fault_vaddr(&self) -> crate::VAddr {
         unimplemented!("eliza")
+    }
+
+    fn debug_error_code(&self) -> &dyn fmt::Debug {
+        &self.code
     }
 }
 
@@ -228,6 +232,12 @@ impl fmt::Display for Registers {
 
 pub fn fire_test_interrupt() {
     unsafe { asm!("int {0}", const 69) }
+}
+
+impl fmt::Debug for PageFaultCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PageFaultCode({:#b})", self.0)
+    }
 }
 
 #[cfg(test)]

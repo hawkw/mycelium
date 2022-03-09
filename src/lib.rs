@@ -104,6 +104,17 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     // XXX(eliza): this sucks
     ALLOC.set_vm_offset(arch::mm::vm_offset());
 
+    unsafe {
+        core::arch::asm!(
+            "
+            mov edx, 0x0
+            mov eax, 0x2
+            mov ecx, 0x0
+            div ecx
+        "
+        );
+    }
+
     let mut regions = 0;
     let mut free_regions = 0;
     let mut free_bytes = 0;

@@ -1,12 +1,11 @@
 use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(test)]
+use core::{ptr, sync::atomic::AtomicPtr};
 use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
 use mycelium_util::{fmt, sync::InitOnce};
-
-#[cfg(test)]
-use core::{ptr, sync::atomic::AtomicPtr};
 
 mod framebuf;
 use self::framebuf::FramebufWriter;
@@ -143,7 +142,10 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
         C: hal_core::interrupt::Context<Registers = X64Registers>
             + hal_core::interrupt::ctx::PageFault,
     {
-        oops(&"PAGE FAULT", Some(&cx));
+        oops(
+            &format_args!("PAGE FAULT ({:?})", cx.debug_error_code()),
+            Some(&cx),
+        );
     }
 
     fn code_fault<C>(cx: C)
@@ -216,6 +218,8 @@ pub fn oops(
     fault: Option<&dyn hal_core::interrupt::ctx::Context<Registers = X64Registers>>,
 ) -> ! {
     use core::fmt::Write;
+    use mycelium_trace::writer::MakeWriter;
+
     let mut vga = vga::writer();
 
     // /!\ disable all interrupts, unlock everything to prevent deadlock /!\
@@ -259,46 +263,112 @@ pub fn oops(
         None
     };
 
-    const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
-    vga.set_color(RED_BG);
-    vga.clear();
-    let _ = vga.write_str("\n  ");
-    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
-    let _ = vga.write_str("OOPSIE WOOPSIE");
-    vga.set_color(RED_BG);
+    let has_framebuf = if let Some((fb_cfg, fb_lock)) = FRAMEBUFFER.try_get() {
+        use hal_core::framebuffer::{Draw, RgbColor};
+        let mut framebuf = Framebuffer::new(fb_cfg, fb_lock.lock());
+        framebuf.fill(RgbColor::RED);
 
-    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
+        use embedded_graphics::{
+            mono_font::{ascii, MonoTextStyle, MonoTextStyleBuilder},
+            pixelcolor::{Rgb888, RgbColor as _},
+            prelude::*,
+            text::{Alignment, Text},
+        };
+        use mycelium_trace::embedded_graphics::MakeTextWriter;
+
+        let top = Point::new(5, 15);
+        let mut target = framebuf.as_draw_target();
+        let uwu = MonoTextStyleBuilder::new()
+            .font(&ascii::FONT_9X15_BOLD)
+            .text_color(Rgb888::RED)
+            .background_color(Rgb888::WHITE)
+            .build();
+
+        let _ = Text::with_alignment(
+            " uwu we did a widdle fucky-wucky ",
+            top,
+            uwu,
+            Alignment::Left,
+        )
+        .draw(&mut target)
+        .unwrap();
+        true
+    } else {
+        false
+    };
+
     if let Some(registers) = registers {
-        let _ = writeln!(vga, "\n{}\n", registers);
+        // let _ = writeln!(mk_writer.make_writer(), "\n{}\n", registers);
 
         let fault_addr = registers.instruction_ptr.as_usize();
         use yaxpeax_arch::LengthedInstruction;
-        let _ = writeln!(vga, "Disassembly:");
+        // let _ = writeln!(mk_writer.make_writer(), "Disassembly:");
         let mut ptr = fault_addr as u64;
         let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
-        let _span = tracing::debug_span!("disassembly", "%rip" = fmt::hex(ptr)).entered();
+        let _span = tracing::info_span!("disassembly", "%rip" = fmt::hex(ptr)).entered();
         for _ in 0..10 {
             // Safety: who cares! At worst this might double-fault by reading past the end of valid
             // memory. whoopsie.
+
+            // XXX(eliza): this read also page faults sometimes. seems wacky.
             let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
-            let _ = write!(vga, "  {:016x}: ", ptr).unwrap();
+            tracing::debug!(?bytes);
+            // let _ = write!(mk_writer.make_writer(), "  {:016x}: ", ptr).unwrap();
             match decoder.decode_slice(bytes) {
                 Ok(inst) => {
-                    let _ = writeln!(vga, "{}", inst);
-                    tracing::debug!("{:016x}: {}", ptr, inst);
+                    // let _ = writeln!(mk_writer.make_writer(), "{}", inst);
+                    tracing::info!("{:016x}: {}", ptr, inst);
                     ptr += inst.len();
                 }
                 Err(e) => {
-                    let _ = writeln!(vga, "{}", e);
-                    tracing::debug!("{:016x}: {}", ptr, e);
+                    // let _ = writeln!(mk_writer.make_writer(), "{}", e);
+                    tracing::info!("{:016x}: {}", ptr, e);
                     break;
                 }
             }
         }
     }
-    let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
 
-    crate::ALLOC.dump_free_lists();
+    // const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
+    // vga.set_color(RED_BG);
+    // vga.clear();
+    // let _ = vga.write_str("\n  ");
+    // vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
+    // let _ = vga.write_str("OOPSIE WOOPSIE");
+    // vga.set_color(RED_BG);
+
+    // let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
+    // if let Some(registers) = registers {
+    //     let _ = writeln!(vga, "\n{}\n", registers);
+
+    //     let fault_addr = registers.instruction_ptr.as_usize();
+    //     use yaxpeax_arch::LengthedInstruction;
+    //     let _ = writeln!(vga, "Disassembly:");
+    //     let mut ptr = fault_addr as u64;
+    //     let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
+    //     let _span = tracing::debug_span!("disassembly", "%rip" = fmt::hex(ptr)).entered();
+    //     for _ in 0..10 {
+    //         // Safety: who cares! At worst this might double-fault by reading past the end of valid
+    //         // memory. whoopsie.
+    //         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
+    //         let _ = write!(vga, "  {:016x}: ", ptr).unwrap();
+    //         match decoder.decode_slice(bytes) {
+    //             Ok(inst) => {
+    //                 let _ = writeln!(vga, "{}", inst);
+    //                 tracing::debug!("{:016x}: {}", ptr, inst);
+    //                 ptr += inst.len();
+    //             }
+    //             Err(e) => {
+    //                 let _ = writeln!(vga, "{}", e);
+    //                 tracing::debug!("{:016x}: {}", ptr, e);
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
+    // let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
+
+    // crate::ALLOC.dump_free_lists();
 
     #[cfg(test)]
     {

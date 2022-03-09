@@ -16,7 +16,7 @@ pub trait Context {
 
 pub trait PageFault: Context {
     fn fault_vaddr(&self) -> VAddr;
-
+    fn debug_error_code(&self) -> &dyn fmt::Debug;
     // TODO(eliza): more
 }
 

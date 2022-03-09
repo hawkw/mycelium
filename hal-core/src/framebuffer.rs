@@ -57,7 +57,7 @@ pub trait Draw {
     /// implementation, and are thus encouraged to override this method.
     fn fill(&mut self, color: RgbColor) -> &mut Self {
         for y in 0..self.height() {
-            self.line_horiz(y, self.width(), color);
+            self.fill_row(y, color);
         }
         self
     }
