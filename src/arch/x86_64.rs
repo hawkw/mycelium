@@ -10,6 +10,9 @@ use mycelium_util::{fmt, sync::InitOnce};
 mod framebuf;
 use self::framebuf::FramebufWriter;
 
+mod oops;
+pub use self::oops::{oops, Oops};
+
 pub type MinPageSize = mm::size::Size4Kb;
 
 #[derive(Debug)]
@@ -142,10 +145,7 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
         C: hal_core::interrupt::Context<Registers = X64Registers>
             + hal_core::interrupt::ctx::PageFault,
     {
-        oops(
-            &format_args!("PAGE FAULT ({:?})", cx.debug_error_code()),
-            Some(&cx),
-        );
+        oops(Oops::fault(&cx, "PAGE FAULT"))
     }
 
     fn code_fault<C>(cx: C)
@@ -153,7 +153,7 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
         C: hal_core::interrupt::Context<Registers = X64Registers>
             + hal_core::interrupt::ctx::CodeFault,
     {
-        oops(&"CODE FAULT", Some(&cx));
+        oops(Oops::fault(&cx, "CODE FAULT"));
     }
 
     fn double_fault<C>(cx: C)
@@ -161,7 +161,7 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
         C: hal_core::interrupt::Context<Registers = X64Registers>
             + hal_core::interrupt::ctx::CodeFault,
     {
-        oops(&"DOUBLE FAULT", Some(&cx))
+        oops(Oops::fault(&cx, "DOUBLE FAULT"))
     }
 
     fn timer_tick() {
@@ -210,186 +210,6 @@ pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
 
     let boot_info = RustbootBootInfo::from_bootloader(info);
     crate::kernel_main(&boot_info);
-}
-
-#[cold]
-pub fn oops(
-    cause: &dyn core::fmt::Display,
-    fault: Option<&dyn hal_core::interrupt::ctx::Context<Registers = X64Registers>>,
-) -> ! {
-    use core::fmt::Write;
-    use mycelium_trace::writer::MakeWriter;
-
-    let mut vga = vga::writer();
-
-    // /!\ disable all interrupts, unlock everything to prevent deadlock /!\
-    //
-    // Safety: it is okay to do this because we are oopsing and everything
-    // is going to die anyway.
-    unsafe {
-        // disable all interrupts.
-        cpu::intrinsics::cli();
-
-        // If the system has a COM1, unlock it.
-        if let Some(com1) = serial::com1() {
-            com1.force_unlock();
-        }
-
-        // unlock the VGA buffer.
-        vga.force_unlock();
-
-        // unlock the frame buffer
-        framebuf::force_unlock();
-    }
-
-    // emit a DEBUG event first. with the default tracing configuration, these
-    // will go to the serial port and *not* get written to the framebuffer. this
-    // is important, since it lets us still get information about the oops on
-    // the serial port, even if the oops was due to a bug in eliza's framebuffer
-    // code, which (it turns out) is surprisingly janky...
-    tracing::debug!(
-        %cause,
-        registers = ?fault.as_ref().map(|cx| tracing::field::debug(cx.registers())),
-        "oops"
-    );
-    // okay, we've dumped the oops to serial, now try to log a nicer event at
-    // the ERROR level.
-    let registers = if let Some(fault) = fault {
-        let registers = fault.registers();
-        tracing::error!(%cause, ?registers, "OOPS! a CPU fault occurred");
-        Some(registers)
-    } else {
-        tracing::error!(%cause, "OOPS! a panic occurred", );
-        None
-    };
-
-    let has_framebuf = if let Some((fb_cfg, fb_lock)) = FRAMEBUFFER.try_get() {
-        use hal_core::framebuffer::{Draw, RgbColor};
-        let mut framebuf = Framebuffer::new(fb_cfg, fb_lock.lock());
-        framebuf.fill(RgbColor::RED);
-
-        use embedded_graphics::{
-            mono_font::{ascii, MonoTextStyle, MonoTextStyleBuilder},
-            pixelcolor::{Rgb888, RgbColor as _},
-            prelude::*,
-            text::{Alignment, Text},
-        };
-        use mycelium_trace::embedded_graphics::MakeTextWriter;
-
-        let top = Point::new(5, 15);
-        let mut target = framebuf.as_draw_target();
-        let uwu = MonoTextStyleBuilder::new()
-            .font(&ascii::FONT_9X15_BOLD)
-            .text_color(Rgb888::RED)
-            .background_color(Rgb888::WHITE)
-            .build();
-
-        let _ = Text::with_alignment(
-            " uwu we did a widdle fucky-wucky ",
-            top,
-            uwu,
-            Alignment::Left,
-        )
-        .draw(&mut target)
-        .unwrap();
-        true
-    } else {
-        false
-    };
-
-    if let Some(registers) = registers {
-        // let _ = writeln!(mk_writer.make_writer(), "\n{}\n", registers);
-
-        let fault_addr = registers.instruction_ptr.as_usize();
-        use yaxpeax_arch::LengthedInstruction;
-        // let _ = writeln!(mk_writer.make_writer(), "Disassembly:");
-        let mut ptr = fault_addr as u64;
-        let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
-        let _span = tracing::info_span!("disassembly", "%rip" = fmt::hex(ptr)).entered();
-        for _ in 0..10 {
-            // Safety: who cares! At worst this might double-fault by reading past the end of valid
-            // memory. whoopsie.
-
-            // XXX(eliza): this read also page faults sometimes. seems wacky.
-            let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
-            tracing::debug!(?bytes);
-            // let _ = write!(mk_writer.make_writer(), "  {:016x}: ", ptr).unwrap();
-            match decoder.decode_slice(bytes) {
-                Ok(inst) => {
-                    // let _ = writeln!(mk_writer.make_writer(), "{}", inst);
-                    tracing::info!("{:016x}: {}", ptr, inst);
-                    ptr += inst.len();
-                }
-                Err(e) => {
-                    // let _ = writeln!(mk_writer.make_writer(), "{}", e);
-                    tracing::info!("{:016x}: {}", ptr, e);
-                    break;
-                }
-            }
-        }
-    }
-
-    // const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
-    // vga.set_color(RED_BG);
-    // vga.clear();
-    // let _ = vga.write_str("\n  ");
-    // vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
-    // let _ = vga.write_str("OOPSIE WOOPSIE");
-    // vga.set_color(RED_BG);
-
-    // let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
-    // if let Some(registers) = registers {
-    //     let _ = writeln!(vga, "\n{}\n", registers);
-
-    //     let fault_addr = registers.instruction_ptr.as_usize();
-    //     use yaxpeax_arch::LengthedInstruction;
-    //     let _ = writeln!(vga, "Disassembly:");
-    //     let mut ptr = fault_addr as u64;
-    //     let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
-    //     let _span = tracing::debug_span!("disassembly", "%rip" = fmt::hex(ptr)).entered();
-    //     for _ in 0..10 {
-    //         // Safety: who cares! At worst this might double-fault by reading past the end of valid
-    //         // memory. whoopsie.
-    //         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
-    //         let _ = write!(vga, "  {:016x}: ", ptr).unwrap();
-    //         match decoder.decode_slice(bytes) {
-    //             Ok(inst) => {
-    //                 let _ = writeln!(vga, "{}", inst);
-    //                 tracing::debug!("{:016x}: {}", ptr, inst);
-    //                 ptr += inst.len();
-    //             }
-    //             Err(e) => {
-    //                 let _ = writeln!(vga, "{}", e);
-    //                 tracing::debug!("{:016x}: {}", ptr, e);
-    //                 break;
-    //             }
-    //         }
-    //     }
-    // }
-    // let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
-
-    // crate::ALLOC.dump_free_lists();
-
-    #[cfg(test)]
-    {
-        if let Some(test) = mycotest::runner::current_test() {
-            if let Some(com1) = serial::com1() {
-                let failure = if fault.is_some() {
-                    mycotest::Failure::Fault
-                } else {
-                    mycotest::Failure::Panic
-                };
-                // if writing the test outcome fails, don't double panic...
-                let _ = test.write_outcome(Err(failure), com1.lock());
-            }
-        }
-        qemu_exit(QemuExitCode::Failed);
-    }
-
-    #[cfg(not(test))]
-    unsafe {
-        cpu::halt();
-    }
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be
