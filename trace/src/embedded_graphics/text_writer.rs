@@ -10,43 +10,43 @@ use embedded_graphics::{
     Drawable,
 };
 use hal_core::framebuffer::{Draw, DrawTarget};
-
-mod text_writer;
-
-#[derive(Debug)]
-pub struct MakeTextWriter<D> {
-    mk: fn() -> D,
-    next_point: AtomicU64,
+#[derive(Clone, Debug)]
+pub struct TextWriter<D> {
+    target: DrawTarget<D>,
     line_len: u32,
     char_height: u32,
     last_line: i32,
+    indent: u32,
+    style: MonoTextStyle<'static, pixelcolor::Rgb888>,
+    point: Point,
 }
 
-#[derive(Clone, Debug)]
-pub struct TextWriter<'mk, D> {
-    target: DrawTarget<D>,
-    mk: &'mk MakeTextWriter<D>,
+impl<D: Draw> TextWriter<D> {
+    pub fn new(at: Point, style: MonoTextStyle<'static, pixelcolor::Rgb888>, target: D) -> Self {
+        let pixel_width = target.width() as u32;
+        let pixel_height = target.height() as u32;
+        let line_len = Self::line_len(pixel_width, &style);
+        let indent = point.x;
+        let last_line = (pixel_height - char_height - point.y) as i32;
+        Self {
+            point,
+            style,
+            char_height,
+            indent,
+            target: DrawTarget::new(target),
+        }
+    }
+
+    fn line_len(pixel_width: u32, text_style: &MonoTextStyle<'static, pixelcolor::Rgb888>) -> u32 {
+        pixel_width / text_style.font.character_size.width
+    }
 }
 
-const fn pack_point(Point { x, y }: Point) -> u64 {
-    (x as u64) << 32 | y as u64
-}
-
-const fn unpack_point(u: u64) -> Point {
-    const Y_MASK: u64 = u32::MAX as u64;
-    let x = (u >> 32) as i32;
-    let y = (u & Y_MASK) as i32;
-    Point { x, y }
-}
-
-impl<'mk, D> fmt::Write for TextWriter<'mk, D>
+impl<D> fmt::Write for TextWriter<D>
 where
     D: Draw,
 {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        let curr_packed = self.mk.next_point.load(Ordering::Relaxed);
-        let mut curr_point = unpack_point(curr_packed);
-
         // for a couple of reasons, we don't trust the `embedded-graphics` crate
         // to handle newlines for us:
         //
@@ -85,11 +85,11 @@ where
             // if we have reached the bottom of the screen, we'll need to scroll
             // previous framebuffer contents up to make room for new line(s) of
             // text.
-            if curr_point.y > self.mk.last_line {
-                let ydiff = curr_point.y - self.mk.last_line;
-                curr_point = Point {
-                    y: self.mk.last_line,
-                    x: 10,
+            if self.point.y > self.last_line {
+                let ydiff = self.point.y - self.last_line;
+                self.point = Point {
+                    y: self.last_line,
+                    x: self.indent,
                 };
                 self.target.inner_mut().scroll_vert(ydiff as isize);
             }
@@ -100,82 +100,22 @@ where
                 curr_point
             } else {
                 // otherwise, actually draw the text.
-                Text::with_alignment(s, curr_point, default_text_style(), text::Alignment::Left)
+                Text::with_alignment(s, curr_point, &self.style, text::Alignment::Left)
                     .draw(&mut self.target)
                     .map_err(|_| fmt::Error)?
             };
 
             if has_newline {
                 // carriage return
-                curr_point = Point {
-                    y: curr_point.y + self.mk.char_height as i32,
-                    x: 10,
+                self.point = Point {
+                    y: curr_point.y + self.char_height as i32,
+                    x: self.indent,
                 };
             } else {
-                curr_point = next_point;
+                self.point = next_point;
             }
         }
 
-        match self.mk.next_point.compare_exchange(
-            curr_packed,
-            pack_point(curr_point),
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => Ok(()),
-            Err(actual_point) => unsafe {
-                mycelium_util::unreachable_unchecked!(
-                    "lock should guard this, could actually be totally unsync; curr_point={}; actual_point={}",
-                    unpack_point(curr_packed),
-                    unpack_point(actual_point)
-                );
-            },
-        }
+        Ok(())
     }
-}
-
-impl<D: Draw> MakeTextWriter<D> {
-    pub fn new(mk: fn() -> D) -> Self {
-        let (pixel_width, pixel_height) = {
-            let buf = (mk)();
-            (buf.width() as u32, buf.height() as u32)
-        };
-        let text_style = default_text_style();
-        let line_len = Self::line_len(pixel_width, &text_style);
-        let char_height = text_style.font.character_size.height;
-        let last_line = (pixel_height - char_height - 10) as i32;
-        Self {
-            next_point: AtomicU64::new(pack_point(Point { x: 10, y: 10 })),
-            char_height,
-            mk,
-            line_len,
-            last_line,
-        }
-    }
-
-    fn line_len(pixel_width: u32, text_style: &MonoTextStyle<'static, pixelcolor::Rgb888>) -> u32 {
-        pixel_width / text_style.font.character_size.width
-    }
-}
-
-impl<'a, D> crate::writer::MakeWriter<'a> for MakeTextWriter<D>
-where
-    D: Draw + 'a,
-{
-    type Writer = TextWriter<'a, D>;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        TextWriter {
-            target: (self.mk)().into_draw_target(),
-            mk: self,
-        }
-    }
-
-    fn line_len(&self) -> usize {
-        self.line_len as usize
-    }
-}
-
-fn default_text_style() -> MonoTextStyle<'static, pixelcolor::Rgb888> {
-    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, pixelcolor::Rgb888::WHITE)
 }
