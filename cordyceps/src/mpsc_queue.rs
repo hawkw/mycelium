@@ -876,8 +876,8 @@ mod tests {
     fn basically_works() {
         use std::{sync::Arc, thread};
 
-        const THREADS: i32 = 8;
-        const MSGS: i32 = 1000;
+        const THREADS: i32 = if_miri(3, 8);
+        const MSGS: i32 = if_miri(10, 1000);
 
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
@@ -908,12 +908,23 @@ mod tests {
                 Err(TryDequeueError::Busy) => {
                     panic!("the queue should never be busy, as there is only one consumer")
                 }
-                Err(e) => println!("recv error {:?}", e),
+                Err(e) => {
+                    println!("recv error {:?}", e);
+                    thread::yield_now();
+                }
             }
         }
 
         for thread in threads {
             thread.join().unwrap();
+        }
+    }
+
+    const fn if_miri(miri: i32, not_miri: i32) -> i32 {
+        if cfg!(miri) {
+            miri
+        } else {
+            not_miri
         }
     }
 }
