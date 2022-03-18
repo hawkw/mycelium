@@ -769,8 +769,8 @@ unsafe impl Linked<list::Links<Self>> for Free {
     type Handle = ptr::NonNull<Free>;
 
     #[inline]
-    fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {
-        *r
+    fn as_ptr(r: Self::Handle) -> ptr::NonNull<Self> {
+        r
     }
 
     #[inline]

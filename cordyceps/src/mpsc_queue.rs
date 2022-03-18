@@ -35,7 +35,7 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
     /// new consumer.
     has_consumer: CachePadded<AtomicBool>,
 
-    stub: T::Handle,
+    stub: NonNull<T>,
 }
 
 /// A handle that holds the right to dequeue elements from a [`Queue`].
@@ -67,11 +67,10 @@ pub struct Links<T> {
     /// Used for debug mode consistency checking only.
     #[cfg(debug_assertions)]
     is_stub: AtomicBool,
-
-    /// Linked list links must always be `!Unpin`, in order to ensure that they
-    /// never recieve LLVM `noalias` annotations; see also
-    /// https://github.com/rust-lang/rust/issues/63818.
-    _unpin: PhantomPinned,
+    // /// Linked list links must always be `!Unpin`, in order to ensure that they
+    // /// never recieve LLVM `noalias` annotations; see also
+    // /// https://github.com/rust-lang/rust/issues/63818.
+    // _unpin: PhantomPinned,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -92,15 +91,15 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     pub fn new_with_stub(stub: T::Handle) -> Self {
-        let ptr = T::as_ptr(&stub);
+        let stub = T::as_ptr(stub);
 
         // // In debug mode, set the stub flag for consistency checking.
         #[cfg(debug_assertions)]
         unsafe {
-            (*T::links(ptr).as_ptr()).is_stub.store(true, Release);
+            (*T::links(stub).as_ptr()).is_stub.store(true, Release);
         }
 
-        let ptr = ptr.as_ptr();
+        let ptr = stub.as_ptr();
         Self {
             head: CachePadded(AtomicPtr::new(ptr)),
             tail: CachePadded(UnsafeCell::new(ptr)),
@@ -110,8 +109,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     pub fn enqueue(&self, node: T::Handle) {
-        let node = ManuallyDrop::new(node);
-        let ptr = T::as_ptr(&node);
+        let ptr = dbg!(T::as_ptr(node));
 
         debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
@@ -120,8 +118,11 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
     #[inline]
     fn enqueue_inner(&self, ptr: NonNull<T>) {
-        let links = unsafe { T::links(ptr).as_ref() };
-        links.next.store(ptr::null_mut(), Relaxed);
+        unsafe {
+            (*T::links(ptr).as_ptr())
+                .next
+                .store(ptr::null_mut(), Relaxed)
+        };
 
         let ptr = ptr.as_ptr();
         let prev = self.head.swap(ptr, AcqRel);
@@ -129,7 +130,9 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             // Safety: in release mode, we don't null check `prev`. This is
             // because no pointer in the list should ever be a null pointer, due
             // to the presence of the stub node.
-            T::links(non_null(prev)).as_ref().next.store(ptr, Release);
+            (*T::links(non_null(prev)).as_ptr())
+                .next
+                .store(ptr, Release);
         }
     }
 
@@ -271,20 +274,20 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub unsafe fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
         self.tail.with_mut(|tail| {
             let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
-            let mut next = T::links(tail_node).as_ref().next.load(Acquire);
+            let mut next = (*T::links(tail_node).as_ptr()).next.load(Acquire);
 
-            if tail_node == T::as_ptr(&self.stub) {
+            if dbg!(tail_node == self.stub) {
                 debug_assert!(T::links(tail_node).as_ref().is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
                 *tail = next;
                 tail_node = next_node;
-                next = T::links(next_node).as_ref().next.load(Acquire);
+                next = (*T::links(next_node).as_ptr()).next.load(Acquire);
             }
 
-            if !next.is_null() {
+            if dbg!(!next.is_null()) {
                 *tail = next;
-                return Ok(T::from_ptr(tail_node));
+                return Ok(T::from_ptr(dbg!(tail_node)));
             }
 
             let head = self.head.load(Acquire);
@@ -293,7 +296,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
                 return Err(TryDequeueError::Inconsistent);
             }
 
-            self.enqueue_inner(T::as_ptr(&self.stub));
+            self.enqueue_inner(self.stub);
 
             next = T::links(tail_node).as_ref().next.load(Acquire);
             if next.is_null() {
@@ -383,7 +386,7 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 // Skip dropping the stub node; it is owned by the queue and
                 // will be dropped when the queue is dropped. If we dropped it
                 // here, that would cause a double free!
-                if node != T::as_ptr(&self.stub) {
+                if node != self.stub {
                     // Convert the pointer to the owning handle and drop it.
                     debug_assert!(!links.is_stub());
                     drop(T::from_ptr(node));
@@ -537,7 +540,7 @@ impl<T> Links<T> {
     pub const fn new() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
-            _unpin: PhantomPinned,
+            // _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
             is_stub: AtomicBool::new(false),
         }
@@ -547,7 +550,7 @@ impl<T> Links<T> {
     pub fn new() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
-            _unpin: PhantomPinned,
+            // _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
             is_stub: AtomicBool::new(false),
         }
@@ -873,6 +876,16 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_dequeue() {
+        let stub = entry(666);
+        let e = entry(1);
+        let q = MpscQueue::<Entry>::new_with_stub(stub);
+        q.enqueue(e);
+        assert_eq!(q.dequeue(), Some(entry(1)));
+        assert_eq!(q.dequeue(), None)
+    }
+
+    #[test]
     fn basically_works() {
         use std::{sync::Arc, thread};
 
@@ -953,8 +966,8 @@ mod test_util {
     unsafe impl<'a> Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
 
-        fn as_ptr(handle: &Pin<Box<Entry>>) -> NonNull<Entry> {
-            NonNull::from(handle.as_ref().get_ref())
+        fn as_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+            NonNull::from(Box::leak(Pin::into_inner(handle)))
         }
 
         unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
