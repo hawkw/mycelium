@@ -66,7 +66,7 @@ pub struct Links<T> {
 
     /// Used for debug mode consistency checking only.
     #[cfg(debug_assertions)]
-    is_stub: bool,
+    is_stub: AtomicBool,
 
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
@@ -94,10 +94,10 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub fn new_with_stub(stub: T::Handle) -> Self {
         let ptr = T::as_ptr(&stub);
 
-        // In debug mode, set the stub flag for consistency checking.
+        // // In debug mode, set the stub flag for consistency checking.
         #[cfg(debug_assertions)]
         unsafe {
-            T::links(ptr).as_mut().is_stub = true;
+            (*T::links(ptr).as_ptr()).is_stub.store(true, Release);
         }
 
         let ptr = ptr.as_ptr();
@@ -113,7 +113,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
         let node = ManuallyDrop::new(node);
         let ptr = T::as_ptr(&node);
 
-        debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub);
+        debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
         self.enqueue_inner(ptr)
     }
@@ -274,7 +274,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             let mut next = T::links(tail_node).as_ref().next.load(Acquire);
 
             if tail_node == T::as_ptr(&self.stub) {
-                debug_assert!(T::links(tail_node).as_ref().is_stub);
+                debug_assert!(T::links(tail_node).as_ref().is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
                 *tail = next;
@@ -302,7 +302,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
             *tail = next;
 
-            debug_assert!(!T::links(tail_node).as_ref().is_stub);
+            debug_assert!(!T::links(tail_node).as_ref().is_stub());
             Ok(T::from_ptr(tail_node))
         })
     }
@@ -385,10 +385,10 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 // here, that would cause a double free!
                 if node != T::as_ptr(&self.stub) {
                     // Convert the pointer to the owning handle and drop it.
-                    debug_assert!(!links.is_stub);
+                    debug_assert!(!links.is_stub());
                     drop(T::from_ptr(node));
                 } else {
-                    debug_assert!(links.is_stub);
+                    debug_assert!(links.is_stub());
                 }
 
                 current = next;
@@ -539,7 +539,7 @@ impl<T> Links<T> {
             next: AtomicPtr::new(ptr::null_mut()),
             _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
-            is_stub: false,
+            is_stub: AtomicBool::new(false),
         }
     }
 
@@ -549,8 +549,13 @@ impl<T> Links<T> {
             next: AtomicPtr::new(ptr::null_mut()),
             _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
-            is_stub: false,
+            is_stub: AtomicBool::new(false),
         }
+    }
+
+    #[cfg(debug_assertions)]
+    fn is_stub(&self) -> bool {
+        self.is_stub.load(Acquire)
     }
 }
 
@@ -920,6 +925,7 @@ mod test_util {
     use std::pin::Pin;
 
     #[derive(Debug)]
+    #[repr(C)]
     pub(super) struct Entry {
         links: Links<Entry>,
         pub(super) val: i32,
@@ -933,7 +939,7 @@ mod test_util {
         }
     }
 
-    unsafe impl Linked<Links<Self>> for Entry {
+    unsafe impl<'a> Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
 
         fn as_ptr(handle: &Pin<Box<Entry>>) -> NonNull<Entry> {
@@ -953,8 +959,10 @@ mod test_util {
             Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
         }
 
-        unsafe fn links(mut target: NonNull<Entry>) -> NonNull<Links<Entry>> {
-            NonNull::from(&mut target.as_mut().links)
+        unsafe fn links(target: NonNull<Entry>) -> NonNull<Links<Entry>> {
+            // Safety: this cast is safe only because `Entry` `is repr(C)` and
+            // is the first field.
+            target.cast()
         }
     }
 
