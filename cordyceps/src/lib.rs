@@ -37,7 +37,7 @@ pub unsafe trait Linked<L> {
     type Handle;
 
     /// Convert a `Handle` to a raw pointer.
-    fn as_ptr(r: Self::Handle) -> NonNull<Self>;
+    fn into_ptr(r: Self::Handle) -> NonNull<Self>;
 
     /// Convert a raw pointer to a `Handle`.
     ///

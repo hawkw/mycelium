@@ -3,7 +3,6 @@ use crate::util::FmtOption;
 use core::{
     fmt,
     marker::PhantomPinned,
-    mem::ManuallyDrop,
     ptr::{self, NonNull},
 };
 
@@ -102,7 +101,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
     /// Appends an item to the head of the list.
     pub fn push_front(&mut self, item: T::Handle) {
-        let ptr = T::as_ptr(item);
+        let ptr = T::into_ptr(item);
         // tracing::trace!(?self, ?ptr, "push_front");
         assert_ne!(self.head, Some(ptr));
         unsafe {
@@ -377,7 +376,7 @@ mod tests {
     unsafe impl<'a> Linked<Links<Self>> for Entry<'a> {
         type Handle = Pin<&'a Entry<'a>>;
 
-        fn as_ptr(handle: Pin<&'a Entry>) -> NonNull<Entry<'a>> {
+        fn into_ptr(handle: Pin<&'a Entry>) -> NonNull<Entry<'a>> {
             NonNull::from(handle.get_ref())
         }
 

@@ -15,7 +15,6 @@ use crate::{
 use core::{
     fmt,
     marker::PhantomPinned,
-    mem::ManuallyDrop,
     ptr::{self, NonNull},
 };
 
@@ -91,7 +90,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     pub fn new_with_stub(stub: T::Handle) -> Self {
-        let stub = T::as_ptr(stub);
+        let stub = T::into_ptr(stub);
 
         // // In debug mode, set the stub flag for consistency checking.
         #[cfg(debug_assertions)]
@@ -109,7 +108,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     pub fn enqueue(&self, node: T::Handle) {
-        let ptr = dbg!(T::as_ptr(node));
+        let ptr = T::into_ptr(node);
 
         debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
@@ -276,7 +275,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
             let mut next = (*T::links(tail_node).as_ptr()).next.load(Acquire);
 
-            if dbg!(tail_node == self.stub) {
+            if tail_node == self.stub {
                 debug_assert!(T::links(tail_node).as_ref().is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
@@ -285,9 +284,9 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
                 next = (*T::links(next_node).as_ptr()).next.load(Acquire);
             }
 
-            if dbg!(!next.is_null()) {
+            if !next.is_null() {
                 *tail = next;
-                return Ok(T::from_ptr(dbg!(tail_node)));
+                return Ok(T::from_ptr(tail_node));
             }
 
             let head = self.head.load(Acquire);
@@ -966,7 +965,7 @@ mod test_util {
     unsafe impl<'a> Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
 
-        fn as_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+        fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
             NonNull::from(Box::leak(Pin::into_inner(handle)))
         }
 
