@@ -36,8 +36,8 @@ pub unsafe trait Linked<L> {
     /// The handle owning nodes in the linked list.
     type Handle;
 
-    /// Convert a `Handle` to a raw pointer.
-    fn into_ptr(r: Self::Handle) -> NonNull<Self>;
+    /// Convert a `Handle` to a raw pointer, without taking ownership of it.
+    fn as_ptr(r: &Self::Handle) -> NonNull<Self>;
 
     /// Convert a raw pointer to a `Handle`.
     ///
