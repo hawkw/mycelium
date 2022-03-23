@@ -95,7 +95,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
         // // In debug mode, set the stub flag for consistency checking.
         #[cfg(debug_assertions)]
         unsafe {
-            (*T::links(stub).as_ptr()).is_stub.store(true, Release);
+            links(stub).is_stub.store(true, Release);
         }
         let ptr = stub.as_ptr();
 
@@ -117,11 +117,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
     #[inline]
     fn enqueue_inner(&self, ptr: NonNull<T>) {
-        unsafe {
-            (*T::links(ptr).as_ptr())
-                .next
-                .store(ptr::null_mut(), Relaxed)
-        };
+        unsafe { links(ptr).next.store(ptr::null_mut(), Relaxed) };
 
         let ptr = ptr.as_ptr();
         let prev = self.head.swap(ptr, AcqRel);
@@ -129,9 +125,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             // Safety: in release mode, we don't null check `prev`. This is
             // because no pointer in the list should ever be a null pointer, due
             // to the presence of the stub node.
-            (*T::links(non_null(prev)).as_ptr())
-                .next
-                .store(ptr, Release);
+            links(non_null(prev)).next.store(ptr, Release);
         }
     }
 
@@ -273,18 +267,18 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub unsafe fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
         self.tail.with_mut(|tail| {
             let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
-            let mut next = (*T::links(tail_node).as_ptr()).next.load(Acquire);
+            let mut next = links(tail_node).next.load(Acquire);
 
             if ptr::eq(
                 tail_node.as_ptr() as *const _,
                 self.stub.as_ptr() as *const _,
             ) {
-                debug_assert!(T::links(tail_node).as_ref().is_stub());
+                debug_assert!(links(tail_node).is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
                 *tail = next;
                 tail_node = next_node;
-                next = (*T::links(next_node).as_ptr()).next.load(Acquire);
+                next = links(next_node).next.load(Acquire);
             }
 
             if !next.is_null() {
@@ -300,14 +294,14 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
             self.enqueue_inner(self.stub);
 
-            next = T::links(tail_node).as_ref().next.load(Acquire);
+            next = links(tail_node).next.load(Acquire);
             if next.is_null() {
                 return Err(TryDequeueError::Empty);
             }
 
             *tail = next;
 
-            debug_assert!(!T::links(tail_node).as_ref().is_stub());
+            debug_assert!(!links(tail_node).is_stub());
             Ok(T::from_ptr(tail_node))
         })
     }
@@ -382,7 +376,7 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
         });
         while let Some(node) = NonNull::new(current) {
             unsafe {
-                let links = T::links(node).as_ref();
+                let links = links(node);
                 let next = links.next.load(Relaxed);
 
                 // Skip dropping the stub node; it is owned by the queue and
@@ -717,6 +711,12 @@ crate::feature! {
             self.try_lock_consumer().map(|_| OwnedConsumer { q: self })
         }
     }
+}
+
+/// Just a little helper so we don't have to add `.as_ref()` noise everywhere...
+#[inline(always)]
+unsafe fn links<'a, T: Linked<Links<T>>>(ptr: NonNull<T>) -> &'a Links<T> {
+    T::links(ptr).as_ref()
 }
 
 #[cfg(all(loom, test))]
