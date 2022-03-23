@@ -268,10 +268,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
             let mut next = links(tail_node).next.load(Acquire);
 
-            if ptr::eq(
-                tail_node.as_ptr() as *const _,
-                self.stub.as_ptr() as *const _,
-            ) {
+            if tail_node == self.stub {
                 debug_assert!(links(tail_node).is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
@@ -381,7 +378,7 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 // Skip dropping the stub node; it is owned by the queue and
                 // will be dropped when the queue is dropped. If we dropped it
                 // here, that would cause a double free!
-                if !ptr::eq(node.as_ptr() as *const _, self.stub.as_ptr() as *const _) {
+                if node != {
                     // Convert the pointer to the owning handle and drop it.
                     debug_assert!(!links.is_stub());
                     drop(T::from_ptr(node));
@@ -729,6 +726,29 @@ unsafe fn links<'a, T: Linked<Links<T>>>(ptr: NonNull<T>) -> &'a Links<T> {
     T::links(ptr).as_ref()
 }
 
+/// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
+/// checks elided in release mode.
+#[cfg(debug_assertions)]
+#[track_caller]
+#[inline(always)]
+unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
+    NonNull::new(ptr).expect(
+        "/!\\ constructed a `NonNull` from a null pointer! /!\\ \n\
+        in release mode, this would have called `NonNull::new_unchecked`, \
+        violating the `NonNull` invariant! this is a bug in `cordyceps!`.",
+    )
+}
+
+/// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
+/// checks elided in release mode.
+///
+/// This is the release mode version.
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
+    NonNull::new_unchecked(ptr)
+}
+
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
@@ -831,23 +851,6 @@ mod loom {
             }
         })
     }
-}
-
-#[cfg(debug_assertions)]
-#[track_caller]
-#[inline(always)]
-unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
-    NonNull::new(ptr).expect(
-        "/!\\ constructed a `NonNull` from a null pointer! /!\\ \n\
-        in release mode, this would have called `NonNull::new_unchecked`, \
-        violating the `NonNull` invariant! this is a bug in `cordyceps!`.",
-    )
-}
-
-#[cfg(not(debug_assertions))]
-#[inline(always)]
-unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
-    NonNull::new_unchecked(ptr)
 }
 
 #[cfg(all(test, not(loom)))]
