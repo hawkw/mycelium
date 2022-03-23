@@ -58,7 +58,6 @@ pub struct Consumer<'q, T: Linked<Links<T>>> {
     q: &'q MpscQueue<T>,
 }
 
-#[derive(Debug)]
 pub struct Links<T> {
     /// The next node in the queue.
     next: AtomicPtr<T>,
@@ -405,7 +404,7 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Queue")
+        f.debug_struct("MpscQueue")
             .field("head", &format_args!("{:p}", self.head.load(Acquire)))
             // only the consumer can load the tail; trying to print it here
             // could be racy.
@@ -414,6 +413,7 @@ where
             // lose loom checking for tail accesses...
             .field("tail", &format_args!("..."))
             .field("has_consumer", &self.has_consumer.load(Acquire))
+            .field("stub", &self.stub)
             .finish()
     }
 }
@@ -565,6 +565,16 @@ impl<T> Links<T> {
 impl<T> Default for Links<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T> fmt::Debug for Links<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("Links");
+        s.field("next", &self.next.load(Acquire));
+        #[cfg(debug_assertions)]
+        s.field("is_stub", &self.is_stub.load(Acquire));
+        s.finish()
     }
 }
 
@@ -954,7 +964,6 @@ mod test_util {
     use crate::loom::alloc;
     use std::pin::Pin;
 
-    #[derive(Debug)]
     #[repr(C)]
     pub(super) struct Entry {
         links: Links<Entry>,
@@ -991,8 +1000,17 @@ mod test_util {
 
         unsafe fn links(target: NonNull<Entry>) -> NonNull<Links<Entry>> {
             // Safety: this cast is safe only because `Entry` `is repr(C)` and
-            // is the first field.
+            // the links is the first field.
             target.cast()
+        }
+    }
+
+    impl fmt::Debug for Entry {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Entry")
+                .field("links", &self.links)
+                .field("val", &self.val)
+                .finish()
         }
     }
 
