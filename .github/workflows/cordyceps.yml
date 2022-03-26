@@ -6,12 +6,14 @@
 #
 # Note that if other crates add loom tests in the future, they will need to be
 # added to this workflow!
-name: Loom (cordyceps)
+name: cordyceps
 
 on:
   push:
     paths:
-      - 'cordyceps/**'
+      - 'cordyceps/**.rs'
+      - 'cordyceps/Cargo.toml'
+      - .github/workflows/cordyceps.yml
 
 env:
   # disable incremental compilation.
@@ -33,15 +35,12 @@ env:
   RUSTUP_MAX_RETRIES: 10
   # don't emit giant backtraces in the CI logs.
   RUST_BACKTRACE: short
-  LOOM_MAX_PREEMPTIONS: 2
-  LOOM_LOG: loom=trace
-  RUSTFLAGS: "--cfg loom"
 
 jobs:
   # run loom tests
   tests:
     runs-on: ubuntu-latest
-    name: Loom tests (mycelium-util)
+    name: Loom tests (cordyceps)
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -51,3 +50,16 @@ jobs:
       with:
         command: test
         args: --profile loom --lib -p cordyceps
+        env:
+          LOOM_MAX_PREEMPTIONS: 2
+          LOOM_LOG: loom=trace
+          RUSTFLAGS: "--cfg loom"
+
+  miri:
+    runs-on: ubuntu-latest
+    name: Miri tests (codyceps)
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: run miri tests
+      run: ./bin/miri
