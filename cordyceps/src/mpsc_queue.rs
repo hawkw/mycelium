@@ -378,7 +378,7 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 // Skip dropping the stub node; it is owned by the queue and
                 // will be dropped when the queue is dropped. If we dropped it
                 // here, that would cause a double free!
-                if node != {
+                if node != self.stub {
                     // Convert the pointer to the owning handle and drop it.
                     debug_assert!(!links.is_stub());
                     drop(T::from_ptr(node));
