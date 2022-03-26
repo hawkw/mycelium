@@ -8,10 +8,17 @@
 # added to this workflow!
 name: Loom (mycelium-util)
 
+
 on:
-  push:
+  pull_request:
     paths:
-      - 'util/**'
+      - 'util/**.rs'
+      - 'util/Cargo.toml'
+      - '.github/workflows/loom-util.yml'
+  push:
+    branches:
+      - 'main'
+
 
 env:
   # disable incremental compilation.

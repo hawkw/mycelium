@@ -9,11 +9,15 @@
 name: cordyceps
 
 on:
-  push:
+  pull_request:
     paths:
       - 'cordyceps/**.rs'
       - 'cordyceps/Cargo.toml'
       - .github/workflows/cordyceps.yml
+  push:
+    branches:
+      - 'main'
+
 
 env:
   # disable incremental compilation.

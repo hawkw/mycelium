@@ -1,6 +1,15 @@
 name: CI
 
-on: [push]
+on:
+  pull_request:
+    paths:
+      - '**.rs'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci.yml'
+  push:
+    branches:
+      - 'main'
 
 env:
   # disable incremental compilation.
