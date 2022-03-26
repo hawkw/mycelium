@@ -62,4 +62,4 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - name: run miri tests
-      run: ./bin/miri
+      run: ./bin/miri -p cordyceps
