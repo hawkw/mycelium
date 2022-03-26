@@ -15,7 +15,6 @@ use crate::{
 use core::{
     fmt,
     marker::PhantomPinned,
-    mem::ManuallyDrop,
     ptr::{self, NonNull},
 };
 
@@ -35,7 +34,7 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
     /// new consumer.
     has_consumer: CachePadded<AtomicBool>,
 
-    stub: T::Handle,
+    stub: NonNull<T>,
 }
 
 /// A handle that holds the right to dequeue elements from a [`Queue`].
@@ -59,15 +58,13 @@ pub struct Consumer<'q, T: Linked<Links<T>>> {
     q: &'q MpscQueue<T>,
 }
 
-#[derive(Debug)]
 pub struct Links<T> {
     /// The next node in the queue.
     next: AtomicPtr<T>,
 
     /// Used for debug mode consistency checking only.
     #[cfg(debug_assertions)]
-    is_stub: bool,
-
+    is_stub: AtomicBool,
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
     /// https://github.com/rust-lang/rust/issues/63818.
@@ -92,15 +89,15 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     pub fn new_with_stub(stub: T::Handle) -> Self {
-        let ptr = T::as_ptr(&stub);
+        let stub = T::into_ptr(stub);
 
-        // In debug mode, set the stub flag for consistency checking.
+        // // In debug mode, set the stub flag for consistency checking.
         #[cfg(debug_assertions)]
         unsafe {
-            T::links(ptr).as_mut().is_stub = true;
+            links(stub).is_stub.store(true, Release);
         }
+        let ptr = stub.as_ptr();
 
-        let ptr = ptr.as_ptr();
         Self {
             head: CachePadded(AtomicPtr::new(ptr)),
             tail: CachePadded(UnsafeCell::new(ptr)),
@@ -110,18 +107,16 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     pub fn enqueue(&self, node: T::Handle) {
-        let node = ManuallyDrop::new(node);
-        let ptr = T::as_ptr(&node);
+        let ptr = T::into_ptr(node);
 
-        debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub);
+        debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
         self.enqueue_inner(ptr)
     }
 
     #[inline]
     fn enqueue_inner(&self, ptr: NonNull<T>) {
-        let links = unsafe { T::links(ptr).as_ref() };
-        links.next.store(ptr::null_mut(), Relaxed);
+        unsafe { links(ptr).next.store(ptr::null_mut(), Relaxed) };
 
         let ptr = ptr.as_ptr();
         let prev = self.head.swap(ptr, AcqRel);
@@ -129,7 +124,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             // Safety: in release mode, we don't null check `prev`. This is
             // because no pointer in the list should ever be a null pointer, due
             // to the presence of the stub node.
-            T::links(non_null(prev)).as_ref().next.store(ptr, Release);
+            links(non_null(prev)).next.store(ptr, Release);
         }
     }
 
@@ -271,15 +266,15 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub unsafe fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
         self.tail.with_mut(|tail| {
             let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
-            let mut next = T::links(tail_node).as_ref().next.load(Acquire);
+            let mut next = links(tail_node).next.load(Acquire);
 
-            if tail_node == T::as_ptr(&self.stub) {
-                debug_assert!(T::links(tail_node).as_ref().is_stub);
+            if tail_node == self.stub {
+                debug_assert!(links(tail_node).is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
                 *tail = next;
                 tail_node = next_node;
-                next = T::links(next_node).as_ref().next.load(Acquire);
+                next = links(next_node).next.load(Acquire);
             }
 
             if !next.is_null() {
@@ -293,16 +288,16 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
                 return Err(TryDequeueError::Inconsistent);
             }
 
-            self.enqueue_inner(T::as_ptr(&self.stub));
+            self.enqueue_inner(self.stub);
 
-            next = T::links(tail_node).as_ref().next.load(Acquire);
+            next = links(tail_node).next.load(Acquire);
             if next.is_null() {
                 return Err(TryDequeueError::Empty);
             }
 
             *tail = next;
 
-            debug_assert!(!T::links(tail_node).as_ref().is_stub);
+            debug_assert!(!links(tail_node).is_stub());
             Ok(T::from_ptr(tail_node))
         })
     }
@@ -377,22 +372,26 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
         });
         while let Some(node) = NonNull::new(current) {
             unsafe {
-                let links = T::links(node).as_ref();
+                let links = links(node);
                 let next = links.next.load(Relaxed);
 
                 // Skip dropping the stub node; it is owned by the queue and
                 // will be dropped when the queue is dropped. If we dropped it
                 // here, that would cause a double free!
-                if node != T::as_ptr(&self.stub) {
+                if node != self.stub {
                     // Convert the pointer to the owning handle and drop it.
-                    debug_assert!(!links.is_stub);
+                    debug_assert!(!links.is_stub());
                     drop(T::from_ptr(node));
                 } else {
-                    debug_assert!(links.is_stub);
+                    debug_assert!(links.is_stub());
                 }
 
                 current = next;
             }
+        }
+
+        unsafe {
+            drop(T::from_ptr(self.stub));
         }
     }
 }
@@ -402,7 +401,7 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Queue")
+        f.debug_struct("MpscQueue")
             .field("head", &format_args!("{:p}", self.head.load(Acquire)))
             // only the consumer can load the tail; trying to print it here
             // could be racy.
@@ -411,6 +410,7 @@ where
             // lose loom checking for tail accesses...
             .field("tail", &format_args!("..."))
             .field("has_consumer", &self.has_consumer.load(Acquire))
+            .field("stub", &self.stub)
             .finish()
     }
 }
@@ -539,7 +539,7 @@ impl<T> Links<T> {
             next: AtomicPtr::new(ptr::null_mut()),
             _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
-            is_stub: false,
+            is_stub: AtomicBool::new(false),
         }
     }
 
@@ -549,14 +549,29 @@ impl<T> Links<T> {
             next: AtomicPtr::new(ptr::null_mut()),
             _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
-            is_stub: false,
+            is_stub: AtomicBool::new(false),
         }
+    }
+
+    #[cfg(debug_assertions)]
+    fn is_stub(&self) -> bool {
+        self.is_stub.load(Acquire)
     }
 }
 
 impl<T> Default for Links<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T> fmt::Debug for Links<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("Links");
+        s.field("next", &self.next.load(Acquire));
+        #[cfg(debug_assertions)]
+        s.field("is_stub", &self.is_stub.load(Acquire));
+        s.finish()
     }
 }
 
@@ -705,6 +720,35 @@ crate::feature! {
     }
 }
 
+/// Just a little helper so we don't have to add `.as_ref()` noise everywhere...
+#[inline(always)]
+unsafe fn links<'a, T: Linked<Links<T>>>(ptr: NonNull<T>) -> &'a Links<T> {
+    T::links(ptr).as_ref()
+}
+
+/// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
+/// checks elided in release mode.
+#[cfg(debug_assertions)]
+#[track_caller]
+#[inline(always)]
+unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
+    NonNull::new(ptr).expect(
+        "/!\\ constructed a `NonNull` from a null pointer! /!\\ \n\
+        in release mode, this would have called `NonNull::new_unchecked`, \
+        violating the `NonNull` invariant! this is a bug in `cordyceps!`.",
+    )
+}
+
+/// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
+/// checks elided in release mode.
+///
+/// This is the release mode version.
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
+    NonNull::new_unchecked(ptr)
+}
+
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
@@ -809,23 +853,6 @@ mod loom {
     }
 }
 
-#[cfg(debug_assertions)]
-#[track_caller]
-#[inline(always)]
-unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
-    NonNull::new(ptr).expect(
-        "/!\\ constructed a `NonNull` from a null pointer! /!\\ \n\
-        in release mode, this would have called `NonNull::new_unchecked`, \
-        violating the `NonNull` invariant! this is a bug in `cordyceps!`.",
-    )
-}
-
-#[cfg(not(debug_assertions))]
-#[inline(always)]
-unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
-    NonNull::new_unchecked(ptr)
-}
-
 #[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
@@ -868,11 +895,21 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_dequeue() {
+        let stub = entry(666);
+        let e = entry(1);
+        let q = MpscQueue::<Entry>::new_with_stub(stub);
+        q.enqueue(e);
+        assert_eq!(q.dequeue(), Some(entry(1)));
+        assert_eq!(q.dequeue(), None)
+    }
+
+    #[test]
     fn basically_works() {
         use std::{sync::Arc, thread};
 
-        const THREADS: i32 = 8;
-        const MSGS: i32 = 1000;
+        const THREADS: i32 = if_miri(3, 8);
+        const MSGS: i32 = if_miri(10, 1000);
 
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
@@ -903,12 +940,23 @@ mod tests {
                 Err(TryDequeueError::Busy) => {
                     panic!("the queue should never be busy, as there is only one consumer")
                 }
-                Err(e) => println!("recv error {:?}", e),
+                Err(e) => {
+                    println!("recv error {:?}", e);
+                    thread::yield_now();
+                }
             }
         }
 
         for thread in threads {
             thread.join().unwrap();
+        }
+    }
+
+    const fn if_miri(miri: i32, not_miri: i32) -> i32 {
+        if cfg!(miri) {
+            miri
+        } else {
+            not_miri
         }
     }
 }
@@ -919,7 +967,7 @@ mod test_util {
     use crate::loom::alloc;
     use std::pin::Pin;
 
-    #[derive(Debug)]
+    #[repr(C)]
     pub(super) struct Entry {
         links: Links<Entry>,
         pub(super) val: i32,
@@ -933,11 +981,11 @@ mod test_util {
         }
     }
 
-    unsafe impl Linked<Links<Self>> for Entry {
+    unsafe impl<'a> Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
 
-        fn as_ptr(handle: &Pin<Box<Entry>>) -> NonNull<Entry> {
-            NonNull::from(handle.as_ref().get_ref())
+        fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+            unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
         }
 
         unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
@@ -953,8 +1001,19 @@ mod test_util {
             Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
         }
 
-        unsafe fn links(mut target: NonNull<Entry>) -> NonNull<Links<Entry>> {
-            NonNull::from(&mut target.as_mut().links)
+        unsafe fn links(target: NonNull<Entry>) -> NonNull<Links<Entry>> {
+            // Safety: this cast is safe only because `Entry` `is repr(C)` and
+            // the links is the first field.
+            target.cast()
+        }
+    }
+
+    impl fmt::Debug for Entry {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Entry")
+                .field("links", &self.links)
+                .field("val", &self.val)
+                .finish()
         }
     }
 

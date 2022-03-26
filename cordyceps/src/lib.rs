@@ -36,11 +36,10 @@ pub unsafe trait Linked<L> {
     /// The handle owning nodes in the linked list.
     type Handle;
 
-    /// Convert a `Handle` to a raw pointer, without consuming it.
-    #[allow(clippy::wrong_self_convention)]
-    fn as_ptr(r: &Self::Handle) -> NonNull<Self>;
+    /// Convert a `Handle` to a raw pointer, taking ownership of it in the process.
+    fn into_ptr(r: Self::Handle) -> NonNull<Self>;
 
-    /// Convert a raw pointer to a `Handle`.
+    /// Convert a raw pointer to an owning `Handle`.
     ///
     /// # Safety
     ///
