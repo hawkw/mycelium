@@ -46,14 +46,11 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - name: run loom tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test
-        args: --profile loom --lib -p cordyceps
-        env:
-          LOOM_MAX_PREEMPTIONS: 2
-          LOOM_LOG: loom=trace
-          RUSTFLAGS: "--cfg loom"
+      run: cargo test --profile loom --lib -p cordyceps
+      env:
+        LOOM_MAX_PREEMPTIONS: 2
+        LOOM_LOG: loom=trace
+        RUSTFLAGS: "--cfg loom"
 
   miri:
     runs-on: ubuntu-latest
