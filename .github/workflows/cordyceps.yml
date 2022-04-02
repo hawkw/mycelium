@@ -8,12 +8,7 @@
 # added to this workflow!
 name: cordyceps
 
-on:
-  push:
-    paths:
-      - 'cordyceps/**.rs'
-      - 'cordyceps/Cargo.toml'
-      - .github/workflows/cordyceps.yml
+on: [pull_request, workflow_dispatch]
 
 env:
   # disable incremental compilation.
@@ -37,8 +32,24 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
+  is_enabled:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["cordyceps/**.rs", "cordyceps/Cargo.toml", ".github/workflows/cordyceps.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
+
+
   # run loom tests
   tests:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     name: Loom tests (cordyceps)
     steps:
@@ -53,6 +64,8 @@ jobs:
         RUSTFLAGS: "--cfg loom"
 
   miri:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     name: Miri tests (codyceps)
     steps:

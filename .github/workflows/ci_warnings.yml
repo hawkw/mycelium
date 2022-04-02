@@ -4,7 +4,7 @@
 # future, but aren't hard PR blockers.
 name: CI (warnings)
 
-on: [push]
+on: [pull_request, workflow_dispatch]
 
 env:
   # disable incremental compilation.
@@ -28,10 +28,24 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
+  is_enabled:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["**.rs", "**/Cargo.toml", "Cargo.lock", ".github/workflows/ci_warnings.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
 
   # are there any annoying clippy lints we ought to clean up (host build)?
   clippy-host:
     name: cargo clippy (host)
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -48,6 +62,8 @@ jobs:
   # build)?
   clippy-x64:
     name: cargo clippy (cross x64)
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
