@@ -119,10 +119,6 @@ pub trait Read {
     /// returns. Any bytes which have already been read will be appended to
     /// `buf`.
     ///
-    /// # Examples
-    ///
-    /// [`File`]s implement `Read`:
-    ///
     /// [`read()`]: trait.Read.html#tymethod.read
     /// [`ErrorKind::Interrupted`]: enum.ErrorKind.html#variant.Interrupted
     #[cfg(feature = "alloc")]
@@ -212,7 +208,6 @@ pub trait Read {
     ///
     /// The returned adaptor also implements `Read` and will simply borrow this
     /// current reader.
-    /// ```
     fn by_ref(&mut self) -> &mut Self
     where
         Self: Sized,
@@ -287,7 +282,7 @@ pub trait Read {
     /// This function returns a new instance of `Read` which will read at most
     /// `limit` bytes, after which it will always return EOF ([`Ok(0)`]). Any
     /// read errors will not count towards the number of bytes read and future
-    /// calls to [`read()`] may succeed.
+    /// calls to [`read()`](Self::read) may succeed.
     fn take(self, limit: u64) -> Take<Self>
     where
         Self: Sized,
@@ -327,7 +322,6 @@ pub trait Write {
     ///
     /// [`Err`]: ../../std/result/enum.Result.html#variant.Err
     /// [`Ok(n)`]:  ../../std/result/enum.Result.html#variant.Ok
-    /// [`ErrorKind::Interrupted`]: ../../std/io/enum.ErrorKind.html#variant.Interrupted
     fn write(&mut self, buf: &[u8]) -> Result<usize>;
 
     /// Flush this output stream, ensuring that all intermediately buffered
@@ -348,7 +342,6 @@ pub trait Write {
     /// This function will return the first error of
     /// non-[`ErrorKind::Interrupted`] kind that [`write`] returns.
     ///
-    /// [`ErrorKind::Interrupted`]: ../../std/io/enum.ErrorKind.html#variant.Interrupted
     /// [`write`]: #tymethod.write
     fn write_all(&mut self, mut buf: &[u8]) -> Result<()> {
         while !buf.is_empty() {
@@ -496,7 +489,7 @@ pub trait BufRead: Read {
     /// be called with the number of bytes that are consumed from this buffer to
     /// ensure that the bytes are never returned twice.
     ///
-    /// [`consume`]: #tymethod.consume
+    /// [`consume`]: Self::consume
     ///
     /// An empty buffer returned indicates that the stream has reached EOF.
     ///
@@ -518,6 +511,8 @@ pub trait BufRead: Read {
     ///
     /// The `amt` must be `<=` the number of bytes in the buffer returned by
     /// [`fill_buf`].
+    ///
+    /// [`fill_buf`]: Self::fill_buf
     fn consume(&mut self, amt: usize);
 
     /// Read all bytes into `buf` until the delimiter `byte` or EOF is reached.
@@ -536,8 +531,7 @@ pub trait BufRead: Read {
     /// If an I/O error is encountered then all bytes read so far will be
     /// present in `buf` and its length will have been adjusted appropriately.
     ///
-    /// [`fill_buf`]: #tymethod.fill_buf
-    /// [`ErrorKind::Interrupted`]: enum.ErrorKind.html#variant.Interrupted
+    /// [`fill_buf`]: Self::fill_buf
     #[cfg(feature = "alloc")]
     fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> Result<usize> {
         read_until(self, byte, buf)
@@ -562,7 +556,7 @@ pub trait BufRead: Read {
     /// error is encountered then `buf` may contain some bytes already read in
     /// the event that all data read so far was valid UTF-8.
     ///
-    /// [`read_until`]: #method.read_until
+    /// [`read_until`]: Self::read_until
     #[cfg(feature = "alloc")]
     fn read_line(&mut self, buf: &mut String) -> Result<usize> {
         // Note that we are not calling the `.read_until` method here, but

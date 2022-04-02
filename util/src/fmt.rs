@@ -32,7 +32,7 @@ pub struct FmtOption<'a, T> {
     or_else: &'a str,
 }
 
-/// Format the provided value using its [`core::Pointer`] implementation.
+/// Format the provided value using its [`core::fmt::Pointer`] implementation.
 ///
 /// # Examples
 /// ```
@@ -54,7 +54,7 @@ pub fn ptr<T: Pointer>(value: T) -> tracing::field::DebugValue<FormatWith<T>> {
     })
 }
 
-/// Format the provided value using its [`core::LowerHex`] implementation.
+/// Format the provided value using its [`core::fmt::LowerHex`] implementation.
 ///
 /// # Examples
 /// ```
@@ -75,7 +75,7 @@ pub fn hex<T: LowerHex>(value: T) -> tracing::field::DebugValue<FormatWith<T>> {
     })
 }
 
-/// Format the provided value using its [`core::Binary`] implementation.
+/// Format the provided value using its [`core::fmt::Binary`] implementation.
 ///
 /// # Examples
 /// ```
@@ -96,7 +96,7 @@ pub fn bin<T: Binary>(value: T) -> tracing::field::DebugValue<FormatWith<T>> {
     })
 }
 
-/// Format the provided value using its [`core::Debug`] implementation,
+/// Format the provided value using its [`core::fmt::Debug`] implementation,
 /// with "alternate mode" set
 ///
 /// # Examples
