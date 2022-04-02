@@ -11,7 +11,7 @@ producing a bootable mycelium disk image. it also provides a test runner for
 running kernel-mode tests in QEMU, running the release kernel in QEMU, and
 launching a [`gdb`] debugging session.
 
-```
+```text
 inoculate 0.1.0
 the horrible mycelium build tool (because that's a thing we have to have now apparently!)
 

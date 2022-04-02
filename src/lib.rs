@@ -3,6 +3,7 @@
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![feature(panic_info_message)]
 #![allow(unused_unsafe)]
+#![doc = include_str!("../README.md")]
 
 extern crate alloc;
 extern crate rlibc;
