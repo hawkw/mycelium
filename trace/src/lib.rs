@@ -120,7 +120,7 @@ where
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent(true);
-        let _ = write!(&mut writer, "{}", meta.name());
+        let _ = write!(writer, "{}", meta.name());
 
         span.record(&mut Visitor::new(&mut writer, meta.fields()));
 
