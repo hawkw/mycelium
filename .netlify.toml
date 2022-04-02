@@ -1,0 +1,21 @@
+
+[build]
+  command = """
+    rustup install nightly --profile minimal \
+      && cargo doc \
+        --workspace \
+        --no-deps \
+        --all-features \
+        --document-private-items
+    """
+  publish = "target/doc"
+
+[build.environment]
+  RUSTDOCFLAGS="""
+    -D warnings \
+    --cfg docsrs \
+    """
+
+[[redirects]]
+  from = "/"
+  to = "/mycelium_kernel"
