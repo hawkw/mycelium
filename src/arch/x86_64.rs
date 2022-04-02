@@ -1,20 +1,15 @@
 use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
-use hal_x86_64::{
-    cpu,
-    framebuffer::{self, Framebuffer},
-    interrupt::Registers as X64Registers,
-    serial, vga,
-};
+use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
-use mycelium_util::{
-    fmt,
-    sync::{spin, InitOnce},
-};
+use mycelium_util::{fmt, sync::InitOnce};
 
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};
+
+mod framebuf;
+use self::framebuf::FramebufWriter;
 
 pub type MinPageSize = mm::size::Size4Kb;
 
@@ -23,12 +18,6 @@ pub struct RustbootBootInfo {
     inner: &'static boot_info::BootInfo,
     has_framebuffer: bool,
 }
-
-#[derive(Debug)]
-pub struct LockedFramebuf(boot_info::FrameBuffer);
-
-type FramebufWriter = Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>>;
-
 type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
@@ -37,7 +26,7 @@ impl BootInfo for RustbootBootInfo {
 
     type Writer = vga::Writer;
 
-    type Framebuffer = Framebuffer<'static, spin::MutexGuard<'static, LockedFramebuf>>;
+    type Framebuffer = FramebufWriter;
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
@@ -76,18 +65,19 @@ impl BootInfo for RustbootBootInfo {
             return None;
         }
 
-        Some(unsafe { Self::mk_framebuf() })
+        Some(unsafe { framebuf::mk_framebuf() })
     }
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
         use mycelium_trace::{
-            embedded_graphics,
+            embedded_graphics::MakeTextWriter,
             writer::{self, MakeWriterExt},
             Subscriber,
         };
+
         static COLLECTOR: InitOnce<
             Subscriber<
-                writer::WithMaxLevel<embedded_graphics::MakeTextWriter<FramebufWriter>>,
+                writer::WithMaxLevel<MakeTextWriter<FramebufWriter>>,
                 Option<&'static serial::Port>,
             >,
         > = InitOnce::uninitialized();
@@ -99,10 +89,7 @@ impl BootInfo for RustbootBootInfo {
         }
 
         let collector = COLLECTOR.get_or_else(|| {
-            let display_writer =
-                mycelium_trace::embedded_graphics::MakeTextWriter::new(|| unsafe {
-                    Self::mk_framebuf()
-                })
+            let display_writer = MakeTextWriter::new(|| unsafe { framebuf::mk_framebuf() })
                 .with_max_level(tracing::Level::INFO);
             Subscriber::display_only(display_writer).with_serial(serial::com1())
         });
@@ -120,16 +107,6 @@ impl BootInfo for RustbootBootInfo {
 }
 
 impl RustbootBootInfo {
-    unsafe fn mk_framebuf() -> FramebufWriter {
-        let (cfg, buf) = unsafe {
-            // Safety: we can reasonably assume this will only be called
-            // after `arch_entry`, so if we've failed to initialize the
-            // framebuffer...things have gone horribly wrong...
-            FRAMEBUFFER.get_unchecked()
-        };
-        Framebuffer::new(cfg, buf.lock())
-    }
-
     fn vm_offset(&self) -> VAddr {
         VAddr::from_u64(
             self.inner
@@ -140,26 +117,7 @@ impl RustbootBootInfo {
     }
 
     fn from_bootloader(inner: &'static mut boot_info::BootInfo) -> Self {
-        let framebuffer = core::mem::replace(&mut inner.framebuffer, boot_info::Optional::None);
-        let has_framebuffer = if let boot_info::Optional::Some(framebuffer) = framebuffer {
-            let info = framebuffer.info();
-            let cfg = framebuffer::Config {
-                height: info.vertical_resolution,
-                width: info.horizontal_resolution,
-                px_bytes: info.bytes_per_pixel,
-                line_len: info.stride,
-                px_kind: match info.pixel_format {
-                    boot_info::PixelFormat::RGB => framebuffer::PixelKind::Rgb,
-                    boot_info::PixelFormat::BGR => framebuffer::PixelKind::Bgr,
-                    boot_info::PixelFormat::U8 => framebuffer::PixelKind::Gray,
-                    x => unimplemented!("hahaha wtf, found a weird pixel format: {:?}", x),
-                },
-            };
-            FRAMEBUFFER.init((cfg, spin::Mutex::new(LockedFramebuf(framebuffer))));
-            true
-        } else {
-            false
-        };
+        let has_framebuffer = framebuf::init(inner);
 
         Self {
             inner,
@@ -168,15 +126,6 @@ impl RustbootBootInfo {
     }
 }
 
-impl AsMut<[u8]> for LockedFramebuf {
-    #[inline]
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.buffer_mut()
-    }
-}
-
-static FRAMEBUFFER: InitOnce<(framebuffer::Config, spin::Mutex<LockedFramebuf>)> =
-    InitOnce::uninitialized();
 static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
@@ -286,9 +235,7 @@ pub fn oops(
         vga.force_unlock();
 
         // unlock the frame buffer
-        if let Some((_, fb)) = FRAMEBUFFER.try_get() {
-            fb.force_unlock();
-        }
+        framebuf::force_unlock();
     }
 
     // emit a DEBUG event first. with the default tracing configuration, these

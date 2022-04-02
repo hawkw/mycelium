@@ -1,9 +1,26 @@
-use core::ptr;
+use core::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
 use hal_core::framebuffer::{Draw, RgbColor};
+use volatile::Volatile;
 
-#[derive(Debug)]
-pub struct Framebuffer<'buf, B> {
-    buf: B,
+pub struct Framebuffer<'buf, B: Deref<Target = [u8]>> {
+    /// A reference to the framebuffer itself.
+    ///
+    /// This is wrapped in a [`Volatile`] cell because we will typically never
+    /// read from the framebuffer, so we need to use volatile writes every time
+    /// it's written to.
+    buf: Volatile<B>,
+
+    /// Length of the actual framebuffer array.
+    ///
+    /// This is stored in the struct because when we construct a new
+    /// `Framebuffer`, we wrap `buf` in a `Volatile` cell, and calling random
+    /// methods like `[u8]::len()` on it becomes kind of a pain.
+    len: usize,
+
+    /// Framebuffer configuration values.
     cfg: &'buf Config,
 }
 
@@ -27,43 +44,36 @@ pub enum PixelKind {
 
 impl<'buf, B> Framebuffer<'buf, B>
 where
-    B: AsMut<[u8]>,
+    B: Deref<Target = [u8]> + DerefMut,
 {
     pub fn new(cfg: &'buf Config, buf: B) -> Self {
-        Self { cfg, buf }
+        let len = buf[..].len();
+        Self {
+            cfg,
+            buf: Volatile::new(buf),
+            len,
+        }
     }
 
     pub fn clear(&mut self) -> &mut Self {
-        self.buf.as_mut().fill(0);
+        self.buf.fill(0);
         self
     }
 
     pub fn set_pixel_rgb(&mut self, x: usize, y: usize, color: RgbColor) -> &mut Self {
         let px_bytes = self.cfg.px_bytes;
-        let pos = (y * self.cfg.line_len + x) * px_bytes;
+        let start = (y * self.cfg.line_len + x) * px_bytes;
+        let end = start + px_bytes;
 
-        let slice = &mut self.buf.as_mut()[pos..(pos + px_bytes)];
         let px_vals = &self.cfg.px_kind.convert_rgb(color)[..px_bytes];
-        for (byte, &val) in slice.iter_mut().zip(px_vals) {
-            let byte = byte as *mut u8;
-            unsafe {
-                // Safety: this is only unsafe because we perform a volatile
-                // write here. if we performed a normal `*byte = val` write,
-                // this would be perfectly safe, as we have mutable ownership
-                // over the buffer. however, we need a volatile write, since
-                // the contents of the framebuffer may not be read, and we can't
-                // let rustc optimize this out. `ptr::write_volatile` is unsafe,
-                // so this is unsafe.
-                ptr::write_volatile(byte, val);
-            }
-        }
+        self.buf.index_mut(start..end).copy_from_slice(px_vals);
         self
     }
 }
 
 impl<'buf, B> Draw for Framebuffer<'buf, B>
 where
-    B: AsMut<[u8]>,
+    B: Deref<Target = [u8]> + DerefMut,
 {
     fn height(&self) -> usize {
         self.cfg.height
@@ -82,11 +92,25 @@ where
             todo!("eliza: handle negatives!")
         }
         let amount_px = (amount as usize * self.cfg.line_len) * self.cfg.px_bytes;
-        let buf = self.buf.as_mut();
-        let len = buf.len();
-        buf.copy_within(amount_px.., 0);
-        buf[(len - amount_px)..].fill(0);
+        self.buf.copy_within(amount_px.., 0);
+        let revealed_start = self.len - amount_px;
+        self.buf.index_mut(revealed_start..).fill(0);
         self
+    }
+}
+
+// `Volatile<B>` is only `Debug` if `<B as Deref>::Target: Copy`,
+// so we must implement this manually.
+impl<'buf, B> fmt::Debug for Framebuffer<'buf, B>
+where
+    B: Deref<Target = [u8]>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Framebuffer")
+            .field("len", &self.len)
+            .field("cfg", &self.cfg)
+            .field("buf", &format_args!("[..]"))
+            .finish()
     }
 }
 
