@@ -9,15 +9,7 @@
 name: Loom (mycelium-util)
 
 
-on:
-  pull_request:
-    paths:
-      - 'util/**.rs'
-      - 'util/Cargo.toml'
-      - '.github/workflows/loom-util.yml'
-  push:
-    branches:
-      - 'main'
+on: [pull_request, workflow_dispatch]
 
 
 env:
@@ -45,8 +37,23 @@ env:
   RUSTFLAGS: "--cfg loom"
 
 jobs:
+  is_enabled:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["util/**.rs", "util/Cargo.toml", ".github/workflows/loom-util.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
+
   # run loom tests
   tests:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     name: Loom tests (mycelium-util)
     steps:

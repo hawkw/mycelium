@@ -8,16 +8,7 @@
 # added to this workflow!
 name: cordyceps
 
-on:
-  pull_request:
-    paths:
-      - 'cordyceps/**.rs'
-      - 'cordyceps/Cargo.toml'
-      - .github/workflows/cordyceps.yml
-  push:
-    branches:
-      - 'main'
-
+on: [pull_request, workflow_dispatch]
 
 env:
   # disable incremental compilation.
@@ -41,8 +32,24 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
+  is_enabled:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["cordyceps/**.rs", "cordyceps/Cargo.toml", ".github/workflows/cordyceps.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
+
+
   # run loom tests
   tests:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     name: Loom tests (cordyceps)
     steps:
@@ -50,18 +57,18 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - name: run loom tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test
-        args: --profile loom --lib -p cordyceps
-        env:
-          LOOM_MAX_PREEMPTIONS: 2
-          LOOM_LOG: loom=trace
-          RUSTFLAGS: "--cfg loom"
+      run: cargo test --profile loom --lib -p cordyceps
+      env:
+        LOOM_MAX_PREEMPTIONS: 2
+        LOOM_LOG: loom=trace
+        RUSTFLAGS: "--cfg loom"
 
   miri:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     name: Miri tests (codyceps)
+    steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
