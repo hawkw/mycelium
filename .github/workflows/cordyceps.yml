@@ -58,6 +58,7 @@ jobs:
   miri:
     runs-on: ubuntu-latest
     name: Miri tests (codyceps)
+    steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
