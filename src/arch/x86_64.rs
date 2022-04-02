@@ -53,7 +53,7 @@ impl BootInfo for RustbootBootInfo {
             let kind = convert_region_kind(region.kind);
             mem::Region::new(start, size, kind)
         }
-        (&self.inner.memory_regions[..]).iter().map(convert_region)
+        self.inner.memory_regions[..].iter().map(convert_region)
     }
 
     fn writer(&self) -> Self::Writer {
@@ -311,7 +311,7 @@ pub fn oops(
                     mycotest::Failure::Panic
                 };
                 writeln!(
-                    &mut com1.lock(),
+                    com1.lock(),
                     "{} {} {} {}",
                     mycotest::FAIL_TEST,
                     failure.as_str(),
@@ -345,13 +345,12 @@ pub fn run_tests() {
     let mut failed = 0;
     let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
     let tests = mycelium_util::testing::all_tests();
-    writeln!(&mut com1.lock(), "{}{}", mycotest::TEST_COUNT, tests.len())
-        .expect("serial write failed");
+    writeln!(com1.lock(), "{}{}", mycotest::TEST_COUNT, tests.len()).expect("serial write failed");
     for test in tests {
         CURRENT_TEST.store(test as *const _ as *mut _, Ordering::Release);
 
         writeln!(
-            &mut com1.lock(),
+            com1.lock(),
             "{}{} {}",
             mycotest::START_TEST,
             test.module,
@@ -364,7 +363,7 @@ pub fn run_tests() {
 
         if (test.run)() {
             writeln!(
-                &mut com1.lock(),
+                com1.lock(),
                 "{} {} {}",
                 mycotest::PASS_TEST,
                 test.module,
@@ -374,7 +373,7 @@ pub fn run_tests() {
             passed += 1;
         } else {
             writeln!(
-                &mut com1.lock(),
+                com1.lock(),
                 "{} {} {} {}",
                 mycotest::FAIL_TEST,
                 mycotest::Failure::Fail.as_str(),
