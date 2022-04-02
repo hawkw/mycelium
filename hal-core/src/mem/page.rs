@@ -188,7 +188,7 @@ where
             phys.size(),
             "virtual and physical pages must be the same size"
         );
-        for (virt, phys) in (&virt).into_iter().zip(&phys) {
+        for (virt, phys) in virt.into_iter().zip(&phys) {
             tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
             let mut flags = self.map_page(virt, phys, frame_alloc);
             set_flags(&mut flags);
@@ -212,7 +212,7 @@ where
     /// behavior for contiguously-mapped virtual page ranges, it must check that
     /// the page range is, in fact, contiguously mapped.
     ///
-    /// Additionally, and unlike [`Mapper::unmap`], this method does not return
+    /// Additionally, and unlike [`unmap`], this method does not return
     /// a physical [`PageRange`], since it is not guaranteed that the unmapped
     /// pages are mapped to a contiguous physical page range.
     ///
@@ -224,6 +224,8 @@ where
     ///
     /// Manual control of page mappings may be used to violate Rust invariants
     /// in a variety of exciting ways.
+    ///
+    /// [`unmap`]: Self::unmap
     unsafe fn unmap_range(&mut self, virt: PageRange<VAddr, S>) {
         let _span = tracing::trace_span!("unmap_range", ?virt).entered();
 

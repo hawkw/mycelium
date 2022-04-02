@@ -3,6 +3,7 @@
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![feature(panic_info_message)]
 #![allow(unused_unsafe)]
+#![doc = include_str!("../README.md")]
 
 extern crate alloc;
 extern crate rlibc;
@@ -21,13 +22,13 @@ static ALLOC: buddy::Alloc = buddy::Alloc::new_default(32);
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
-        &mut writer,
+        writer,
         "hello from mycelium {} (on {})",
         env!("CARGO_PKG_VERSION"),
         arch::NAME
     )
     .unwrap();
-    writeln!(&mut writer, "booting via {}", bootinfo.bootloader_name()).unwrap();
+    writeln!(writer, "booting via {}", bootinfo.bootloader_name()).unwrap();
 
     if let Some(subscriber) = bootinfo.subscriber() {
         tracing::dispatch::set_global_default(subscriber).unwrap();

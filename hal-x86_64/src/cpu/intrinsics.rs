@@ -25,6 +25,8 @@ pub unsafe fn hlt() {
 ///
 /// Prefer the higher-level [`interrupt::Control::enter_critical`] API when
 /// possible.
+///
+/// [`interrupt::Control::enter_critical`]: crate::interrupt::Idt#method.enter_critical
 #[inline(always)]
 pub unsafe fn cli() {
     asm!("cli")
@@ -41,6 +43,8 @@ pub unsafe fn cli() {
 ///
 /// Prefer the higher-level [`interrupt::Control::enter_critical`] API when
 /// possible.
+///
+/// [`interrupt::Control::enter_critical`]: crate::interrupt::Idt#method.enter_critical
 #[inline(always)]
 pub unsafe fn sti() {
     asm!("sti")
