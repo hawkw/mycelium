@@ -1,3 +1,6 @@
+//! The simplest thing resembling an "allocator" I could possibly create.
+//! Allocates into a "large" static array.
+
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;

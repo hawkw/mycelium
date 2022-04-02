@@ -24,7 +24,7 @@ use mycelium_util::sync::{
 pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Minimum allocateable page size in bytes.
     ///
-    /// Free blocks on free_lists[0] are one page of this size each. For each
+    /// Free blocks on `free_lists[0]` are one page of this size each. For each
     /// index higher in the array of free lists, the blocks on that free list
     /// are 2x as large.
     min_size: usize,

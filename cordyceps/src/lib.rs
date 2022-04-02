@@ -31,7 +31,7 @@ use core::ptr::NonNull;
 /// Failure to uphold these invariants will result in corruption of the
 /// intrusive data structure, including dangling pointers.
 ///
-/// [`Unpin`]: core::pin::Unpin
+/// [`Unpin`]: core::marker::Unpin
 pub unsafe trait Linked<L> {
     /// The handle owning nodes in the linked list.
     type Handle;

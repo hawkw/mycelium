@@ -25,7 +25,7 @@ struct LinksInner<T: ?Sized> {
     prev: Link<T>,
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
-    /// https://github.com/rust-lang/rust/issues/63818.
+    /// <https://github.com/rust-lang/rust/issues/63818>.
     _unpin: PhantomPinned,
 }
 

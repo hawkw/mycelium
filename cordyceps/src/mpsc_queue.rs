@@ -37,23 +37,27 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
     stub: NonNull<T>,
 }
 
-/// A handle that holds the right to dequeue elements from a [`Queue`].
+/// A handle that holds the right to dequeue elements from a [`MpscQueue`].
 ///
 /// This can be used when one thread wishes to dequeue many elements at a time,
 /// to avoid the overhead of ensuring mutual exclusion on every [`dequeue`] or
 /// [`try_dequeue`] call.
 ///
-/// This type is returned by the [`Queue::consume`] and [`Queue::try_consume`]
+/// This type is returned by the [`MpscQueue::consume`] and [`MpscQueue::try_consume`]
 /// methods.
 ///
+/*
+// XXX(eliza): these docs are commented out because i didnt actually write that part...
 /// If the right to dequeue elements needs to be reserved for longer than a
 /// single scope, an owned variant ([`OwnedConsumer`]) is also available, when
-/// the [`Queue`] is stored in an [`Arc`]. Since the [`Queue`] must be stored
+/// the [`MpscQueue`] is stored in an [`Arc`]. Since the [`MpscQueue`] must be stored
 /// in an [`Arc`], the [`OwnedConsumer`] type requires the "alloc" feature flag.
+///
+/// [`Arc`]: alloc::sync::Arc
+*/
 ///
 /// [`dequeue`]: Consumer::dequeue
 /// [`try_dequeue`]: Consumer::try_dequeue
-/// [`Arc`]: alloc::sync::Arc
 pub struct Consumer<'q, T: Linked<Links<T>>> {
     q: &'q MpscQueue<T>,
 }
@@ -65,9 +69,10 @@ pub struct Links<T> {
     /// Used for debug mode consistency checking only.
     #[cfg(debug_assertions)]
     is_stub: AtomicBool,
+
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
-    /// https://github.com/rust-lang/rust/issues/63818.
+    /// <https://github.com/rust-lang/rust/issues/63818>.
     _unpin: PhantomPinned,
 }
 
@@ -144,10 +149,10 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// only one thread may be dequeueing at a time. If another thread is
     /// dequeueing, this method returns [`TryDequeueError::Busy`].
     ///
-    /// The [`Queue::dequeue`] method will instead wait (by spinning with an
+    /// The [`MpscQueue::dequeue`] method will instead wait (by spinning with an
     /// exponential backoff) when the queue is in an inconsistent state or busy.
     ///
-    /// The unsafe [`Queue::try_dequeue_unchecked`] method will not check if the
+    /// The unsafe [`MpscQueue::try_dequeue_unchecked`] method will not check if the
     /// queue is busy before dequeueing an element. This can be used when the
     /// user code guarantees that no other threads will dequeue from the queue
     /// concurrently, but this cannot be enforced by the compiler.
@@ -160,6 +165,8 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///   inconsistent state
     /// - [`TryDequeueError::Busy`] if another thread is currently trying to
     ///   dequeue a message.
+    ///
+    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
     pub fn try_dequeue(&self) -> Result<T::Handle, TryDequeueError> {
         if self
             .has_consumer
@@ -192,10 +199,10 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// only one thread may be dequeueing at a time. If another thread is
     /// dequeueing, this method will spin until the queue is no longer busy.
     ///
-    /// The [`Queue::try_dequeue`] will return an error rather than waiting when
+    /// The [`MpscQueue::try_dequeue`] will return an error rather than waiting when
     /// the queue is in an inconsistent state or busy.
     ///
-    /// The unsafe [`Queue::dequeue_unchecked`] method will not check if the
+    /// The unsafe [`MpscQueue::dequeue_unchecked`] method will not check if the
     /// queue is busy before dequeueing an element. This can be used when the
     /// user code guarantees that no other threads will dequeue from the queue
     /// concurrently, but this cannot be enforced by the compiler.
@@ -247,7 +254,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
     /// state.
     ///
-    /// The [`Queue::dequeue_unchecked`] method will instead wait (by spinning with an
+    /// The [`MpscQueue::dequeue_unchecked`] method will instead wait (by spinning with an
     /// exponential backoff) when the queue is in an inconsistent state.
     ///
     /// # Returns
@@ -311,7 +318,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// wait before dequeueing an element. This method will wait by spinning
     /// with an exponential backoff if the queue is in an inconsistent state.
     ///
-    /// The [`Queue::try_dequeue`] will return an error rather than waiting when
+    /// The [`MpscQueue::try_dequeue`] will return an error rather than waiting when
     /// the queue is in an inconsistent state.
     ///
     /// # Returns
@@ -586,8 +593,8 @@ crate::feature! {
     /// to avoid the overhead of ensuring mutual exclusion on every [`dequeue`] or
     /// [`try_dequeue`] call.
     ///
-    /// This type is returned by the [`Queue::consume_owned`] and
-    /// [`Queue::try_consume_owned`] methods.
+    /// This type is returned by the [`MpscQueue::consume_owned`] and
+    /// [`MpscQueue::try_consume_owned`] methods.
     ///
     /// This is similar to the [`Consumer`] type, but the queue is stored in an
     /// [`Arc`] rather than borrowed. This allows a single `OwnedConsumer`

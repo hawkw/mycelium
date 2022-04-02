@@ -16,6 +16,8 @@ use core::{
 /// method, which dereferences the cell **without** checking if it has been
 /// initialized. This method is unsafe and should be used with caution ---
 /// incorrect usage can result in reading uninitialized memory.
+///
+/// [`get_unchecked`]: Self::get_unchecked
 pub struct InitOnce<T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicU8,
@@ -25,11 +27,6 @@ pub struct InitOnce<T> {
 /// time it is accessed.
 ///
 /// This can be used as a safer alternative to `static mut`.
-///
-/// For performance-critical use-cases, this type also has a [`get_unchecked`]
-/// method, which dereferences the cell **without** checking if it has been
-/// initialized. This method is unsafe and should be used with caution ---
-/// incorrect usage can result in reading uninitialized memory.
 pub struct Lazy<T, F = fn() -> T> {
     value: UnsafeCell<MaybeUninit<T>>,
     state: AtomicU8,
