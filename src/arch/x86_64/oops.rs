@@ -177,16 +177,14 @@ pub fn oops(oops: Oops<'_>) -> ! {
             "...while handling a panic! we really screwed up!"
         )
         .unwrap();
-    }
+    } else {
 
     if oops.already_faulted {
-        if oops.already_panicked {
-            writeln!(
-                mk_writer.make_writer(),
-                "...while handling a fault! seems real bad lol!"
-            )
-            .unwrap();
-        }
+        writeln!(
+            mk_writer.make_writer(),
+            "...while handling a fault! seems real bad lol!"
+        )
+        .unwrap();
     }
 
     writeln!(
