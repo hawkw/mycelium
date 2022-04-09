@@ -163,8 +163,8 @@ pub fn oops(oops: Oops<'_>) -> ! {
         // skip printing disassembly if we already faulted; disassembling the
         // fault address may fault a second time.
         if !oops.already_faulted {
-            let fault_addr = registers.instruction_ptr.as_usize();
-            disassembly(fault_addr);
+             let fault_addr = registers.instruction_ptr.as_usize();
+             disassembly(fault_addr);
         }
         */
     }
