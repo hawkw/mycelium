@@ -285,6 +285,7 @@ dependencies = [
  "hal-core",
  "mycelium-trace",
  "mycelium-util",
+ "mycotest",
  "tracing 0.2.0",
  "volatile",
 ]
@@ -503,6 +504,7 @@ dependencies = [
 name = "mycotest"
 version = "0.1.0"
 dependencies = [
+ "mycelium-trace",
  "tracing 0.1.29",
 ]
 

@@ -302,23 +302,15 @@ pub fn oops(
 
     #[cfg(test)]
     {
-        if let Some(test) = ptr::NonNull::new(CURRENT_TEST.load(Ordering::Acquire)) {
+        if let Some(test) = mycotest::runner::current_test() {
             if let Some(com1) = serial::com1() {
-                let test = unsafe { test.as_ref() };
                 let failure = if fault.is_some() {
                     mycotest::Failure::Fault
                 } else {
                     mycotest::Failure::Panic
                 };
-                writeln!(
-                    com1.lock(),
-                    "{} {} {} {}",
-                    mycotest::FAIL_TEST,
-                    failure.as_str(),
-                    test.module,
-                    test.name
-                )
-                .expect("serial write failed");
+                // if writing the test outcome fails, don't double panic...
+                let _ = test.write_outcome(Err(failure), com1.lock());
             }
         }
         qemu_exit(QemuExitCode::Failed);
@@ -330,68 +322,15 @@ pub fn oops(
     }
 }
 
-#[cfg(test)]
-static CURRENT_TEST: AtomicPtr<mycelium_util::testing::Test> = AtomicPtr::new(ptr::null_mut());
-
 // TODO(eliza): this is now in arch because it uses the serial port, would be
 // nice if that was cross platform...
 #[cfg(test)]
 pub fn run_tests() {
-    use core::fmt::Write;
-    let span = tracing::info_span!("run tests");
-    let _enter = span.enter();
-
-    let mut passed = 0;
-    let mut failed = 0;
     let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
-    let tests = mycelium_util::testing::all_tests();
-    writeln!(com1.lock(), "{}{}", mycotest::TEST_COUNT, tests.len()).expect("serial write failed");
-    for test in tests {
-        CURRENT_TEST.store(test as *const _ as *mut _, Ordering::Release);
-
-        writeln!(
-            com1.lock(),
-            "{}{} {}",
-            mycotest::START_TEST,
-            test.module,
-            test.name
-        )
-        .expect("serial write failed");
-
-        let span = tracing::info_span!("test", test.name, test.module);
-        let _enter = span.enter();
-
-        if (test.run)() {
-            writeln!(
-                com1.lock(),
-                "{} {} {}",
-                mycotest::PASS_TEST,
-                test.module,
-                test.name
-            )
-            .expect("serial write failed");
-            passed += 1;
-        } else {
-            writeln!(
-                com1.lock(),
-                "{} {} {} {}",
-                mycotest::FAIL_TEST,
-                mycotest::Failure::Fail.as_str(),
-                test.module,
-                test.name
-            )
-            .expect("serial write failed");
-            failed += 1;
-        }
-    }
-
-    CURRENT_TEST.store(ptr::null_mut(), Ordering::Release);
-
-    tracing::warn!("{} passed | {} failed", passed, failed);
-    if failed == 0 {
-        qemu_exit(QemuExitCode::Success);
-    } else {
-        qemu_exit(QemuExitCode::Failed);
+    let mk = || com1.lock();
+    match mycotest::runner::run_tests(mk) {
+        Ok(()) => qemu_exit(QemuExitCode::Success),
+        Err(()) => qemu_exit(QemuExitCode::Failed),
     }
 }
 
@@ -417,7 +356,7 @@ pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn interrupts_work() -> Result<(), &'static str> {
         let test_interrupt_fires = TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire);
 
@@ -433,7 +372,7 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_some_4k_pages() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {
@@ -482,7 +421,7 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_4k_pages_and_ranges() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let range1 = tracing::info_span!("alloc range 1").in_scope(|| {
@@ -528,7 +467,7 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_some_pages() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {

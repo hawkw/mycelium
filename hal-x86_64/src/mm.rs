@@ -899,7 +899,7 @@ pub(crate) mod tlb {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn basic_map() -> Result<(), ()> {
         let mut ctrl = PageCtrl::current();
         // We shouldn't need to allocate page frames for this test.
@@ -924,7 +924,7 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
         let mut ctrl = PageCtrl::current();
 
