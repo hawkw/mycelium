@@ -38,6 +38,9 @@ impl StateSegment {
         VAddr::of(self).offset(self.iomap_offset as i32)
     }
 
+    /// # Safety
+    ///
+    /// its bad
     pub unsafe fn load_tss(sel: segment::Selector) {
         tracing::trace!(selector = ?sel, "setting TSS...");
         cpu::intrinsics::ltr(sel);

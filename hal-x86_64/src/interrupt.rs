@@ -232,6 +232,8 @@ impl hal_core::interrupt::Control for Idt {
                     com1.force_unlock();
                 }
             }
+            // XXX(eliza): wait no this is actually a special thing, so this is
+            // wrong: https://wiki.osdev.org/Exceptions#Selector_Error_Code
             let segment_selector = if code > 0 {
                 Some(segment::Selector::from_raw(code as u16))
             } else {

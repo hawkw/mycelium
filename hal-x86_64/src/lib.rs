@@ -5,7 +5,6 @@
 #![feature(abi_x86_interrupt)]
 #![feature(doc_cfg)]
 // A bunch of const fn features.
-#![feature(const_generics_defaults)]
 #![feature(const_mut_refs)]
 // Oftentimes it's necessary to write to a value at a particular location in
 // memory, and these types don't implement Copy to ensure they aren't

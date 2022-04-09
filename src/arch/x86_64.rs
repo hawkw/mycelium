@@ -18,7 +18,10 @@ pub type MinPageSize = mm::size::Size4Kb;
 #[tracing::instrument]
 pub fn init_interrupts() {
     interrupt::init_gdt();
+    tracing::info!("GDT initialized!");
+
     interrupt::init::<InterruptHandlers>();
+    tracing::info!("IDT initialized!");
 }
 #[derive(Debug)]
 pub struct RustbootBootInfo {
