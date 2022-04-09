@@ -1,4 +1,4 @@
-use core::{fmt, ptr};
+use core::fmt;
 use mycelium_util::{
     io,
     sync::{spin, Lazy},
@@ -75,15 +75,6 @@ impl ColorSpec {
     pub const fn new(fg: Color, bg: Color) -> Self {
         let bg = (bg as u8) << 4;
         Self(bg | (fg as u8))
-    }
-}
-
-impl Character {
-    fn write(&mut self, ch: Character) {
-        unsafe {
-            // safety: we have mutable access to this character.
-            ptr::write_volatile(self as *mut Character, ch)
-        }
     }
 }
 

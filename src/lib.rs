@@ -194,30 +194,29 @@ pub fn alloc_error(layout: core::alloc::Layout) -> ! {
 
 #[cfg_attr(target_os = "none", panic_handler)]
 #[cold]
-pub fn panic(panic: &core::panic::PanicInfo) -> ! {
-    use core::fmt;
-    struct PrettyPanic<'a>(&'a core::panic::PanicInfo<'a>);
-    impl<'a> fmt::Display for PrettyPanic<'a> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let message = self.0.message();
-            let location = self.0.location();
-            if let Some(message) = message {
-                writeln!(f, "  mycelium panicked: {}", message)?;
-                if let Some(loc) = location {
-                    writeln!(f, "  at: {}:{}:{}", loc.file(), loc.line(), loc.column(),)?;
-                } else {
-                    writeln!(f, "  at: ???")?;
-                }
-            } else {
-                writeln!(f, "  mycelium panicked: {}", self.0)?;
-            }
-            Ok(())
-        }
-    }
+pub fn panic(panic: &core::panic::PanicInfo<'_>) -> ! {
+    // use core::fmt;
+    // struct PrettyPanic<'a>(&'a core::panic::PanicInfo<'a>);
+    // impl<'a> fmt::Display for PrettyPanic<'a> {
+    //     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    //         let message = self.0.message();
+    //         let location = self.0.location();
+    //         if let Some(message) = message {
+    //             writeln!(f, "  mycelium panicked: {}", message)?;
+    //             if let Some(loc) = location {
+    //                 writeln!(f, "  at: {}:{}:{}", loc.file(), loc.line(), loc.column(),)?;
+    //             } else {
+    //                 writeln!(f, "  at: ???")?;
+    //             }
+    //         } else {
+    //             writeln!(f, "  mycelium panicked: {}", self.0)?;
+    //         }
+    //         Ok(())
+    //     }
+    // }
 
-    let pp = PrettyPanic(panic);
-    tracing::info!(%pp);
-    arch::oops(&pp, None)
+    // let pp = PrettyPanic(panic);
+    arch::oops(arch::Oops::from(panic))
 }
 
 #[cfg(all(test, not(target_os = "none")))]
