@@ -37,7 +37,7 @@ unsafe impl GlobalAlloc for Heap {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn basic_alloc() {
         // Let's allocate something, for funsies
         use alloc::vec::Vec;
@@ -52,7 +52,7 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_big() {
         use alloc::vec::Vec;
         let mut v = Vec::new();

@@ -4,7 +4,7 @@ use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
 };
-use mycotest::Test;
+use mycotest::TestName;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -67,7 +67,7 @@ pub struct Settings {
 struct TestResults {
     tests: usize,
     completed: usize,
-    failed: BTreeMap<mycotest::Test<'static, String>, Vec<String>>,
+    failed: BTreeMap<TestName<'static, String>, Vec<String>>,
     panicked: usize,
     faulted: usize,
     total: usize,
@@ -296,14 +296,14 @@ impl TestResults {
             tracing::trace!(message = ?line);
             let line = line?;
 
-            if let Some(count) = line.strip_prefix(mycotest::TEST_COUNT) {
+            if let Some(count) = line.strip_prefix(mycotest::report::TEST_COUNT) {
                 results.total = count
                     .trim()
                     .parse::<usize>()
                     .with_context(|| format!("parse string: {:?}", count.trim()))?;
             }
 
-            if let Some(test) = Test::parse_start(&line) {
+            if let Some(test) = TestName::parse_start(&line) {
                 let _span =
                     tracing::debug_span!("test", "{}::{}", test.module(), test.name()).entered();
                 tracing::debug!(?test, "found a test");
@@ -323,7 +323,7 @@ impl TestResults {
                         Ok(line) => line,
                     };
 
-                    match Test::parse_outcome(&line) {
+                    match TestName::parse_outcome(&line) {
                         Ok(None) => {}
                         Ok(Some((completed_test, outcome))) => {
                             ensure!(
@@ -350,16 +350,16 @@ impl TestResults {
 
                 match curr_outcome {
                     Some(Ok(())) => eprintln!(" {}", "ok".style(green)),
-                    Some(Err(mycotest::Failure::Fail)) => {
+                    Some(Err(mycotest::report::Failure::Fail)) => {
                         eprintln!(" {}", "not ok!".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                     }
-                    Some(Err(mycotest::Failure::Panic)) => {
+                    Some(Err(mycotest::report::Failure::Panic)) => {
                         eprintln!(" {}", "panic!".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                         results.panicked += 1;
                     }
-                    Some(Err(mycotest::Failure::Fault)) => {
+                    Some(Err(mycotest::report::Failure::Fault)) => {
                         eprintln!(" {}", "FAULT".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                         results.faulted += 1;

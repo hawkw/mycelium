@@ -152,14 +152,14 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     loop {}
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn wasm_hello_world() -> Result<(), wasmi::Error> {
         const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
         wasm::run_wasm(HELLOWORLD_WASM)
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn basic_alloc() {
         // Let's allocate something, for funsies
         use alloc::vec::Vec;
@@ -174,7 +174,7 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_big() {
         use alloc::vec::Vec;
         let mut v = Vec::new();
@@ -216,6 +216,7 @@ pub fn panic(panic: &core::panic::PanicInfo) -> ! {
     }
 
     let pp = PrettyPanic(panic);
+    tracing::info!(%pp);
     arch::oops(&pp, None)
 }
 
