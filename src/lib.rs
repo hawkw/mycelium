@@ -104,8 +104,6 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     // XXX(eliza): this sucks
     ALLOC.set_vm_offset(arch::mm::vm_offset());
 
-    panic!("fake panic lol");
-
     let mut regions = 0;
     let mut free_regions = 0;
     let mut free_bytes = 0;
