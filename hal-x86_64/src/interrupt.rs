@@ -21,6 +21,7 @@ pub type ErrorCode = u64;
 #[derive(Debug)]
 pub struct CodeFault {
     kind: &'static str,
+    #[allow(dead_code)] // TODO(eliza): actually use this lol
     error_code: Option<u64>,
 }
 
