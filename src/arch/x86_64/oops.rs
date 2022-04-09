@@ -107,7 +107,7 @@ pub fn oops(oops: Oops<'_>) -> ! {
     .draw(&mut target)
     .unwrap();
     let _ = Text::with_alignment(
-        "uwu we did a widdle fucky-wucky!",
+        "uwu mycelium did a widdle fucky-wucky!",
         Point::new(5, 30),
         smol,
         Alignment::Left,
@@ -128,22 +128,11 @@ pub fn oops(oops: Oops<'_>) -> ! {
             fault,
             details,
         } => {
-            let registers = fault.registers();
             if let Some(deets) = details {
                 writeln!(writer, "a {} occurred: {}\n", kind, deets).unwrap();
             } else {
                 writeln!(writer, "a {} occurred!\n", kind).unwrap();
             }
-            writeln!(
-                writer,
-                "%rip    = {:#016x}",
-                registers.instruction_ptr.as_usize()
-            )
-            .unwrap();
-            writeln!(writer, "%rsp    = {:#016x}", registers.stack_ptr.as_usize()).unwrap();
-            writeln!(writer, "%cs     = {:016x}", registers.code_segment).unwrap();
-            writeln!(writer, "%ss     = {:016x}", registers.stack_segment).unwrap();
-            writeln!(writer, "%rflags = {:#016b}", registers.cpu_flags).unwrap();
         }
         OopsSituation::Panic(panic) => {
             writeln!(writer, "mycelium panicked!\n").unwrap();
@@ -151,21 +140,37 @@ pub fn oops(oops: Oops<'_>) -> ! {
     }
 
     if let Some(registers) = oops.situation.registers() {
+        writeln!(
+            writer,
+            "%rip    = {:#016x}",
+            registers.instruction_ptr.as_usize()
+        )
+        .unwrap();
+        writeln!(writer, "%rsp    = {:#016x}", registers.stack_ptr.as_usize()).unwrap();
+        writeln!(writer, "%cs     = {:016x}", registers.code_segment).unwrap();
+        writeln!(writer, "%ss     = {:016x}", registers.stack_segment).unwrap();
+        writeln!(writer, "%rflags = {:#016b}", registers.cpu_flags).unwrap();
         // tracing::error!("%rip    = {:#016x}", registers.instruction_ptr.as_usize());
         // tracing::error!("%rsp    = {:#016x}", registers.stack_ptr.as_usize());
         // tracing::error!("%cs     = {:#016x}", registers.code_segment);
         // tracing::error!("%ss     = {:#016x}", registers.stack_segment);
         // tracing::error!("%rflags = {:#016b}", registers.cpu_flags);
 
+        // TODO(eliza): disassembly appears to (always?) do a general protection
+        // fault. seems weird.
+        /*
         // skip printing disassembly if we already faulted; disassembling the
         // fault address may fault a second time.
         if !oops.already_faulted {
             let fault_addr = registers.instruction_ptr.as_usize();
             disassembly(fault_addr);
         }
+        */
     }
 
     crate::ALLOC.dump_free_lists();
+
+    writeln!(writer, "\nit will NEVER be safe to turn off your computer!").unwrap();
 
     #[cfg(test)]
     oops.fail_test();
