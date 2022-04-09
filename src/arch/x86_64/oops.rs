@@ -13,16 +13,8 @@ use hal_core::{
     framebuffer::{Draw, RgbColor},
     interrupt, Address,
 };
-use hal_x86_64::{
-    cpu,
-    framebuffer::{self, Framebuffer},
-    interrupt::Registers as X64Registers,
-    serial, vga,
-};
-use mycelium_trace::{
-    embedded_graphics::MakeTextWriter,
-    writer::{self, MakeWriter},
-};
+use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
+use mycelium_trace::{embedded_graphics::MakeTextWriter, writer::MakeWriter};
 use mycelium_util::fmt::{self, Write};
 
 #[derive(Debug)]
