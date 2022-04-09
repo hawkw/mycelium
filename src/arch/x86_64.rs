@@ -2,7 +2,7 @@ use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(test)]
 use core::{ptr, sync::atomic::AtomicPtr};
-use hal_core::{boot::BootInfo, mem, Address, PAddr, VAddr};
+use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 pub use hal_x86_64::{interrupt, mm, NAME};
 use mycelium_util::{fmt, sync::InitOnce};
