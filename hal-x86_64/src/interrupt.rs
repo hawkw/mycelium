@@ -236,20 +236,6 @@ mod tests {
     use core::mem::size_of;
 
     #[test]
-    fn context_is_correct_size() {
-        use core::mem::size_of;
-        assert_eq!(size_of::<Context<'_>>(), size_of::<&mut Registers>());
-        assert_eq!(
-            size_of::<Context<'_, ErrorCode>>(),
-            size_of::<&mut Registers>() + size_of::<ErrorCode>()
-        );
-        assert_eq!(
-            size_of::<Context<'_, PageFaultCode>>(),
-            size_of::<&mut Registers>() + size_of::<PageFaultCode>()
-        );
-    }
-
-    #[test]
     fn registers_is_correct_size() {
         assert_eq!(size_of::<Registers>(), 40);
     }
