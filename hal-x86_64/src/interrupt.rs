@@ -232,8 +232,13 @@ impl hal_core::interrupt::Control for Idt {
                     com1.force_unlock();
                 }
             }
+            let segment_selector = if code > 0 {
+                Some(segment::Selector::from_raw(code as u16))
+            } else {
+                None
+            };
             tracing::error!(
-                segment_selector = ?if code > 0 { Some(code) } else { None },
+                ?segment_selector,
                 "lmao, a general protection fault is happening"
             );
             let code = CodeFault {
