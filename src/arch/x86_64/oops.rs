@@ -177,7 +177,7 @@ pub fn oops(oops: Oops<'_>) -> ! {
             "...while handling a panic! we really screwed up!"
         )
         .unwrap();
-    } else {
+    }
 
     if oops.already_faulted {
         writeln!(
