@@ -24,6 +24,7 @@ use mycelium_trace::{
     writer::{self, MakeWriter},
 };
 use mycelium_util::fmt::{self, Write};
+
 #[derive(Debug)]
 pub struct Oops<'a> {
     already_panicked: bool,
@@ -35,6 +36,7 @@ enum OopsSituation<'a> {
     Fault {
         kind: &'static str,
         fault: Fault<'a>,
+        details: Option<&'a dyn fmt::Display>,
     },
     Panic(&'a PanicInfo<'a>),
 }
@@ -121,9 +123,17 @@ pub fn oops(oops: Oops<'_>) -> ! {
     );
     let mut writer = mk_writer.make_writer();
     match oops.situation {
-        OopsSituation::Fault { kind, fault } => {
+        OopsSituation::Fault {
+            kind,
+            fault,
+            details,
+        } => {
             let registers = fault.registers();
-            writeln!(writer, "a {} occurred!\n", kind).unwrap();
+            if let Some(deets) = details {
+                writeln!(writer, "a {} occurred: {}\n", kind, deets).unwrap();
+            } else {
+                writeln!(writer, "a {} occurred!\n", kind).unwrap();
+            }
             writeln!(
                 writer,
                 "%rip    = {:#016x}",
@@ -140,8 +150,6 @@ pub fn oops(oops: Oops<'_>) -> ! {
         }
     }
 
-    crate::ALLOC.dump_free_lists();
-
     if let Some(registers) = oops.situation.registers() {
         // tracing::error!("%rip    = {:#016x}", registers.instruction_ptr.as_usize());
         // tracing::error!("%rsp    = {:#016x}", registers.stack_ptr.as_usize());
@@ -156,6 +164,8 @@ pub fn oops(oops: Oops<'_>) -> ! {
             disassembly(fault_addr);
         }
     }
+
+    crate::ALLOC.dump_free_lists();
 
     #[cfg(test)]
     oops.fail_test();
@@ -174,7 +184,30 @@ static IS_FAULTING: AtomicBool = AtomicBool::new(false);
 impl<'a> Oops<'a> {
     #[inline(always)] // don't push a stack frame in case we overflowed!
     pub(super) fn fault(fault: Fault<'a>, kind: &'static str) -> Self {
-        let situation = OopsSituation::Fault { kind, fault };
+        let situation = OopsSituation::Fault {
+            kind,
+            fault,
+            details: None,
+        };
+        Self::mk_fault(situation)
+    }
+
+    #[inline(always)] // don't push a stack frame in case we overflowed!
+    pub(super) fn fault_with_details(
+        fault: Fault<'a>,
+        kind: &'static str,
+        details: &'a dyn fmt::Display,
+    ) -> Self {
+        let situation = OopsSituation::Fault {
+            kind,
+            fault,
+            details: Some(details),
+        };
+        Self::mk_fault(situation)
+    }
+
+    #[inline(always)]
+    fn mk_fault(situation: OopsSituation<'a>) -> Self {
         let already_panicked = IS_PANICKING.load(Ordering::Acquire);
         let already_faulted = IS_FAULTING.swap(true, Ordering::AcqRel);
         Self {
@@ -240,17 +273,26 @@ impl<'a> OopsSituation<'a> {
 impl fmt::Debug for OopsSituation<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Fault { kind, fault } => f
-                .debug_struct("OopsSituation::Fault")
-                .field("kind", kind)
-                .field("registers", fault.registers())
-                .finish(),
+            Self::Fault {
+                kind,
+                fault,
+                details,
+            } => {
+                let mut dbg = f.debug_struct("OopsSituation::Fault");
+                dbg.field("kind", kind)
+                    .field("registers", fault.registers());
+                if let Some(deets) = details {
+                    dbg.field("details", &format_args!("\"{}\"", deets));
+                }
+                dbg.finish()
+            }
             Self::Panic(panic) => f.debug_tuple("OopsSituation::Panic").field(&panic).finish(),
         }
     }
 }
 
 #[tracing::instrument(target = "oops", level = "error", skip(rip), fields(rip = fmt::hex(rip)))]
+#[inline(always)]
 fn disassembly(rip: usize) {
     use yaxpeax_arch::LengthedInstruction;
     // let _ = writeln!(mk_writer.make_writer(), "Disassembly:");
@@ -262,7 +304,7 @@ fn disassembly(rip: usize) {
 
         // XXX(eliza): this read also page faults sometimes. seems wacky.
         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
-        // tracing::debug!(?bytes);
+        tracing::debug!(?bytes);
         // let _ = write!(mk_writer.make_writer(), "  {:016x}: ", ptr).unwrap();
         match decoder.decode_slice(bytes) {
             Ok(inst) => {

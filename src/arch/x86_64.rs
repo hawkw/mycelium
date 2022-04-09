@@ -153,13 +153,16 @@ impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
         C: hal_core::interrupt::Context<Registers = X64Registers>
             + hal_core::interrupt::ctx::CodeFault,
     {
-        oops(Oops::fault(&cx, "CODE FAULT"));
+        oops(Oops::fault_with_details(
+            &cx,
+            "CODE FAULT",
+            &cx.fault_kind(),
+        ));
     }
 
     fn double_fault<C>(cx: C)
     where
-        C: hal_core::interrupt::Context<Registers = X64Registers>
-            + hal_core::interrupt::ctx::CodeFault,
+        C: hal_core::interrupt::Context<Registers = X64Registers>,
     {
         oops(Oops::fault(&cx, "DOUBLE FAULT"))
     }

@@ -99,7 +99,7 @@ impl Idt {
 
     pub const PAGE_FAULT: usize = 14;
 
-    pub const X87_FPU_EXCEPTION_PENDING: usize = 16;
+    pub const X87_FPU_EXCEPTION: usize = 16;
 
     pub const ALIGNMENT_CHECK: usize = 17;
 

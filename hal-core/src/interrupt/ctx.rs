@@ -23,6 +23,7 @@ pub trait PageFault: Context {
 pub trait CodeFault: Context {
     fn is_user_mode(&self) -> bool;
     fn instruction_ptr(&self) -> VAddr;
+    fn fault_kind(&self) -> &'static str;
 }
 
 #[non_exhaustive]
