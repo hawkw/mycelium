@@ -1,6 +1,7 @@
 //! Implementation of the Mycelium HAL for 64-bit x86 platforms.
 #![cfg_attr(not(test), no_std)]
-#![feature(asm)]
+// Allow const operands in asm.
+#![feature(asm_const)]
 #![feature(abi_x86_interrupt)]
 #![feature(doc_cfg)]
 // A bunch of const fn features.

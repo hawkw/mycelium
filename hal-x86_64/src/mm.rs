@@ -51,7 +51,7 @@ pub fn init_paging(vm_offset: VAddr) {
 
     // Log out some details about our starting page table.
     let mut present_entries = 0;
-    for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
+    for (idx, entry) in pml4.entries[..].iter().enumerate() {
         if entry.is_present() {
             tracing::trace!(idx, ?entry);
             present_entries += 1;
@@ -78,7 +78,7 @@ pub fn init_paging(vm_offset: VAddr) {
 
     // Log out some details about our starting page table.
     let mut present_entries = 0;
-    for (idx, entry) in (&pml4.entries[..]).iter().enumerate() {
+    for (idx, entry) in pml4.entries[..].iter().enumerate() {
         if entry.is_present() {
             tracing::trace!(idx, ?entry);
             present_entries += 1;
@@ -350,7 +350,7 @@ impl<R: level::Recursive> PageTable<R> {
     ) -> &mut PageTable<R::Next> {
         let span = tracing::trace_span!("create_next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
         let _e = span.enter();
-        for (idx, entry) in (&self.entries[..]).iter().enumerate() {
+        for (idx, entry) in self.entries[..].iter().enumerate() {
             if entry.is_present() {
                 tracing::trace!(idx, ?entry);
             }
@@ -881,6 +881,7 @@ pub mod level {
 pub(crate) mod tlb {
     use crate::control_regs::cr3;
     use crate::VAddr;
+    use core::arch::asm;
     use hal_core::Address;
 
     #[allow(dead_code)] // we'll need this later
@@ -898,7 +899,7 @@ pub(crate) mod tlb {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn basic_map() -> Result<(), ()> {
         let mut ctrl = PageCtrl::current();
         // We shouldn't need to allocate page frames for this test.
@@ -923,7 +924,7 @@ mycelium_util::decl_test! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
         let mut ctrl = PageCtrl::current();
 

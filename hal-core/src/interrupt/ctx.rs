@@ -16,13 +16,14 @@ pub trait Context {
 
 pub trait PageFault: Context {
     fn fault_vaddr(&self) -> VAddr;
-
+    fn debug_error_code(&self) -> &dyn fmt::Debug;
     // TODO(eliza): more
 }
 
 pub trait CodeFault: Context {
     fn is_user_mode(&self) -> bool;
     fn instruction_ptr(&self) -> VAddr;
+    fn fault_kind(&self) -> &'static str;
 }
 
 #[non_exhaustive]

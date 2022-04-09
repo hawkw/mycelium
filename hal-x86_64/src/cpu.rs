@@ -1,4 +1,4 @@
-use core::{fmt, mem};
+use core::{arch::asm, fmt, mem};
 
 pub mod intrinsics;
 

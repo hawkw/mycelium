@@ -1,10 +1,11 @@
 use crate::{segment, VAddr};
-use core::marker::PhantomData;
+use core::{arch::asm, marker::PhantomData};
 use hal_core::interrupt::{ctx, Handlers};
 use mycelium_util::fmt;
 
 pub mod idt;
 pub mod pic;
+
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
@@ -19,6 +20,13 @@ pub struct Context<'a, T = ()> {
 
 pub type ErrorCode = u64;
 
+#[derive(Debug)]
+pub struct CodeFault {
+    kind: &'static str,
+    #[allow(dead_code)] // TODO(eliza): actually use this lol
+    error_code: Option<u64>,
+}
+
 /// An interrupt service routine.
 pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 
@@ -31,7 +39,7 @@ pub struct Interrupt<T = ()> {
 
 #[derive(Copy, Clone)]
 #[repr(transparent)]
-pub struct PageFaultCode(u64);
+pub struct PageFaultCode(u32);
 
 #[repr(C)]
 pub struct Registers {
@@ -82,7 +90,7 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
     /// Mutating the value of saved interrupt registers can cause
     /// undefined behavior.
     unsafe fn registers_mut(&mut self) -> &mut Registers {
-        &mut self.registers
+        self.registers
     }
 }
 
@@ -90,15 +98,23 @@ impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
     fn fault_vaddr(&self) -> crate::VAddr {
         unimplemented!("eliza")
     }
+
+    fn debug_error_code(&self) -> &dyn fmt::Debug {
+        &self.code
+    }
 }
 
-impl<'a> ctx::CodeFault for Context<'a, ErrorCode> {
+impl<'a> ctx::CodeFault for Context<'a, CodeFault> {
     fn is_user_mode(&self) -> bool {
         false // TODO(eliza)
     }
 
     fn instruction_ptr(&self) -> crate::VAddr {
         self.registers.instruction_ptr
+    }
+
+    fn fault_kind(&self) -> &'static str {
+        self.code.kind
     }
 }
 
@@ -136,6 +152,36 @@ impl hal_core::interrupt::Control for Idt {
     where
         H: Handlers<Registers>,
     {
+        macro_rules! gen_code_faults {
+            ($self:ident, $h:ty, $($vector:path => fn $name:ident($($rest:tt)+),)+) => {
+                $(
+                    gen_code_faults! {@ $name($($rest)+); }
+                    $self.set_isr($vector, $name::<$h> as *const ());
+                )+
+            };
+            (@ $name:ident($kind:literal);) => {
+                extern "x86-interrupt" fn $name<H: Handlers<Registers>>(registers: &mut Registers) {
+                    let code = CodeFault {
+                        error_code: None,
+                        kind: $kind,
+                    };
+                    H::code_fault(Context { registers, code });
+                }
+            };
+            (@ $name:ident($kind:literal, code);) => {
+                extern "x86-interrupt" fn $name<H: Handlers<Registers>>(
+                    registers: &mut Registers,
+                    code: u64,
+                ) {
+                    let code = CodeFault {
+                        error_code: Some(code),
+                        kind: $kind,
+                    };
+                    H::code_fault(Context { registers, code });
+                }
+            };
+        }
+
         let span = tracing::debug_span!("Idt::register_handlers");
         let _enter = span.enter();
 
@@ -187,17 +233,32 @@ impl hal_core::interrupt::Control for Idt {
                 }
             }
             tracing::error!(
-                segment_selector = if code > 0 { Some(code) } else { None },
+                segment_selector = ?if code > 0 { Some(code) } else { None },
                 "lmao, a general protection fault is happening"
             );
+            let code = CodeFault {
+                error_code: Some(code),
+                kind: "General Protection Fault (0xD)",
+            };
             H::code_fault(Context { registers, code });
+        }
+
+        gen_code_faults! {
+            self, H,
+            Self::DIVIDE_BY_ZERO => fn div_0_isr("Divide-By-Zero (0x0)"),
+            Self::OVERFLOW => fn overflow_isr("Overflow (0x4)"),
+            Self::BOUND_RANGE_EXCEEDED => fn br_isr("Bound Range Exceeded (0x5)"),
+            Self::INVALID_OPCODE => fn ud_isr("Invalid Opcode (0x6)"),
+            Self::DEVICE_NOT_AVAILABLE => fn no_fpu_isr("Device (FPU) Not Available (0x7)"),
+            Self::ALIGNMENT_CHECK => fn alignment_check_isr("Alignment Check (0x11)", code),
+            Self::SIMD_FLOATING_POINT => fn simd_fp_exn_isr("SIMD Floating-Point Exception (0x13)"),
+            Self::X87_FPU_EXCEPTION => fn x87_exn_isr("x87 Floating-Point Exception (0x10)"),
         }
 
         self.set_isr(0x20, timer_isr::<H> as *const ());
         self.set_isr(0x21, keyboard_isr::<H> as *const ());
         self.set_isr(69, test_isr::<H> as *const ());
         self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
-
         self.set_isr(Self::GENERAL_PROTECTION_FAULT, gpf_isr::<H> as *const ());
         self.set_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
         Ok(())
@@ -231,24 +292,16 @@ pub fn fire_test_interrupt() {
     unsafe { asm!("int {0}", const 69) }
 }
 
+impl fmt::Debug for PageFaultCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PageFaultCode({:#b})", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::mem::size_of;
-
-    #[test]
-    fn context_is_correct_size() {
-        use core::mem::size_of;
-        assert_eq!(size_of::<Context<'_>>(), size_of::<&mut Registers>());
-        assert_eq!(
-            size_of::<Context<'_, ErrorCode>>(),
-            size_of::<&mut Registers>() + size_of::<ErrorCode>()
-        );
-        assert_eq!(
-            size_of::<Context<'_, PageFaultCode>>(),
-            size_of::<&mut Registers>() + size_of::<PageFaultCode>()
-        );
-    }
 
     #[test]
     fn registers_is_correct_size() {

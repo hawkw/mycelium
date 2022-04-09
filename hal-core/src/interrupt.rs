@@ -49,13 +49,9 @@ pub trait Handlers<R: fmt::Debug + fmt::Display> {
     where
         C: ctx::Context<Registers = R> + ctx::CodeFault;
 
-    #[inline(always)]
     fn double_fault<C>(cx: C)
     where
-        C: ctx::Context<Registers = R> + ctx::CodeFault,
-    {
-        Self::code_fault(cx)
-    }
+        C: ctx::Context<Registers = R>;
 
     fn timer_tick();
 

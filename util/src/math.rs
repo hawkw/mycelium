@@ -14,6 +14,7 @@ pub const fn usize_const_log2_ceil(u: usize) -> usize {
     u.next_power_of_two().trailing_zeros() as usize
 }
 
+#[cfg(all(test, not(loom)))]
 #[test]
 fn test_log2_ceil() {
     assert_eq!(0, 0.log2_ceil());

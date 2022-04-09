@@ -1,6 +1,6 @@
 use core::{
     alloc::{GlobalAlloc, Layout},
-    cmp, ptr,
+    cmp, mem, ptr,
 };
 use hal_core::{
     mem::{
@@ -10,7 +10,7 @@ use hal_core::{
     Address, PAddr, VAddr,
 };
 use mycelium_util::fmt;
-use mycelium_util::intrusive::{list, List};
+use mycelium_util::intrusive::{list, Linked, List};
 use mycelium_util::math::Log2;
 use mycelium_util::sync::{
     atomic::{
@@ -24,7 +24,7 @@ use mycelium_util::sync::{
 pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Minimum allocateable page size in bytes.
     ///
-    /// Free blocks on free_lists[0] are one page of this size each. For each
+    /// Free blocks on `free_lists[0]` are one page of this size each. For each
     /// index higher in the array of free lists, the blocks on that free list
     /// are 2x as large.
     min_size: usize,
@@ -46,7 +46,6 @@ pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
 
 type Result<T> = core::result::Result<T, AllocErr>;
 
-#[derive(Debug)]
 pub struct Free {
     magic: usize,
     links: list::Links<Self>,
@@ -101,10 +100,20 @@ impl Alloc {
 
 impl<L> Alloc<L> {
     #[cfg(not(loom))]
-    pub const fn new(min_size: usize, free_lists: L) -> Self {
+    pub const fn new(mut min_size: usize, free_lists: L) -> Self {
+        // ensure we don't split memory into regions too small to fit the free
+        // block header in them.
+        let free_block_size = mem::size_of::<Free>();
+        if min_size < free_block_size {
+            min_size = free_block_size;
+        }
+        // round the minimum block size up to the next power of two, if it isn't
+        // a power of two (`size_of::<Free>` is *probably* 48 bytes on 64-bit
+        // architectures...)
+        min_size = min_size.next_power_of_two();
         Self {
             min_size,
-            base_vaddr: AtomicUsize::new(core::usize::MAX),
+            base_vaddr: AtomicUsize::new(usize::MAX),
             vm_offset: AtomicUsize::new(0),
             min_size_log2: mycelium_util::math::usize_const_log2_ceil(min_size),
             heap_size: AtomicUsize::new(0),
@@ -161,10 +170,19 @@ impl<L> Alloc<L> {
         }
 
         // Is the size a power of two?
-        debug_assert!(
-            size.is_power_of_two(),
-            "somebody constructed a bad layout! don't do that!"
-        );
+        if !size.is_power_of_two() {
+            let next_pow2 = size.next_power_of_two();
+            tracing::trace!(
+                layout.size = size,
+                next_pow2,
+                "size is not a power of two, rounding up..."
+            );
+            size = next_pow2;
+        }
+        // debug_assert!(
+        //     size.is_power_of_two(),
+        //     "somebody constructed a bad layout! don't do that!"
+        // );
 
         // Is there enough room to meet this allocation request?
         let available = self.heap_size.load(Acquire);
@@ -198,72 +216,101 @@ impl<L> Alloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
 {
+    pub fn dump_free_lists(&self) {
+        struct ListEntries<'a>(&'a List<Free>);
+        impl fmt::Debug for ListEntries<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_list()
+                    .entries(self.0.iter().map(|val| unsafe { val.as_ref() }))
+                    .finish()
+            }
+        }
+
+        for (order, list) in self.free_lists.as_ref().iter().enumerate() {
+            let _span = tracing::debug_span!("free_list", order, size = self.size_for_order(order))
+                .entered();
+            match list.try_lock() {
+                Some(list) => {
+                    tracing::trace!(?list);
+                    tracing::debug!(entries = ?&ListEntries(&*list));
+                }
+                None => {
+                    tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
+                }
+            }
+        }
+    }
+
     /// Adds a memory region to the heap from which pages may be allocated.
-    #[tracing::instrument(skip(self), level = "trace")]
-    pub unsafe fn add_region(&self, mut region: Region) -> core::result::Result<(), ()> {
+    #[tracing::instrument(skip(self), level = "debug")]
+    pub unsafe fn add_region(&self, region: Region) -> core::result::Result<(), ()> {
         // Is the region in use?
         if region.kind() != RegionKind::FREE {
             tracing::warn!(?region, "cannot add to page allocator, region is not free");
             return Err(());
         }
 
-        let size = region.size();
-        let base = region.base_addr();
-        tracing::info!(region.size = size, region.base_addr = ?base, "adding region");
+        let mut next_region = Some(region);
+        while let Some(mut region) = next_region.take() {
+            let size = region.size();
+            let base = region.base_addr();
+            let _span = tracing::trace_span!("adding_region", size, ?base).entered();
+            tracing::info!(region.size = size, region.base_addr = ?base, "adding region");
 
-        // Is the region aligned on the heap's minimum page size? If not, we
-        // need to align it.
-        if !base.is_aligned(self.min_size) {
-            let new_base = base.align_up(self.min_size);
-            tracing::trace!(region.new_base = ?new_base, "base address not aligned!");
-            region = Region::new(new_base, region.size(), RegionKind::FREE);
-        }
-
-        // Is the size of the region a power of two? The buddy block algorithm
-        // requires each free block to be a power of two.
-        if !size.is_power_of_two() {
-            // If the region is not a power of two, split it down to the nearest
-            // power of two.
-            let prev_power_of_two = prev_power_of_two(size);
-            tracing::debug!(prev_power_of_two, "not a power of two!");
-            let region2 = region.split_back(prev_power_of_two).unwrap();
-
-            // If the region we split off is larger than the minimum page size,
-            // we can try to add it as well.
-            if region2.size() >= self.min_size {
-                tracing::debug!("adding split-off region");
-                self.add_region(region2)?;
-            } else {
-                // Otherwise, we can't use it --- we'll have to leak it.
-                // TODO(eliza):
-                //  figure out a nice way to use stuff that won't fit for "some
-                //  other purpose"?
-                // NOTE:
-                //  in practice these might just be the two "bonus bytes" that
-                //  the free regions in our memory map have for some kind of
-                //  reason (on x84).
-                // TODO(eliza):
-                //  figure out why free regions in the memory map are all
-                //  misaligned by two bytes.
-                tracing::debug!(
-                    region = ?region2,
-                    min_size = self.min_size,
-                    "leaking a region smaller than min page size"
-                );
+            // Is the region aligned on the heap's minimum page size? If not, we
+            // need to align it.
+            if !base.is_aligned(self.min_size) {
+                let new_base = base.align_up(self.min_size);
+                tracing::trace!(region.new_base = ?new_base, "base address not aligned!");
+                region = Region::new(new_base, region.size(), RegionKind::FREE);
             }
+
+            // Is the size of the region a power of two? The buddy block algorithm
+            // requires each free block to be a power of two.
+            if !size.is_power_of_two() {
+                // If the region is not a power of two, split it down to the nearest
+                // power of two.
+                let prev_power_of_two = prev_power_of_two(size);
+                tracing::debug!(prev_power_of_two, "not a power of two!");
+                let region2 = region.split_back(prev_power_of_two).unwrap();
+
+                // If the region we split off is larger than the minimum page size,
+                // we can try to add it as well.
+                if region2.size() >= self.min_size {
+                    tracing::debug!("adding split-off region");
+                    next_region = Some(region2);
+                } else {
+                    // Otherwise, we can't use it --- we'll have to leak it.
+                    // TODO(eliza):
+                    //  figure out a nice way to use stuff that won't fit for "some
+                    //  other purpose"?
+                    // NOTE:
+                    //  in practice these might just be the two "bonus bytes" that
+                    //  the free regions in our memory map have for some kind of
+                    //  reason (on x84).
+                    // TODO(eliza):
+                    //  figure out why free regions in the memory map are all
+                    //  misaligned by two bytes.
+                    tracing::debug!(
+                        region = ?region2,
+                        min_size = self.min_size,
+                        "leaking a region smaller than min page size"
+                    );
+                }
+            }
+
+            // Update the base virtual address of the heap.
+            let region_vaddr = region.base_addr().as_usize() + self.offset();
+            self.base_vaddr.fetch_min(region_vaddr, AcqRel);
+
+            // ...and actually add the block to a free list.
+            let block = Free::new(region, self.offset());
+            unsafe { self.push_block(block) };
         }
 
-        // Update the base virtual address of the heap.
-        let region_vaddr = region.base_addr().as_usize() + self.offset();
-        self.base_vaddr.fetch_min(region_vaddr, AcqRel);
-
-        // ...and actually add the block to a free list.
-        let block = Free::new(region, self.offset());
-        unsafe { self.push_block(block) };
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     unsafe fn alloc_inner(&self, layout: Layout) -> Option<ptr::NonNull<Free>> {
         // This is the minimum order necessary for the requested allocation ---
         // the first free list we'll check.
@@ -302,20 +349,26 @@ where
         None
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     unsafe fn dealloc_inner(&self, paddr: PAddr, layout: Layout) -> Result<()> {
         // Find the order of the free list on which the freed range belongs.
         let min_order = self.order_for(layout);
         tracing::trace!(?min_order);
         let min_order = min_order.ok_or_else(AllocErr::oom)?;
 
-        // Construct a new free block.
-        let mut block = unsafe {
-            Free::new(
-                Region::new(paddr, layout.size(), RegionKind::FREE),
-                self.offset(),
-            )
+        let size = match self.size_for(layout) {
+            Some(size) => size,
+            // XXX(eliza): is it better to just leak it?
+            None => panic!(
+                "couldn't determine the correct layout for an allocation \
+                we previously allocated successfully, what the actual fuck!\n \
+                addr={:?}; layout={:?}; min_order={}",
+                paddr, layout, min_order,
+            ),
         };
+
+        // Construct a new free block.
+        let mut block =
+            unsafe { Free::new(Region::new(paddr, size, RegionKind::FREE), self.offset()) };
 
         // Starting at the minimum order on which the freed range will fit
         for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
@@ -326,7 +379,7 @@ where
             if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, &mut free_list) } {
                 // Okay, merge the blocks, and try the next order!
                 if buddy < block {
-                    core::mem::swap(&mut block, &mut buddy);
+                    mem::swap(&mut block, &mut buddy);
                 }
                 unsafe {
                     block.as_mut().merge(buddy.as_mut());
@@ -379,7 +432,7 @@ where
         let size = self.size_for_order(order);
         let base = self.base_vaddr.load(Relaxed);
 
-        if base == core::usize::MAX {
+        if base == usize::MAX {
             // This is a bug.
             tracing::error!("cannot find buddy block; heap not initialized!");
             return None;
@@ -403,7 +456,7 @@ where
             buddy.addr = ?buddy,
         );
 
-        if core::ptr::eq(buddy as *const _, block.as_ptr() as *const _) {
+        if ptr::eq(buddy as *const _, block.as_ptr() as *const _) {
             tracing::trace!("buddy block is the same as self");
             return None;
         }
@@ -436,7 +489,11 @@ where
     #[tracing::instrument(skip(self), level = "trace")]
     fn split_down(&self, block: &mut Free, mut order: usize, target_order: usize) {
         let mut size = block.size();
-        debug_assert_eq!(size, self.size_for_order(order));
+        debug_assert_eq!(
+            size,
+            self.size_for_order(order),
+            "a block was a weird size for some reason"
+        );
 
         let free_lists = self.free_lists.as_ref();
         while order > target_order {
@@ -456,7 +513,7 @@ where
 unsafe impl<S, L> page::Alloc<S> for Alloc<L>
 where
     L: AsRef<[spin::Mutex<List<Free>>]>,
-    S: Size + core::fmt::Display,
+    S: Size + fmt::Display,
 {
     /// Allocate a range of at least `len` pages.
     ///
@@ -470,17 +527,6 @@ where
     fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>> {
         let span = tracing::trace_span!("alloc_range", size = size.as_usize(), len);
         let _e = span.enter();
-
-        // Determine the layout to allocate this page range...
-        if size.as_usize() > self.min_size {
-            // TODO(eliza): huge pages should work!
-            tracing::error!(
-                requested.size = size.as_usize(),
-                requested.len = len,
-                "cannot allocate; huge pages are not currently supported!"
-            );
-            return Err(AllocErr::oom());
-        }
 
         debug_assert!(
             size.as_usize().is_power_of_two(),
@@ -643,14 +689,26 @@ impl Free {
     }
 
     pub fn split_front(&mut self, size: usize, offset: usize) -> Option<ptr::NonNull<Self>> {
-        debug_assert_eq!(self.magic, Self::MAGIC);
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
         let new_meta = self.meta.split_front(size)?;
         let new_free = unsafe { Self::new(new_meta, offset) };
         Some(new_free)
     }
 
     pub fn split_back(&mut self, size: usize, offset: usize) -> Option<ptr::NonNull<Self>> {
-        debug_assert_eq!(self.magic, Self::MAGIC);
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
 
         let new_meta = self.meta.split_back(size)?;
         debug_assert_ne!(new_meta, self.meta);
@@ -663,8 +721,20 @@ impl Free {
     }
 
     pub fn merge(&mut self, other: &mut Self) {
-        debug_assert_eq!(self.magic, Self::MAGIC, "self.magic={:x}", self.magic);
-        debug_assert_eq!(other.magic, Self::MAGIC, "self.magic={:x}", self.magic);
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
+        debug_assert_eq!(
+            self.magic,
+            Self::MAGIC,
+            "THEIR MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
+            self,
+            self.magic
+        );
         assert!(!other.links.is_linked());
         self.meta.merge(&mut other.meta)
     }
@@ -695,17 +765,32 @@ impl Free {
     }
 }
 
-unsafe impl list::Linked for Free {
+unsafe impl Linked<list::Links<Self>> for Free {
     type Handle = ptr::NonNull<Free>;
-    type Node = Self;
-    fn as_ptr(r: &Self::Handle) -> ptr::NonNull<Self> {
-        *r
+
+    #[inline]
+    fn into_ptr(r: Self::Handle) -> ptr::NonNull<Self> {
+        r
     }
+
+    #[inline]
     unsafe fn from_ptr(ptr: ptr::NonNull<Self>) -> Self::Handle {
         ptr
     }
+
+    #[inline]
     unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
         ptr::NonNull::from(&ptr.as_ref().links)
+    }
+}
+
+impl fmt::Debug for Free {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Free")
+            .field("magic", &fmt::hex(&self.magic))
+            .field("links", &self.links)
+            .field("meta", &self.meta)
+            .finish()
     }
 }
 

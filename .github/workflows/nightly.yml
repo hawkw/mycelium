@@ -1,0 +1,55 @@
+# Check if we can build mycelium on whatever the most recent Rust nightly is.
+name: Latest nightly
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+
+env:
+  # disable incremental compilation.
+  #
+  # incremental compilation is useful as part of an edit-build-test-edit cycle,
+  # as it lets the compiler avoid recompiling code that hasn't changed. however,
+  # on CI, we're not making small edits; we're almost always building the entire
+  # project from scratch. thus, incremental compilation on CI actually
+  # introduces *additional* overhead to support making future builds
+  # faster...but no future builds will ever occur in any given CI environment.
+  #
+  # see https://matklad.github.io/2021/09/04/fast-rust-builds.html#ci-workflow
+  # for details.
+  CARGO_INCREMENTAL: 0
+  # allow more retries for network requests in cargo (downloading crates) and
+  # rustup (installing toolchains). this should help to reduce flaky CI failures
+  # from transient network timeouts or other issues.
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  # don't emit giant backtraces in the CI logs.
+  RUST_BACKTRACE: short
+
+jobs:
+
+  # check whether we can build mycelium on the *latest* Rust nightly.
+  #
+  # the actual build is run on a pinned nightly revision in the `rust-toolchain`
+  # file. this job checks to see if we can build mycelium on whatever the most
+  # recent nightly is. if this fails, there are breaking changes we need to
+  # address before updating to a newer nightly build.
+  clippy-nightly:
+    name: check latest nightly
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1.0.6
+      with:
+        profile: minimal
+        components: clippy
+        toolchain: nightly
+        override: true
+    - uses: actions/checkout@v2
+    - name: print current nightly
+      run: rustc --version && cargo --version
+    - name: run cargo clippy
+      uses: actions-rs/cargo@v1.0.1
+      with:
+        command: clippy
+        args: --all --all-features

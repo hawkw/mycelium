@@ -1,10 +1,47 @@
 name: CI
 
-on: [push]
+on: [pull_request, workflow_dispatch]
+
+env:
+  # disable incremental compilation.
+  #
+  # incremental compilation is useful as part of an edit-build-test-edit cycle,
+  # as it lets the compiler avoid recompiling code that hasn't changed. however,
+  # on CI, we're not making small edits; we're almost always building the entire
+  # project from scratch. thus, incremental compilation on CI actually
+  # introduces *additional* overhead to support making future builds
+  # faster...but no future builds will ever occur in any given CI environment.
+  #
+  # see https://matklad.github.io/2021/09/04/fast-rust-builds.html#ci-workflow
+  # for details.
+  CARGO_INCREMENTAL: 0
+  # allow more retries for network requests in cargo (downloading crates) and
+  # rustup (installing toolchains). this should help to reduce flaky CI failures
+  # from transient network timeouts or other issues.
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  # don't emit giant backtraces in the CI logs.
+  RUST_BACKTRACE: short
 
 jobs:
+  is_enabled:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["**.rs", "**/Cargo.toml", "Cargo.lock", ".github/workflows/ci.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
+
+  # run `cargo check` with the host target triple.
   check-host:
     name: cargo check (host)
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -16,7 +53,10 @@ jobs:
         command: check
         args: --all --all-features
 
+  # check code style with `rustfmt`
   rustfmt:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -28,10 +68,21 @@ jobs:
         command: fmt
         args: --all -- --check
 
+  # run host tests
+  #
+  # many crates in mycelium have tests that run on the host platform and are
+  # compiled with the host's target triple. this allows the tests to use the
+  # Rust standard library, enabling the use of testing libraries like `proptest`
+  # and `loom`.
+  #
+  # it's also faster to run these tests without building a kernel image and
+  # spinning up a QEMU VM, so host tests are preferred for tests that doesn't
+  # *need* to be tested in a mycelium VM.
   test-host:
     runs-on: ubuntu-latest
     name: cargo test (host)
-    needs: check-host
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -42,10 +93,12 @@ jobs:
         command: test
         args: --all --all-features
 
+  # build a bootable image for the `x86_64-mycelium` target.
   build-x64:
     name: build boot image (x86_64)
     runs-on: ubuntu-latest
-    needs: check-host
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -55,18 +108,25 @@ jobs:
       with:
         command: build-x64
 
+
+  # run kernel tests in QEMU for the `x86_64-mycelium` target.
   test-x64:
     name: cargo test (cross x64)
     runs-on: ubuntu-latest
-    needs: check-host
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+
+    # install QEMU
     - name: install qemu
       run: |
         sudo apt-get update
         sudo apt-get install qemu-system-x86
+
+    # run kernel tests in QEMU
     - name: run tests
       uses: actions-rs/cargo@v1.0.1
       with:

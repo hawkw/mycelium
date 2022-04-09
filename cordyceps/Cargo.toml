@@ -1,0 +1,32 @@
+[package]
+name = "cordyceps"
+version = "0.1.0"
+edition = "2021"
+description = "Mycelium intrusive data structures."
+authors = ["Eliza Weisman <eliza@elizas.website>"]
+documentation = "https://docs.rs/cordyceps"
+license = "MIT"
+repository = "https://github.com/hawkw/mycelium"
+readme = "README.md"
+keywords = ["intrusive", "no_std", "list", "queue", "lock-free"]
+categories = ["data-structures", "no-std"]
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["std"]
+alloc = []
+std = ["alloc"]
+
+[dev-dependencies]
+proptest = "1"
+tracing = { version = "0.1", default_features = false, features = ["attributes"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.5.4"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

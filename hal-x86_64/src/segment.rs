@@ -1,5 +1,5 @@
 use crate::{cpu, task};
-use core::mem;
+use core::{arch::asm, mem};
 use mycelium_util::{
     bits::{self, Pack16, Pack64},
     fmt,
@@ -217,7 +217,7 @@ impl Selector {
     }
 
     /// Returns this selector's bits as a `u16`.
-    pub(crate) fn bits(self) -> u16 {
+    pub fn bits(self) -> u16 {
         self.0
     }
 

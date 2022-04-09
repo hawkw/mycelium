@@ -1,15 +1,15 @@
-use core::{fmt, ptr};
+use core::fmt;
 use mycelium_util::{
     io,
     sync::{spin, Lazy},
 };
-
+use volatile::Volatile;
 static BUFFER: Lazy<spin::Mutex<Buffer>> = Lazy::new(|| {
     spin::Mutex::new(Buffer {
         col: 0,
         row: 0,
         color: ColorSpec::new(Color::LightGray, Color::Black),
-        buf: unsafe { &mut *(0xb8000u64 as *mut Buf) },
+        buf: Volatile::new(unsafe { &mut *(0xb8000u64 as *mut Buf) }),
     })
 });
 
@@ -21,7 +21,7 @@ pub fn writer() -> Writer {
 /// fuck off
 pub unsafe fn init_with_offset(offset: u64) {
     // lmao
-    BUFFER.lock().buf = &mut *((0xb8000u64 + offset) as *mut Buf);
+    BUFFER.lock().buf = Volatile::new(&mut *((0xb8000u64 + offset) as *mut Buf));
 }
 
 #[derive(Debug)]
@@ -56,7 +56,7 @@ pub struct Buffer {
     col: usize,
     row: usize,
     color: ColorSpec,
-    buf: &'static mut Buf,
+    buf: Volatile<&'static mut Buf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,15 +75,6 @@ impl ColorSpec {
     pub const fn new(fg: Color, bg: Color) -> Self {
         let bg = (bg as u8) << 4;
         Self(bg | (fg as u8))
-    }
-}
-
-impl Character {
-    fn write(&mut self, ch: Character) {
-        unsafe {
-            // safety: we have mutable access to this character.
-            ptr::write_volatile(self as *mut Character, ch)
-        }
     }
 }
 
@@ -126,27 +117,31 @@ impl Buffer {
         }
 
         let ch = self.character(ch);
-        self.buf[self.row][self.col].write(ch);
+        self.buf
+            .as_mut_slice()
+            .index_mut(self.row)
+            .as_mut_slice()
+            .index_mut(self.col)
+            .write(ch);
         self.col += 1;
     }
 
     fn newline(&mut self) {
+        let blank = self.blank();
+        let mut buf = self.buf.as_mut_slice();
         if self.row >= (BUF_HEIGHT - 1) {
-            let mut rows = self.buf.iter_mut();
-            let mut prev_row = rows.next().expect("fixed size buf should have rows");
-            for row in rows {
-                for (i, ch) in row.iter().enumerate() {
-                    prev_row[i].write(*ch);
-                }
-                prev_row = row;
+            for row in 1..(BUF_HEIGHT - 1) {
+                buf.copy_within(row..=row, row);
             }
         } else {
             self.row += 1;
         }
 
-        let blank = self.blank();
-        for c in &mut self.buf[self.row][..] {
-            c.write(blank)
+        let mut row = buf.index_mut(self.row);
+        let mut row = row.as_mut_slice();
+        // XXX(eliza): it would be cool if this could be a memset...
+        for i in 0..BUF_WIDTH {
+            row.index_mut(i).write(blank);
         }
 
         self.col = 0;
@@ -154,9 +149,13 @@ impl Buffer {
 
     fn clear(&mut self) {
         let ch = self.character(b' ');
-        for row in self.buf.iter_mut() {
-            for col in row.iter_mut() {
-                col.write(ch);
+        let mut buf = self.buf.as_mut_slice();
+        // XXX(eliza): it would be cool if this could also be a ``smemset`.
+        for row in 0..BUF_HEIGHT {
+            let mut row = buf.index_mut(row);
+            let mut row = row.as_mut_slice();
+            for col in 0..BUF_WIDTH {
+                row.index_mut(col).write(ch);
             }
         }
         self.row = 0;
@@ -177,7 +176,7 @@ impl fmt::Debug for Buffer {
             .field("row", &self.row)
             .field("col", &self.col)
             .field("color", &self.color)
-            .field("buf", &format_args!("{:p}", self.buf))
+            .field("buf", &format_args!("[..]"))
             .finish()
     }
 }

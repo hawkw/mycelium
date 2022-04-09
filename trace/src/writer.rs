@@ -43,15 +43,14 @@ pub trait MakeWriter<'a> {
     ///
     /// # Implementer notes
     ///
-    /// [`fmt::Subscriber`] or [`fmt::Collector`] will call this method each
-    /// time an event is recorded. Ensure any state that must be saved across
-    /// writes is not lost when the [`Writer`] instance is dropped. If creating
-    /// a [`fmt::Write`] instance is expensive, be sure to cache it when
-    /// implementing [`MakeWriter`] to improve performance.
+    /// A [`Subscriber`] will call this method each  time an event is recorded.
+    /// Ensure any state that must be saved across writes is not lost when the
+    /// [`Writer`] instance is dropped. If creating a [`fmt::Write`] instance is
+    /// expensive, be sure to cache it when implementing [`MakeWriter`] to
+    /// improve performance.
     ///
     /// [`Writer`]: MakeWriter::Writer
-    /// [`fmt::Subscriber`]: super::super::fmt::Subscriber
-    /// [`fmt::Collector`]: super::super::fmt::Collector
+    /// [`Subscriber`]: crate::Subscriber
     /// [`fmt::Write`]: mycelium_util::fmt::Write
     fn make_writer(&'a self) -> Self::Writer;
 
@@ -136,7 +135,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// determine if  a writer should be produced for a given span or event.
     ///
     /// If the predicate returns `false`, the wrapped [`MakeWriter`]'s
-    /// [`make_writer_for`][mwf] will return [`OptionalWriter::none`].
+    /// [`make_writer_for`][mwf] will return [`None`].
     /// Otherwise, it calls the wrapped [`MakeWriter`]'s
     /// [`make_writer_for`][mwf] method, and returns the produced writer.
     ///
@@ -173,7 +172,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
 
     /// Combines `self` with another type implementing [`MakeWriter`], returning
     /// a new [`MakeWriter`] that calls `other`'s [`make_writer`] if `self`'s
-    /// `make_writer` returns [`OptionalWriter::none`].
+    /// `make_writer` returns [`None`].
     ///
     /// [`make_writer`]: MakeWriter::make_writer
     fn or_else<B>(self, other: B) -> OrElse<Self, B>
@@ -286,8 +285,8 @@ pub struct WithMinLevel<M> {
 
 /// A [`MakeWriter`] combinator that wraps a [`MakeWriter`] with a predicate for
 /// span and event [`Metadata`], so that the [`MakeWriter::make_writer_for`]
-/// method returns [`OptionalWriter::some`] when the predicate returns `true`,
-/// and [`OptionalWriter::none`] when the predicate returns `false`.
+/// method returns [`Some`] when the predicate returns `true`,
+/// and [`None`] when the predicate returns `false`.
 ///
 /// This is returned by the [`MakeWriterExt::with_filter`] method. See the
 /// method documentation for details.
@@ -299,9 +298,9 @@ pub struct WithFilter<M, F> {
     filter: F,
 }
 
-/// Combines a [`MakeWriter`] that returns an [`OptionalWriter`] with another
+/// Combines a [`MakeWriter`] that returns an [`Option`] of another
 /// [`MakeWriter`], so that the second [`MakeWriter`] is used when the first
-/// [`MakeWriter`] returns [`OptionalWriter::none`].
+/// [`MakeWriter`] returns [`None`].
 ///
 /// This is returned by the [`MakeWriterExt::or_else] method. See the
 /// method documentation for details.
@@ -344,6 +343,39 @@ where
 
     fn make_writer(&'a self) -> Self::Writer {
         (self)()
+    }
+}
+
+impl<'a, M> MakeWriter<'a> for Option<M>
+where
+    M: MakeWriter<'a>,
+{
+    type Writer = EitherWriter<M::Writer, NoWriter>;
+    #[inline]
+    fn make_writer(&'a self) -> Self::Writer {
+        self.as_ref()
+            .map(MakeWriter::make_writer)
+            .map(EitherWriter::A)
+            .unwrap_or(EitherWriter::B(NoWriter(())))
+    }
+
+    #[inline]
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        self.as_ref()
+            .map(|make| make.enabled(meta))
+            .unwrap_or(false)
+    }
+
+    #[inline]
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Option<Self::Writer> {
+        self.as_ref()
+            .and_then(|make| make.make_writer_for(meta))
+            .map(EitherWriter::A)
+    }
+
+    #[inline]
+    fn line_len(&self) -> usize {
+        self.as_ref().map(MakeWriter::line_len).unwrap_or(80)
     }
 }
 
@@ -403,7 +435,7 @@ where
 
 impl<M> WithMaxLevel<M> {
     /// Wraps the provided [`MakeWriter`] with a maximum [`Level`], so that it
-    /// returns [`OptionalWriter::none`] for spans and events whose level is
+    /// returns [`None`] for spans and events whose level is
     /// more verbose than the maximum level.
     ///
     /// See [`MakeWriterExt::with_max_level`] for details.
@@ -446,7 +478,7 @@ impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMaxLevel<M> {
 
 impl<M> WithMinLevel<M> {
     /// Wraps the provided [`MakeWriter`] with a minimum [`Level`], so that it
-    /// returns [`OptionalWriter::none`] for spans and events whose level is
+    /// returns [`None`] for spans and events whose level is
     /// less verbose than the maximum level.
     ///
     /// See [`MakeWriterExt::with_min_level`] for details.
@@ -489,12 +521,11 @@ impl<'a, M: MakeWriter<'a>> MakeWriter<'a> for WithMinLevel<M> {
 impl<M, F> WithFilter<M, F> {
     /// Wraps `make` with the provided `filter`, returning a [`MakeWriter`] that
     /// will call `make.make_writer_for()` when `filter` returns `true` for a
-    /// span or event's [`Metadata`], and returns a [`sink`] otherwise.
+    /// span or event's [`Metadata`], and returns [`None`] otherwise.
     ///
     /// See [`MakeWriterExt::with_filter`] for details.
     ///
     /// [`Metadata`]: tracing_core::Metadata
-    /// [`sink`]: core::io::sink
     pub fn new(make: M, filter: F) -> Self
     where
         F: Fn(&Metadata<'_>) -> bool,
@@ -543,6 +574,8 @@ impl<A, B> Tee<A, B> {
     /// outputs.
     ///
     /// See the documentation for [`MakeWriterExt::and`] for details.
+    ///
+    /// [writers]: fmt::Write
     pub fn new(a: A, b: B) -> Self {
         Self { a, b }
     }

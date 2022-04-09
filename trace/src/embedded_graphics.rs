@@ -133,6 +133,10 @@ where
 
 impl<D: Draw> MakeTextWriter<D> {
     pub fn new(mk: fn() -> D) -> Self {
+        Self::new_at(mk, Point { x: 10, y: 10 })
+    }
+
+    pub fn new_at(mk: fn() -> D, point: Point) -> Self {
         let (pixel_width, pixel_height) = {
             let buf = (mk)();
             (buf.width() as u32, buf.height() as u32)
@@ -142,7 +146,7 @@ impl<D: Draw> MakeTextWriter<D> {
         let char_height = text_style.font.character_size.height;
         let last_line = (pixel_height - char_height - 10) as i32;
         Self {
-            next_point: AtomicU64::new(pack_point(Point { x: 10, y: 10 })),
+            next_point: AtomicU64::new(pack_point(point)),
             char_height,
             mk,
             line_len,

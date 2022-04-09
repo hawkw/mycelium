@@ -1,30 +1,28 @@
 use crate::term::{ColorMode, OwoColorize};
-use crate::{cargo_log, Result};
+use crate::Result;
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
 };
-use mycotest::Test;
+use mycotest::TestName;
 use std::{
     collections::BTreeMap,
-    ffi::{OsStr, OsString},
     fmt,
     path::Path,
     process::{Child, Command, ExitStatus, Stdio},
     time::Duration,
 };
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Subcommand)]
 pub enum Cmd {
     /// Builds a bootable disk image and runs it in QEMU (implies: `build`).
     Run {
         /// Redirect the VM's serial output to stdout
-        #[structopt(long, short)]
+        #[clap(long, short)]
         serial: bool,
 
         /// Extra arguments passed to QEMU
-        #[structopt(flatten)]
+        #[clap(flatten)]
         qemu_settings: Settings,
     },
     /// Builds a bootable disk image with tests enabled, and runs the tests in QEMU.
@@ -33,35 +31,35 @@ pub enum Cmd {
         ///
         /// If a test run doesn't complete before this timeout has elapsed, it's
         /// considered to have failed.
-        #[structopt(long, short, parse(try_from_os_str = parse_secs), default_value = "60")]
+        #[clap(long, parse(try_from_str = parse_secs), default_value = "60")]
         timeout_secs: Duration,
 
         /// Disables capturing test serial output.
-        #[structopt(long)]
+        #[clap(long)]
         nocapture: bool,
 
         /// Show captured serial output of successful tests
-        #[structopt(long)]
+        #[clap(long)]
         show_output: bool,
 
         /// Extra arguments passed to QEMU
-        #[structopt(flatten)]
+        #[clap(flatten)]
         qemu_settings: Settings,
     },
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Args)]
 pub struct Settings {
     /// Listen for GDB connections.
-    #[structopt(long, short)]
+    #[clap(long, short)]
     gdb: bool,
 
     /// The TCP port to listen for debug connections on.
-    #[structopt(long, default_value = "1234")]
+    #[clap(long, default_value = "1234")]
     gdb_port: u16,
 
     /// Extra arguments passed to QEMU
-    #[structopt(raw = true)]
+    #[clap(raw = true)]
     qemu_args: Vec<String>,
 }
 
@@ -69,7 +67,7 @@ pub struct Settings {
 struct TestResults {
     tests: usize,
     completed: usize,
-    failed: BTreeMap<mycotest::Test<'static, String>, Vec<String>>,
+    failed: BTreeMap<TestName<'static, String>, Vec<String>>,
     panicked: usize,
     faulted: usize,
     total: usize,
@@ -102,7 +100,7 @@ impl Cmd {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "debug")]
     fn spawn_qemu(&self, qemu: &mut Command, binary: &Path) -> Result<Child> {
         let (Cmd::Run { qemu_settings, .. } | Cmd::Test { qemu_settings, .. }) = self;
 
@@ -129,7 +127,7 @@ impl Cmd {
         Ok(child)
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, paths), level = "debug")]
     pub fn run_qemu(&self, image: &Path, paths: &crate::Paths) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
@@ -141,12 +139,10 @@ impl Cmd {
                 serial,
                 qemu_settings,
             } => {
-                cargo_log!(
-                    "Running",
-                    "mycelium in QEMU ({})",
+                tracing::info!(
+                    "running mycelium in QEMU ({})",
                     paths.relative(image).display()
                 );
-                tracing::info!("running QEMU in normal mode");
                 if *serial {
                     tracing::debug!("configured QEMU to output serial on stdio");
                     qemu.arg("-serial").arg("stdio");
@@ -198,12 +194,7 @@ impl Cmd {
                     "-serial",
                     "stdio",
                 ];
-                cargo_log!(
-                    "Running",
-                    "kernel tests ({})",
-                    paths.relative(image).display()
-                );
-                tracing::info!("running QEMU in test mode");
+                tracing::info!("running kernel tests ({})", paths.relative(image).display());
                 qemu_settings.configure(&mut qemu);
                 qemu.args(TEST_ARGS);
 
@@ -268,21 +259,21 @@ impl Cmd {
 impl Settings {
     fn configure(&self, cmd: &mut Command) {
         if self.gdb {
-            tracing::debug!(gdb_port = self.gdb_port, "configured QEMU to wait for GDB");
+            tracing::debug!(gdb_port = self.gdb_port, "configuring QEMU to wait for GDB");
             cmd.arg("-S")
                 .arg("-gdb")
                 .arg(format!("tcp::{}", self.gdb_port));
         }
 
+        tracing::debug!(qemu.args = ?self.qemu_args, "configuring qemu");
         cmd.args(&self.qemu_args[..]);
     }
 }
 
-fn parse_secs(s: &OsStr) -> std::result::Result<Duration, OsString> {
-    s.to_str()
-        .ok_or_else(|| OsString::from(s))
-        .and_then(|s| s.parse::<u64>().map_err(|_| OsString::from(s)))
+fn parse_secs(s: &str) -> Result<Duration> {
+    s.parse::<u64>()
         .map(Duration::from_secs)
+        .context("not a valid number of seconds")
 }
 
 impl TestResults {
@@ -305,17 +296,17 @@ impl TestResults {
             tracing::trace!(message = ?line);
             let line = line?;
 
-            if let Some(count) = line.strip_prefix(mycotest::TEST_COUNT) {
+            if let Some(count) = line.strip_prefix(mycotest::report::TEST_COUNT) {
                 results.total = count
                     .trim()
                     .parse::<usize>()
                     .with_context(|| format!("parse string: {:?}", count.trim()))?;
             }
 
-            if let Some(test) = Test::parse_start(&line) {
+            if let Some(test) = TestName::parse_start(&line) {
                 let _span =
                     tracing::debug_span!("test", "{}::{}", test.module(), test.name()).entered();
-                tracing::debug!(?test, "found a test...");
+                tracing::debug!(?test, "found a test");
                 eprint!("test {} ...", test);
                 results.tests += 1;
 
@@ -332,7 +323,7 @@ impl TestResults {
                         Ok(line) => line,
                     };
 
-                    match Test::parse_outcome(&line) {
+                    match TestName::parse_outcome(&line) {
                         Ok(None) => {}
                         Ok(Some((completed_test, outcome))) => {
                             ensure!(
@@ -342,7 +333,7 @@ impl TestResults {
                                 test,
                                 outcome,
                             );
-                            tracing::debug!(?outcome);
+                            tracing::trace!(?outcome);
                             curr_outcome = Some(outcome);
                             break;
                         }
@@ -359,16 +350,16 @@ impl TestResults {
 
                 match curr_outcome {
                     Some(Ok(())) => eprintln!(" {}", "ok".style(green)),
-                    Some(Err(mycotest::Failure::Fail)) => {
+                    Some(Err(mycotest::report::Failure::Fail)) => {
                         eprintln!(" {}", "not ok!".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                     }
-                    Some(Err(mycotest::Failure::Panic)) => {
+                    Some(Err(mycotest::report::Failure::Panic)) => {
                         eprintln!(" {}", "panic!".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                         results.panicked += 1;
                     }
-                    Some(Err(mycotest::Failure::Fault)) => {
+                    Some(Err(mycotest::report::Failure::Fault)) => {
                         eprintln!(" {}", "FAULT".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                         results.faulted += 1;

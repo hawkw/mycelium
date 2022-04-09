@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "alloc",
+    "cordyceps",
     "util",
     "hal-core",
     "hal-x86_64",
@@ -36,11 +37,12 @@ rlibc = "1.0"
 # NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`
 # instead of normal [dependencies]. don't move this.
-bootloader = { version = "0.10.6" }
+bootloader = { version = "0.10.12" }
 embedded-graphics = "0.7"
+mycotest = { path = "mycotest" }
 
 [dev-dependencies]
-mycotest = { path = "mycotest" }
+mycotest = { path = "mycotest", features = ["runner"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 hal-x86_64 = { path = "hal-x86_64" }
@@ -48,12 +50,12 @@ yaxpeax-x86 = { version = "1.0.0", default-features = false, features = ["fmt"] 
 yaxpeax-arch = { version = "0.2.0", default-features = false }
 
 [dependencies.tracing]
-version = "0.1"
 default_features = false
-features = ["attributes"]
+features = ["attributes", "alloc"]
+git = "https://github.com/tokio-rs/tracing"
 
 [dependencies.wasmi]
-git = "https://github.com/mystor/wasmi"
+git = "https://github.com/hawkw/wasmi"
 branch = "mycelium-v0.9.0"
 default-features = false
 features = ["core"]
@@ -74,3 +76,19 @@ map-framebuffer = true
 [package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
 memcpy = true
 sysroot_path = "target/x86_64/sysroot"
+
+[patch.crates-io]
+# use `tracing` 0.2 from git
+tracing = { git = "https://github.com/tokio-rs/tracing" }
+tracing-core = { git = "https://github.com/tokio-rs/tracing" }
+# temporary patch to use my branch of `volatile` until PR
+# https://github.com/rust-osdev/volatile/pull/25 merges upstream. this is
+# necessary to build with unstable features on recent nightlies.
+volatile = { git = "https://github.com/hawkw/volatile", branch = "eliza/update-features" }
+
+# Custom profile for Loom tests: enable release optimizations so that the loom
+# tests are less slow, but don't disable debug assertions.
+[profile.loom]
+inherits = "test"
+lto = true
+opt-level = 3

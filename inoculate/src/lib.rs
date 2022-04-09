@@ -1,3 +1,4 @@
+use clap::Parser;
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help,
@@ -6,55 +7,62 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
 };
-use structopt::StructOpt;
 
 pub use color_eyre::eyre::Result;
-
 pub mod cargo;
 pub mod gdb;
 pub mod qemu;
 pub mod term;
+pub mod trace;
 
-#[derive(Debug, StructOpt)]
-#[structopt(
-    name = "inoculate",
-    about = "the horrible mycelium build tool (because that's a thing we have to have now apparently!)"
-)]
+#[derive(Debug, Parser)]
+#[clap(about, version, author = "Eliza Weisman <eliza@elizas.website>")]
 pub struct Options {
     /// Which command to run?
     ///
     /// By default, an image is built but not run.
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     pub cmd: Option<Subcommand>,
 
     /// Configures build logging.
-    #[structopt(short, long, env = "RUST_LOG", default_value = "warn")]
+    #[clap(short, long, env = "RUST_LOG", default_value = "inoculate=info,warn")]
     pub log: String,
 
     /// The path to the kernel binary.
-    #[structopt(parse(from_os_str))]
+    #[clap(parse(from_os_str))]
     pub kernel_bin: PathBuf,
 
     /// The path to the `bootloader` crate's Cargo manifest. If this is not
     /// provided, it will be located automatically.
-    #[structopt(long, parse(from_os_str))]
+    #[clap(long, parse(from_os_str))]
     pub bootloader_manifest: Option<PathBuf>,
 
     /// The path to the kernel's Cargo manifest. If this is not
     /// provided, it will be located automatically.
-    #[structopt(long, parse(from_os_str))]
+    #[clap(long, parse(from_os_str))]
     pub kernel_manifest: Option<PathBuf>,
 
     /// Overrides the directory in which to build the output image.
-    #[structopt(short, long, parse(from_os_str))]
+    #[clap(short, long, parse(from_os_str), env = "OUT_DIR")]
     pub out_dir: Option<PathBuf>,
 
     /// Overrides the target directory for the kernel build.
-    #[structopt(short, long, parse(from_os_str))]
+    #[clap(short, long, parse(from_os_str), env = "CARGO_TARGET_DIR")]
     pub target_dir: Option<PathBuf>,
 
+    /// Overrides the path to the `cargo` executable.
+    ///
+    /// By default, this is read from the `CARGO` environment variable.
+    #[clap(
+        long = "cargo",
+        parse(from_os_str),
+        env = "CARGO",
+        default_value = "cargo"
+    )]
+    pub cargo_path: PathBuf,
+
     /// Whether to emit colors in output.
-    #[structopt(
+    #[clap(
         long,
         possible_values(&["auto", "always", "never"]),
         env = "CARGO_TERM_COLORS",
@@ -63,9 +71,9 @@ pub struct Options {
     pub color: term::ColorMode,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub enum Subcommand {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     Qemu(qemu::Cmd),
     /// Run `gdb` without launching the kernel in QEMU.
     ///
@@ -93,6 +101,10 @@ impl Subcommand {
 }
 
 impl Options {
+    pub fn trace_init(&self) -> Result<()> {
+        trace::try_init(self)
+    }
+
     pub fn is_test(&self) -> bool {
         matches!(self.cmd, Some(Subcommand::Qemu(qemu::Cmd::Test { .. })))
     }
@@ -144,7 +156,7 @@ impl Options {
             tracing::warn!(?error, "error getting current dir");
             Default::default()
         });
-        tracing::debug!(path = %pwd.display(), "pwd");
+        tracing::debug!(path = %pwd.display(), "found pwd");
 
         Ok(Paths {
             bootloader_manifest,
@@ -157,13 +169,11 @@ impl Options {
     pub fn make_image(&self, paths: &Paths) -> Result<PathBuf> {
         let _span = tracing::info_span!("make_image").entered();
 
-        cargo_log!(
-            "Building",
-            "kernel disk image ({})",
+        tracing::info!(
+            "Building kernel disk image ({})",
             paths.relative(paths.kernel_bin()).display()
         );
 
-        tracing::debug!(kernel_bin = %paths.kernel_bin().display(), "making boot image...");
         let out_dir = self
             .out_dir
             .as_ref()
@@ -187,7 +197,7 @@ impl Options {
             .suggestion("maybe dont run this in `/`???")?;
 
         tracing::trace!(?run_dir);
-        let mut cmd = cargo::cmd("builder")?;
+        let mut cmd = self.cargo_cmd("builder");
         cmd.current_dir(run_dir)
             .arg("--kernel-manifest")
             .arg(&paths.kernel_manifest())
@@ -199,7 +209,7 @@ impl Options {
             .arg(target_dir)
             .stderr(Stdio::inherit())
             .stdout(Stdio::piped());
-        tracing::debug!(?cmd);
+        tracing::debug!(?cmd, "running bootimage builder");
         let output = cmd.status().context("run builder command")?;
         // TODO(eliza): modes for capturing/piping stdout?
 
@@ -217,9 +227,8 @@ impl Options {
             "disk image should probably exist after running bootloader build command"
         );
 
-        cargo_log!(
-            "Created",
-            "bootable disk image ({})",
+        tracing::info!(
+            "created bootable disk image ({})",
             paths.relative(&image).display()
         );
 
