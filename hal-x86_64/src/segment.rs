@@ -260,6 +260,11 @@ impl Selector {
         );
 
         tracing::trace!(selector = fmt::alt(self), "set code segment");
+        let actual_selector = Self::cs();
+        tracing::trace!(
+            actual_selector = fmt::alt(actual_selector),
+            "read %cs just to check"
+        );
     }
 
     /// # Safety
