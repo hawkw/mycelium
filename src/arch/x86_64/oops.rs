@@ -111,22 +111,29 @@ pub fn oops(oops: Oops<'_>) -> ! {
 
     let mk_writer = MakeTextWriter::new_at(
         || unsafe { super::framebuf::mk_framebuf() },
-        Point::new(5, 45),
+        Point::new(4, 45),
     );
+
     match oops.situation {
         OopsSituation::Fault {
             kind,
-            fault,
-            details,
-        } => {
-            if let Some(deets) = details {
-                writeln!(mk_writer.make_writer(), "a {} occurred: {}\n", kind, deets).unwrap();
-            } else {
-                writeln!(mk_writer.make_writer(), "a {} occurred!\n", kind).unwrap();
-            }
-        }
+            details: Some(deets),
+            ..
+        } => writeln!(mk_writer.make_writer(), "a {} occurred: {}\n", kind, deets).unwrap(),
+        OopsSituation::Fault {
+            kind,
+            details: None,
+            ..
+        } => writeln!(mk_writer.make_writer(), "a {} occurred!\n", kind).unwrap(),
         OopsSituation::Panic(panic) => {
-            writeln!(mk_writer.make_writer(), "mycelium panicked!\n").unwrap();
+            let mut writer = mk_writer.make_writer();
+            match panic.message() {
+                Some(msg) => writeln!(writer, "mycelium panicked: {}", msg).unwrap(),
+                None => writeln!(writer, "mycelium panicked!").unwrap(),
+            }
+            if let Some(loc) = panic.location() {
+                writeln!(writer, "at {}:{}:{}", loc.file(), loc.line(), loc.column()).unwrap();
+            }
         }
     }
 
@@ -163,6 +170,24 @@ pub fn oops(oops: Oops<'_>) -> ! {
     }
 
     crate::ALLOC.dump_free_lists();
+
+    if oops.already_panicked {
+        writeln!(
+            mk_writer.make_writer(),
+            "...while handling a panic! we really screwed up!"
+        )
+        .unwrap();
+    }
+
+    if oops.already_faulted {
+        if oops.already_panicked {
+            writeln!(
+                mk_writer.make_writer(),
+                "...while handling a fault! seems real bad lol!"
+            )
+            .unwrap();
+        }
+    }
 
     writeln!(
         mk_writer.make_writer(),
