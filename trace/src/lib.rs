@@ -120,9 +120,9 @@ where
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent(true);
-        let _ = write!(writer, "{}", meta.name());
+        let _ = write!(writer, "{}: ", meta.name());
 
-        span.record(&mut Visitor::new(&mut writer, meta.fields()));
+        span.record(&mut Visitor::new(&mut writer));
 
         let mut id = self.next_id.fetch_add(1, Ordering::Acquire);
         if id & SERIAL_BIT != 0 {
@@ -157,7 +157,7 @@ where
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent(false);
         let _ = write!(writer, "{}: ", meta.target());
-        event.record(&mut Visitor::new(&mut writer, meta.fields()));
+        event.record(&mut Visitor::new(&mut writer));
     }
 
     fn enter(&self, span: &span::Id) {
@@ -377,64 +377,95 @@ fn write_level(w: &mut impl fmt::Write, level: &Level) -> fmt::Result {
 }
 
 impl<'writer, W: fmt::Write> Visitor<'writer, W> {
-    fn new(writer: &'writer mut W, fields: &tracing_core::field::FieldSet) -> Self {
+    fn new(writer: &'writer mut W) -> Self {
         Self {
             writer: writer.with_indent(2),
             seen: false,
             comma: false,
-            newline: fields.iter().filter(|f| f.name() != "message").count() > 1,
+            newline: false,
         }
     }
 
-    fn record_inner(&mut self, field: &field::Field, val: &dyn fmt::Debug, nl: &'static str) {
+    fn record_inner(&mut self, field: &field::Field, val: &dyn fmt::Debug) {
+        // XXX(eliza): sad and gross hack
+        struct HasWrittenNewline<'a, W> {
+            writer: &'a mut W,
+            has_written_newline: bool,
+            has_written_punct: bool,
+        }
+
+        impl<'a, W: fmt::Write> fmt::Write for HasWrittenNewline<'a, W> {
+            #[inline]
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                self.has_written_punct = s.ends_with(|ch: char| ch.is_ascii_punctuation());
+                if s.contains('\n') {
+                    self.has_written_newline = true;
+                }
+                self.writer.write_str(s)
+            }
+        }
+
+        let mut writer = HasWrittenNewline {
+            writer: &mut self.writer,
+            has_written_newline: false,
+            has_written_punct: false,
+        };
+        let nl = if self.newline { '\n' } else { ' ' };
+
         if field.name() == "message" {
             if self.seen {
-                let _ = write!(self.writer, ",{}{:?}", nl, val);
+                let _ = write!(writer, ",{}{:?}", nl, val);
             } else {
-                let _ = write!(self.writer, "{:?}", val);
+                let _ = write!(writer, "{:?}", val);
+                self.comma = !writer.has_written_punct;
             }
             self.seen = true;
             return;
         }
 
         if self.comma {
-            let _ = self.writer.write_char(',');
-        } else {
+            let _ = writer.write_char(',');
+        }
+
+        if self.seen {
+            let _ = writer.write_char(nl);
+        }
+
+        if !self.comma {
             self.seen = true;
             self.comma = true;
         }
 
-        let _ = write!(self.writer, "{}{}={:?}", nl, field, val);
+        let _ = write!(writer, "{}={:?}", field, val);
+        self.newline |= writer.has_written_newline;
     }
 }
 
 impl<'writer, W: fmt::Write> field::Visit for Visitor<'writer, W> {
+    #[inline]
     fn record_u64(&mut self, field: &field::Field, val: u64) {
-        let nl = if self.newline { "\n" } else { " " };
-        self.record_inner(field, &val, nl)
+        self.record_inner(field, &val)
     }
 
+    #[inline]
     fn record_i64(&mut self, field: &field::Field, val: i64) {
-        let nl = if self.newline { "\n" } else { " " };
-        self.record_inner(field, &val, nl)
+        self.record_inner(field, &val)
     }
 
+    #[inline]
     fn record_bool(&mut self, field: &field::Field, val: bool) {
-        let nl = if self.newline { "\n" } else { " " };
-        self.record_inner(field, &val, nl)
+        self.record_inner(field, &val)
     }
 
+    #[inline]
     fn record_str(&mut self, field: &field::Field, val: &str) {
-        let nl = if self.newline || val.len() > 70 {
-            "\n"
-        } else {
-            " "
-        };
-        self.record_inner(field, &val, nl)
+        if val.len() >= 70 {
+            self.newline = true;
+        }
+        self.record_inner(field, &val)
     }
 
     fn record_debug(&mut self, field: &field::Field, val: &dyn fmt::Debug) {
-        let nl = if self.newline || self.seen { "\n" } else { " " };
-        self.record_inner(field, &fmt::alt(val), nl)
+        self.record_inner(field, &fmt::alt(val))
     }
 }
