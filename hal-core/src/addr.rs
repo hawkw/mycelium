@@ -156,13 +156,9 @@ macro_rules! impl_addrs {
             impl fmt::Debug for $name {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     if let Some(width) = f.width() {
-                        f.debug_tuple(stringify!($name))
-                            .field(&format_args!("{:#0width$x}", self.0, width = width))
-                            .finish()
+                        write!(f, concat!(stringify!($name), "({:#0width$x})"), self.0, width = width)
                     } else {
-                        f.debug_tuple(stringify!($name))
-                            .field(&format_args!("{:#x}", self.0,))
-                            .finish()
+                        write!(f, concat!(stringify!($name), "({:#x})"), self.0,)
                     }
                 }
             }
