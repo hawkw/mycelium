@@ -20,10 +20,28 @@ pub trait PageFault: Context {
     // TODO(eliza): more
 }
 
+/// Trait representing a fault caused by the currently executing code.
 pub trait CodeFault: Context {
+    /// Returns `true` if the code fault occurred while executing in user
+    /// mode code.
     fn is_user_mode(&self) -> bool;
+
+    /// Returns the virtual address of the instruction pointer where the
+    /// fault occurred.
     fn instruction_ptr(&self) -> VAddr;
+
+    /// Returns a static string describing the kind of code fault.
     fn fault_kind(&self) -> &'static str;
+
+    /// Returns a dynamically formatted message if additional information about
+    /// the fault is available. Otherwise, this returns `None`.
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns `None`.
+    fn details(&self) -> Option<&dyn fmt::Display> {
+        None
+    }
 }
 
 #[non_exhaustive]

@@ -157,16 +157,13 @@ pub fn oops(oops: Oops<'_>) -> ! {
         tracing::debug!(?registers.code_segment);
         tracing::debug!(?registers.stack_segment);
         tracing::debug!(registers.cpu_flags = ?fmt::bin(registers.cpu_flags));
-        // TODO(eliza): disassembly appears to (always?) do a general protection
-        // fault. seems weird.
-        /*
+
         // skip printing disassembly if we already faulted; disassembling the
         // fault address may fault a second time.
         if !oops.already_faulted {
-             let fault_addr = registers.instruction_ptr.as_usize();
-             disassembly(fault_addr);
+            let fault_addr = registers.instruction_ptr.as_usize();
+            disassembly(fault_addr, &mk_writer);
         }
-        */
     }
 
     crate::ALLOC.dump_free_lists();
@@ -317,30 +314,27 @@ impl fmt::Debug for OopsSituation<'_> {
     }
 }
 
-#[tracing::instrument(target = "oops", level = "error", skip(rip), fields(rip = fmt::hex(rip)))]
+#[tracing::instrument(target = "oops", level = "trace", skip(rip, mk_writer), fields(rip = fmt::hex(rip)))]
 #[inline(always)]
-fn disassembly(rip: usize) {
+fn disassembly<'a>(rip: usize, mk_writer: &'a impl MakeWriter<'a>) {
     use yaxpeax_arch::LengthedInstruction;
-    // let _ = writeln!(mk_writer.make_writer(), "Disassembly:");
+    let _ = writeln!(mk_writer.make_writer(), "\nDisassembly:");
     let mut ptr = rip as u64;
     let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
     for _ in 0..10 {
         // Safety: who cares! At worst this might double-fault by reading past the end of valid
         // memory. whoopsie.
-
-        // XXX(eliza): this read also page faults sometimes. seems wacky.
         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
-        tracing::debug!(?bytes);
-        // let _ = write!(mk_writer.make_writer(), "  {:016x}: ", ptr).unwrap();
+        let _ = write!(mk_writer.make_writer(), "  {:016x}: ", ptr).unwrap();
         match decoder.decode_slice(bytes) {
             Ok(inst) => {
-                // let _ = writeln!(mk_writer.make_writer(), "{}", inst);
-                tracing::error!(target: "oops", "{:016x}: {}", ptr, inst);
+                let _ = writeln!(mk_writer.make_writer(), "{}", inst);
+                tracing::debug!(target: "oops", "{:016x}: {}", ptr, inst);
                 ptr += inst.len();
             }
             Err(e) => {
-                // let _ = writeln!(mk_writer.make_writer(), "{}", e);
-                tracing::error!(target: "oops", "{:016x}: {}", ptr, e);
+                let _ = writeln!(mk_writer.make_writer(), "{}", e);
+                tracing::debug!(target: "oops", "{:016x}: {}", ptr, e);
                 break;
             }
         }
