@@ -85,13 +85,16 @@ impl DtablePtr {
 /// This disables interrupts and performs the `hlt` instruction in a loop,
 /// forever.
 ///
-/// # Safety
+/// # Notes
 ///
 /// This halts the CPU.
 #[inline(always)]
-pub unsafe fn halt() -> ! {
-    intrinsics::cli();
-    loop {
-        intrinsics::hlt();
+pub fn halt() -> ! {
+    unsafe {
+        // safety: this does exactly what it says on the tin lol
+        intrinsics::cli();
+        loop {
+            intrinsics::hlt();
+        }
     }
 }
