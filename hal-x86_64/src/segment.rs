@@ -37,6 +37,20 @@ impl Selector {
         cpu::Ring::from_u8(Self::RING.unpack(self.0) as u8)
     }
 
+    /// Returns which descriptor table (GDT or LDT) this selector references.
+    ///
+    /// # Note
+    ///
+    /// This will never return [`DescriptorTable::Idt`][idt], as a segment
+    /// selector only references segmentation table descriptors.
+    pub const fn table(&self) -> cpu::DescriptorTable {
+        if self.is_gdt() {
+            cpu::DescriptorTable::Gdt
+        } else {
+            cpu::DescriptorTable::Idt
+        }
+    }
+
     /// Returns true if this is an LDT segment selector.
     pub const fn is_ldt(&self) -> bool {
         Self::LDT_BIT.contained_in_any(self.0)

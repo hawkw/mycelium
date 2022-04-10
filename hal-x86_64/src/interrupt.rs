@@ -1,11 +1,12 @@
+use crate::{cpu, segment, VAddr};
+use core::{arch::asm, fmt, marker::PhantomData};
+use hal_core::interrupt::{ctx, Handlers};
+use mycelium_util::bits;
+
 pub mod idt;
 pub mod pic;
-use crate::{segment, VAddr};
-use core::{arch::asm, fmt, marker::PhantomData};
 pub use idt::Idt;
 pub use pic::CascadedPic;
-
-use hal_core::interrupt::{ctx, Handlers};
 
 pub type Control = &'static mut Idt;
 
@@ -18,11 +19,9 @@ pub struct Context<'a, T = ()> {
 
 pub type ErrorCode = u64;
 
-#[derive(Debug)]
-pub struct CodeFault {
+pub struct CodeFault<'a> {
     kind: &'static str,
-    #[allow(dead_code)] // TODO(eliza): actually use this lol
-    error_code: Option<u64>,
+    error_code: Option<&'a dyn fmt::Display>,
 }
 
 /// An interrupt service routine.
@@ -38,6 +37,15 @@ pub struct Interrupt<T = ()> {
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct PageFaultCode(u32);
+
+/// Error code set by the "Invalid TSS", "Segment Not Present", "Stack-Segment
+/// Fault", and "General Protection Fault" faults.
+///
+/// This includes a segment selector index, and includes 2 bits describing
+/// which table the segment selector references.
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct SelectorErrorCode(u16);
 
 #[repr(C)]
 pub struct Registers {
@@ -105,7 +113,7 @@ impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
     }
 }
 
-impl<'a> ctx::CodeFault for Context<'a, CodeFault> {
+impl<'a> ctx::CodeFault for Context<'a, CodeFault<'a>> {
     fn is_user_mode(&self) -> bool {
         false // TODO(eliza)
     }
@@ -116,6 +124,10 @@ impl<'a> ctx::CodeFault for Context<'a, CodeFault> {
 
     fn fault_kind(&self) -> &'static str {
         self.code.kind
+    }
+
+    fn details(&self) -> Option<&dyn fmt::Display> {
+        self.code.error_code
     }
 }
 
@@ -175,7 +187,7 @@ impl hal_core::interrupt::Control for Idt {
                     code: u64,
                 ) {
                     let code = CodeFault {
-                        error_code: Some(code),
+                        error_code: Some(&code),
                         kind: $kind,
                     };
                     H::code_fault(Context {  registers: &mut registers, code });
@@ -227,6 +239,81 @@ impl hal_core::interrupt::Control for Idt {
             });
         }
 
+        extern "x86-interrupt" fn invalid_tss_isr<H: Handlers<Registers>>(
+            mut registers: Registers,
+            code: u64,
+        ) {
+            unsafe {
+                // Safety: who cares!
+                crate::vga::writer().force_unlock();
+                if let Some(com1) = crate::serial::com1() {
+                    com1.force_unlock();
+                }
+            }
+            let selector = SelectorErrorCode(code as u16);
+            tracing::error!(?selector, "invalid task-state segment!");
+
+            let msg = selector.named("task-state segment (TSS)");
+            let code = CodeFault {
+                error_code: Some(&msg),
+                kind: "Invalid TSS (0xA)",
+            };
+            H::code_fault(Context {
+                registers: &mut registers,
+                code,
+            });
+        }
+
+        extern "x86-interrupt" fn segment_not_present_isr<H: Handlers<Registers>>(
+            mut registers: Registers,
+            code: u64,
+        ) {
+            unsafe {
+                // Safety: who cares!
+                crate::vga::writer().force_unlock();
+                if let Some(com1) = crate::serial::com1() {
+                    com1.force_unlock();
+                }
+            }
+            let selector = SelectorErrorCode(code as u16);
+            tracing::error!(?selector, "a segment was not present!");
+
+            let msg = selector.named("stack segment");
+            let code = CodeFault {
+                error_code: Some(&msg),
+                kind: "Segment Not Present (0xB)",
+            };
+            H::code_fault(Context {
+                registers: &mut registers,
+                code,
+            });
+        }
+
+        extern "x86-interrupt" fn stack_segment_isr<H: Handlers<Registers>>(
+            mut registers: Registers,
+            code: u64,
+        ) {
+            unsafe {
+                // Safety: who cares!
+                crate::vga::writer().force_unlock();
+                if let Some(com1) = crate::serial::com1() {
+                    com1.force_unlock();
+                }
+            }
+            let selector = SelectorErrorCode(code as u16);
+            tracing::error!(?selector, "a stack-segment fault is happening");
+
+            let msg = selector.named("stack segment");
+            let code = CodeFault {
+                error_code: Some(&msg),
+                kind: "Stack-Segment Fault (0xC)",
+            };
+            H::code_fault(Context {
+                registers: &mut registers,
+                code,
+            });
+        }
+
         extern "x86-interrupt" fn gpf_isr<H: Handlers<Registers>>(
             mut registers: Registers,
             code: u64,
@@ -239,9 +326,17 @@ impl hal_core::interrupt::Control for Idt {
                     com1.force_unlock();
                 }
             }
-            tracing::error!(code = ?&format_args!("{:x}", code), "lmao, a general protection fault is happening");
+
+            let segment = if code > 0 {
+                Some(SelectorErrorCode(code as u16))
+            } else {
+                None
+            };
+
+            tracing::error!(?segment, "lmao, a general protection fault is happening");
+            let error_code = segment.map(|seg| seg.named("selector"));
             let code = CodeFault {
-                error_code: Some(code),
+                error_code: error_code.as_ref().map(|code| code as &dyn fmt::Display),
                 kind: "General Protection Fault (0xD)",
             };
             H::code_fault(Context {
@@ -266,6 +361,15 @@ impl hal_core::interrupt::Control for Idt {
         self.set_isr(0x21, keyboard_isr::<H> as *const ());
         self.set_isr(69, test_isr::<H> as *const ());
         self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
+        self.set_isr(Self::INVALID_TSS, invalid_tss_isr::<H> as *const ());
+        self.set_isr(
+            Self::SEGMENT_NOT_PRESENT,
+            segment_not_present_isr::<H> as *const (),
+        );
+        self.set_isr(
+            Self::STACK_SEGMENT_FAULT,
+            stack_segment_isr::<H> as *const (),
+        );
         self.set_isr(Self::GENERAL_PROTECTION_FAULT, gpf_isr::<H> as *const ());
         self.set_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
         Ok(())
@@ -302,6 +406,86 @@ pub fn fire_test_interrupt() {
 impl fmt::Debug for PageFaultCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "PageFaultCode({:#b})", self.0)
+    }
+}
+
+impl SelectorErrorCode {
+    const EXTERNAL: bits::Pack16 = bits::Pack16::least_significant(1);
+    const TABLE: bits::Pack16 = Self::EXTERNAL.next(2);
+    const INDEX: bits::Pack16 = Self::TABLE.next(13);
+
+    /// When set, the exception originated externally to the processor.
+    #[inline]
+    pub fn is_external(self) -> bool {
+        Self::EXTERNAL.unpack(self.0) == 1
+    }
+
+    /// Returns which descriptor table the selector error code references.
+    #[inline]
+    pub fn table(self) -> cpu::DescriptorTable {
+        match self.table_bits() {
+            0b00 => cpu::DescriptorTable::Gdt,
+            0b01 => cpu::DescriptorTable::Idt,
+            0b10 => cpu::DescriptorTable::Ldt,
+            0b11 => cpu::DescriptorTable::Idt,
+            _ => unreachable!("table_bits() should only unpack a 2-bit value"),
+        }
+    }
+
+    #[inline]
+    pub fn index(self) -> u16 {
+        Self::INDEX.unpack(self.0)
+    }
+
+    #[inline]
+    fn table_bits(self) -> u8 {
+        Self::TABLE.unpack(self.0) as u8
+    }
+
+    #[inline]
+    fn named(self, segment_kind: &'static str) -> NamedSelectorErrorCode {
+        NamedSelectorErrorCode {
+            segment_kind,
+            code: self,
+        }
+    }
+}
+
+// === impl SelectorErrorCode ===
+
+impl fmt::Debug for SelectorErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SelectorErrorCode")
+            .field("is_external", &self.is_external())
+            .field(
+                "table",
+                &format_args!("{} ({:#b})", self.table(), self.table_bits()),
+            )
+            .field("index", &self.index())
+            .finish()
+    }
+}
+
+impl fmt::Display for SelectorErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} index {}", self.table(), self.index())?;
+        if self.is_external() {
+            f.write_str(" (from an external source)")?;
+        }
+
+        Ok(())
+    }
+}
+
+struct NamedSelectorErrorCode {
+    segment_kind: &'static str,
+    code: SelectorErrorCode,
+}
+
+impl fmt::Display for NamedSelectorErrorCode {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} at {}", self.segment_kind, self.code)
     }
 }
 
