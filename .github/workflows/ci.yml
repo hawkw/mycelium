@@ -148,7 +148,7 @@ jobs:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@master
         with:
-          paths: '["cordyceps/**.rs", "cordyceps/Cargo.toml", ".github/workflows/cordyceps.yml"]'
+          paths: '["cordyceps/**.rs", "cordyceps/Cargo.toml", ".github/workflows/ci.yml"]'
           do_not_skip: '["workflow_dispatch"]'
 
   # run loom tests
@@ -181,7 +181,6 @@ jobs:
       run: ./bin/miri -p cordyceps
 
   #### MYCELIUM-UTIL ####
-  
   needs-util:
     continue-on-error:
     runs-on: ubuntu-latest
@@ -192,7 +191,7 @@ jobs:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@master
         with:
-          paths: '["util/**.rs", "util/Cargo.toml", ".github/workflows/loom-util.yml"]'
+          paths: '["util/**.rs", "util/Cargo.toml", ".github/workflows/ci.yml"]'
           do_not_skip: '["workflow_dispatch"]'
 
   # run loom tests
