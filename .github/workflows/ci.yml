@@ -24,8 +24,11 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
-  is_enabled:
-    # continue-on-error: true # Uncomment once integration is finished
+  #### ALL BUILDS ####
+
+  # check if any CI build is needed
+  needs-build:
+    continue-on-error: true
     runs-on: ubuntu-latest
     # Map a step output to a job output
     outputs:
@@ -40,8 +43,8 @@ jobs:
   # run `cargo check` with the host target triple.
   check-host:
     name: cargo check (host)
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: needs-build
+    if: ${{ needs.needs-build.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -55,8 +58,8 @@ jobs:
 
   # check code style with `rustfmt`
   rustfmt:
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: needs-build
+    if: ${{ needs.needs-build.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -81,8 +84,8 @@ jobs:
   test-host:
     runs-on: ubuntu-latest
     name: cargo test (host)
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: needs-build
+    if: ${{ needs.needs-build.outputs.should_skip != 'true' }}
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -97,8 +100,8 @@ jobs:
   build-x64:
     name: build boot image (x86_64)
     runs-on: ubuntu-latest
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: needs-build
+    if: ${{ needs.needs-build.outputs.should_skip != 'true' }}
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -113,8 +116,8 @@ jobs:
   test-x64:
     name: cargo test (cross x64)
     runs-on: ubuntu-latest
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: needs-build
+    if: ${{ needs.needs-build.outputs.should_skip != 'true' }}
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -132,3 +135,79 @@ jobs:
       with:
         command: test-x64
 
+  #### CORDYCEPS ####
+
+  # check if a build of cordyceps is needed
+  needs-cordyceps:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["cordyceps/**.rs", "cordyceps/Cargo.toml", ".github/workflows/cordyceps.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
+
+  # run loom tests
+  cordyceps-loom:
+    needs: needs-cordyceps
+    if: ${{ needs.needs-cordyceps.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    name: Loom tests (cordyceps)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: run loom tests
+      run: cargo test --profile loom --lib -p cordyceps
+      env:
+        LOOM_MAX_PREEMPTIONS: 2
+        LOOM_LOG: loom=trace
+        RUSTFLAGS: "--cfg loom"
+
+  cordyceps-miri:
+    needs: needs-cordyceps
+    if: ${{ needs.needs-cordyceps.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    name: Miri tests (codyceps)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: run miri tests
+      run: ./bin/miri -p cordyceps
+
+  #### MYCELIUM-UTIL ####
+  
+  needs-util:
+    continue-on-error:
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["util/**.rs", "util/Cargo.toml", ".github/workflows/loom-util.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
+
+  # run loom tests
+  util-loom:
+    needs: needs-util
+    if: ${{ needs.needs-util.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    name: Loom tests (mycelium-util)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: run loom tests
+      run: cargo test --profile loom --lib -p mycelium-util
+      env:
+        LOOM_MAX_PREEMPTIONS: 2
+        LOOM_LOG: loom=trace
+        RUSTFLAGS: "--cfg loom"
