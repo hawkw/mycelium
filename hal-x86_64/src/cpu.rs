@@ -7,6 +7,68 @@ pub struct Port {
     num: u16,
 }
 
+/// Describes which descriptor table ([GDT], [LDT], or [IDT]) a selector references.
+///
+/// [GDT]: https://en.wikipedia.org/wiki/Global_Descriptor_Table
+/// [LDT]: https://en.wikipedia.org/wiki/Global_Descriptor_Table#Local_Descriptor_Table
+/// [IDT]: crate::interrupt::Idt
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum DescriptorTable {
+    /// The selector references a descriptor in the [Global Descriptor Table
+    /// (GDT)][gdt].
+    ///
+    /// [gdt]: https://en.wikipedia.org/wiki/Global_Descriptor_Table
+    Gdt,
+
+    /// The selector references an entry in a [Local Descriptor Table
+    /// (LDT)][ldt]
+    ///
+    /// [ldt]: https://en.wikipedia.org/wiki/Global_Descriptor_Table#Local_Descriptor_Table
+    Ldt,
+
+    /// The selector references an interrupt handler in the [Interrupt
+    /// Descriptor Table(IDT)][idt].
+    ///
+    /// [idt]: crate::interrupt::Idt
+    Idt,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Ring {
+    Ring0 = 0b00,
+    Ring1 = 0b01,
+    Ring2 = 0b10,
+    Ring3 = 0b11,
+}
+
+#[repr(C, packed)]
+pub(crate) struct DtablePtr {
+    limit: u16,
+    base: *const (),
+}
+
+/// Halt the CPU.
+///
+/// This disables interrupts and performs the `hlt` instruction in a loop,
+/// forever.
+///
+/// # Notes
+///
+/// This halts the CPU.
+#[inline(always)]
+pub fn halt() -> ! {
+    unsafe {
+        // safety: this does exactly what it says on the tin lol
+        intrinsics::cli();
+        loop {
+            intrinsics::hlt();
+        }
+    }
+}
+
+// === impl Port ===
+
 impl fmt::Debug for Port {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Port")
@@ -44,14 +106,19 @@ impl Port {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum Ring {
-    Ring0 = 0b00,
-    Ring1 = 0b01,
-    Ring2 = 0b10,
-    Ring3 = 0b11,
+// === impl DescriptorTable ===
+
+impl fmt::Display for DescriptorTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Gdt => f.pad("GDT"),
+            Self::Ldt => f.pad("LDT"),
+            Self::Idt => f.pad("IDT"),
+        }
+    }
 }
+
+// === impl Ring ===
 
 impl Ring {
     pub fn from_u8(u: u8) -> Self {
@@ -65,11 +132,7 @@ impl Ring {
     }
 }
 
-#[repr(C, packed)]
-pub(crate) struct DtablePtr {
-    limit: u16,
-    base: *const (),
-}
+// === impl DtablePtr ===
 
 impl DtablePtr {
     pub(crate) fn new<T>(t: &'static T) -> Self {
@@ -77,24 +140,5 @@ impl DtablePtr {
         let base = t as *const _ as *const ();
 
         Self { limit, base }
-    }
-}
-
-/// Halt the CPU.
-///
-/// This disables interrupts and performs the `hlt` instruction in a loop,
-/// forever.
-///
-/// # Notes
-///
-/// This halts the CPU.
-#[inline(always)]
-pub fn halt() -> ! {
-    unsafe {
-        // safety: this does exactly what it says on the tin lol
-        intrinsics::cli();
-        loop {
-            intrinsics::hlt();
-        }
     }
 }
