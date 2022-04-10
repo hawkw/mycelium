@@ -217,22 +217,15 @@ where
     L: AsRef<[spin::Mutex<List<Free>>]>,
 {
     pub fn dump_free_lists(&self) {
-        struct ListEntries<'a>(&'a List<Free>);
-        impl fmt::Debug for ListEntries<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_list()
-                    .entries(self.0.iter().map(|val| unsafe { val.as_ref() }))
-                    .finish()
-            }
-        }
-
         for (order, list) in self.free_lists.as_ref().iter().enumerate() {
-            let _span = tracing::debug_span!("free_list", order, size = self.size_for_order(order))
-                .entered();
+            let _span =
+                tracing::debug_span!("free_list", order, size = self.size_for_order(order),)
+                    .entered();
             match list.try_lock() {
                 Some(list) => {
-                    tracing::trace!(?list);
-                    tracing::debug!(entries = ?&ListEntries(&*list));
+                    for entry in list.iter() {
+                        tracing::debug!("entry={:?}", unsafe { entry.as_ref() });
+                    }
                 }
                 None => {
                     tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
