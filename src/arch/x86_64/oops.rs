@@ -64,17 +64,7 @@ pub fn oops(oops: Oops<'_>) -> ! {
     // is important, since it lets us still get information about the oops on
     // the serial port, even if the oops was due to a bug in eliza's framebuffer
     // code, which (it turns out) is surprisingly janky...
-    tracing::debug!(?oops);
-    // okay, we've dumped the oops to serial, now try to log a nicer event at
-    // the ERROR level.
-    // let registers = if let Some(fault) = fault {
-    //     let registers = fault.registers();
-    //     tracing::error!(%cause, ?registers, "OOPS! a CPU fault occurred");
-    //     Some(registers)
-    // } else {
-    //     tracing::error!(%cause, "OOPS! a panic occurred", );
-    //     None
-    // };
+    tracing::debug!(target: "oops", message = ?oops);
 
     let mut framebuf = unsafe { super::framebuf::mk_framebuf() };
     framebuf.fill(RgbColor::RED);
@@ -152,11 +142,11 @@ pub fn oops(oops: Oops<'_>) -> ! {
             writeln!(writer, "%rflags = {:#016b}", registers.cpu_flags).unwrap();
         }
 
-        tracing::debug!(?registers.instruction_ptr);
-        tracing::debug!(?registers.stack_ptr);
-        tracing::debug!(?registers.code_segment);
-        tracing::debug!(?registers.stack_segment);
-        tracing::debug!(registers.cpu_flags = ?fmt::bin(registers.cpu_flags));
+        tracing::debug!(target: "oops", instruction_ptr = ?registers.instruction_ptr);
+        tracing::debug!(target: "oops", stack_ptr = ?registers.stack_ptr);
+        tracing::debug!(target: "oops", code_segment = ?registers.code_segment);
+        tracing::debug!(target: "oops", stack_segment = ?registers.stack_segment);
+        tracing::debug!(target: "oops", cpu_flags = ?fmt::bin(registers.cpu_flags));
 
         // skip printing disassembly if we already faulted; disassembling the
         // fault address may fault a second time.
@@ -318,14 +308,15 @@ impl fmt::Debug for OopsSituation<'_> {
 #[inline(always)]
 fn disassembly<'a>(rip: usize, mk_writer: &'a impl MakeWriter<'a>) {
     use yaxpeax_arch::LengthedInstruction;
-    let _ = writeln!(mk_writer.make_writer(), "\nDisassembly:");
+    let _ = writeln!(mk_writer.make_writer(), "\nDisassembly:\n");
     let mut ptr = rip as u64;
     let decoder = yaxpeax_x86::long_mode::InstDecoder::default();
-    for _ in 0..10 {
+    for i in 0..10 {
         // Safety: who cares! At worst this might double-fault by reading past the end of valid
         // memory. whoopsie.
         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
-        let _ = write!(mk_writer.make_writer(), "  {:016x}: ", ptr).unwrap();
+        let indent = if i == 0 { "> " } else { "  " };
+        let _ = write!(mk_writer.make_writer(), "{}{:016x}: ", indent, ptr).unwrap();
         match decoder.decode_slice(bytes) {
             Ok(inst) => {
                 let _ = writeln!(mk_writer.make_writer(), "{}", inst);

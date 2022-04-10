@@ -182,7 +182,7 @@ impl Selector {
     ///
     /// # Note
     ///
-    /// This will never return [`DescriptorTable::Idt`][idt], as a segment
+    /// This will never return [`cpu::DescriptorTable::Idt`], as a segment
     /// selector only references segmentation table descriptors.
     pub const fn table(&self) -> cpu::DescriptorTable {
         if self.is_gdt() {
