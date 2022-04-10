@@ -161,24 +161,24 @@ impl hal_core::interrupt::Control for Idt {
                 )+
             };
             (@ $name:ident($kind:literal);) => {
-                extern "x86-interrupt" fn $name<H: Handlers<Registers>>(registers: &mut Registers) {
+                extern "x86-interrupt" fn $name<H: Handlers<Registers>>(mut registers: Registers) {
                     let code = CodeFault {
                         error_code: None,
                         kind: $kind,
                     };
-                    H::code_fault(Context { registers, code });
+                    H::code_fault(Context { registers: &mut registers, code });
                 }
             };
             (@ $name:ident($kind:literal, code);) => {
                 extern "x86-interrupt" fn $name<H: Handlers<Registers>>(
-                    registers: &mut Registers,
+                    mut registers: Registers,
                     code: u64,
                 ) {
                     let code = CodeFault {
                         error_code: Some(code),
                         kind: $kind,
                     };
-                    H::code_fault(Context { registers, code });
+                    H::code_fault(Context {  registers: &mut registers, code });
                 }
             };
         }
@@ -187,42 +187,48 @@ impl hal_core::interrupt::Control for Idt {
         let _enter = span.enter();
 
         extern "x86-interrupt" fn page_fault_isr<H: Handlers<Registers>>(
-            registers: &mut Registers,
+            mut registers: Registers,
             code: PageFaultCode,
         ) {
-            H::page_fault(Context { registers, code });
+            H::page_fault(Context {
+                registers: &mut registers,
+                code,
+            });
         }
 
         extern "x86-interrupt" fn double_fault_isr<H: Handlers<Registers>>(
-            registers: &mut Registers,
+            mut registers: Registers,
             code: u64,
         ) {
-            H::double_fault(Context { registers, code });
+            H::double_fault(Context {
+                registers: &mut registers,
+                code,
+            });
         }
 
-        extern "x86-interrupt" fn timer_isr<H: Handlers<Registers>>(_regs: &mut Registers) {
+        extern "x86-interrupt" fn timer_isr<H: Handlers<Registers>>(_regs: Registers) {
             H::timer_tick();
             unsafe {
                 PIC.end_interrupt(0x20);
             }
         }
 
-        extern "x86-interrupt" fn keyboard_isr<H: Handlers<Registers>>(_regs: &mut Registers) {
+        extern "x86-interrupt" fn keyboard_isr<H: Handlers<Registers>>(_regs: Registers) {
             H::keyboard_controller();
             unsafe {
                 PIC.end_interrupt(0x21);
             }
         }
 
-        extern "x86-interrupt" fn test_isr<H: Handlers<Registers>>(registers: &mut Registers) {
+        extern "x86-interrupt" fn test_isr<H: Handlers<Registers>>(mut registers: Registers) {
             H::test_interrupt(Context {
-                registers,
+                registers: &mut registers,
                 code: (),
             });
         }
 
         extern "x86-interrupt" fn gpf_isr<H: Handlers<Registers>>(
-            registers: &mut Registers,
+            mut registers: Registers,
             code: u64,
         ) {
             unsafe {
@@ -238,7 +244,10 @@ impl hal_core::interrupt::Control for Idt {
                 error_code: Some(code),
                 kind: "General Protection Fault (0xD)",
             };
-            H::code_fault(Context { registers, code });
+            H::code_fault(Context {
+                registers: &mut registers,
+                code,
+            });
         }
 
         gen_code_faults! {
