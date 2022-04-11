@@ -1,42 +1,41 @@
 use hal_core::VAddr;
 pub use hal_x86_64::interrupt::*;
+use hal_x86_64::{
+    cpu::Ring,
+    segment::{self, Gdt},
+    task,
+};
 use mycelium_util::{fmt, sync};
 
 // TODO(eliza): put this somewhere good.
 type StackFrame = [u8; 4096];
 
+// chosen by fair dice roll, guaranteed to be random
+const DOUBLE_FAULT_STACK_SIZE: usize = 8;
+
+/// Stack used by ISRs during a double fault.
+///
+/// /!\ EXTREMELY SERIOUS WARNING: this has to be `static mut` or else it
+///     will go in `.bss` and we'll all die or something.
+static mut DOUBLE_FAULT_STACK: [StackFrame; DOUBLE_FAULT_STACK_SIZE] =
+    [[0; 4096]; DOUBLE_FAULT_STACK_SIZE];
+
+static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
+    tracing::trace!("initializing TSS..");
+    let mut tss = task::StateSegment::empty();
+    tss.interrupt_stacks[Idt::DOUBLE_FAULT_IST_OFFSET] = unsafe {
+        // safety: asdf
+        VAddr::of(&DOUBLE_FAULT_STACK).offset(DOUBLE_FAULT_STACK_SIZE as i32)
+    };
+    tracing::debug!(?tss, "TSS initialized");
+    tss
+});
+
+static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
+
 #[inline]
 #[tracing::instrument(level = "debug")]
 pub(super) fn init_gdt() {
-    use hal_x86_64::{
-        cpu::Ring,
-        segment::{self, Gdt},
-        task,
-    };
-
-    // chosen by fair dice roll, guaranteed to be random
-    const DOUBLE_FAULT_STACK_SIZE: usize = 8;
-
-    /// Stack used by ISRs during a double fault.
-    ///
-    /// /!\ EXTREMELY SERIOUS WARNING: this has to be `static mut` or else it
-    ///     will go in `.bss` and we'll all die or something.
-    static mut DOUBLE_FAULT_STACK: [StackFrame; DOUBLE_FAULT_STACK_SIZE] =
-        [[0; 4096]; DOUBLE_FAULT_STACK_SIZE];
-
-    static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
-        tracing::trace!("initializing TSS..");
-        let mut tss = task::StateSegment::empty();
-        tss.interrupt_stacks[Idt::DOUBLE_FAULT_IST_OFFSET] = unsafe {
-            // safety: asdf
-            VAddr::of(&DOUBLE_FAULT_STACK[DOUBLE_FAULT_STACK_SIZE - 1][4095])
-        };
-        tracing::debug!(?tss, "TSS initialized");
-        tss
-    });
-
-    static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
-
     tracing::trace!("initializing GDT...");
     let mut gdt = Gdt::new();
 

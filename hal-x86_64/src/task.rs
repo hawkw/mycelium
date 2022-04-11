@@ -1,9 +1,10 @@
 use crate::{cpu, segment, VAddr};
+use core::mem;
 use mycelium_util::fmt;
 
 /// A 64-bit mode task-state segment (TSS).
 #[derive(Clone, Copy)]
-#[repr(C, packed)]
+#[repr(C, packed(4))]
 pub struct StateSegment {
     _reserved_1: u32,
     /// The stack pointers for privilege levels 0-2.
@@ -24,7 +25,7 @@ impl StateSegment {
         Self {
             privilege_stacks: [VAddr::zero(); 3],
             interrupt_stacks: [VAddr::zero(); 7],
-            iomap_offset: 0,
+            iomap_offset: mem::size_of::<Self>() as u16,
             _reserved_1: 0,
             _reserved_2: 0,
             _reserved_3: 0,
@@ -68,5 +69,15 @@ impl fmt::Debug for StateSegment {
             .field("iomap_offset", &fmt::hex(self.iomap_offset))
             .field("iomap_addr", &self.iomap_addr())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sizeof_tss() {
+        assert_eq!(mem::size_of::<StateSegment>(), 0x68)
     }
 }
