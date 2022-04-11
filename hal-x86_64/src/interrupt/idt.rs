@@ -12,9 +12,9 @@ pub struct Idt {
 #[repr(C)]
 pub struct Descriptor {
     offset_low: u16,
-    pub segment: segment::Selector,
+    segment: segment::Selector,
     ist_offset: u8,
-    pub attrs: Attrs,
+    attrs: Attrs,
     offset_mid: u16,
     offset_hi: u32,
     _zero: u32,
@@ -37,17 +37,29 @@ impl Descriptor {
         }
     }
 
-    pub(crate) fn set_handler(&mut self, handler: *const (), ist_offset: u8) -> &mut Attrs {
+    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Self {
         self.segment = segment::code_segment();
         let addr = handler as u64;
         self.offset_low = addr as u16;
         self.offset_mid = (addr >> 16) as u16;
         self.offset_hi = (addr >> 32) as u32;
-        self.ist_offset = ist_offset;
         self.attrs
             .set_present(true)
             .set_32_bit(true)
-            .set_gate_kind(GateKind::Interrupt)
+            .set_gate_kind(GateKind::Interrupt);
+        self
+    }
+
+    /// Sets the descriptor's [Interrupt Stack Table][ist] offset.
+    ///
+    /// [ist]: https://en.wikipedia.org/wiki/Task_state_segment#Inner-level_stack_pointers
+    pub(crate) fn set_ist_offset(&mut self, ist_offset: u8) -> &mut Self {
+        self.ist_offset = ist_offset;
+        self
+    }
+
+    pub(crate) fn attrs(&mut self) -> &mut Attrs {
+        &mut self.attrs
     }
 }
 
@@ -112,6 +124,7 @@ impl Idt {
 
     pub const SECURITY_EXCEPTION: usize = 30;
 
+    /// Chosen by fair die roll, guaranteed to be random.
     pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
 
     pub const fn new() -> Self {
@@ -121,13 +134,11 @@ impl Idt {
     }
 
     pub(super) fn set_isr(&mut self, vector: usize, isr: *const ()) {
-        let ist_index = if vector == Self::DOUBLE_FAULT {
-            Self::DOUBLE_FAULT_IST_OFFSET as u8
-        } else {
-            0
-        };
-        let attrs = self.descriptors[vector].set_handler(isr, ist_index);
-        tracing::debug!(vector, isr = ?isr, ?attrs, ist_index, "set isr");
+        let descr = self.descriptors[vector].set_handler(isr);
+        if vector == Self::DOUBLE_FAULT {
+            descr.set_ist_offset(Self::DOUBLE_FAULT_IST_OFFSET as u8);
+        }
+        tracing::debug!(vector, ?isr, ?descr, "set isr");
     }
 
     pub fn load(&'static self) {
@@ -303,7 +314,7 @@ mod tests {
     #[test]
     fn idt_entry_is_correct() {
         let mut idt_entry = Descriptor::null();
-        idt_entry.set_handler(0x1234_8765_abcd_fdec as *const (), 0);
+        idt_entry.set_handler(0x1234_8765_abcd_fdec as *const ());
 
         let idt_bytes = unsafe { core::mem::transmute::<&Descriptor, &[u8; 16]>(&idt_entry) };
 
