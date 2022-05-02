@@ -219,6 +219,15 @@ macro_rules! make_packers {
                     Self { mask, shift }
                 }
 
+                /// Returns a packer for packing a value into all the remaining
+                /// more-significant bits after `self`.
+                pub const fn remaining(&self) -> Self {
+                    let shift = self.shift_next();
+                    let n = Self::SIZE_BITS - shift;
+                    let mask = Self::mk_mask(n) << shift;
+                    Self { mask, shift }
+                }
+
                 /// Returns a packer for packing a value into the next `n` more-significant
                 ///  after the `bit`th bit.
                 pub const fn starting_at(bit: u32, n: u32) -> Self {
