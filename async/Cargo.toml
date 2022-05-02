@@ -11,6 +11,7 @@ authors = [
 [dependencies]
 mycelium-util = { path = "../util" }
 cordyceps = { path = "../cordyceps" }
+pin-project = "1"
 
 [dependencies.tracing]
 default_features = false

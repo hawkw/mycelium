@@ -1,30 +1,31 @@
 use crate::{
     loom::sync::atomic::{AtomicBool, Ordering},
-    task::{Context, Poll, Task, Waker},
+    task::{self, Context, Poll, TaskRef, Waker},
 };
-use core::{any::type_name, ptr::NonNull};
-use mycelium_util::{intrusive::list, sync::spin};
+use cordyceps::mpsc_queue::MpscQueue;
+use core::{any::type_name, pin::Pin, ptr::NonNull};
 
 #[derive(Debug)]
 pub struct StaticScheduler {
-    inner: SchedulerInner<&'static Self>,
+    inner: SchedulerInner,
 }
 
 #[derive(Debug)]
-struct SchedulerInner<S> {
-    run_queue: spin::Mutex<list::List<Task<S>>>,
+struct SchedulerInner {
+    run_queue: MpscQueue<TaskRef>,
     woken: AtomicBool,
 }
 
 pub(crate) trait Schedule: Sized {
-    fn schedule(&self, task: Pin<*const task::Header<Self>>);
+    fn schedule(&self, task: NonNull<TaskRef>);
     fn clone_ref(&self);
     fn drop_ref(&self);
 }
 
 impl Schedule for &'static StaticScheduler {
-    fn schedule(&self, task: Pin<*const task::Header<Self>>) {
-        self.inner.run_queue.lock().push_front(task);
+    fn schedule(&self, task: NonNull<TaskRef>) {
+        // self.inner.run_queue.lock().push_front(task);
+        self.inner.run_queue.enqueue(task);
         self.inner.woken.store(true, Ordering::Release);
     }
 
