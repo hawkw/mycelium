@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "alloc",
+    "async",
     "cordyceps",
     "util",
     "hal-core",
