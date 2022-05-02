@@ -331,8 +331,16 @@ macro_rules! make_packers {
                     Self::SIZE_BITS - (self.mask >> self.shift).leading_zeros()
                 }
 
+                /// Returns the maximum value of this packing spec (i.e. a value
+                /// with all the bits set)
                 pub const fn max_value(&self) -> $Bits {
                     (1 << self.bits()) - 1
+                }
+
+                /// Returns a value with the first bit in this packing spec set.
+                #[inline]
+                pub const fn first_bit(&self) -> $Bits {
+                    1 << self.shift
                 }
 
                 /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
