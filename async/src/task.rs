@@ -1,6 +1,7 @@
 use crate::{loom::UnsafeCell, scheduler::Schedule};
 use alloc::boxed::Box;
-use cordyceps::list;
+use cordyceps::mpsc_queue::{self, MpscQueue};
+
 pub use core::task::{Context, Poll, Waker};
 use core::{
     any::type_name,
@@ -14,7 +15,7 @@ use core::{future::Future, pin::Pin, ptr::NonNull};
 mod task_list;
 
 pub(crate) struct TaskRef<S> {
-    run_queue: UnsafeCell<list::Links<TaskRef<S>>>,
+    run_queue: mpsc_queue::Links<TaskRef<S>>,
 
     vtable: &'static Vtable,
     scheduler: S,

@@ -1,5 +1,6 @@
 use super::Task;
-use mycelium_util::{intrusive::list, sync::spin};
+use cordyceps::list;
+use mycelium_util::sync::spin;
 pub(crate) struct TaskList<S> {
     inner: spin::Mutex<Inner<S>>,
 }
