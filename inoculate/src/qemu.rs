@@ -17,11 +17,11 @@ use std::{
 pub enum Cmd {
     /// Builds a bootable disk image and runs it in QEMU (implies: `build`).
     Run {
-        /// Redirect the VM's serial output to stdout
+        /// Redirect the QEMU VM's serial output to stdout.
         #[clap(long, short)]
         serial: bool,
 
-        /// Extra arguments passed to QEMU
+        /// Extra arguments passed to QEMU.
         #[clap(flatten)]
         qemu_settings: Settings,
     },
@@ -51,10 +51,12 @@ pub enum Cmd {
 #[derive(Debug, clap::Args)]
 pub struct Settings {
     /// Listen for GDB connections.
+    ///
+    /// If this is set, the QEMU VM will pause until a GDB client connects.
     #[clap(long, short)]
     gdb: bool,
 
-    /// The TCP port to listen for debug connections on.
+    /// The TCP port to listen for GDB debug connections on.
     #[clap(long, default_value = "1234")]
     gdb_port: u16,
 

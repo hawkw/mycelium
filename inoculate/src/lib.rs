@@ -29,16 +29,21 @@ pub struct Options {
     pub log: String,
 
     /// The path to the kernel binary.
+    ///
+    /// When inoculate is used as a Cargo runner (which it typically is), this
+    /// is passed by Cargo.
     #[clap(parse(from_os_str))]
     pub kernel_bin: PathBuf,
 
-    /// The path to the `bootloader` crate's Cargo manifest. If this is not
-    /// provided, it will be located automatically.
+    /// Overrides the path to the `bootloader` crate's Cargo manifest.
+    ///
+    /// If this is not provided, it will be located automatically.
     #[clap(long, parse(from_os_str))]
     pub bootloader_manifest: Option<PathBuf>,
 
-    /// The path to the kernel's Cargo manifest. If this is not
-    /// provided, it will be located automatically.
+    /// Overrides the path to the kernel's Cargo manifest.
+    ///
+    /// If this is not provided, it will be located automatically.
     #[clap(long, parse(from_os_str))]
     pub kernel_manifest: Option<PathBuf>,
 
