@@ -403,20 +403,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edc5c7d328e32cc4954e8e01193d7f0ef5ab257b5090b70a964e099a36034309"
 dependencies = [
  "cfg-if",
- "generator 0.6.25",
- "scoped-tls",
- "tracing 0.1.29",
- "tracing-subscriber 0.3.1",
-]
-
-[[package]]
-name = "loom"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5df2c4aeb432e60c9e5ae517ca8ed8b63556ce23093b2758fc8837d75439c5ec"
-dependencies = [
- "cfg-if",
- "generator 0.7.0",
+ "generator",
  "scoped-tls",
  "tracing 0.1.29",
  "tracing-subscriber 0.3.1",
@@ -472,8 +459,10 @@ dependencies = [
 name = "mycelium-async"
 version = "0.1.0"
 dependencies = [
- "loom 0.5.3",
+ "cordyceps",
+ "loom",
  "mycelium-util",
+ "pin-project",
  "tracing 0.2.0",
 ]
 
@@ -601,6 +590,26 @@ name = "parity-wasm"
 version = "0.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be5e13c266502aadf83426d87d81a0f5d1ef45b8027f5a471c360abfe4bfae92"
+
+[[package]]
+name = "pin-project"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58ad3879ad3baf4e44784bc6a718a8698867bb991f8ce24d1bcbe2cfb4c3a75e"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "744b6f092ba29c3650faf274db506afd39944f48420f6c86b17cfe0ee1cb36bb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "pin-project-lite"
