@@ -826,6 +826,7 @@ macro_rules! make_packers {
 }
 
 make_packers! {
+    pub struct PackUsize { bits: usize, packing: PackingUsize, pair: PairUsize }
     pub struct Pack64 { bits: u64, packing: Packing64, pair: Pair64, }
     pub struct Pack32 { bits: u32, packing: Packing32, pair: Pair32, }
     pub struct Pack16 { bits: u16, packing: Packing16, pair: Pair16, }
