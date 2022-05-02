@@ -343,6 +343,12 @@ macro_rules! make_packers {
                     1 << self.shift
                 }
 
+                /// Returns a raw, shifted mask for unpacking this packing spec.
+                #[inline]
+                pub const fn raw_mask(&self) -> $Bits {
+                    self.mask << self.shift
+                }
+
                 /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
                 ///
                 /// Any bits more significant than the [`self.bits()`]-th bit are ignored.
@@ -484,7 +490,7 @@ macro_rules! make_packers {
                     bits & self.mask == self.mask
                 }
 
-                /// Asserts that this packing pair is valid.
+                /// Asserts that this packing spec is valid.
                 ///
                 /// Because assertions cannot be made in `const fn`, this
                 /// performs validating assertions that would ideally be made
@@ -526,7 +532,33 @@ macro_rules! make_packers {
                         self,
                         cx,
                     );
+                }
 
+                #[track_caller]
+                pub fn assert_all_valid(specs: &[(&str, Self)]) {
+                    for (name, spec) in specs {
+                        spec.assert_valid_inner(&format_args!(" ({name})"));
+                        for (other_name, other_spec) in specs {
+                            // Don't test if this spec overlaps with itself ---
+                            // they obviously overlap.
+                            if name == other_name {
+                                continue;
+                            }
+                            if spec.raw_mask() & other_spec.raw_mask() > 0 {
+                                let maxlen = core::cmp::max(name.len(), other_name.len());
+                                panic!(
+                                    "mask for {name} overlaps with {other_name}\n\
+                                    {name:>width$} = {this_mask:#b}\n\
+                                    {other_name:>width$} = {that_mask:#b}",
+                                    name = name,
+                                    other_name = other_name,
+                                    this_mask = spec.raw_mask(),
+                                    that_mask = other_spec.raw_mask(),
+                                    width = maxlen + 2,
+                                );
+                            }
+                        }
+                    }
                 }
             }
 
