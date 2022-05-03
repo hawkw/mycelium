@@ -1,9 +1,13 @@
-use crate::loom::sync::atomic::{AtomicUsize, Ordering};
-use mycelium_util::bits::{self, PackUsize};
-
-#[repr(transparent)]
-pub(crate) struct StateVar(AtomicUsize);
+use crate::loom::sync::atomic::{
+    self, AtomicUsize,
+    Ordering::{self, *},
+};
+use mycelium_util::bits::PackUsize;
+#[derive(Clone, Copy)]
 pub(crate) struct State(usize);
+#[derive(Default)]
+#[repr(transparent)]
+pub(super) struct StateVar(AtomicUsize);
 
 impl State {
     const RUNNING: PackUsize = PackUsize::least_significant(1);
@@ -16,8 +20,27 @@ impl State {
         Self::RUNNING.raw_mask() | Self::NOTIFIED.raw_mask() | Self::COMPLETED.raw_mask();
 }
 
-impl StateVar {}
+impl StateVar {
+    pub(super) fn clone_ref(&self) {
+        self.0.fetch_add(State::REF_ONE, Relaxed);
+    }
 
+    pub(super) fn drop_ref(&self) -> bool {
+        let val = self.0.fetch_sub(State::REF_ONE, Relaxed);
+        if State::REFS.unpack(val) == 1 {
+            // Did we drop the last ref?
+            atomic::fence(Release);
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn load(&self, order: Ordering) -> State {
+        State(self.0.load(order))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

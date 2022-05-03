@@ -10,6 +10,7 @@ authors = [
 
 [dependencies]
 mycelium-util = { path = "../util" }
+mycotest = { path = "../mycotest", default-features = false }
 cordyceps = { path = "../cordyceps" }
 pin-project = "1"
 

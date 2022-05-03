@@ -1,6 +1,6 @@
 pub(crate) use self::inner::*;
 
-#[cfg(test)]
+#[cfg(loom)]
 mod inner {
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
@@ -69,7 +69,7 @@ mod inner {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(not(loom))]
 mod inner {
     #![allow(dead_code)]
     pub(crate) mod sync {

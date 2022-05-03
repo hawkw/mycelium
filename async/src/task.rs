@@ -1,6 +1,6 @@
-use crate::scheduler::Schedule;
+use crate::{loom::atomic::Ordering, scheduler::Schedule, util::non_null};
 use alloc::boxed::Box;
-use cordyceps::{list, mpsc_queue, Linked};
+use cordyceps::{mpsc_queue, Linked};
 
 pub use core::task::{Context, Poll, Waker};
 use core::{
@@ -14,14 +14,16 @@ use pin_project::pin_project;
 
 mod state;
 mod task_list;
-mod waker;
-use self::state::State;
+
+pub(crate) use self::state::State;
+use self::state::StateVar;
+
 #[repr(C)]
 pub(crate) struct TaskRef {
     run_queue: mpsc_queue::Links<TaskRef>,
     // task_list: list::Links<TaskRef>,
     vtable: &'static Vtable,
-    state: State,
+    state: StateVar,
 }
 
 #[repr(C)]
@@ -31,28 +33,29 @@ pub(crate) struct Task<S, F: Future> {
 
     scheduler: S,
     #[pin]
-    core: Core<F>,
+    inner: Cell<F>,
 }
 
-#[pin_project(project = CoreProj)]
-enum Core<F: Future> {
+#[pin_project(project = CellProj)]
+enum Cell<F: Future> {
     Future(#[pin] F),
     Finished(F::Output),
 }
 
 struct Vtable {
     /// Poll the future.
-    poll: unsafe fn(NonNull<TaskRef>),
+    poll: unsafe fn(NonNull<TaskRef>) -> Poll<()>,
     /// Drops the task and deallocates its memory.
-    drop: unsafe fn(NonNull<TaskRef>),
+    drop_task: unsafe fn(NonNull<TaskRef>),
 }
 
 // === impl Task ===
 
 impl<S: Schedule, F: Future> Task<S, F> {
-    fn vtable() -> &'static Vtable {
-        todo!()
-    }
+    const TASK_VTABLE: Vtable = Vtable {
+        poll: Self::poll,
+        drop_task: Self::drop_task,
+    };
 
     const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
         Self::clone_waker,
@@ -60,6 +63,44 @@ impl<S: Schedule, F: Future> Task<S, F> {
         Self::wake_by_ref,
         Self::drop_waker,
     );
+
+    pub(crate) fn new(scheduler: S, future: F) -> NonNull<TaskRef> {
+        let task_ptr = Box::leak(Box::new(Self {
+            header: TaskRef {
+                run_queue: mpsc_queue::Links::new(),
+                vtable: &Self::TASK_VTABLE,
+                state: StateVar::default(),
+            },
+            scheduler,
+            inner: Cell::Future(future),
+        }));
+        NonNull::from(task_ptr).cast()
+    }
+
+    pub(crate) fn clone_ref(&self) {
+        self.header.clone_ref();
+    }
+
+    pub(crate) fn drop_ref(&self) -> bool {
+        if self.header.state.drop_ref() {
+            // if `drop_ref` is called on the `Task` cell directly, elide
+            // the vtable call.
+
+            unsafe {
+                Self::drop_task(NonNull::from(self).cast());
+            }
+            return true;
+        }
+
+        false
+    }
+
+    /// # Safety
+    ///
+    /// The `TaskRef` must point to a task with the same type parameters as `Self`.
+    unsafe fn from_ref(ptr: NonNull<TaskRef>) -> NonNull<Self> {
+        ptr.cast()
+    }
 
     fn raw_waker(&self) -> RawWaker {
         RawWaker::new(self as *const _ as *const (), &Self::WAKER_VTABLE)
@@ -72,9 +113,9 @@ impl<S: Schedule, F: Future> Task<S, F> {
             type_name::<S>(),
             type_name::<F::Output>()
         );
-        let this = &*(ptr as *const Self);
-        this.scheduler.clone_ref();
-        this.raw_waker()
+        let task = non_null(ptr as *mut ()).cast::<Self>().as_ref();
+        task.clone_ref();
+        task.raw_waker()
     }
 
     unsafe fn drop_waker(ptr: *const ()) {
@@ -84,8 +125,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
             type_name::<S>(),
             type_name::<F::Output>()
         );
-        let this = &*(ptr as *const Self);
-        this.scheduler.drop_ref();
+        non_null(ptr as *mut ()).cast::<Self>().as_ref().drop_ref();
     }
 
     unsafe fn wake_by_val(ptr: *const ()) {
@@ -95,9 +135,9 @@ impl<S: Schedule, F: Future> Task<S, F> {
             type_name::<S>(),
             type_name::<F::Output>()
         );
-        let ptr = ptr as *const Self;
-        let scheduler = &(*ptr).scheduler;
-        scheduler.schedule(non_null(ptr as *mut _));
+        let ptr = non_null(ptr as *mut ()).cast::<Self>();
+        Self::schedule(ptr);
+        ptr.as_ref().header.drop_ref();
     }
 
     unsafe fn wake_by_ref(ptr: *const ()) {
@@ -107,28 +147,37 @@ impl<S: Schedule, F: Future> Task<S, F> {
             type_name::<S>(),
             type_name::<F::Output>()
         );
-        let ptr = ptr as *const Self;
-        let scheduler = &(*ptr).scheduler;
-        scheduler.schedule(non_null(ptr as *mut _));
+        Self::schedule(non_null(ptr as *mut ()).cast::<Self>())
     }
 
-    unsafe fn poll(ptr: NonNull<TaskRef>) {
-        // ptr.cast::<Task<S, F>().poll
-        todo!()
+    #[inline(always)]
+    unsafe fn schedule(this: NonNull<Self>) {
+        this.as_ref().scheduler.schedule(this.cast::<TaskRef>());
+    }
+
+    unsafe fn poll(ptr: NonNull<TaskRef>) -> Poll<()> {
+        let this = ptr.cast::<Self>().as_mut();
+        let waker = Waker::from_raw(this.raw_waker());
+        let cx = Context::from_waker(&waker);
+        Pin::new_unchecked(this).poll_inner(cx)
+    }
+
+    unsafe fn drop_task(ptr: NonNull<TaskRef>) {
+        drop(Box::from_raw(ptr.cast::<Self>().as_ptr()))
     }
 
     fn poll_inner(self: Pin<&mut Self>, mut cx: Context<'_>) -> Poll<()> {
         let mut this = self.project();
         let res = {
-            let future = match this.core.as_mut().project() {
-                CoreProj::Future(future) => future,
-                CoreProj::Finished(_) => unreachable!("tried to poll a completed future!"),
+            let future = match this.inner.as_mut().project() {
+                CellProj::Future(future) => future,
+                CellProj::Finished(_) => unreachable!("tried to poll a completed future!"),
             };
             future.poll(&mut cx)
         };
         match res {
             Poll::Ready(ready) => {
-                this.core.set(Core::Finished(ready));
+                this.inner.set(Cell::Finished(ready));
                 Poll::Ready(())
             }
             Poll::Pending => Poll::Pending,
@@ -176,17 +225,25 @@ unsafe impl Linked<mpsc_queue::Links<TaskRef>> for TaskRef {
 unsafe impl Send for TaskRef {}
 unsafe impl Sync for TaskRef {}
 
-impl TaskRef {}
+impl TaskRef {
+    pub(crate) fn state(&self) -> State {
+        self.state.load(Ordering::Acquire)
+    }
 
-/// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
-/// checks elided in release mode.
-#[cfg(debug_assertions)]
-#[track_caller]
-#[inline(always)]
-unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
-    NonNull::new(ptr).expect(
-        "/!\\ constructed a `NonNull` from a null pointer! /!\\ \n\
-        in release mode, this would have called `NonNull::new_unchecked`, \
-        violating the `NonNull` invariant! this is a bug in `cordyceps!`.",
-    )
+    pub(crate) fn clone_ref(&self) {
+        self.state.clone_ref();
+    }
+
+    pub(crate) fn drop_ref(&self) -> bool {
+        if self.state.drop_ref() {
+            unsafe { (self.vtable.drop_task)(NonNull::from(self)) }
+            return true;
+        }
+
+        false
+    }
+
+    pub(crate) fn poll(this: NonNull<Self>) -> Poll<()> {
+        unsafe { (this.as_ref().vtable.poll)(this) }
+    }
 }

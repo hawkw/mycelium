@@ -462,6 +462,7 @@ dependencies = [
  "cordyceps",
  "loom",
  "mycelium-util",
+ "mycotest",
  "pin-project",
  "tracing 0.2.0",
 ]
