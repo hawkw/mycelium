@@ -537,6 +537,17 @@ where
     }
 }
 
+impl<T> Iterator for Consumer<'_, T>
+where
+    T: Send + Linked<Links<T>>,
+{
+    type Item = T::Handle;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.dequeue()
+    }
+}
+
 // === impl Links ===
 
 impl<T> Links<T> {
