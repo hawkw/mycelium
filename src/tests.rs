@@ -9,7 +9,7 @@ mycotest::decl_test! {
 
 mod alloc {
     mycotest::decl_test! {
-        fn basic_alloc() {
+        fn basic_alloc() -> mycotest::TestResult {
             // Let's allocate something, for funsies
             use alloc::vec::Vec;
             let mut v = Vec::new();
@@ -18,8 +18,10 @@ mod alloc {
             tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
             v.push(10u64);
             tracing::info!(vec=?v, vec.addr=?v.as_ptr());
-            assert_eq!(v.pop(), Some(10));
-            assert_eq!(v.pop(), Some(5));
+            mycotest::assert_eq!(v.pop(), Some(10));
+            mycotest::assert_eq!(v.pop(), Some(5));
+
+            Ok(())
         }
     }
 
@@ -75,7 +77,7 @@ mod myco_async {
     }
 
     mycotest::decl_test! {
-        fn basically_works() -> Result<(), ()> {
+        fn basically_works() -> mycotest::TestResult {
             static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
             static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
@@ -86,17 +88,17 @@ mod myco_async {
 
             let tick = SCHEDULER.tick();
 
-            assert!(IT_WORKED.load(Ordering::Acquire));
-            assert_eq!(tick.completed, 1);
-            assert!(!tick.has_remaining);
-            assert_eq!(tick.polled, 2);
+            mycotest::assert!(IT_WORKED.load(Ordering::Acquire));
+            mycotest::assert_eq!(tick.completed, 1);
+            mycotest::assert!(!tick.has_remaining);
+            mycotest::assert_eq!(tick.polled, 2);
 
             Ok(())
         }
     }
 
     mycotest::decl_test! {
-        fn schedule_many() -> Result<(), ()> {
+        fn schedule_many() -> mycotest::TestResult {
             static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
             static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
@@ -111,17 +113,17 @@ mod myco_async {
 
             let tick = SCHEDULER.tick();
 
-            assert_eq!(tick.completed, TASKS);
-            assert_eq!(tick.polled, TASKS * 2);
-            assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-            assert!(!tick.has_remaining);
+            mycotest::assert_eq!(tick.completed, TASKS);
+            mycotest::assert_eq!(tick.polled, TASKS * 2);
+            mycotest::assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+            mycotest::assert!(!tick.has_remaining);
 
             Ok(())
         }
     }
 
     mycotest::decl_test! {
-        fn many_yields() -> Result<(), ()> {
+        fn many_yields() -> mycotest::TestResult {
             static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
             static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
@@ -136,9 +138,9 @@ mod myco_async {
 
             let tick = SCHEDULER.tick();
 
-            assert_eq!(tick.completed, TASKS);
-            assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-            assert!(!tick.has_remaining);
+            mycotest::assert_eq!(tick.completed, TASKS);
+            mycotest::assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+            mycotest::assert!(!tick.has_remaining);
 
             Ok(())
         }

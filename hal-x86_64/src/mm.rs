@@ -900,7 +900,7 @@ pub(crate) mod tlb {
 }
 
 mycotest::decl_test! {
-    fn basic_map() -> Result<(), ()> {
+    fn basic_map() -> mycotest::TestResult {
         let mut ctrl = PageCtrl::current();
         // We shouldn't need to allocate page frames for this test.
         let mut frame_alloc = page::EmptyAlloc::default();
@@ -925,7 +925,7 @@ mycotest::decl_test! {
 }
 
 mycotest::decl_test! {
-    fn identity_mapped_pages_are_reasonable() -> Result<(), ()> {
+    fn identity_mapped_pages_are_reasonable() -> mycotest::TestResult {
         let mut ctrl = PageCtrl::current();
 
         // We shouldn't need to allocate page frames for this test.
@@ -940,7 +940,7 @@ mycotest::decl_test! {
         let page = VirtPage::<Size4Kb>::containing_fixed(VAddr::from_usize(0xb8000));
         let frame = ctrl.translate_page(page).expect("translate");
         tracing::info!(?page, ?frame, "translated");
-        assert_eq!(frame, actual_frame, "identity mapped address should translate to itself");
+        mycotest::assert_eq!(frame, actual_frame, "identity mapped address should translate to itself");
         Ok(())
     }
 }

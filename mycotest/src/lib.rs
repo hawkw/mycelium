@@ -14,10 +14,12 @@ use core::{
     fmt::{self, Write},
     marker::PhantomData,
 };
+pub mod assert;
 pub mod report;
 #[cfg(feature = "runner")]
 pub mod runner;
 
+pub type TestResult = Result<(), assert::Failed>;
 pub type Outcome = Result<(), Failure>;
 pub use report::Failure;
 
@@ -38,19 +40,19 @@ pub struct Test {
 }
 
 /// Type which may be used as a test return type.
-pub trait TestResult {
+pub trait TestReport {
     /// Report any errors to `tracing`, then returns either `true` for a
     /// success, or `false` for a failure.
     fn report(self) -> Outcome;
 }
 
-impl TestResult for () {
+impl TestReport for () {
     fn report(self) -> Outcome {
         Ok(())
     }
 }
 
-impl<T: fmt::Debug> TestResult for Result<(), T> {
+impl<T: fmt::Debug> TestReport for Result<(), T> {
     fn report(self) -> Outcome {
         match self {
             Ok(_) => Ok(()),
@@ -81,7 +83,7 @@ macro_rules! decl_test {
             #[link_section = "MyceliumTests"]
             static TEST: $crate::Test = $crate::Test {
                 descr: $crate::TestName::new(module_path!(), stringify!($name)),
-                run: || $crate::TestResult::report($name()),
+                run: || $crate::TestReport::report($name()),
             };
         };
     }
