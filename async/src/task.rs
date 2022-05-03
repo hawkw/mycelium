@@ -13,7 +13,6 @@ use core::{
 use pin_project::pin_project;
 
 mod state;
-mod task_list;
 
 pub(crate) use self::state::State;
 use self::state::StateVar;
