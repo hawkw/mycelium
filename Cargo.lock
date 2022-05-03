@@ -476,6 +476,7 @@ dependencies = [
  "hal-core",
  "hal-x86_64",
  "mycelium-alloc",
+ "mycelium-async",
  "mycelium-trace",
  "mycelium-util",
  "mycotest",

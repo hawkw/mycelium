@@ -876,6 +876,8 @@ mod tests {
     use super::*;
     use test_util::*;
 
+    use std::println;
+
     #[test]
     fn dequeue_empty() {
         let stub = entry(666);
@@ -983,8 +985,7 @@ mod tests {
 mod test_util {
     use super::*;
     use crate::loom::alloc;
-    use std::pin::Pin;
-
+    pub use std::{boxed::Box, pin::Pin, println, vec, vec::Vec};
     #[repr(C)]
     pub(super) struct Entry {
         links: Links<Entry>,
