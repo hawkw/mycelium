@@ -464,7 +464,9 @@ dependencies = [
  "mycelium-util",
  "mycotest",
  "pin-project",
+ "tracing 0.1.29",
  "tracing 0.2.0",
+ "tracing-subscriber 0.3.1",
 ]
 
 [[package]]

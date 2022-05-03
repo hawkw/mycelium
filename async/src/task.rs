@@ -1,4 +1,4 @@
-use crate::{loom::atomic::Ordering, scheduler::Schedule, util::non_null};
+use crate::{loom::sync::atomic::Ordering, scheduler::Schedule, util::non_null};
 use alloc::boxed::Box;
 use cordyceps::{mpsc_queue, Linked};
 
@@ -68,7 +68,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
             header: TaskRef {
                 run_queue: mpsc_queue::Links::new(),
                 vtable: &Self::TASK_VTABLE,
-                state: StateVar::default(),
+                state: StateVar::new(),
             },
             scheduler,
             inner: Cell::Future(future),
@@ -81,7 +81,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
     }
 
     pub(crate) fn drop_ref(&self) -> bool {
-        if self.header.state.drop_ref() {
+        if test_dbg!(self.header.state.drop_ref()) {
             // if `drop_ref` is called on the `Task` cell directly, elide
             // the vtable call.
 
@@ -95,6 +95,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
     }
 
     fn raw_waker(&self) -> RawWaker {
+        self.header.clone_ref();
         RawWaker::new(self as *const _ as *const (), &Self::WAKER_VTABLE)
     }
 
@@ -151,7 +152,17 @@ impl<S: Schedule, F: Future> Task<S, F> {
         let this = ptr.cast::<Self>().as_mut();
         let waker = Waker::from_raw(this.raw_waker());
         let cx = Context::from_waker(&waker);
-        Pin::new_unchecked(this).poll_inner(cx)
+        let poll = Pin::new_unchecked(this).poll_inner(cx);
+
+        // Completing the final poll counts as consuming a ref --- if the task
+        // has join interest, the `JoinHandle` will drop the final ref.
+        // Otherwise, if the ref the task was polled through was the final ref,
+        // it's safe to drop the task now.
+        if poll.is_ready() {
+            ptr.cast::<Self>().as_ref().drop_ref();
+        }
+
+        poll
     }
 
     unsafe fn drop_task(ptr: NonNull<TaskRef>) {
@@ -227,7 +238,7 @@ impl TaskRef {
     }
 
     pub(crate) fn drop_ref(&self) -> bool {
-        if self.state.drop_ref() {
+        if test_dbg!(self.state.drop_ref()) {
             unsafe { (self.vtable.drop_task)(NonNull::from(self)) }
             return true;
         }

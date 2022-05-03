@@ -5,7 +5,7 @@ use crate::loom::sync::atomic::{
 use mycelium_util::bits::PackUsize;
 #[derive(Clone, Copy)]
 pub(crate) struct State(usize);
-#[derive(Default)]
+
 #[repr(transparent)]
 pub(super) struct StateVar(AtomicUsize);
 
@@ -21,13 +21,17 @@ impl State {
 }
 
 impl StateVar {
+    pub fn new() -> Self {
+        Self(AtomicUsize::new(State::REF_ONE))
+    }
+
     pub(super) fn clone_ref(&self) {
-        self.0.fetch_add(State::REF_ONE, Relaxed);
+        test_dbg!(self.0.fetch_add(State::REF_ONE, Relaxed));
     }
 
     pub(super) fn drop_ref(&self) -> bool {
         let val = self.0.fetch_sub(State::REF_ONE, Relaxed);
-        if State::REFS.unpack(val) == 1 {
+        if test_dbg!(State::REFS.unpack(val)) == 1 {
             // Did we drop the last ref?
             atomic::fence(Release);
             return true;
