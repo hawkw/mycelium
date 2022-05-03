@@ -95,13 +95,6 @@ impl<S: Schedule, F: Future> Task<S, F> {
         false
     }
 
-    /// # Safety
-    ///
-    /// The `TaskRef` must point to a task with the same type parameters as `Self`.
-    unsafe fn from_ref(ptr: NonNull<TaskRef>) -> NonNull<Self> {
-        ptr.cast()
-    }
-
     fn raw_waker(&self) -> RawWaker {
         RawWaker::new(self as *const _ as *const (), &Self::WAKER_VTABLE)
     }

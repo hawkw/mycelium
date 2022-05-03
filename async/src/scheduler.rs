@@ -90,25 +90,35 @@ mod mycotests {
     use super::*;
     use core::{
         future::Future,
+        sync::atomic::AtomicUsize,
         task::{Context, Poll},
     };
     use mycelium_util::sync::Lazy;
 
-    #[derive(Default)]
-    struct YieldOnce {
-        yielded: bool,
+    struct Yield {
+        yields: usize,
     }
 
-    impl Future for YieldOnce {
+    impl Future for Yield {
         type Output = ();
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-            let yielded = &mut self.as_mut().yielded;
-            if *yielded {
+            let yields = &mut self.as_mut().yields;
+            if *yields == 0 {
                 return Poll::Ready(());
             }
-            *yielded = true;
+            *yields -= 1;
             cx.waker().wake_by_ref();
             Poll::Pending
+        }
+    }
+
+    impl Yield {
+        fn once() -> Self {
+            Self::new(1)
+        }
+
+        fn new(yields: usize) -> Self {
+            Self { yields }
         }
     }
 
@@ -118,8 +128,7 @@ mod mycotests {
             static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
             SCHEDULER.spawn(async {
-                let yield_once = YieldOnce::default();
-                yield_once.await;
+                Yield::once().await;
                 IT_WORKED.store(true, Ordering::Release);
             });
 
@@ -127,6 +136,52 @@ mod mycotests {
 
             assert!(IT_WORKED.load(Ordering::Acquire));
             assert_eq!(tick.completed, 1);
+            assert!(!tick.has_remaining);
+            assert_eq!(tick.polled, 2)
+        }
+    }
+
+    mycotest::decl_test! {
+        fn schedule_many() {
+            static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
+            static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+            const TASKS: usize = 10;
+
+            for _ in 0..TASKS {
+                SCHEDULER.spawn(async {
+                    Yield::once().await;
+                    COMPLETED.fetch_add(1, Ordering::SeqCst);
+                })
+            }
+
+            let tick = SCHEDULER.tick();
+
+            assert_eq!(tick.completed, TASKS);
+            assert_eq!(tick.polled, TASKS * 2);
+            assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+            assert!(!tick.has_remaining);
+        }
+    }
+
+    mycotest::decl_test! {
+        fn many_yields() {
+            static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
+            static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+            const TASKS: usize = 10;
+
+            for i in 0..TASKS {
+                SCHEDULER.spawn(async {
+                    Yield::new(i).await;
+                    COMPLETED.fetch_add(1, Ordering::SeqCst);
+                })
+            }
+
+            let tick = SCHEDULER.tick();
+
+            assert_eq!(tick.completed, TASKS);
+            assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
             assert!(!tick.has_remaining);
         }
     }
