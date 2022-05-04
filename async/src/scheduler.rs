@@ -1,13 +1,17 @@
 use crate::{
-    loom::sync::atomic::{AtomicBool, Ordering},
+    loom::sync::Arc,
     task::{Task, TaskRef},
 };
-use alloc::sync::Arc;
 use cordyceps::mpsc_queue::MpscQueue;
-use core::{future::Future, pin::Pin, ptr::NonNull, sync::Arc};
+use core::{future::Future, pin::Pin, ptr::NonNull};
+#[derive(Debug, Clone)]
+pub struct Scheduler(Arc<Core>);
 
 #[derive(Debug)]
-pub struct Scheduler {
+pub struct StaticScheduler(Core);
+
+#[derive(Debug)]
+struct Core {
     run_queue: MpscQueue<TaskRef>,
     // woken: AtomicBool,
 }
@@ -30,13 +34,73 @@ pub(crate) trait Schedule: Sized + Clone {
     fn schedule(&self, task: NonNull<TaskRef>);
 }
 
+// === impl Scheduler ===
+
 impl Scheduler {
+    /// How many tasks are polled per call to `Scheduler::tick`.
+    ///
+    /// Chosen by fair dice roll, guaranteed to be random.
+    pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+    pub fn new() -> Self {
+        Self(Arc::new(Core::new()))
+    }
+
+    #[inline]
+    pub fn spawn(&self, future: impl Future) {
+        Core::spawn_arc(&self.0, future)
+    }
+
+    pub fn tick(&self) -> Tick {
+        self.0.tick_n(Self::DEFAULT_TICK_SIZE)
+    }
+}
+
+/// A trait abstracting over spawning futures.
+impl<F: Future> Spawn<F> for Scheduler {
+    /// Spawns `future` as a new task on this executor.
+    fn spawn(&self, future: F) {
+        Scheduler::spawn(self, future)
+    }
+}
+
+// === impl StaticScheduler ===
+
+impl StaticScheduler {
     /// How many tasks are polled per call to `StaticScheduler::tick`.
     ///
     /// Chosen by fair dice roll, guaranteed to be random.
-    pub const DEFAULT_TICK_SIZE: usize = 256;
+    pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
 
     pub fn new() -> Self {
+        Self(Core::new())
+    }
+
+    #[inline]
+    pub fn spawn(&'static self, future: impl Future) {
+        Core::spawn_static(&self.0, future)
+    }
+
+    pub fn tick(&'static self) -> Tick {
+        self.0.tick_n(Self::DEFAULT_TICK_SIZE)
+    }
+}
+
+/// A trait abstracting over spawning futures.
+impl<F: Future> Spawn<F> for &'static StaticScheduler {
+    /// Spawns `future` as a new task on this executor.
+    fn spawn(&self, future: F) {
+        StaticScheduler::spawn(self, future)
+    }
+}
+
+impl Core {
+    /// How many tasks are polled per call to `StaticScheduler::tick`.
+    ///
+    /// Chosen by fair dice roll, guaranteed to be random.
+    const DEFAULT_TICK_SIZE: usize = 256;
+
+    fn new() -> Self {
         let stub_task = Task::new(StubScheduler, async {
             unimplemented!("stub task should never be polled!")
         });
@@ -46,18 +110,14 @@ impl Scheduler {
         }
     }
 
-    pub fn spawn(&'static self, future: impl Future) {
+    fn spawn_static(&'static self, future: impl Future) {
         let task = Task::new(self, future);
         self.schedule(task.cast::<TaskRef>());
     }
 
-    pub fn spawn_arc(self: Arc<Self>, future: impl Future) {
-        let task = Task::new(self.clone(), future);
-        self.schedule(task.cast::<TaskRef>());
-    }
-
-    pub fn tick(&self) -> Tick {
-        self.tick_n(Self::DEFAULT_TICK_SIZE)
+    fn spawn_arc(this: &Arc<Self>, future: impl Future) {
+        let task = Task::new(this.clone(), future);
+        this.schedule(task.cast::<TaskRef>());
     }
 
     fn tick_n(&self, n: usize) -> Tick {
@@ -85,28 +145,14 @@ impl Scheduler {
     }
 }
 
-impl<F: Future> Spawn<F> for &'static Scheduler {
-    #[inline]
-    fn spawn(&self, future: F) {
-        Scheduler::spawn(self, future)
-    }
-}
-
-impl<F: Future> Spawn<F> for Arc<Scheduler> {
-    #[inline]
-    fn spawn(&self, future: F) {
-        Scheduler::spawn_arc(self.clone(), future)
-    }
-}
-
-impl Schedule for &'static Scheduler {
+impl Schedule for &'static Core {
     fn schedule(&self, task: NonNull<TaskRef>) {
         // self.woken.store(true, Ordering::Release);
         self.run_queue.enqueue(task);
     }
 }
 
-impl Schedule for Arc<Scheduler> {
+impl Schedule for Arc<Core> {
     fn schedule(&self, task: NonNull<TaskRef>) {
         // self.woken.store(true, Ordering::Release);
         self.run_queue.enqueue(task);
@@ -130,7 +176,7 @@ mod tests {
 
     #[test]
     fn basically_works() {
-        static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
+        static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
         static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
         SCHEDULER.spawn(async {
@@ -148,7 +194,7 @@ mod tests {
 
     #[test]
     fn schedule_many() {
-        static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
+        static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         const TASKS: usize = 10;
@@ -170,7 +216,7 @@ mod tests {
 
     #[test]
     fn many_yields() {
-        static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
+        static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         const TASKS: usize = 10;
@@ -201,56 +247,22 @@ mod loom {
             Arc,
         },
     };
-    use mycelium_util::sync::Lazy;
-
-    use core::{
-        future::Future,
-        pin::Pin,
-        task::{Context, Poll},
-    };
-
-    fn with_leak_check<T: Future>(f: T) -> LeakCheck<T> {
-        LeakCheck {
-            inner: f,
-            arc: Arc::new(()),
-        }
-    }
-
-    #[pin_project::pin_project]
-    struct LeakCheck<T> {
-        #[pin]
-        inner: T,
-        // loom will report an error if an `Arc` is leaked
-        arc: Arc<()>,
-    }
-
-    impl<T: Future> Future for LeakCheck<T> {
-        type Output = LeakCheck<T::Output>;
-
-        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            let this = self.project();
-            this.inner.poll(cx).map(|inner| LeakCheck {
-                inner,
-                arc: this.arc.clone(),
-            })
-        }
-    }
 
     #[test]
     fn basically_works() {
-        static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
         loom::model(|| {
+            let scheduler = Scheduler::new();
             let it_worked = Arc::new(AtomicBool::new(false));
 
-            SCHEDULER.spawn({
+            scheduler.spawn({
                 let it_worked = it_worked.clone();
-                with_leak_check(async move {
+                async move {
                     Yield::once().await;
                     it_worked.store(true, Ordering::Release);
-                })
+                }
             });
 
-            let tick = SCHEDULER.tick();
+            let tick = scheduler.tick();
 
             assert!(it_worked.load(Ordering::Acquire));
             assert_eq!(tick.completed, 1);
@@ -261,22 +273,22 @@ mod loom {
 
     #[test]
     fn schedule_many() {
-        static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
         const TASKS: usize = 10;
         loom::model(|| {
+            let scheduler = Scheduler::new();
             let completed = Arc::new(AtomicUsize::new(0));
 
             for _ in 0..TASKS {
-                SCHEDULER.spawn({
+                scheduler.spawn({
                     let completed = completed.clone();
-                    with_leak_check(async move {
+                    async move {
                         Yield::once().await;
                         completed.fetch_add(1, Ordering::SeqCst);
-                    })
+                    }
                 });
             }
 
-            let tick = SCHEDULER.tick();
+            let tick = scheduler.tick();
 
             assert_eq!(tick.completed, TASKS);
             assert_eq!(tick.polled, TASKS * 2);
@@ -286,24 +298,25 @@ mod loom {
     }
 
     #[test]
-    #[ignore] // this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
+    // #[ignore] // this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
     fn cross_thread_spawn() {
-        static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
         const TASKS: usize = 10;
         loom::model(|| {
+            let scheduler = Scheduler::new();
             let completed = Arc::new(AtomicUsize::new(0));
             let all_spawned = Arc::new(AtomicBool::new(false));
             loom::thread::spawn({
+                let scheduler = scheduler.clone();
                 let completed = completed.clone();
                 let all_spawned = all_spawned.clone();
                 move || {
                     for _ in 0..TASKS {
-                        SCHEDULER.spawn({
+                        scheduler.spawn({
                             let completed = completed.clone();
-                            with_leak_check(async move {
+                            async move {
                                 Yield::once().await;
                                 completed.fetch_add(1, Ordering::SeqCst);
-                            })
+                            }
                         });
                     }
                     all_spawned.store(true, Ordering::Release);
@@ -312,7 +325,7 @@ mod loom {
 
             let mut tick;
             loop {
-                tick = SCHEDULER.tick();
+                tick = scheduler.tick();
                 if all_spawned.load(Ordering::Acquire) {
                     break;
                 }
