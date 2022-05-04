@@ -44,7 +44,7 @@ mod myco_async {
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         task::{Context, Poll},
     };
-    use mycelium_async::scheduler::StaticScheduler;
+    use mycelium_async::scheduler::Scheduler;
     use mycelium_util::sync::Lazy;
 
     struct Yield {
@@ -76,7 +76,7 @@ mod myco_async {
 
     mycotest::decl_test! {
         fn basically_works() -> Result<(), ()> {
-            static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
+            static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
             static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
             SCHEDULER.spawn(async {
@@ -97,7 +97,7 @@ mod myco_async {
 
     mycotest::decl_test! {
         fn schedule_many() -> Result<(), ()> {
-            static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
+            static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
             static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
             const TASKS: usize = 10;
@@ -122,7 +122,7 @@ mod myco_async {
 
     mycotest::decl_test! {
         fn many_yields() -> Result<(), ()> {
-            static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
+            static SCHEDULER: Lazy<Scheduler> = Lazy::new(Scheduler::new);
             static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
             const TASKS: usize = 10;
