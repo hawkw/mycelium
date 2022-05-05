@@ -1,23 +1,9 @@
 #![cfg_attr(not(test), no_std)]
 extern crate alloc;
 
-#[cfg(not(test))]
-macro_rules! test_dbg {
-    ($e:expr) => {
-        $e
-    };
-}
-
-#[cfg(all(test, not(loom)))]
-macro_rules! test_dbg {
-    ($e:expr) => {
-        std::dbg!($e)
-    };
-}
-
-#[cfg(all(loom, test))]
 macro_rules! test_println {
     ($($arg:tt)*) => {
+        #[cfg(test)]
         crate::loom::traceln(format_args!(
             "[{:?} {:>30}:{:<3}] {}",
             crate::loom::thread::current().id(),
@@ -28,7 +14,14 @@ macro_rules! test_println {
     }
 }
 
-#[cfg(all(loom, test))]
+#[cfg(not(test))]
+macro_rules! test_dbg {
+    ($e:expr) => {
+        $e
+    };
+}
+
+#[cfg(test)]
 macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
@@ -39,6 +32,7 @@ macro_rules! test_dbg {
         }
     };
 }
+
 pub(crate) mod loom;
 
 pub mod scheduler;

@@ -87,6 +87,10 @@ tracing-core = { git = "https://github.com/tokio-rs/tracing" }
 # https://github.com/rust-osdev/volatile/pull/25 merges upstream. this is
 # necessary to build with unstable features on recent nightlies.
 volatile = { git = "https://github.com/hawkw/volatile", branch = "eliza/update-features" }
+# use loom from Git until https://github.com/tokio-rs/loom/pull/258 is published
+# loom = { git = "https://github.com/tokio-rs/loom", branch =
+# "eliza/track-refcounts"}
+loom = { path = "/home/eliza/Code/loom" }
 
 # Custom profile for Loom tests: enable release optimizations so that the loom
 # tests are less slow, but don't disable debug assertions.

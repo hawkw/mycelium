@@ -1,6 +1,6 @@
 use crate::{
     loom::sync::Arc,
-    task::{Task, TaskRef},
+    task::{self, Task, TaskRef},
 };
 use cordyceps::mpsc_queue::MpscQueue;
 use core::{future::Future, pin::Pin, ptr::NonNull};
@@ -13,6 +13,7 @@ pub struct StaticScheduler(Core);
 #[derive(Debug)]
 struct Core {
     run_queue: MpscQueue<TaskRef>,
+    _stub_task: Arc<Task<Stub, Stub>>,
     // woken: AtomicBool,
 }
 
@@ -101,23 +102,24 @@ impl Core {
     const DEFAULT_TICK_SIZE: usize = 256;
 
     fn new() -> Self {
-        let stub_task = Task::new(StubScheduler, async {
-            unimplemented!("stub task should never be polled!")
-        });
+        let stub_task = Arc::new(Task::new(Stub, Stub));
+        let stub_ref = unsafe {
+            let raw = Arc::into_raw(stub_task.clone());
+            Arc::decrement_strong_count(raw);
+            crate::util::non_null(raw as *mut Task<Stub, Stub>).cast()
+        };
         Self {
-            run_queue: MpscQueue::new_with_stub(stub_task),
-            // woken: AtomicBool::new(false),
+            run_queue: MpscQueue::new_with_stub(stub_ref),
+            _stub_task: stub_task, // woken: AtomicBool::new(false),
         }
     }
 
     fn spawn_static(&'static self, future: impl Future) {
-        let task = Task::new(self, future);
-        self.schedule(task.cast::<TaskRef>());
+        self.schedule(Task::new_ref(self, future));
     }
 
     fn spawn_arc(this: &Arc<Self>, future: impl Future) {
-        let task = Task::new(this.clone(), future);
-        this.schedule(task.cast::<TaskRef>());
+        this.schedule(Task::new_ref(this.clone(), future));
     }
 
     fn tick_n(&self, n: usize) -> Tick {
@@ -159,11 +161,19 @@ impl Schedule for Arc<Core> {
     }
 }
 
-#[derive(Copy, Clone)]
-struct StubScheduler;
-impl Schedule for StubScheduler {
+#[derive(Copy, Clone, Debug)]
+struct Stub;
+
+impl Schedule for Stub {
     fn schedule(&self, _: NonNull<TaskRef>) {
         unimplemented!("stub task should never be woken!")
+    }
+}
+
+impl Future for Stub {
+    type Output = ();
+    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+        unreachable!("the stub task should never be polled!")
     }
 }
 

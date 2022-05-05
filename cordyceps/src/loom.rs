@@ -77,6 +77,7 @@ mod inner {
                 })
                 .unwrap_or_else(|| Targets::new().with_target("loom", tracing::Level::INFO));
             fmt::Subscriber::builder()
+                .pretty()
                 .with_writer(|| TracebufWriter)
                 .without_time()
                 .with_max_level(tracing::Level::TRACE)
