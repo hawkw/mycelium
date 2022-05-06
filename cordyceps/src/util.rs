@@ -4,19 +4,6 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-#[macro_export]
-macro_rules! feature {
-    (
-        #![$meta:meta]
-        $($item:item)*
-    ) => {
-        $(
-            #[cfg($meta)]
-            $item
-        )*
-    }
-}
-
 /// An exponential backoff for spin loops
 #[derive(Debug, Clone)]
 pub(crate) struct Backoff {

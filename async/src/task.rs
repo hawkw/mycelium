@@ -1,11 +1,4 @@
-use crate::{
-    loom::{
-        cell::UnsafeCell,
-        sync::{atomic::Ordering, Arc},
-    },
-    scheduler::Schedule,
-    util::non_null,
-};
+use crate::{loom::cell::UnsafeCell, scheduler::Schedule, util::non_null};
 use alloc::boxed::Box;
 use cordyceps::{mpsc_queue, Linked};
 
@@ -14,30 +7,31 @@ use core::{
     any::type_name,
     fmt,
     future::Future,
-    mem,
     pin::Pin,
     ptr::NonNull,
     task::{RawWaker, RawWakerVTable},
 };
-use pin_project::pin_project;
 
 mod state;
 
 // pub(crate) use self::state::State;
 use self::state::StateVar;
 
+#[derive(Debug)]
+pub(crate) struct TaskRef(NonNull<Header>);
+
 #[repr(C)]
 #[derive(Debug)]
-pub(crate) struct TaskRef {
-    run_queue: mpsc_queue::Links<TaskRef>,
+pub(crate) struct Header {
+    run_queue: mpsc_queue::Links<Header>,
+    state: StateVar,
     // task_list: list::Links<TaskRef>,
     vtable: &'static Vtable,
-    // state: StateVar,
 }
 
 #[repr(C)]
-pub(crate) struct Task<S, F: Future> {
-    header: TaskRef,
+struct Task<S, F: Future> {
+    header: Header,
 
     scheduler: S,
     inner: UnsafeCell<Cell<F>>,
@@ -52,17 +46,28 @@ enum Cell<F: Future> {
 
 struct Vtable {
     /// Poll the future.
-    poll: unsafe fn(NonNull<TaskRef>) -> Poll<()>,
+    poll: unsafe fn(NonNull<Header>) -> Poll<()>,
     /// Drops the task and deallocates its memory.
-    drop_task: unsafe fn(NonNull<TaskRef>),
+    deallocate: unsafe fn(NonNull<Header>),
 }
 
 // === impl Task ===
 
+macro_rules! trace_task {
+    ($ptr:expr, $f:ty, $method:literal) => {
+        event!(
+            Level::TRACE,
+            ptr = ?$ptr,
+            concat!("Task::<Output = {}>::", $method),
+            type_name::<<$f>::Output>()
+        );
+    };
+}
+
 impl<S: Schedule, F: Future> Task<S, F> {
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
-        drop_task: Self::drop_task,
+        deallocate: Self::deallocate,
     };
 
     const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
@@ -72,126 +77,88 @@ impl<S: Schedule, F: Future> Task<S, F> {
         Self::drop_waker,
     );
 
-    pub(crate) fn from_arc(arc: Arc<Self>) -> NonNull<TaskRef> {
-        let ptr = Arc::into_raw(arc) as *mut Self as *mut TaskRef;
-        unsafe { non_null(ptr) }
-    }
-
-    pub(crate) fn new_ref(scheduler: S, future: F) -> NonNull<TaskRef> {
-        Self::from_arc(Arc::new(Self::new(scheduler, future)))
-    }
-
-    pub(crate) fn new(scheduler: S, future: F) -> Self {
-        Self {
-            header: TaskRef {
+    fn allocate(scheduler: S, future: F) -> Box<Self> {
+        Box::new(Self {
+            header: Header {
                 run_queue: mpsc_queue::Links::new(),
                 vtable: &Self::TASK_VTABLE,
-                // state: StateVar::new(),
+                state: StateVar::new(),
             },
             scheduler,
             inner: UnsafeCell::new(Cell::Future(future)),
-        }
+        })
     }
 
-    // pub(crate) fn clone_ref(&self) {
-    //     self.header.clone_ref();
-    // }
-
-    // pub(crate) fn drop_ref(&self) -> bool {
-    //     if test_dbg!(self.header.state.drop_ref()) {
-    //         // if `drop_ref` is called on the `Task` cell directly, elide
-    //         // the vtable call.
-
-    //         unsafe {
-    //             Self::drop_task(NonNull::from(self).cast());
-    //         }
-    //         return true;
-    //     }
-
-    //     false
-    // }
-
-    fn raw_waker(arc: &Arc<Self>) -> RawWaker {
-        let ptr = Arc::into_raw(arc.clone()) as *const ();
-        RawWaker::new(ptr, &Self::WAKER_VTABLE)
+    fn raw_waker(this: *const Self) -> RawWaker {
+        unsafe { (*this).header.state.clone_ref() };
+        RawWaker::new(this as *const (), &Self::WAKER_VTABLE)
     }
 
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
-        tracing::trace!(
-            ?ptr,
-            "Task::<{}, dyn Future<Output = {}>::clone_waker",
-            type_name::<S>(),
-            type_name::<F::Output>()
-        );
-        let ptr = ptr as *const Self;
-        let arc = mem::ManuallyDrop::new(Arc::from_raw(ptr));
-        Self::raw_waker(&*arc)
+        trace_task!(ptr, F, "clone_waker");
+
+        Self::raw_waker(ptr as *const Self)
     }
 
     unsafe fn drop_waker(ptr: *const ()) {
-        tracing::trace!(
-            ?ptr,
-            "Task::<{}, dyn Future<Output = {}>::drop_waker",
-            type_name::<S>(),
-            type_name::<F::Output>()
-        );
-        drop(Arc::from_raw(ptr as *const Self))
+        trace_task!(ptr, F, "drop_waker");
+
+        let this = ptr as *const Self as *mut _;
+        Self::drop_ref(non_null(this))
     }
 
     unsafe fn wake_by_val(ptr: *const ()) {
-        tracing::trace!(
-            ?ptr,
-            "Task::<{}, dyn Future<Output = {}>::wake_by_val",
-            type_name::<S>(),
-            type_name::<F::Output>()
-        );
+        trace_task!(ptr, F, "wake_by_val");
 
-        let task = non_null(ptr as *mut ()).cast::<Self>();
-        Self::schedule(task);
-        Arc::decrement_strong_count(ptr)
+        let this = non_null(ptr as *mut ()).cast::<Self>();
+        Self::schedule(this);
     }
 
     unsafe fn wake_by_ref(ptr: *const ()) {
-        tracing::trace!(
-            ?ptr,
-            "Task::<{}, dyn Future<Output = {}>::wake_by_ref",
-            type_name::<S>(),
-            type_name::<F::Output>()
-        );
+        trace_task!(ptr, F, "wake_by_ref");
+
         Self::schedule(non_null(ptr as *mut ()).cast::<Self>())
     }
 
     #[inline(always)]
     unsafe fn schedule(this: NonNull<Self>) {
-        this.as_ref().scheduler.schedule(this.cast::<TaskRef>());
+        this.as_ref()
+            .scheduler
+            .schedule(TaskRef(this.cast::<Header>()));
     }
 
-    unsafe fn poll(ptr: NonNull<TaskRef>) -> Poll<()> {
-        let ptr = ptr.cast::<Self>().as_ptr() as *const _;
-        let this = mem::ManuallyDrop::new(Arc::from_raw(ptr));
-        let waker = Waker::from_raw(Self::raw_waker(&this));
-        let cx = Context::from_waker(&waker);
-        let poll = Pin::new(&this).poll_inner(cx);
+    #[inline]
+    unsafe fn drop_ref(this: NonNull<Self>) {
+        trace_task!(this, F, "drop_ref");
+        if !this.as_ref().header.state.drop_ref() {
+            return;
+        }
 
-        // Completing the final poll counts as consuming a ref --- if the task
-        // has join interest, the `JoinHandle` will drop the final ref.
-        // Otherwise, if the ref the task was polled through was the final ref,
-        // it's safe to drop the task now.
-        if test_dbg!(poll.is_ready()) {
-            drop(mem::ManuallyDrop::into_inner(this));
+        drop(Box::from_raw(this.as_ptr()))
+    }
+
+    unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
+        trace_task!(ptr, F, "poll");
+        let ptr = ptr.cast::<Self>();
+        let waker = Waker::from_raw(Self::raw_waker(ptr.as_ptr()));
+        let cx = Context::from_waker(&waker);
+        let pin = unsafe { Pin::new_unchecked(ptr.cast::<Self>().as_mut()) };
+        let poll = pin.poll_inner(cx);
+        if poll.is_ready() {
+            Self::drop_ref(ptr);
         }
 
         poll
     }
 
-    unsafe fn drop_task(ptr: NonNull<TaskRef>) {
+    unsafe fn deallocate(ptr: NonNull<Header>) {
+        trace_task!(ptr, F, "deallocate");
         drop(Box::from_raw(ptr.cast::<Self>().as_ptr()))
     }
 
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {
-        test_println!("poll_inner: {:#?}", self);
         self.inner.with_mut(|cell| {
-            let mut cell = unsafe { &mut *cell };
+            let cell = unsafe { &mut *cell };
             let poll = match cell {
                 Cell::Future(future) => unsafe { Pin::new_unchecked(future).poll(&mut cx) },
                 Cell::Finished(_) => unreachable!("tried to poll a completed future!"),
@@ -214,9 +181,9 @@ unsafe impl<S: Sync, F: Future + Sync> Sync for Task<S, F> {}
 impl<S, F: Future> fmt::Debug for Task<S, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Task")
-            .field("future_type", &core::any::type_name::<F>())
-            .field("output_type", &core::any::type_name::<F::Output>())
-            .field("scheduler_type", &core::any::type_name::<S>())
+            .field("future_type", &type_name::<F>())
+            .field("output_type", &type_name::<F::Output>())
+            .field("scheduler_type", &type_name::<S>())
             .field("header", &self.header)
             .field("inner", &self.inner)
             .finish()
@@ -225,14 +192,69 @@ impl<S, F: Future> fmt::Debug for Task<S, F> {
 
 // === impl TaskRef ===
 
+impl TaskRef {
+    pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
+        let task = Task::allocate(scheduler, future);
+        let ptr = unsafe { non_null(Box::into_raw(task)).cast::<Header>() };
+        event!(
+            Level::TRACE,
+            ?ptr,
+            "Task<..., Output = {}>::new",
+            type_name::<F::Output>()
+        );
+        Self(ptr)
+    }
+
+    pub(crate) fn poll(&self) -> Poll<()> {
+        let poll_fn = self.header().vtable.poll;
+        unsafe { poll_fn(self.0) }
+    }
+
+    #[inline]
+    fn state(&self) -> &StateVar {
+        &self.header().state
+    }
+
+    #[inline]
+    fn header(&self) -> &Header {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+// impl Clone for TaskRef {
+//     #[inline]
+//     fn clone(&self) -> Self {
+//         self.state().clone_ref();
+//         Self(self.0)
+//     }
+// }
+
+// impl Drop for TaskRef {
+//     #[inline]
+//     fn drop(&mut self) {
+//         if !self.state().drop_ref() {
+//             return;
+//         }
+
+//         unsafe {
+//             Header::drop_slow(self.0);
+//         }
+//     }
+// }
+
+unsafe impl Send for TaskRef {}
+unsafe impl Sync for TaskRef {}
+
+// === impl Header ===
+
 /// # Safety
 ///
 /// A task must be pinned to be spawned.
-unsafe impl Linked<mpsc_queue::Links<TaskRef>> for TaskRef {
-    type Handle = NonNull<Self>;
+unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
+    type Handle = TaskRef;
 
     fn into_ptr(task: Self::Handle) -> NonNull<Self> {
-        task
+        task.0
     }
 
     /// Convert a raw pointer to a `Handle`.
@@ -244,7 +266,7 @@ unsafe impl Linked<mpsc_queue::Links<TaskRef>> for TaskRef {
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
     unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle {
-        ptr
+        TaskRef(ptr)
     }
 
     /// Return the links of the node pointed to by `ptr`.
@@ -260,12 +282,14 @@ unsafe impl Linked<mpsc_queue::Links<TaskRef>> for TaskRef {
     }
 }
 
-unsafe impl Send for TaskRef {}
-unsafe impl Sync for TaskRef {}
+unsafe impl Send for Header {}
+unsafe impl Sync for Header {}
 
-impl TaskRef {
-    pub(crate) fn poll(this: NonNull<Self>) -> Poll<()> {
-        unsafe { (this.as_ref().vtable.poll)(this) }
+impl Header {
+    #[inline(never)]
+    unsafe fn drop_slow(ptr: NonNull<Header>) {
+        let deallocate = ptr.as_ref().vtable.deallocate;
+        deallocate(ptr)
     }
 }
 

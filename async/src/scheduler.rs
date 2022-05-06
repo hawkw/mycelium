@@ -1,6 +1,6 @@
 use crate::{
     loom::sync::Arc,
-    task::{self, Task, TaskRef},
+    task::{self, Header, TaskRef},
 };
 use cordyceps::mpsc_queue::MpscQueue;
 use core::{future::Future, pin::Pin, ptr::NonNull};
@@ -12,8 +12,7 @@ pub struct StaticScheduler(Core);
 
 #[derive(Debug)]
 struct Core {
-    run_queue: MpscQueue<TaskRef>,
-    _stub_task: Arc<Task<Stub, Stub>>,
+    run_queue: MpscQueue<Header>,
     // woken: AtomicBool,
 }
 
@@ -32,7 +31,7 @@ pub trait Spawn<F: Future> {
 }
 
 pub(crate) trait Schedule: Sized + Clone {
-    fn schedule(&self, task: NonNull<TaskRef>);
+    fn schedule(&self, task: TaskRef);
 }
 
 // === impl Scheduler ===
@@ -102,24 +101,18 @@ impl Core {
     const DEFAULT_TICK_SIZE: usize = 256;
 
     fn new() -> Self {
-        let stub_task = Arc::new(Task::new(Stub, Stub));
-        let stub_ref = unsafe {
-            let raw = Arc::into_raw(stub_task.clone());
-            Arc::decrement_strong_count(raw);
-            crate::util::non_null(raw as *mut Task<Stub, Stub>).cast()
-        };
+        let stub_task = TaskRef::new(Stub, Stub);
         Self {
-            run_queue: MpscQueue::new_with_stub(stub_ref),
-            _stub_task: stub_task, // woken: AtomicBool::new(false),
+            run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
         }
     }
 
     fn spawn_static(&'static self, future: impl Future) {
-        self.schedule(Task::new_ref(self, future));
+        self.schedule(TaskRef::new(self, future));
     }
 
     fn spawn_arc(this: &Arc<Self>, future: impl Future) {
-        this.schedule(Task::new_ref(this.clone(), future));
+        this.schedule(TaskRef::new(this.clone(), future));
     }
 
     fn tick_n(&self, n: usize) -> Tick {
@@ -131,7 +124,8 @@ impl Core {
         };
 
         for task in self.run_queue.consume() {
-            if TaskRef::poll(task).is_ready() {
+            event!(Level::TRACE, ?task, "polling");
+            if test_dbg!(task.poll()).is_ready() {
                 tick.completed += 1;
             }
             tick.polled += 1;
@@ -148,14 +142,14 @@ impl Core {
 }
 
 impl Schedule for &'static Core {
-    fn schedule(&self, task: NonNull<TaskRef>) {
+    fn schedule(&self, task: TaskRef) {
         // self.woken.store(true, Ordering::Release);
         self.run_queue.enqueue(task);
     }
 }
 
 impl Schedule for Arc<Core> {
-    fn schedule(&self, task: NonNull<TaskRef>) {
+    fn schedule(&self, task: TaskRef) {
         // self.woken.store(true, Ordering::Release);
         self.run_queue.enqueue(task);
     }
@@ -165,14 +159,14 @@ impl Schedule for Arc<Core> {
 struct Stub;
 
 impl Schedule for Stub {
-    fn schedule(&self, _: NonNull<TaskRef>) {
+    fn schedule(&self, _: TaskRef) {
         unimplemented!("stub task should never be woken!")
     }
 }
 
 impl Future for Stub {
     type Output = ();
-    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<Self::Output> {
         unreachable!("the stub task should never be polled!")
     }
 }
@@ -257,6 +251,36 @@ mod loom {
             Arc,
         },
     };
+    use core::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    #[pin_project::pin_project]
+    struct TrackFuture<F> {
+        #[pin]
+        inner: F,
+        track: Arc<()>,
+    }
+
+    impl<F: Future> Future for TrackFuture<F> {
+        type Output = TrackFuture<F::Output>;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.project();
+            this.inner.poll(cx).map(|inner| TrackFuture {
+                inner,
+                track: this.track.clone(),
+            })
+        }
+    }
+
+    fn track_future<F: Future>(inner: F) -> TrackFuture<F> {
+        TrackFuture {
+            inner,
+            track: Arc::new(()),
+        }
+    }
 
     #[test]
     fn basically_works() {
@@ -266,10 +290,10 @@ mod loom {
 
             scheduler.spawn({
                 let it_worked = it_worked.clone();
-                async move {
+                track_future(async move {
                     Yield::once().await;
                     it_worked.store(true, Ordering::Release);
-                }
+                })
             });
 
             let tick = scheduler.tick();
@@ -291,10 +315,10 @@ mod loom {
             for _ in 0..TASKS {
                 scheduler.spawn({
                     let completed = completed.clone();
-                    async move {
+                    track_future(async move {
                         Yield::once().await;
                         completed.fetch_add(1, Ordering::SeqCst);
-                    }
+                    })
                 });
             }
 
@@ -308,7 +332,7 @@ mod loom {
     }
 
     #[test]
-    // #[ignore] // this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
+    #[ignore] // this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
     fn cross_thread_spawn() {
         const TASKS: usize = 10;
         loom::model(|| {
@@ -323,10 +347,10 @@ mod loom {
                     for _ in 0..TASKS {
                         scheduler.spawn({
                             let completed = completed.clone();
-                            async move {
+                            track_future(async move {
                                 Yield::once().await;
                                 completed.fetch_add(1, Ordering::SeqCst);
-                            }
+                            })
                         });
                     }
                     all_spawned.store(true, Ordering::Release);

@@ -593,7 +593,7 @@ impl<T> fmt::Debug for Links<T> {
     }
 }
 
-crate::feature! {
+feature! {
     #![feature = "alloc"]
 
     use alloc::sync::Arc;

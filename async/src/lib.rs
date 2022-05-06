@@ -1,16 +1,17 @@
 #![cfg_attr(not(test), no_std)]
 extern crate alloc;
 
-macro_rules! test_println {
+macro_rules! event {
     ($($arg:tt)*) => {
-        #[cfg(test)]
-        crate::loom::traceln(format_args!(
-            "[{:?} {:>30}:{:<3}] {}",
-            crate::loom::thread::current().id(),
-            file!(),
-            line!(),
-            format_args!($($arg)*),
-        ))
+        #[cfg(all(test, loom))]{
+            use tracing::Level;
+            tracing::event!($($arg)*);
+        }
+        #[cfg(all(test, loom))]
+        {
+            use tracing_01::Level;
+            tracing_01::event!($($arg)*);
+        }
     }
 }
 
@@ -26,7 +27,7 @@ macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
             e => {
-                test_println!("{} = {:?}", stringify!($e), &e);
+                event!(Level::DEBUG, "{} = {:?}", stringify!($e), &e);
                 e
             }
         }

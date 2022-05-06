@@ -42,6 +42,7 @@ mod inner {
             filter::{LevelFilter, Targets},
             fmt,
             prelude::*,
+            registry,
         };
         static IS_NOCAPTURE: AtomicBool = AtomicBool::new(false);
         static SETUP_TRACE: Once = Once::new();
@@ -75,11 +76,15 @@ mod inner {
                     Ok(targets) => Some(targets),
                 })
                 .unwrap_or_else(|| Targets::new().with_target("loom", LevelFilter::INFO));
-            fmt::Subscriber::builder()
-                .with_writer(|| TracebufWriter)
-                .without_time()
-                .with_max_level(LevelFilter::TRACE)
-                .finish()
+            tracing_subscriber_03::registry()
+                .with(
+                    fmt::layer()
+                        .with_writer(|| TracebufWriter)
+                        .without_time()
+                        .with_target(false)
+                        .with_file(true)
+                        .with_line_number(true),
+                )
                 .with(filter)
                 .init();
 

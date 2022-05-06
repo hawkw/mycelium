@@ -432,6 +432,7 @@ dependencies = [
 [[package]]
 name = "loom"
 version = "0.5.4"
+source = "git+https://github.com/tokio-rs/loom?branch=eliza/track-refcounts#38ad8a63d6ae944c510cff919394a4af9748bdbf"
 dependencies = [
  "cfg-if",
  "generator",
