@@ -14,7 +14,6 @@ use core::{
 
 mod state;
 
-// pub(crate) use self::state::State;
 use self::state::StateVar;
 
 #[derive(Debug)]
@@ -47,8 +46,10 @@ enum Cell<F: Future> {
 struct Vtable {
     /// Poll the future.
     poll: unsafe fn(NonNull<Header>) -> Poll<()>,
+    /* // TODO(eliza): this will be needed when tasks can be dropped through `JoinHandle` refs...
     /// Drops the task and deallocates its memory.
     deallocate: unsafe fn(NonNull<Header>),
+    */
 }
 
 // === impl Task ===
@@ -67,7 +68,7 @@ macro_rules! trace_task {
 impl<S: Schedule, F: Future> Task<S, F> {
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
-        deallocate: Self::deallocate,
+        // deallocate: Self::deallocate,
     };
 
     const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
@@ -142,7 +143,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
         let ptr = ptr.cast::<Self>();
         let waker = Waker::from_raw(Self::raw_waker(ptr.as_ptr()));
         let cx = Context::from_waker(&waker);
-        let pin = unsafe { Pin::new_unchecked(ptr.cast::<Self>().as_mut()) };
+        let pin = Pin::new_unchecked(ptr.cast::<Self>().as_mut());
         let poll = pin.poll_inner(cx);
         if poll.is_ready() {
             Self::drop_ref(ptr);
@@ -151,10 +152,10 @@ impl<S: Schedule, F: Future> Task<S, F> {
         poll
     }
 
-    unsafe fn deallocate(ptr: NonNull<Header>) {
-        trace_task!(ptr, F, "deallocate");
-        drop(Box::from_raw(ptr.cast::<Self>().as_ptr()))
-    }
+    // unsafe fn deallocate(ptr: NonNull<Header>) {
+    //     trace_task!(ptr, F, "deallocate");
+    //     drop(Box::from_raw(ptr.cast::<Self>().as_ptr()))
+    // }
 
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {
         self.inner.with_mut(|cell| {
@@ -210,10 +211,10 @@ impl TaskRef {
         unsafe { poll_fn(self.0) }
     }
 
-    #[inline]
-    fn state(&self) -> &StateVar {
-        &self.header().state
-    }
+    // #[inline]
+    // fn state(&self) -> &StateVar {
+    //     &self.header().state
+    // }
 
     #[inline]
     fn header(&self) -> &Header {
@@ -284,14 +285,6 @@ unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
 
 unsafe impl Send for Header {}
 unsafe impl Sync for Header {}
-
-impl Header {
-    #[inline(never)]
-    unsafe fn drop_slow(ptr: NonNull<Header>) {
-        let deallocate = ptr.as_ref().vtable.deallocate;
-        deallocate(ptr)
-    }
-}
 
 impl<F: Future> fmt::Debug for Cell<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

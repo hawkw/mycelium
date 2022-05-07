@@ -18,32 +18,6 @@ macro_rules! feature {
     }
 }
 
-macro_rules! test_println {
-    ($($arg:tt)*) => {
-        #[cfg(any(test, loom))]
-        tracing::debug!($($arg)*);
-    }
-}
-
-#[cfg(not(any(test, loom)))]
-macro_rules! test_dbg {
-    ($e:expr) => {
-        $e
-    };
-}
-
-#[cfg(any(test, loom))]
-macro_rules! test_dbg {
-    ($e:expr) => {
-        match $e {
-            e => {
-                test_println!("{} = {:?}", stringify!($e), &e);
-                e
-            }
-        }
-    };
-}
-
 pub mod list;
 pub use list::List;
 pub mod mpsc_queue;

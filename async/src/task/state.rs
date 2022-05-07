@@ -19,8 +19,8 @@ impl State {
 
     const REF_ONE: usize = Self::REFS.first_bit();
     const REF_MAX: usize = Self::REFS.raw_mask();
-    const STATE_MASK: usize =
-        Self::RUNNING.raw_mask() | Self::NOTIFIED.raw_mask() | Self::COMPLETED.raw_mask();
+    // const STATE_MASK: usize =
+    //     Self::RUNNING.raw_mask() | Self::NOTIFIED.raw_mask() | Self::COMPLETED.raw_mask();
 
     #[inline]
     pub(crate) fn is_running(self) -> bool {

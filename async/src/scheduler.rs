@@ -3,11 +3,12 @@ use crate::{
     task::{self, Header, TaskRef},
 };
 use cordyceps::mpsc_queue::MpscQueue;
-use core::{future::Future, pin::Pin, ptr::NonNull};
-#[derive(Debug, Clone)]
+use core::{future::Future, pin::Pin};
+
+#[derive(Clone, Debug, Default)]
 pub struct Scheduler(Arc<Core>);
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct StaticScheduler(Core);
 
 #[derive(Debug)]
@@ -17,11 +18,11 @@ struct Core {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Tick {
     pub polled: usize,
     pub completed: usize,
     pub has_remaining: bool,
-    _p: (),
 }
 
 /// A trait abstracting over spawning futures.
@@ -43,7 +44,7 @@ impl Scheduler {
     pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
 
     pub fn new() -> Self {
-        Self(Arc::new(Core::new()))
+        Self::default()
     }
 
     #[inline]
@@ -73,7 +74,7 @@ impl StaticScheduler {
     pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
 
     pub fn new() -> Self {
-        Self(Core::new())
+        Self::default()
     }
 
     #[inline]
@@ -120,7 +121,6 @@ impl Core {
             polled: 0,
             completed: 0,
             has_remaining: true,
-            _p: (),
         };
 
         for task in self.run_queue.consume() {
@@ -152,6 +152,12 @@ impl Schedule for Arc<Core> {
     fn schedule(&self, task: TaskRef) {
         // self.woken.store(true, Ordering::Release);
         self.run_queue.enqueue(task);
+    }
+}
+
+impl Default for Core {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
