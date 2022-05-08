@@ -1,6 +1,6 @@
 pub(crate) use self::inner::*;
 
-#[cfg(all(test, loom))]
+#[cfg(loom)]
 mod inner {
 
     pub(crate) mod atomic {
@@ -9,6 +9,8 @@ mod inner {
     }
 
     pub(crate) use loom::{cell, hint, sync, thread};
+
+    #[cfg(test)]
     use std::{cell::RefCell, fmt::Write};
 
     pub(crate) mod model {
@@ -16,10 +18,12 @@ mod inner {
         pub(crate) use loom::model::Builder;
     }
 
+    #[cfg(test)]
     std::thread_local! {
         static TRACE_BUF: RefCell<String> = RefCell::new(String::new());
     }
 
+    #[cfg(test)]
     pub(crate) fn traceln(args: std::fmt::Arguments) {
         let mut args = Some(args);
         TRACE_BUF
@@ -31,6 +35,7 @@ mod inner {
             .unwrap_or_else(|_| println!("{}", args.take().unwrap()))
     }
 
+    #[cfg(test)]
     #[track_caller]
     pub(crate) fn run_builder(
         builder: loom::model::Builder,
@@ -77,7 +82,6 @@ mod inner {
                 })
                 .unwrap_or_else(|| Targets::new().with_target("loom", tracing::Level::INFO));
             fmt::Subscriber::builder()
-                .pretty()
                 .with_writer(|| TracebufWriter)
                 .without_time()
                 .with_max_level(tracing::Level::TRACE)
@@ -136,6 +140,7 @@ mod inner {
         }
     }
 
+    #[cfg(test)]
     #[track_caller]
     pub(crate) fn model(model: impl Fn() + std::panic::UnwindSafe + Sync + Send + 'static) {
         run_builder(Default::default(), model)
@@ -191,7 +196,7 @@ mod inner {
     }
 }
 
-#[cfg(not(all(loom, test)))]
+#[cfg(not(loom))]
 mod inner {
     #![allow(dead_code)]
     pub(crate) mod sync {

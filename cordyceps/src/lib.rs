@@ -1,10 +1,9 @@
 #![cfg_attr(docsrs, doc = include_str!("../README.md"))]
-#![cfg_attr(not(any(feature = "std", test)), no_std)]
+#![cfg_attr(not(any(feature = "std", test, loom)), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
-#[cfg(test)]
-extern crate std;
 
 macro_rules! feature {
     (
