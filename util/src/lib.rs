@@ -10,7 +10,6 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-pub mod atomic;
 pub mod bits;
 pub mod cell;
 pub mod error;
@@ -19,7 +18,6 @@ pub mod io;
 mod macros;
 pub mod math;
 pub mod sync;
-pub mod testing;
 
 pub(crate) mod loom;
 
