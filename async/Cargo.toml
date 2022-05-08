@@ -1,0 +1,25 @@
+[package]
+name = "mycelium-async"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "Eliza Weisman <eliza@elizas.website>",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mycelium-util = { path = "../util" }
+mycotest = { path = "../mycotest", default-features = false }
+cordyceps = { path = "../cordyceps" }
+pin-project = "1"
+
+[dependencies.tracing]
+default_features = false
+features = ["attributes"]
+git = "https://github.com/tokio-rs/tracing"
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.5.4"
+tracing_01 = { package = "tracing", version = "0.1", default_features = false, features = ["attributes"] }
+tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }

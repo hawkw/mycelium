@@ -399,7 +399,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
 mod tests {
     use super::*;
 
-    use std::pin::Pin;
+    use std::{boxed::Box, pin::Pin, vec, vec::Vec};
 
     #[derive(Debug)]
     #[repr(C)]

@@ -18,7 +18,6 @@ pub mod io;
 mod macros;
 pub mod math;
 pub mod sync;
-pub mod testing;
 
 pub(crate) mod loom;
 

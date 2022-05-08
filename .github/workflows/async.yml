@@ -1,0 +1,76 @@
+# CI workflow for running `loom` tests
+#
+# This is factored out from the main workflow so that it can be triggered only
+# by changes to `mycelium-util`, `mycelium-async`, and `cordyceps`, which are
+# the only crates that currently contain loom tests.
+#
+# Note that if other crates add loom tests in the future, they will need to be
+# added to this workflow!
+name: mycelium-async
+
+on: [pull_request, workflow_dispatch]
+
+env:
+  # disable incremental compilation.
+  #
+  # incremental compilation is useful as part of an edit-build-test-edit cycle,
+  # as it lets the compiler avoid recompiling code that hasn't changed. however,
+  # on CI, we're not making small edits; we're almost always building the entire
+  # project from scratch. thus, incremental compilation on CI actually
+  # introduces *additional* overhead to support making future builds
+  # faster...but no future builds will ever occur in any given CI environment.
+  #
+  # see https://matklad.github.io/2021/09/04/fast-rust-builds.html#ci-workflow
+  # for details.
+  CARGO_INCREMENTAL: 0
+  # allow more retries for network requests in cargo (downloading crates) and
+  # rustup (installing toolchains). this should help to reduce flaky CI failures
+  # from transient network timeouts or other issues.
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  # don't emit giant backtraces in the CI logs.
+  RUST_BACKTRACE: short
+
+jobs:
+  is_enabled:
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          paths: '["async/**.rs", "async/Cargo.toml", ".github/workflows/async.yml"]'
+          do_not_skip: '["workflow_dispatch"]'
+
+
+  # run loom tests
+  tests:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    name: Loom tests (mycelium-async)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: run loom tests
+      run: cargo test --profile loom --lib -p mycelium-async
+      env:
+        LOOM_MAX_PREEMPTIONS: 2
+        LOOM_LOG: loom=trace
+        RUSTFLAGS: "--cfg loom"
+
+  miri:
+    # needs: is_enabled
+    # if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    # runs-on: ubuntu-latest
+    # name: Miri tests (mycelium-async)
+    # steps:
+    # - name: install rust toolchain
+    #   run: rustup show
+    # - uses: actions/checkout@v2
+    # - name: run miri tests
+    #   run: ./bin/miri -p mycelium-async

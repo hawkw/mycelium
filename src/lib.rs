@@ -16,6 +16,9 @@ use mycelium_alloc::buddy;
 
 mod wasm;
 
+#[cfg(test)]
+mod tests;
+
 #[cfg_attr(target_os = "none", global_allocator)]
 static ALLOC: buddy::Alloc = buddy::Alloc::new_default(32);
 
@@ -150,41 +153,6 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     #[allow(clippy::empty_loop)]
     #[allow(unreachable_code)]
     loop {}
-}
-
-mycotest::decl_test! {
-    fn wasm_hello_world() -> Result<(), wasmi::Error> {
-        const HELLOWORLD_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helloworld.wasm"));
-        wasm::run_wasm(HELLOWORLD_WASM)
-    }
-}
-
-mycotest::decl_test! {
-    fn basic_alloc() {
-        // Let's allocate something, for funsies
-        use alloc::vec::Vec;
-        let mut v = Vec::new();
-        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
-        v.push(5u64);
-        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
-        v.push(10u64);
-        tracing::info!(vec=?v, vec.addr=?v.as_ptr());
-        assert_eq!(v.pop(), Some(10));
-        assert_eq!(v.pop(), Some(5));
-    }
-}
-
-mycotest::decl_test! {
-    fn alloc_big() {
-        use alloc::vec::Vec;
-        let mut v = Vec::new();
-
-        for i in 0..2048 {
-            v.push(i);
-        }
-
-        tracing::info!(vec = ?v);
-    }
 }
 
 #[cfg_attr(target_os = "none", alloc_error_handler)]

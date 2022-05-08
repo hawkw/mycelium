@@ -1,8 +1,23 @@
 #![cfg_attr(docsrs, doc = include_str!("../README.md"))]
-#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
 #[cfg(feature = "alloc")]
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
+macro_rules! feature {
+    (
+        #![$meta:meta]
+        $($item:item)*
+    ) => {
+        $(
+            #[cfg($meta)]
+            $item
+        )*
+    }
+}
+
 pub mod list;
 pub use list::List;
 pub mod mpsc_queue;

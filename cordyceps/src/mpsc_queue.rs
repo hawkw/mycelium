@@ -537,6 +537,17 @@ where
     }
 }
 
+impl<T> Iterator for Consumer<'_, T>
+where
+    T: Send + Linked<Links<T>>,
+{
+    type Item = T::Handle;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.dequeue()
+    }
+}
+
 // === impl Links ===
 
 impl<T> Links<T> {
@@ -582,7 +593,7 @@ impl<T> fmt::Debug for Links<T> {
     }
 }
 
-crate::feature! {
+feature! {
     #![feature = "alloc"]
 
     use alloc::sync::Arc;
@@ -865,6 +876,8 @@ mod tests {
     use super::*;
     use test_util::*;
 
+    use std::println;
+
     #[test]
     fn dequeue_empty() {
         let stub = entry(666);
@@ -972,8 +985,7 @@ mod tests {
 mod test_util {
     use super::*;
     use crate::loom::alloc;
-    use std::pin::Pin;
-
+    pub use std::{boxed::Box, pin::Pin, println, vec, vec::Vec};
     #[repr(C)]
     pub(super) struct Entry {
         links: Links<Entry>,

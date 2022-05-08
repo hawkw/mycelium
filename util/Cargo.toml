@@ -18,7 +18,7 @@ proptest = "1"
 tracing-subscriber = { git = "https://github.com/tokio-rs/tracing" }
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes", "std"] }
 
-[target.'cfg(loom)'.dev-dependencies]
+[target.'cfg(loom)'.dependencies]
 loom = "0.5.4"
 tracing_01 = { package = "tracing", version = "0.1", default_features = false, features = ["attributes"] }
 tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3", features = ["fmt"] }

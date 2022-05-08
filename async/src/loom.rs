@@ -1,14 +1,9 @@
+#[allow(unused_imports)]
 pub(crate) use self::inner::*;
 
-#[cfg(all(test, loom))]
+#[cfg(loom)]
 mod inner {
-
-    pub(crate) mod atomic {
-        pub use loom::sync::atomic::*;
-        pub use std::sync::atomic::Ordering;
-    }
-
-    pub(crate) use loom::{cell, hint, sync, thread};
+    pub use loom::{alloc, cell, hint, sync, thread};
     use std::{cell::RefCell, fmt::Write};
 
     pub(crate) mod model {
@@ -43,7 +38,12 @@ mod inner {
                 Once,
             },
         };
-        use tracing_subscriber::{filter::Targets, fmt, prelude::*};
+        use tracing_subscriber_03::{
+            filter::{LevelFilter, Targets},
+            fmt,
+            prelude::*,
+            registry,
+        };
         static IS_NOCAPTURE: AtomicBool = AtomicBool::new(false);
         static SETUP_TRACE: Once = Once::new();
 
@@ -75,13 +75,16 @@ mod inner {
                     }
                     Ok(targets) => Some(targets),
                 })
-                .unwrap_or_else(|| Targets::new().with_target("loom", tracing::Level::INFO));
-            fmt::Subscriber::builder()
-                .pretty()
-                .with_writer(|| TracebufWriter)
-                .without_time()
-                .with_max_level(tracing::Level::TRACE)
-                .finish()
+                .unwrap_or_else(|| Targets::new().with_target("loom", LevelFilter::INFO));
+            tracing_subscriber_03::registry()
+                .with(
+                    fmt::layer()
+                        .with_writer(|| TracebufWriter)
+                        .without_time()
+                        .with_target(false)
+                        .with_file(true)
+                        .with_line_number(true),
+                )
                 .with(filter)
                 .init();
 
@@ -117,6 +120,9 @@ mod inner {
             Some(name) => name.to_string(),
         };
         builder.check(move || {
+            // clear the buffer for the next iteration...
+            TRACE_BUF.with(|buf| buf.borrow_mut().clear());
+
             let iteration = current_iteration.fetch_add(1, Ordering::Relaxed);
             traceln(format_args!(
                 "\n---- {} iteration {} ----",
@@ -124,9 +130,6 @@ mod inner {
             ));
 
             model();
-            // if this iteration succeeded, clear the buffer for the
-            // next iteration...
-            TRACE_BUF.with(|buf| buf.borrow_mut().clear());
         });
 
         // Only print iterations on test completion in nocapture mode; otherwise
@@ -140,70 +143,19 @@ mod inner {
     pub(crate) fn model(model: impl Fn() + std::panic::UnwindSafe + Sync + Send + 'static) {
         run_builder(Default::default(), model)
     }
-
-    pub(crate) mod alloc {
-        #![allow(dead_code)]
-        use loom::alloc;
-        use std::fmt;
-        /// Track allocations, detecting leaks
-        ///
-        /// This is a version of `loom::alloc::Track` that adds a missing
-        /// `Default` impl.
-        pub struct Track<T>(alloc::Track<T>);
-
-        impl<T> Track<T> {
-            /// Track a value for leaks
-            #[inline(always)]
-            pub fn new(value: T) -> Track<T> {
-                Track(alloc::Track::new(value))
-            }
-
-            /// Get a reference to the value
-            #[inline(always)]
-            pub fn get_ref(&self) -> &T {
-                self.0.get_ref()
-            }
-
-            /// Get a mutable reference to the value
-            #[inline(always)]
-            pub fn get_mut(&mut self) -> &mut T {
-                self.0.get_mut()
-            }
-
-            /// Stop tracking the value for leaks
-            #[inline(always)]
-            pub fn into_inner(self) -> T {
-                self.0.into_inner()
-            }
-        }
-
-        impl<T: fmt::Debug> fmt::Debug for Track<T> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-
-        impl<T: Default> Default for Track<T> {
-            fn default() -> Self {
-                Self::new(T::default())
-            }
-        }
-    }
 }
 
-#[cfg(not(all(loom, test)))]
+#[cfg(not(loom))]
 mod inner {
     #![allow(dead_code)]
     pub(crate) mod sync {
-        pub use core::sync::*;
-
-        #[cfg(feature = "alloc")]
         pub use alloc::sync::*;
+        pub use core::sync::*;
     }
 
     pub(crate) use core::sync::atomic;
 
-    #[cfg(feature = "std")]
+    #[cfg(test)]
     pub use std::thread;
 
     pub(crate) mod hint {
@@ -302,11 +254,11 @@ mod inner {
         }
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(test)]
     pub(crate) fn traceln(args: std::fmt::Arguments) {
         eprintln!("{}", args);
     }
 
-    #[cfg(not(feature = "std"))]
+    #[cfg(not(test))]
     pub(crate) fn traceln(_: core::fmt::Arguments) {}
 }

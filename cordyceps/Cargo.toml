@@ -15,16 +15,16 @@ categories = ["data-structures", "no-std"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["std"]
+default = []
 alloc = []
 std = ["alloc"]
 
 [dev-dependencies]
 proptest = "1"
-tracing = { version = "0.1", default_features = false, features = ["attributes"] }
+tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
-[target.'cfg(loom)'.dev-dependencies]
+[target.'cfg(loom)'.dependencies]
 loom = "0.5.4"
 
 [package.metadata.docs.rs]
