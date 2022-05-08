@@ -1,12 +1,47 @@
 #!/usr/bin/env bash
+# Script for running loom tests and getting nice errors out.
+#
+# This runs loom with logging and location capture disabled, writes to a
+# checkpoint file, collects the names of any failing tests, and reruns them from
+# the last checkpoint with logging and location capture enabled.
 
-set -x
+set -euo pipefail
 
-RUSTFLAGS="--cfg loom ${RUSTFLAGS}" \
-LOOM_LOG="${LOOM_LOG:-info}" \
-LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" \
-LOOM_LOCATION=true \
-cargo test \
-    --profile loom \
-    --lib \
-    "$@"
+CHECKPOINT_PATH="$(pwd)/target/loom/checkpoint"
+mkdir -p "$CHECKPOINT_PATH"
+CHECKPOINT_FILE="${CHECKPOINT_PATH}/$(date +%s).json"
+echo $CHECKPOINT_FILE
+export RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}"
+export LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}"
+export LOOM_CHECKPOINT_FILE="$CHECKPOINT_FILE"
+export LOOM_CHECKPOINT_INTERVAL=5
+
+RUNNER_ARGS=()
+TEST_ARGS=()
+IN_TEST_ARGS=0
+
+
+while test "$#" -gt 0
+do
+    if [ "$1" == "--" ]; then
+        IN_TEST_ARGS=1
+    elif [ "$IN_TEST_ARGS" -eq 1 ]; then
+        TEST_ARGS+=("$1")
+    else
+        RUNNER_ARGS+=("$1")
+    fi
+    shift
+done
+
+list_failed() {
+    local args=(test --message-format json --profile loom --lib ${RUNNER_ARGS[@]} -- ${TEST_ARGS[@]} -Z unstable-options --format json)
+    cargo "${args[@]}" | jq 'select(.type == "test") | select(.event == "failed") | .name'
+}
+
+mapfile -t FAILED < <( list_failed )
+
+args=(test --profile loom --lib ${RUNNER_ARGS[@]} -- ${FAILED[@]} ${TEST_ARGS[@]})
+# rerun the failed tests with the checkpoint file and loom log enabled
+LOOM_LOCATION=1 \
+        LOOM_LOG="trace" \
+        cargo "${args[@]}"
