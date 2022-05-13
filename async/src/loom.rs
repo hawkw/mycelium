@@ -3,7 +3,7 @@ pub(crate) use self::inner::*;
 
 #[cfg(loom)]
 mod inner {
-    pub use loom::{alloc, cell, hint, model, sync, thread};
+    pub use loom::{alloc, cell, future, hint, model, sync, thread};
 }
 
 #[cfg(not(loom))]

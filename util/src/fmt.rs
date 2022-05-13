@@ -1,5 +1,6 @@
 //! Text formatting utilities.
 pub use core::fmt::*;
+pub use tracing::field::{debug, display};
 
 /// A wrapper type that formats the wrapped value using a provided function.
 pub struct FormatWith<T, F = fn(&T, &mut Formatter<'_>) -> Result>
