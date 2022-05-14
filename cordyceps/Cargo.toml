@@ -24,8 +24,8 @@ proptest = "1"
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
-[target.'cfg(loom)'.dependencies]
-loom = "0.5.4"
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.5.5"
 
 [package.metadata.docs.rs]
 all-features = true
