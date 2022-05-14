@@ -1,18 +1,20 @@
 pub(crate) use self::inner::*;
 
-#[cfg(all(test, loom))]
+#[cfg(loom)]
 mod inner {
+    #![allow(unused_imports)]
+
     pub(crate) mod atomic {
+        pub use core::sync::atomic::Ordering;
         pub use loom::sync::atomic::*;
-        pub use std::sync::atomic::Ordering;
     }
 
     pub(crate) use loom::{cell, hint, model, sync, thread};
 
     pub(crate) mod alloc {
         #![allow(dead_code)]
+        use core::fmt;
         use loom::alloc;
-        use std::fmt;
         /// Track allocations, detecting leaks
         ///
         /// This is a version of `loom::alloc::Track` that adds a missing
@@ -59,7 +61,7 @@ mod inner {
     }
 }
 
-#[cfg(not(all(loom, test)))]
+#[cfg(not(loom))]
 mod inner {
     #![allow(dead_code)]
     pub(crate) mod sync {
