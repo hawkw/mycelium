@@ -1,6 +1,7 @@
 use crate::{
     loom::sync::Arc,
     task::{self, Header, TaskRef},
+    util::tracing,
 };
 use cordyceps::mpsc_queue::MpscQueue;
 use core::{future::Future, pin::Pin};
@@ -124,11 +125,15 @@ impl Core {
         };
 
         for task in self.run_queue.consume() {
-            event!(Level::TRACE, ?task, "polling");
-            if test_dbg!(task.poll()).is_ready() {
+            let span = tracing::debug_span!("poll", ?task);
+            let _enter = span.enter();
+            let poll = task.poll();
+            if poll.is_ready() {
                 tick.completed += 1;
             }
             tick.polled += 1;
+
+            tracing::debug!(parent: span.id(), poll = ?poll, tick.polled, tick.completed);
             if tick.polled == n {
                 return tick;
             }

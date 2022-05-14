@@ -1,5 +1,30 @@
 use core::ptr::NonNull;
 
+#[cfg(not(all(test, loom)))]
+pub(crate) use tracing;
+
+#[cfg(all(test, loom))]
+pub(crate) use tracing_01 as tracing;
+
+#[cfg(not(test))]
+macro_rules! test_dbg {
+    ($e:expr) => {
+        $e
+    };
+}
+
+#[cfg(test)]
+macro_rules! test_dbg {
+    ($e:expr) => {
+        match $e {
+            e => {
+                crate::util::tracing::debug!("{} = {:?}", stringify!($e), &e);
+                e
+            }
+        }
+    };
+}
+
 /// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
 /// checks elided in release mode.
 #[cfg(debug_assertions)]

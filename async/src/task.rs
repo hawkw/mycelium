@@ -1,4 +1,8 @@
-use crate::{loom::cell::UnsafeCell, scheduler::Schedule, util::non_null};
+use crate::{
+    loom::cell::UnsafeCell,
+    scheduler::Schedule,
+    util::{non_null, tracing},
+};
 use alloc::boxed::Box;
 use cordyceps::{mpsc_queue, Linked};
 
@@ -56,8 +60,7 @@ struct Vtable {
 
 macro_rules! trace_task {
     ($ptr:expr, $f:ty, $method:literal) => {
-        event!(
-            Level::TRACE,
+        tracing::trace!(
             ptr = ?$ptr,
             concat!("Task::<Output = {}>::", $method),
             type_name::<<$f>::Output>()
@@ -197,8 +200,7 @@ impl TaskRef {
     pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
         let task = Task::allocate(scheduler, future);
         let ptr = unsafe { non_null(Box::into_raw(task)).cast::<Header>() };
-        event!(
-            Level::TRACE,
+        tracing::trace!(
             ?ptr,
             "Task<..., Output = {}>::new",
             type_name::<F::Output>()
