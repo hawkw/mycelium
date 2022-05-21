@@ -776,7 +776,7 @@ mod loom {
     #[test]
     fn basically_works_loom() {
         const THREADS: i32 = 2;
-        const MSGS: i32 = THREADS * 2;
+        const MSGS: i32 = THREADS;
         const TOTAL_MSGS: i32 = THREADS * MSGS;
         basically_works_test(THREADS, MSGS, TOTAL_MSGS);
     }
@@ -786,7 +786,7 @@ mod loom {
         // Test that dropping the queue drops any messages that haven't been
         // consumed by the consumer.
         const THREADS: i32 = 2;
-        const MSGS: i32 = THREADS * 2;
+        const MSGS: i32 = THREADS;
         // Only consume half as many messages as are sent, to ensure dropping
         // the queue does not leak.
         const TOTAL_MSGS: i32 = (THREADS * MSGS) / 2;
