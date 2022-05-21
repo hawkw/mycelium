@@ -57,10 +57,10 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - name: run loom tests
-      run: cargo test --profile loom --lib -p cordyceps
+      run: cargo test --profile loom --lib -p cordyceps -- --nocapture --test-threads=1
       env:
         LOOM_MAX_PREEMPTIONS: 2
-        LOOM_LOG: loom=trace
+        LOOM_LOG: loom=info
         RUSTFLAGS: "--cfg loom"
 
   miri:
