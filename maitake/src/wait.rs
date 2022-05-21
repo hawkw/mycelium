@@ -4,7 +4,8 @@
 //! which stores a *single* waiting task, and a wait *queue*, which
 //! stores a queue of waiting tasks.
 pub(crate) mod cell;
-pub use cell::WaitCell;
+mod queue;
+pub use self::{cell::WaitCell, queue::WaitQueue};
 
 use core::task::Poll;
 
