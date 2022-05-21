@@ -221,7 +221,7 @@ pub fn run_tests() {
     let mk = || com1.lock();
     match mycotest::runner::run_tests(mk) {
         Ok(()) => qemu_exit(QemuExitCode::Success),
-        Err(()) => qemu_exit(QemuExitCode::Failed),
+        Err(_) => qemu_exit(QemuExitCode::Failed),
     }
 }
 

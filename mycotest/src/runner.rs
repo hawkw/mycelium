@@ -1,7 +1,7 @@
 use crate::{report, Test};
 use core::{
     ffi,
-    fmt::Write,
+    fmt::{self, Write},
     mem, ptr, slice,
     sync::atomic::{AtomicPtr, Ordering},
 };
@@ -20,6 +20,12 @@ extern "C" {
 
 static CURRENT_TEST: AtomicPtr<Test> = AtomicPtr::new(ptr::null_mut());
 
+#[derive(Debug)]
+pub struct TestsFailed {
+    failed: usize,
+    passed: usize,
+}
+
 /// Run all tests linked into the current binary, outputting test reports to the
 /// provided `mk_writer`.
 ///
@@ -27,7 +33,7 @@ static CURRENT_TEST: AtomicPtr<Test> = AtomicPtr::new(ptr::null_mut());
 ///
 /// - `Err(())` if any test failed
 /// - `Ok(())` if all tests passed
-pub fn run_tests(mk_writer: impl for<'writer> MakeWriter<'writer>) -> Result<(), ()> {
+pub fn run_tests(mk_writer: impl for<'writer> MakeWriter<'writer>) -> Result<(), TestsFailed> {
     let _span = tracing::info_span!("run tests").entered();
 
     let mut passed = 0;
@@ -71,7 +77,7 @@ pub fn run_tests(mk_writer: impl for<'writer> MakeWriter<'writer>) -> Result<(),
     tracing::warn!("{} passed | {} failed", passed, failed);
 
     if failed > 0 {
-        Err(())
+        Err(TestsFailed { passed, failed })
     } else {
         Ok(())
     }
@@ -105,5 +111,16 @@ pub fn all_tests() -> &'static [Test] {
         } else {
             &[]
         }
+    }
+}
+
+impl fmt::Display for TestsFailed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} tests failed (out of {})",
+            self.failed,
+            self.failed + self.passed
+        )
     }
 }
