@@ -58,6 +58,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: run loom tests
       run: ./bin/loom -p cordyceps -- --test-threads=1 --nocapture
+      env:
+        LOOM_LOG: "off"
 
   miri:
     needs: is_enabled
