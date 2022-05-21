@@ -11,7 +11,7 @@ use core::task::Poll;
 
 /// An error indicating that a [`WaitCell`] or queue was closed while attempting
 /// register a waiter.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Closed(());
 
 pub type WaitResult = Result<(), Closed>;
