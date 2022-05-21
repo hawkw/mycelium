@@ -221,7 +221,7 @@ pub fn run_tests() {
     let mk = || com1.lock();
     match mycotest::runner::run_tests(mk) {
         Ok(()) => qemu_exit(QemuExitCode::Success),
-        Err(()) => qemu_exit(QemuExitCode::Failed),
+        Err(_) => qemu_exit(QemuExitCode::Failed),
     }
 }
 
@@ -248,18 +248,20 @@ pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
 }
 
 mycotest::decl_test! {
-    fn interrupts_work() -> Result<(), &'static str> {
+    fn interrupts_work() -> mycotest::TestResult {
         let test_interrupt_fires = TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire);
 
         tracing::debug!("testing interrupts...");
         interrupt::fire_test_interrupt();
         tracing::debug!("it worked");
 
-        if TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire) != test_interrupt_fires + 1 {
-            Err("test interrupt wasn't fired")
-        } else {
-            Ok(())
-        }
+        mycotest::assert_eq!(
+            test_interrupt_fires + 1,
+            TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire),
+            "test interrupt wasn't fired!",
+        );
+
+        Ok(())
     }
 }
 
