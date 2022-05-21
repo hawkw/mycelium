@@ -57,11 +57,7 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - name: run loom tests
-      run: cargo test --profile loom --lib -p cordyceps
-      env:
-        LOOM_MAX_PREEMPTIONS: 2
-        LOOM_LOG: loom=trace
-        RUSTFLAGS: "--cfg loom"
+      run: ./bin/loom -p cordyceps
 
   miri:
     needs: is_enabled
