@@ -1,9 +1,9 @@
-//! An intrusive singly-linked lock-free MPSC queue.
+//! A multi-producer, single-consumer (MPSC) queue, implemented using a
+//! lock-free intrusive singly-linked list.
 //!
 //! Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
 //!
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-
 use crate::{
     loom::{
         cell::UnsafeCell,
@@ -18,11 +18,297 @@ use core::{
     ptr::{self, NonNull},
 };
 
-/// An intrusive singly-linked lock-free MPSC queue.
+/// A multi-producer, single-consumer (MPSC) queue, implemented using a
+/// lock-free intrusive singly-linked list.
 ///
 /// Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
 ///
+/// # Examples
+///
+/// ```
+/// use cordyceps::{
+///     Linked,
+///     mpsc_queue::{self, MpscQueue},
+/// };
+///
+/// // This example uses the Rust standard library for convenience, but
+/// // the MPSC queue itself does not require std.
+/// use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+///
+/// /// A simple queue entry that stores an `i32`.
+/// // This type must be `repr(C)` in order for the cast in `Linked::links`
+/// // to be sound.
+/// #[repr(C)]
+/// #[derive(Debug, Default)]
+/// struct Entry {
+///    links: mpsc_queue::Links<Entry>,
+///    val: i32,
+/// }
+///
+/// // Implement the `Linked` trait for our entry type so that it can be used
+/// // as a queue entry.
+/// unsafe impl Linked<mpsc_queue::Links<Entry>> for Entry {
+///     // In this example, our entries will be "owned" by a `Box`, but any
+///     // heap-allocated type that owns an element may be used.
+///     //
+///     // An element *must not* move while part of an intrusive data
+///     // structure. In many cases, `Pin` may be used to enforce this.
+///     type Handle = Pin<Box<Self>>;
+///
+///     /// Convert an owned `Handle` into a raw pointer
+///     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+///        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+///     }
+///
+///     /// Convert a raw pointer back into an owned `Handle`.
+///     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+///         // Safety: if this function is only called by the linked list
+///         // implementation (and it is not intended for external use), we can
+///         // expect that the `NonNull` was constructed from a reference which
+///         // was pinned.
+///         //
+///         // If other callers besides `List`'s internals were to call this on
+///         // some random `NonNull<Entry>`, this would not be the case, and
+///         // this could be constructing an erroneous `Pin` from a referent
+///         // that may not be pinned!
+///         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+///     }
+///
+///     /// Access an element's `Links`.
+///     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
+///         // Safety: this cast is safe only because `Entry` `is repr(C)` and
+///         // the links is the first field.
+///         target.cast()
+///     }
+/// }
+///
+/// impl Entry {
+///     fn new(val: i32) -> Self {
+///         Self {
+///             val,
+///             ..Self::default()
+///         }
+///     }
+/// }
+///
+/// // Once we have a `Linked` implementation for our element type, we can construct
+/// // a queue.
+///
+/// // Because `Pin<Box<...>>` doesn't have a `Default` impl, we have to manually
+/// // construct the stub node.
+/// let stub = Box::pin(Entry::default());
+/// let q = Arc::new(MpscQueue::<Entry>::new_with_stub(stub));
+///
+/// // Spawn some producer threads.
+/// thread::spawn({
+///     let q = q.clone();
+///     move || {
+///         // Enqueuing elements does not require waiting, and is not fallible.
+///         q.enqueue(Box::pin(Entry::new(1)));
+///         q.enqueue(Box::pin(Entry::new(2)));
+///     }
+/// });
+///
+/// thread::spawn({
+///     let q = q.clone();
+///     move || {
+///         q.enqueue(Box::pin(Entry::new(3)));
+///         q.enqueue(Box::pin(Entry::new(4)));
+///     }
+/// });
+///
+///
+/// // Dequeue elements until the producer threads have terminated.
+/// let mut seen = Vec::new();
+/// while Arc::strong_count(&q) > 1 {
+///     // Dequeue until the queue is empty.
+///     while let Some(entry) = q.dequeue() {
+///         seen.push(entry.as_ref().val);
+///     }
+///
+///     // If there are still producers, we may continue dequeuing.
+///     thread::yield_now();
+/// }
+///
+/// // The elements may not have been received in order, so sort the
+/// // received values before making assertions about them.
+/// &mut seen[..].sort();
+///
+/// assert_eq!(&[1, 2, 3, 4], &seen[..]);
+/// ```
+///
+/// The [`Consumer`] type may be used to reserve the permission to consume
+/// multiple elements at a time:
+///
+/// ```
+/// # use cordyceps::{
+/// #     Linked,
+/// #     mpsc_queue::{self, MpscQueue},
+/// # };
+/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// #
+/// # #[repr(C)]
+/// # #[derive(Debug, Default)]
+/// # struct Entry {
+/// #    links: mpsc_queue::Links<Entry>,
+/// #    val: i32,
+/// # }
+/// #
+/// # unsafe impl Linked<mpsc_queue::Links<Entry>> for Entry {
+/// #     type Handle = Pin<Box<Self>>;
+/// #
+/// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #     }
+/// #
+/// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+/// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+/// #     }
+/// #
+/// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
+/// #         target.cast()
+/// #     }
+/// # }
+/// #
+/// # impl Entry {
+/// #     fn new(val: i32) -> Self {
+/// #         Self {
+/// #             val,
+/// #             ..Self::default()
+/// #         }
+/// #     }
+/// # }
+/// let stub = Box::pin(Entry::default());
+/// let q = Arc::new(MpscQueue::<Entry>::new_with_stub(stub));
+///
+/// thread::spawn({
+///     let q = q.clone();
+///     move || {
+///         q.enqueue(Box::pin(Entry::new(1)));
+///         q.enqueue(Box::pin(Entry::new(2)));
+///     }
+/// });
+///
+/// // Reserve exclusive permission to consume elements
+/// let consumer = q.consume();
+///
+/// let mut seen = Vec::new();
+/// while Arc::strong_count(&q) > 1 {
+///     // Dequeue until the queue is empty.
+///     while let Some(entry) = consumer.dequeue() {
+///         seen.push(entry.as_ref().val);
+///     }
+///
+///     thread::yield_now();
+/// }
+///
+/// assert_eq!(&[1, 2], &seen[..]);
+/// ```
+///
+/// The [`Consumer`] type also implements [`Iterator`]:
+///
+/// ```
+/// # use cordyceps::{
+/// #     Linked,
+/// #     mpsc_queue::{self, MpscQueue},
+/// # };
+/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// #
+/// # #[repr(C)]
+/// # #[derive(Debug, Default)]
+/// # struct Entry {
+/// #    links: mpsc_queue::Links<Entry>,
+/// #    val: i32,
+/// # }
+/// #
+/// # unsafe impl Linked<mpsc_queue::Links<Entry>> for Entry {
+/// #     type Handle = Pin<Box<Self>>;
+/// #
+/// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #     }
+/// #
+/// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+/// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+/// #     }
+/// #
+/// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
+/// #         target.cast()
+/// #     }
+/// # }
+/// #
+/// # impl Entry {
+/// #     fn new(val: i32) -> Self {
+/// #         Self {
+/// #             val,
+/// #             ..Self::default()
+/// #         }
+/// #     }
+/// # }
+/// let stub = Box::pin(Entry::default());
+/// let q = Arc::new(MpscQueue::<Entry>::new_with_stub(stub));
+///
+/// thread::spawn({
+///     let q = q.clone();
+///     move || {
+///         for i in 1..5 {
+///             q.enqueue(Box::pin(Entry::new(i)));
+///         }
+///     }
+/// });
+///
+/// thread::spawn({
+///     let q = q.clone();
+///     move || {
+///         for i in 5..=10 {
+///             q.enqueue(Box::pin(Entry::new(i)));
+///         }
+///     }
+/// });
+///
+/// let mut seen = Vec::new();
+/// while Arc::strong_count(&q) > 1 {
+///     // Append any elements currently in the queue to the `Vec`
+///     seen.extend(q.consume().map(|entry| entry.as_ref().val));
+///     thread::yield_now();
+/// }
+///
+/// &mut seen[..].sort();
+/// assert_eq!(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], &seen[..]);
+/// ```
+///
+/// # Implementation Details
+///
+/// This queue design is conceptually very simple, and has *extremely* fast and
+/// wait-free producers (the [`enqueue`] operation). Enqueuing an element always
+/// performs exactly one atomic swap and one atomic store, so producers need
+/// never wait.
+///
+/// The consumer (the [`dequeue`]) is *typically* wait-free in the common case,
+/// but must occasionally wait when the queue is in an inconsistent state.
+///
+/// ## Inconsistent States
+///
+/// As discussed in the [algorithm description on 1024cores.net][vyukov], it
+/// is possible for this queue design to enter an incosistent state if the
+/// consumer tries to dequeue an element while a producer is in the middle
+/// of enqueueing a new element. This occurs when a producer is between the
+/// atomic swap with the `head` of the queue and the atomic store that sets the
+/// `next` pointer of the previous `head` element. When the queue is in an
+/// inconsistent state, the consumer must briefly wait before dequeueing an
+/// element.
+///
+/// The consumer's behavior in the inconsistent state depends on which API
+/// method is used. The [`MpscQueue::dequeue`] and [`Consumer::dequeue`] methods
+/// will wait by spinning (with an exponential backoff) when the queue is
+/// inconsistent. Alternatively, the [`MpscQueue::try_dequeue`] and
+/// [`Consumer::try_dequeue`] methods will instead return [an error] when the
+/// queue is in an inconsistent state.
+///
 /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+/// [`dequeue`]: Self::dequeue
+/// [`enqueue`]: Self::enqueue
+/// [an error]: TryDequeueError
 pub struct MpscQueue<T: Linked<Links<T>>> {
     /// The head of the queue. This is accessed in both `enqueue` and `dequeue`.
     head: CachePadded<AtomicPtr<T>>,
@@ -46,16 +332,12 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
 /// This type is returned by the [`MpscQueue::consume`] and [`MpscQueue::try_consume`]
 /// methods.
 ///
-/*
-// XXX(eliza): these docs are commented out because i didnt actually write that part...
 /// If the right to dequeue elements needs to be reserved for longer than a
 /// single scope, an owned variant ([`OwnedConsumer`]) is also available, when
 /// the [`MpscQueue`] is stored in an [`Arc`]. Since the [`MpscQueue`] must be stored
 /// in an [`Arc`], the [`OwnedConsumer`] type requires the "alloc" feature flag.
 ///
 /// [`Arc`]: alloc::sync::Arc
-*/
-///
 /// [`dequeue`]: Consumer::dequeue
 /// [`try_dequeue`]: Consumer::try_dequeue
 pub struct Consumer<'q, T: Linked<Links<T>>> {
@@ -66,6 +348,8 @@ pub struct Links<T> {
     /// The next node in the queue.
     next: AtomicPtr<T>,
 
+    /// Is this the stub node?
+    ///
     /// Used for debug mode consistency checking only.
     #[cfg(debug_assertions)]
     is_stub: AtomicBool,
@@ -76,9 +360,12 @@ pub struct Links<T> {
     _unpin: PhantomPinned,
 }
 
+/// Errors returned by [`MpscQueue::try_dequeue`] and [`Consumer::try_dequeue`].
 #[derive(Debug, Eq, PartialEq)]
 pub enum TryDequeueError {
+    /// No element was dequeued because the queue was empty.
     Empty,
+    ///
     Inconsistent,
     Busy,
 }
@@ -111,8 +398,17 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
         }
     }
 
-    pub fn enqueue(&self, node: T::Handle) {
-        let ptr = T::into_ptr(node);
+    /// Enqueue a new element at the end of the queue.
+    ///
+    /// This takes ownership of a [`Handle`] that owns the element, and
+    /// (conceptually) assigns ownership of the element to the queue while it
+    /// remains enqueued.
+    ///
+    /// This method will never wait.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn enqueue(&self, element: T::Handle) {
+        let ptr = T::into_ptr(element);
 
         debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
@@ -134,18 +430,10 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     /// Try to dequeue an element from the queue, without waiting if the queue
-    /// is in an inconsistent state, or until there is no other consumer trying
+    /// is in an [inconsistent state], or until there is no other consumer trying
     /// to read from the queue.
     ///
-    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
-    /// consumer tries to dequeue an element while a producer is in the middle
-    /// of enqueueing a new element. If this occurs, the consumer must briefly
-    /// wait before dequeueing an element. This method returns
-    /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
-    /// state.
-    ///
-    /// Additionally, because this is a multi-producer, _single-consumer_ queue,
+    /// Because this is a multi-producer, _single-consumer_ queue,
     /// only one thread may be dequeueing at a time. If another thread is
     /// dequeueing, this method returns [`TryDequeueError::Busy`].
     ///
@@ -157,16 +445,19 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// user code guarantees that no other threads will dequeue from the queue
     /// concurrently, but this cannot be enforced by the compiler.
     ///
+    /// This method will never wait.
+    ///
     /// # Returns
     ///
-    /// - `T::Handle` if an element was successfully dequeued
-    /// - [`TryDequeueError::Empty`] if there are no elements in the queue
-    /// - [`TryDequeueError::Inconsistent`] if the queue is currently in an
+    /// - `Ok`([`T::Handle`]`)` if an element was successfully dequeued
+    /// - `Err(`[`TryDequeueError::Empty`]`)` if there are no elements in the queue
+    /// - `Err(`[`TryDequeueError::Inconsistent`]`)` if the queue is currently in an
     ///   inconsistent state
-    /// - [`TryDequeueError::Busy`] if another thread is currently trying to
+    /// - `Err(`[`TryDequeueError::Busy`]`)` if another thread is currently trying to
     ///   dequeue a message.
     ///
-    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    /// [inconsistent state]: Self#inconsistent-states
+    /// [`T::Handle`]: crate::Linked::Handle
     pub fn try_dequeue(&self) -> Result<T::Handle, TryDequeueError> {
         if self
             .has_consumer
@@ -188,12 +479,8 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
     /// Dequeue an element from the queue.
     ///
-    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
-    /// consumer tries to dequeue an element while a producer is in the middle
-    /// of enqueueing a new element. If this occurs, the consumer must briefly
-    /// wait before dequeueing an element. This method will wait by spinning
-    /// with an exponential backoff if the queue is in an inconsistent state.
+    /// This method will wait by spinning with an exponential backoff if the
+    /// queue is in an [inconsistent state].
     ///
     /// Additionally, because this is a multi-producer, _single-consumer_ queue,
     /// only one thread may be dequeueing at a time. If another thread is
@@ -209,10 +496,11 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///
     /// # Returns
     ///
-    /// - `Some(T::Handle)` if an element was successfully dequeued
+    /// - `Some(`[`T::Handle`]`)` if an element was successfully dequeued
     /// - `None` if the queue is empty or another thread is dequeueing
     ///
-    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    /// [inconsistent state]: Self#inconsistent-states
+    /// [`T::Handle`]: crate::Linked::Handle
     pub fn dequeue(&self) -> Option<T::Handle> {
         let mut boff = Backoff::new();
         loop {
@@ -244,32 +532,34 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     /// Try to dequeue an element from the queue, without waiting if the queue
-    /// is in an inconsistent state.
+    /// is in an inconsistent state, and without checking if another consumer
+    /// exists.
     ///
-    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
-    /// consumer tries to dequeue an element while a producer is in the middle
-    /// of enqueueing a new element. If this occurs, the consumer must briefly
-    /// wait before dequeueing an element. This method returns
-    /// [`TryDequeueError::Inconsistent`] when the queue is in an inconsistent
-    /// state.
+    /// This method returns [`TryDequeueError::Inconsistent`] when the queue is
+    /// in an [inconsistent state].
     ///
-    /// The [`MpscQueue::dequeue_unchecked`] method will instead wait (by spinning with an
-    /// exponential backoff) when the queue is in an inconsistent state.
+    /// The [`MpscQueue::dequeue_unchecked`] method will instead wait (by
+    /// spinning with an  exponential backoff) when the queue is in an
+    /// inconsistent state.
+    ///
+    /// This method will never wait.
     ///
     /// # Returns
     ///
-    /// - `T::Handle` if an element was successfully dequeued
-    /// - [`TryDequeueError::Empty`] if there are no elements in the queue
-    /// - [`TryDequeueError::Inconsistent`] if the queue is currently in an
+    /// - `Ok`([`T::Handle`]`)` if an element was successfully dequeued
+    /// - `Err(`[`TryDequeueError::Empty`]`)` if there are no elements in the queue
+    /// - `Err(`[`TryDequeueError::Inconsistent`]`)` if the queue is currently in an
     ///   inconsistent state
+    ///
+    /// This method will **never** return [`TryDequeueError::Busy`].
     ///
     /// # Safety
     ///
     /// This is a multi-producer, *single-consumer* queue. Only one thread/core
     /// may call `try_dequeue_unchecked` at a time!
     ///
-    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    /// [inconsistent state]: Self#inconsistent-states
+    /// [`T::Handle`]: crate::Linked::Handle
     pub unsafe fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
         self.tail.with_mut(|tail| {
             let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
@@ -309,21 +599,18 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
         })
     }
 
-    /// Dequeue an element from the queue.
+    /// Dequeue an element from the queue, without checking whether another
+    /// consumer exists.
     ///
-    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
-    /// consumer tries to dequeue an element while a producer is in the middle
-    /// of enqueueing a new element. If this occurs, the consumer must briefly
-    /// wait before dequeueing an element. This method will wait by spinning
-    /// with an exponential backoff if the queue is in an inconsistent state.
+    /// This method will wait by spinning with an exponential backoff if the
+    /// queue is in an [inconsistent state].
     ///
-    /// The [`MpscQueue::try_dequeue`] will return an error rather than waiting when
-    /// the queue is in an inconsistent state.
+    /// The [`MpscQueue::try_dequeue`] will return an error rather than waiting
+    /// when the queue is in an inconsistent state.
     ///
     /// # Returns
     ///
-    /// - `Some(T::Handle)` if an element was successfully dequeued
+    /// - `Some(`[`T::Handle`]`)` if an element was successfully dequeued
     /// - `None` if the queue is empty
     ///
     /// # Safety
@@ -331,7 +618,8 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// This is a multi-producer, *single-consumer* queue. Only one thread/core
     /// may call `dequeue` at a time!
     ///
-    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    /// [inconsistent state]: Self#inconsistent-states
+    /// [`T::Handle`]: crate::Linked::Handle
     pub unsafe fn dequeue_unchecked(&self) -> Option<T::Handle> {
         let mut boff = Backoff::new();
         loop {
@@ -445,22 +733,19 @@ unsafe impl<T: Send + Linked<Links<T>>> Sync for MpscQueue<T> {}
 impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     /// Dequeue an element from the queue.
     ///
-    /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
-    /// consumer tries to dequeue an element while a producer is in the middle
-    /// of enqueueing a new element. If this occurs, the consumer must briefly
-    /// wait before dequeueing an element. This method will wait by spinning
-    /// with an exponential backoff if the queue is in an inconsistent state.
+    /// This method will wait by spinning with an exponential backoff if the
+    /// queue is in an [inconsistent state].
     ///
     /// The [`Consumer::try_dequeue`] will return an error rather than waiting when
     /// the queue is in an inconsistent state.
     ///
     /// # Returns
     ///
-    /// - `Some(T::Handle)` if an element was successfully dequeued
+    /// - `Some(`[`T::Handle`]`)` if an element was successfully dequeued
     /// - `None` if the queue is empty
     ///
-    /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+    /// [inconsistent state]: Self#inconsistent-states
+    /// [`T::Handle`]: crate::Linked::Handle
     #[inline]
     pub fn dequeue(&self) -> Option<T::Handle> {
         debug_assert!(self.q.has_consumer.load(Acquire));
@@ -686,6 +971,11 @@ feature! {
                 // Safety: we have reserved exclusive access to the queue.
                 self.q.try_dequeue_unchecked()
             }
+        }
+
+        /// Returns `true` if any producers exist for this queue.
+        pub fn has_producers(&self) -> bool {
+            Arc::strong_count(&self.q) > 1
         }
     }
 
@@ -1000,7 +1290,7 @@ mod test_util {
         }
     }
 
-    unsafe impl<'a> Linked<Links<Self>> for Entry {
+    unsafe impl Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
 
         fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
