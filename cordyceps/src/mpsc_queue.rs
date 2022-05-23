@@ -559,7 +559,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// may call `try_dequeue_unchecked` at a time!
     ///
     /// [inconsistent state]: Self#inconsistent-states
-    /// [`T::Handle`]: crate::linked::Handle
+    /// [`T::Handle`]: crate::Linked::Handle
     pub unsafe fn try_dequeue_unchecked(&self) -> Result<T::Handle, TryDequeueError> {
         self.tail.with_mut(|tail| {
             let mut tail_node = NonNull::new(*tail).ok_or(TryDequeueError::Empty)?;
@@ -619,7 +619,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// may call `dequeue` at a time!
     ///
     /// [inconsistent state]: Self#inconsistent-states
-    /// [`T::Handle`]: crate::linked::Handle
+    /// [`T::Handle`]: crate::Linked::Handle
     pub unsafe fn dequeue_unchecked(&self) -> Option<T::Handle> {
         let mut boff = Backoff::new();
         loop {
@@ -745,7 +745,7 @@ impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     /// - `None` if the queue is empty
     ///
     /// [inconsistent state]: Self#inconsistent-states
-    /// [`T::Handle`]: crate::linked::Handle
+    /// [`T::Handle`]: crate::Linked::Handle
     #[inline]
     pub fn dequeue(&self) -> Option<T::Handle> {
         debug_assert!(self.q.has_consumer.load(Acquire));
