@@ -139,8 +139,6 @@ use core::{
 ///
 /// The [`Consumer`] type may be used to reserve the permission to consume
 /// multiple elements at a time:
-/// ```
-/// /// # Examples
 ///
 /// ```
 /// # use cordyceps::{
@@ -204,10 +202,11 @@ use core::{
 ///     thread::yield_now();
 /// }
 ///
-/// assert_eq!(&[1, 2, 3, 4], &seen[..]);
+/// assert_eq!(&[1, 2], &seen[..]);
 /// ```
 ///
 /// The [`Consumer`] type also implements [`Iterator`]:
+///
 /// ```
 /// # use cordyceps::{
 /// #     Linked,
