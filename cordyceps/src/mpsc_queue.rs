@@ -973,6 +973,11 @@ feature! {
                 self.q.try_dequeue_unchecked()
             }
         }
+
+        /// Returns `true` if any producers exist for this queue.
+        pub fn has_producers(&self) -> bool {
+            Arc::strong_count(&self.q) > 1
+        }
     }
 
     impl<T: Linked<Links<T>>> Drop for OwnedConsumer<T> {
