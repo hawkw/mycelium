@@ -18,6 +18,7 @@ categories = ["data-structures", "no-std"]
 default = []
 alloc = []
 std = ["alloc"]
+no-cache-pad = []
 
 [dev-dependencies]
 proptest = "1"
