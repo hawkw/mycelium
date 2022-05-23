@@ -500,7 +500,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// - `None` if the queue is empty or another thread is dequeueing
     ///
     /// [inconsistent state]: Self#inconsistent-states
-    /// [`T::Handle`]: crate::linked::Handle
+    /// [`T::Handle`]: crate::Linked::Handle
     pub fn dequeue(&self) -> Option<T::Handle> {
         let mut boff = Backoff::new();
         loop {
