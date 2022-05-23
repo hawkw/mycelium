@@ -54,5 +54,5 @@ The following features are available (this list is incomplete; you can help by [
 
 | Feature | Default | Explanation |
 | :---    | :---    | :---        |
-| `no-cache-pad` | `false` | Inhibits cache padding for the `CachePadded` struct used for many linked list pointers. When this feature is NOT enabled, the size will be determined base on target platform. |
+| `no-cache-pad` | `false` | Inhibits cache padding for the `CachePadded` struct used for many linked list pointers. When this feature is NOT enabled, the size will be determined based on target platform. |
 
