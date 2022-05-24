@@ -1036,7 +1036,7 @@ unsafe fn links<'a, T: Linked<Links<T>>>(ptr: NonNull<T>) -> &'a Links<T> {
 
 /// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
 /// checks elided in release mode.
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 #[track_caller]
 #[inline(always)]
 unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
@@ -1051,7 +1051,7 @@ unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 /// checks elided in release mode.
 ///
 /// This is the release mode version.
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, test)))]
 #[inline(always)]
 unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
     NonNull::new_unchecked(ptr)
