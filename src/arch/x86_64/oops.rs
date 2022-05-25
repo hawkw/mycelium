@@ -96,7 +96,6 @@ pub fn oops(oops: Oops<'_>) -> ! {
     )
     .draw(&mut target)
     .unwrap();
-    drop(target);
     drop(framebuf);
 
     let mk_writer = MakeTextWriter::new_at(
