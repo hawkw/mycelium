@@ -941,7 +941,6 @@ where
 // === impl Links ===
 
 impl<T> Links<T> {
-    #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
@@ -951,23 +950,12 @@ impl<T> Links<T> {
         }
     }
 
-    #[cfg(not(loom))]
     pub const fn new_stub() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
             _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
             is_stub: AtomicBool::new(true),
-        }
-    }
-
-    #[cfg(loom)]
-    pub fn new() -> Self {
-        Self {
-            next: AtomicPtr::new(ptr::null_mut()),
-            _unpin: PhantomPinned,
-            #[cfg(debug_assertions)]
-            is_stub: AtomicBool::new(false),
         }
     }
 
