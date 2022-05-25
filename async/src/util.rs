@@ -25,6 +25,33 @@ macro_rules! test_dbg {
     };
 }
 
+#[cfg(not(test))]
+macro_rules! test_trace {
+    ($($args:tt)+) => {};
+}
+
+#[cfg(test)]
+macro_rules! test_trace {
+    ($($args:tt)+) => {
+        crate::util::tracing::debug!($($args)+);
+    };
+}
+
+macro_rules! fmt_bits {
+    ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
+        $(
+            if $self.contains(Self::$name) {
+                if $has_states {
+                    $f.write_str(" | ")?;
+                }
+                $f.write_str(stringify!($name))?;
+                $has_states = true;
+            }
+        )+
+
+    };
+}
+
 /// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
 /// checks elided in release mode.
 #[cfg(debug_assertions)]
