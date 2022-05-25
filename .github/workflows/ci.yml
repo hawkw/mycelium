@@ -1,6 +1,10 @@
 name: CI
 
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
 
 env:
   # disable incremental compilation.

@@ -8,9 +8,11 @@
 # added to this workflow!
 name: Loom (mycelium-util)
 
-
-on: [pull_request, workflow_dispatch]
-
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
 
 env:
   # disable incremental compilation.
