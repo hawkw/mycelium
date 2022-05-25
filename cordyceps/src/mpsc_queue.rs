@@ -434,6 +434,11 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// recover that memory after the MpscQueue has been dropped, that will
     /// need to be done by the user manually.
     ///
+    /// ## SAFETY
+    ///
+    /// The "stub" provided must ONLY EVER be used for a single MpscQueue. Re-using
+    /// the stub for multiple queues may lead to undefined behavior.
+    ///
     /// ## Example usage
     ///
     /// ```rust
@@ -485,18 +490,20 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///     val: 0
     /// };
     ///
-    /// static MPMC: MpscQueue<Entry> = MpscQueue::new_with_static_stub(&STUB_ENTRY);
+    ///
+    /// // SAFETY: The STUB_ENTRY is only ever used for one MPMC queue
+    /// static MPMC: MpscQueue<Entry> = unsafe { MpscQueue::new_with_static_stub(&STUB_ENTRY) };
     /// ```
     ///
     #[cfg(not(loom))]
-    pub const fn new_with_static_stub(stub: &'static T) -> Self {
+    pub const unsafe fn new_with_static_stub(stub: &'static T) -> Self {
         let ptr = stub as *const T as *mut T;
         Self {
             head: CachePadded(AtomicPtr::new(ptr)),
             tail: CachePadded(UnsafeCell::new(ptr)),
             has_consumer: CachePadded(AtomicBool::new(false)),
             stub_is_static: true,
-            stub: unsafe { NonNull::new_unchecked(ptr) },
+            stub: NonNull::new_unchecked(ptr),
         }
     }
 
@@ -1396,7 +1403,7 @@ mod tests {
         const MSGS: i32 = if_miri(10, 1000);
 
         static STUB_ENTRY: Entry = const_stub_entry(666);
-        static MPSC: MpscQueue<Entry> = MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY);
+        static MPSC: MpscQueue<Entry> = unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
 
         assert_eq!(MPSC.dequeue(), None);
 
@@ -1441,7 +1448,7 @@ mod tests {
         const MSGS: i32 = if_miri(10, 1000);
 
         static STUB_ENTRY: Entry = const_stub_entry(666);
-        let q = MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY);
+        let q = unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
 
         assert_eq!(q.dequeue(), None);
         let q = Arc::new(q);
