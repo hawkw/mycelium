@@ -19,6 +19,11 @@ default = []
 alloc = []
 std = ["alloc"]
 
+# Inhibits cache padding for the `CachePadded` struct used for many linked list pointers
+# When this feature is NOT enabled, the size will be determined based on target platform.
+# See the documentation of `CachePadded` for more details.
+no-cache-pad = []
+
 [dev-dependencies]
 proptest = "1"
 tracing = { version = "0.1" }
