@@ -9,12 +9,11 @@ extern crate alloc;
 extern crate rlibc;
 
 pub mod arch;
+pub mod wasm;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 use mycelium_alloc::buddy;
-
-mod wasm;
 
 #[cfg(test)]
 mod tests;
