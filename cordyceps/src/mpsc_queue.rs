@@ -1403,7 +1403,8 @@ mod tests {
         const MSGS: i32 = if_miri(10, 1000);
 
         static STUB_ENTRY: Entry = const_stub_entry(666);
-        static MPSC: MpscQueue<Entry> = unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
+        static MPSC: MpscQueue<Entry> =
+            unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
 
         assert_eq!(MPSC.dequeue(), None);
 
