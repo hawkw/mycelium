@@ -4,7 +4,11 @@
 # future, but aren't hard PR blockers.
 name: CI (warnings)
 
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
 
 env:
   # disable incremental compilation.
