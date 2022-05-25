@@ -63,14 +63,14 @@ jobs:
         LOOM_LOG: loom=trace
         RUSTFLAGS: "--cfg loom"
 
-  miri:
-    # needs: is_enabled
-    # if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
-    # runs-on: ubuntu-latest
-    # name: Miri tests (mycelium-async)
-    # steps:
-    # - name: install rust toolchain
-    #   run: rustup show
-    # - uses: actions/checkout@v2
-    # - name: run miri tests
-    #   run: ./bin/miri -p mycelium-async
+  # miri:
+  #   needs: is_enabled
+  #   if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+  #   runs-on: ubuntu-latest
+  #   name: Miri tests (mycelium-async)
+  #   steps:
+  #   - name: install rust toolchain
+  #     run: rustup show
+  #   - uses: actions/checkout@v2
+  #   - name: run miri tests
+  #     run: ./bin/miri -p mycelium-async
