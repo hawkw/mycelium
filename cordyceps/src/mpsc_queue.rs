@@ -120,13 +120,20 @@ use core::{
 ///
 /// // Dequeue elements until the producer threads have terminated.
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Dequeue until the queue is empty.
 ///     while let Some(entry) = q.dequeue() {
 ///         seen.push(entry.as_ref().val);
 ///     }
 ///
 ///     // If there are still producers, we may continue dequeuing.
+///     if done {
+///         break;
+///     }
+///
 ///     thread::yield_now();
 /// }
 ///
@@ -273,9 +280,17 @@ use core::{
 /// });
 ///
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Append any elements currently in the queue to the `Vec`
 ///     seen.extend(q.consume().map(|entry| entry.as_ref().val));
+///
+///     if done {
+///         break;
+///     }
+///
 ///     thread::yield_now();
 /// }
 ///
