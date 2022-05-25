@@ -19,8 +19,10 @@ macro_rules! feature {
 }
 
 pub mod list;
+#[doc(inline)]
 pub use list::List;
 pub mod mpsc_queue;
+#[doc(inline)]
 pub use mpsc_queue::MpscQueue;
 
 pub(crate) mod loom;
