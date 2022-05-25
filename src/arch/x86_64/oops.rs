@@ -315,7 +315,7 @@ fn disassembly<'a>(rip: usize, mk_writer: &'a impl MakeWriter<'a>) {
         // memory. whoopsie.
         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
         let indent = if i == 0 { "> " } else { "  " };
-        let _ = write!(mk_writer.make_writer(), "{}{:016x}: ", indent, ptr).unwrap();
+        let _ = write!(mk_writer.make_writer(), "{}{:016x}: ", indent, ptr);
         match decoder.decode_slice(bytes) {
             Ok(inst) => {
                 let _ = writeln!(mk_writer.make_writer(), "{}", inst);
