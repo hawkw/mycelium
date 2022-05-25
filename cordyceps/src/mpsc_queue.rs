@@ -193,12 +193,18 @@ use core::{
 /// let consumer = q.consume();
 ///
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Dequeue until the queue is empty.
 ///     while let Some(entry) = consumer.dequeue() {
 ///         seen.push(entry.as_ref().val);
 ///     }
 ///
+///     if done {
+///         break;
+///     }
 ///     thread::yield_now();
 /// }
 ///
