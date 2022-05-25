@@ -406,7 +406,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub fn new_with_stub(stub: T::Handle) -> Self {
         let stub = T::into_ptr(stub);
 
-        // // In debug mode, set the stub flag for consistency checking.
+        // In debug mode, set the stub flag for consistency checking.
         #[cfg(debug_assertions)]
         unsafe {
             links(stub).is_stub.store(true, Release);
@@ -422,6 +422,72 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
         }
     }
 
+    /// Create an MpscQueue with a static "stub" entity
+    ///
+    /// This is primarily used for creating an MpscQueue as a `static` variable.
+    ///
+    /// ## Usage notes
+    ///
+    /// Unlike `new()` or `new_with_stub()`, the `stub` item will NOT be
+    /// dropped when the `MpscQueue` is dropped. This is fine if you are
+    /// ALSO statically creating the `stub`, however if it is necessary to
+    /// recover that memory after the MpscQueue has been dropped, that will
+    /// need to be done by the user manually.
+    ///
+    /// ## Example usage
+    ///
+    /// ```rust
+    /// # use cordyceps::{
+    /// #     Linked,
+    /// #     mpsc_queue::{self, MpscQueue},
+    /// # };
+    /// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+    /// #
+    /// #
+    ///
+    /// // This is our same `Entry` from the parent examples. It has implemented
+    /// // the `Links` trait as above.
+    /// #[repr(C)]
+    /// #[derive(Debug, Default)]
+    /// struct Entry {
+    ///    links: mpsc_queue::Links<Entry>,
+    ///    val: i32,
+    /// }
+    ///
+    /// #
+    /// # unsafe impl Linked<mpsc_queue::Links<Entry>> for Entry {
+    /// #     type Handle = Pin<Box<Self>>;
+    /// #
+    /// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+    /// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+    /// #     }
+    /// #
+    /// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+    /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+    /// #     }
+    /// #
+    /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
+    /// #         target.cast()
+    /// #     }
+    /// # }
+    /// #
+    /// # impl Entry {
+    /// #     fn new(val: i32) -> Self {
+    /// #         Self {
+    /// #             val,
+    /// #             ..Self::default()
+    /// #         }
+    /// #     }
+    /// # }
+    ///
+    /// static STUB_ENTRY: Entry = Entry {
+    ///     links: mpsc_queue::Links::<Entry>::new_stub(),
+    ///     val: 0
+    /// };
+    ///
+    /// static MPMC: MpscQueue<Entry> = MpscQueue::new_with_static_stub(&STUB_ENTRY);
+    /// ```
+    ///
     pub const fn new_with_static_stub(stub: &'static T) -> Self {
         let ptr = stub as *const T as *mut T;
         Self {
@@ -1311,6 +1377,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn basically_works_const() {
+        use std::thread;
+
+        const THREADS: i32 = if_miri(3, 8);
+        const MSGS: i32 = if_miri(10, 1000);
+
+        static STUB_ENTRY: Entry = const_stub_entry(666);
+        static MPSC: MpscQueue<Entry> = MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY);
+
+        assert_eq!(MPSC.dequeue(), None);
+
+        let threads: Vec<_> = (0..THREADS)
+            .map(|thread| {
+                thread::spawn(move || {
+                    for i in 0..MSGS {
+                        MPSC.enqueue(entry(i));
+                        println!("thread {}; msg {}/{}", thread, i, MSGS);
+                    }
+                })
+            })
+            .collect();
+
+        let mut i = 0;
+        while i < THREADS * MSGS {
+            match MPSC.try_dequeue() {
+                Ok(msg) => {
+                    i += 1;
+                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
+                }
+                Err(TryDequeueError::Busy) => {
+                    panic!("the queue should never be busy, as there is only one consumer")
+                }
+                Err(e) => {
+                    println!("recv error {:?}", e);
+                    thread::yield_now();
+                }
+            }
+        }
+
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    }
+
     const fn if_miri(miri: i32, not_miri: i32) -> i32 {
         if cfg!(miri) {
             miri
@@ -1372,6 +1483,14 @@ mod test_util {
                 .field("links", &self.links)
                 .field("val", &self.val)
                 .finish()
+        }
+    }
+
+    pub(super) const fn const_stub_entry(val: i32) -> Entry {
+        Entry {
+            links: Links::new_stub(),
+            val,
+            _track: alloc::Track::new_const(()),
         }
     }
 
