@@ -14,13 +14,13 @@ mycotest = { path = "../mycotest", default-features = false }
 cordyceps = { path = "../cordyceps" }
 pin-project = "1"
 
-[dependencies.tracing]
+[dependencies.tracing_02]
+package = "tracing"
 default_features = false
-features = ["attributes"]
 git = "https://github.com/tokio-rs/tracing"
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.5.5", features = ["futures"] }
-tracing_01 = { package = "tracing", version = "0.1", default_features = false, features = ["attributes"] }
+tracing_01 = { package = "tracing", version = "0.1", default_features = false }
 tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
 futures-util = "0.3"

@@ -34,7 +34,7 @@ pub struct Host {
 impl Host {
     // Create a new host for the given instance.
     // NOTE: The instance may not have been started yet.
-    fn new(instance: &wasmi::ModuleRef) -> Result<Self, wasmi::Error> {
+    pub fn new(instance: &wasmi::ModuleRef) -> Result<Self, wasmi::Error> {
         let memory = match instance.export_by_name("memory") {
             Some(wasmi::ExternVal::Memory(memory)) => memory,
             _ => {
