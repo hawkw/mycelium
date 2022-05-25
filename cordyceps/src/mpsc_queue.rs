@@ -120,13 +120,20 @@ use core::{
 ///
 /// // Dequeue elements until the producer threads have terminated.
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Dequeue until the queue is empty.
 ///     while let Some(entry) = q.dequeue() {
 ///         seen.push(entry.as_ref().val);
 ///     }
 ///
 ///     // If there are still producers, we may continue dequeuing.
+///     if done {
+///         break;
+///     }
+///
 ///     thread::yield_now();
 /// }
 ///
@@ -193,12 +200,18 @@ use core::{
 /// let consumer = q.consume();
 ///
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Dequeue until the queue is empty.
 ///     while let Some(entry) = consumer.dequeue() {
 ///         seen.push(entry.as_ref().val);
 ///     }
 ///
+///     if done {
+///         break;
+///     }
 ///     thread::yield_now();
 /// }
 ///
@@ -267,9 +280,17 @@ use core::{
 /// });
 ///
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Append any elements currently in the queue to the `Vec`
 ///     seen.extend(q.consume().map(|entry| entry.as_ref().val));
+///
+///     if done {
+///         break;
+///     }
+///
 ///     thread::yield_now();
 /// }
 ///
@@ -290,7 +311,7 @@ use core::{
 /// ## Inconsistent States
 ///
 /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-/// is possible for this queue design to enter an incosistent state if the
+/// is possible for this queue design to enter an inconsistent state if the
 /// consumer tries to dequeue an element while a producer is in the middle
 /// of enqueueing a new element. This occurs when a producer is between the
 /// atomic swap with the `head` of the queue and the atomic store that sets the
@@ -759,7 +780,7 @@ impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     /// is in an inconsistent state.
     ///
     /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
+    /// is possible for this queue design to enter an inconsistent state if the
     /// consumer tries to dequeue an element while a producer is in the middle
     /// of enqueueing a new element. If this occurs, the consumer must briefly
     /// wait before dequeueing an element. This method returns
@@ -912,7 +933,7 @@ feature! {
         /// Dequeue an element from the queue.
         ///
         /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-        /// is possible for this queue design to enter an incosistent state if the
+        /// is possible for this queue design to enter an inconsistent state if the
         /// consumer tries to dequeue an element while a producer is in the middle
         /// of enqueueing a new element. If this occurs, the consumer must briefly
         /// wait before dequeueing an element. This method will wait by spinning
@@ -940,7 +961,7 @@ feature! {
         /// is in an inconsistent state.
         ///
         /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-        /// is possible for this queue design to enter an incosistent state if the
+        /// is possible for this queue design to enter an inconsistent state if the
         /// consumer tries to dequeue an element while a producer is in the middle
         /// of enqueueing a new element. If this occurs, the consumer must briefly
         /// wait before dequeueing an element. This method returns
