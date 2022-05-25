@@ -8,7 +8,11 @@
 # added to this workflow!
 name: cordyceps
 
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
 
 env:
   # disable incremental compilation.
