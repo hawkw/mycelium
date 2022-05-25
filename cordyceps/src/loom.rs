@@ -152,6 +152,11 @@ mod inner {
                 Track { value }
             }
 
+            #[inline(always)]
+            pub const fn new_const(value: T) -> Track<T> {
+                Track { value }
+            }
+
             /// Get a reference to the value
             #[inline(always)]
             pub fn get_ref(&self) -> &T {
