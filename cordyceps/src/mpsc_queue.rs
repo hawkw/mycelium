@@ -1389,7 +1389,7 @@ mod tests {
     }
 
     #[test]
-    fn basically_works_const() {
+    fn basically_works_all_const() {
         use std::thread;
 
         const THREADS: i32 = if_miri(3, 8);
@@ -1414,6 +1414,53 @@ mod tests {
         let mut i = 0;
         while i < THREADS * MSGS {
             match MPSC.try_dequeue() {
+                Ok(msg) => {
+                    i += 1;
+                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
+                }
+                Err(TryDequeueError::Busy) => {
+                    panic!("the queue should never be busy, as there is only one consumer")
+                }
+                Err(e) => {
+                    println!("recv error {:?}", e);
+                    thread::yield_now();
+                }
+            }
+        }
+
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn basically_works_mixed_const() {
+        use std::{sync::Arc, thread};
+
+        const THREADS: i32 = if_miri(3, 8);
+        const MSGS: i32 = if_miri(10, 1000);
+
+        static STUB_ENTRY: Entry = const_stub_entry(666);
+        let q = MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY);
+
+        assert_eq!(q.dequeue(), None);
+        let q = Arc::new(q);
+
+        let threads: Vec<_> = (0..THREADS)
+            .map(|thread| {
+                let q = q.clone();
+                thread::spawn(move || {
+                    for i in 0..MSGS {
+                        q.enqueue(entry(i));
+                        println!("thread {}; msg {}/{}", thread, i, MSGS);
+                    }
+                })
+            })
+            .collect();
+
+        let mut i = 0;
+        while i < THREADS * MSGS {
+            match q.try_dequeue() {
                 Ok(msg) => {
                     i += 1;
                     println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
