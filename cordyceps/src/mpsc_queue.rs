@@ -341,6 +341,8 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
     /// new consumer.
     has_consumer: CachePadded<AtomicBool>,
 
+    /// If the stub node is in a `static`, we cannot drop it when the 
+    /// queue is dropped.
     stub_is_static: bool,
 
     stub: NonNull<T>,
@@ -426,15 +428,15 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///
     /// This is primarily used for creating an MpscQueue as a `static` variable.
     ///
-    /// ## Usage notes
+    /// # Usage notes
     ///
-    /// Unlike `new()` or `new_with_stub()`, the `stub` item will NOT be
+    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub` item will NOT be
     /// dropped when the `MpscQueue` is dropped. This is fine if you are
     /// ALSO statically creating the `stub`, however if it is necessary to
     /// recover that memory after the MpscQueue has been dropped, that will
     /// need to be done by the user manually.
     ///
-    /// ## SAFETY
+    /// # Safety
     ///
     /// The "stub" provided must ONLY EVER be used for a single MpscQueue. Re-using
     /// the stub for multiple queues may lead to undefined behavior.
@@ -485,14 +487,19 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// #     }
     /// # }
     ///
-    /// static STUB_ENTRY: Entry = Entry {
-    ///     links: mpsc_queue::Links::<Entry>::new_stub(),
-    ///     val: 0
+    ///
+    /// static MPSC: MpscQueue<Entry> = {
+    ///     static STUB_ENTRY: Entry = Entry {
+    ///         links: mpsc_queue::Links::<Entry>::new_stub(),
+    ///         val: 0
+    ///     };
+    ///
+    ///     // SAFETY: The stub may not be used by another MPSC queue. 
+    ///     // Here, this is ensured because the `STUB_ENTRY` static is defined
+    ///     // inside of the initializer for the `MPSC` static, so it cannot be referenced
+    ///     // elsewhere.
+    ///     unsafe { MpscQueue::new_with_static_stub(&STUB_ENTRY) }
     /// };
-    ///
-    ///
-    /// // SAFETY: The STUB_ENTRY is only ever used for one MPMC queue
-    /// static MPMC: MpscQueue<Entry> = unsafe { MpscQueue::new_with_static_stub(&STUB_ENTRY) };
     /// ```
     ///
     #[cfg(not(loom))]
