@@ -311,7 +311,7 @@ use core::{
 /// ## Inconsistent States
 ///
 /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-/// is possible for this queue design to enter an incosistent state if the
+/// is possible for this queue design to enter an inconsistent state if the
 /// consumer tries to dequeue an element while a producer is in the middle
 /// of enqueueing a new element. This occurs when a producer is between the
 /// atomic swap with the `head` of the queue and the atomic store that sets the
@@ -780,7 +780,7 @@ impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     /// is in an inconsistent state.
     ///
     /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
+    /// is possible for this queue design to enter an inconsistent state if the
     /// consumer tries to dequeue an element while a producer is in the middle
     /// of enqueueing a new element. If this occurs, the consumer must briefly
     /// wait before dequeueing an element. This method returns
@@ -933,7 +933,7 @@ feature! {
         /// Dequeue an element from the queue.
         ///
         /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-        /// is possible for this queue design to enter an incosistent state if the
+        /// is possible for this queue design to enter an inconsistent state if the
         /// consumer tries to dequeue an element while a producer is in the middle
         /// of enqueueing a new element. If this occurs, the consumer must briefly
         /// wait before dequeueing an element. This method will wait by spinning
@@ -961,7 +961,7 @@ feature! {
         /// is in an inconsistent state.
         ///
         /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-        /// is possible for this queue design to enter an incosistent state if the
+        /// is possible for this queue design to enter an inconsistent state if the
         /// consumer tries to dequeue an element while a producer is in the middle
         /// of enqueueing a new element. If this occurs, the consumer must briefly
         /// wait before dequeueing an element. This method returns
