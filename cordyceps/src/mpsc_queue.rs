@@ -120,13 +120,20 @@ use core::{
 ///
 /// // Dequeue elements until the producer threads have terminated.
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Dequeue until the queue is empty.
 ///     while let Some(entry) = q.dequeue() {
 ///         seen.push(entry.as_ref().val);
 ///     }
 ///
 ///     // If there are still producers, we may continue dequeuing.
+///     if done {
+///         break;
+///     }
+///
 ///     thread::yield_now();
 /// }
 ///
@@ -193,12 +200,18 @@ use core::{
 /// let consumer = q.consume();
 ///
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Dequeue until the queue is empty.
 ///     while let Some(entry) = consumer.dequeue() {
 ///         seen.push(entry.as_ref().val);
 ///     }
 ///
+///     if done {
+///         break;
+///     }
 ///     thread::yield_now();
 /// }
 ///
@@ -267,9 +280,17 @@ use core::{
 /// });
 ///
 /// let mut seen = Vec::new();
-/// while Arc::strong_count(&q) > 1 {
+/// loop {
+///     // Make sure we run at least once, in case the producer is already done.
+///     let done = Arc::strong_count(&q) == 1;
+///
 ///     // Append any elements currently in the queue to the `Vec`
 ///     seen.extend(q.consume().map(|entry| entry.as_ref().val));
+///
+///     if done {
+///         break;
+///     }
+///
 ///     thread::yield_now();
 /// }
 ///
@@ -290,7 +311,7 @@ use core::{
 /// ## Inconsistent States
 ///
 /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-/// is possible for this queue design to enter an incosistent state if the
+/// is possible for this queue design to enter an inconsistent state if the
 /// consumer tries to dequeue an element while a producer is in the middle
 /// of enqueueing a new element. This occurs when a producer is between the
 /// atomic swap with the `head` of the queue and the atomic store that sets the
@@ -319,6 +340,10 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
     /// Does a consumer handle to the queue exist? If not, it is safe to create a
     /// new consumer.
     has_consumer: CachePadded<AtomicBool>,
+
+    /// If the stub node is in a `static`, we cannot drop it when the
+    /// queue is dropped.
+    stub_is_static: bool,
 
     stub: NonNull<T>,
 }
@@ -383,7 +408,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub fn new_with_stub(stub: T::Handle) -> Self {
         let stub = T::into_ptr(stub);
 
-        // // In debug mode, set the stub flag for consistency checking.
+        // In debug mode, set the stub flag for consistency checking.
         #[cfg(debug_assertions)]
         unsafe {
             links(stub).is_stub.store(true, Release);
@@ -394,7 +419,98 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             head: CachePadded(AtomicPtr::new(ptr)),
             tail: CachePadded(UnsafeCell::new(ptr)),
             has_consumer: CachePadded(AtomicBool::new(false)),
+            stub_is_static: false,
             stub,
+        }
+    }
+
+    /// Create an MpscQueue with a static "stub" entity
+    ///
+    /// This is primarily used for creating an MpscQueue as a `static` variable.
+    ///
+    /// # Usage notes
+    ///
+    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub` item will NOT be
+    /// dropped when the `MpscQueue` is dropped. This is fine if you are
+    /// ALSO statically creating the `stub`, however if it is necessary to
+    /// recover that memory after the MpscQueue has been dropped, that will
+    /// need to be done by the user manually.
+    ///
+    /// # Safety
+    ///
+    /// The "stub" provided must ONLY EVER be used for a single MpscQueue. Re-using
+    /// the stub for multiple queues may lead to undefined behavior.
+    ///
+    /// ## Example usage
+    ///
+    /// ```rust
+    /// # use cordyceps::{
+    /// #     Linked,
+    /// #     mpsc_queue::{self, MpscQueue},
+    /// # };
+    /// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+    /// #
+    /// #
+    ///
+    /// // This is our same `Entry` from the parent examples. It has implemented
+    /// // the `Links` trait as above.
+    /// #[repr(C)]
+    /// #[derive(Debug, Default)]
+    /// struct Entry {
+    ///    links: mpsc_queue::Links<Entry>,
+    ///    val: i32,
+    /// }
+    ///
+    /// #
+    /// # unsafe impl Linked<mpsc_queue::Links<Entry>> for Entry {
+    /// #     type Handle = Pin<Box<Self>>;
+    /// #
+    /// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+    /// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+    /// #     }
+    /// #
+    /// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+    /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+    /// #     }
+    /// #
+    /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
+    /// #         target.cast()
+    /// #     }
+    /// # }
+    /// #
+    /// # impl Entry {
+    /// #     fn new(val: i32) -> Self {
+    /// #         Self {
+    /// #             val,
+    /// #             ..Self::default()
+    /// #         }
+    /// #     }
+    /// # }
+    ///
+    ///
+    /// static MPSC: MpscQueue<Entry> = {
+    ///     static STUB_ENTRY: Entry = Entry {
+    ///         links: mpsc_queue::Links::<Entry>::new_stub(),
+    ///         val: 0
+    ///     };
+    ///
+    ///     // SAFETY: The stub may not be used by another MPSC queue.
+    ///     // Here, this is ensured because the `STUB_ENTRY` static is defined
+    ///     // inside of the initializer for the `MPSC` static, so it cannot be referenced
+    ///     // elsewhere.
+    ///     unsafe { MpscQueue::new_with_static_stub(&STUB_ENTRY) }
+    /// };
+    /// ```
+    ///
+    #[cfg(not(loom))]
+    pub const unsafe fn new_with_static_stub(stub: &'static T) -> Self {
+        let ptr = stub as *const T as *mut T;
+        Self {
+            head: CachePadded(AtomicPtr::new(ptr)),
+            tail: CachePadded(UnsafeCell::new(ptr)),
+            has_consumer: CachePadded(AtomicBool::new(false)),
+            stub_is_static: true,
+            stub: NonNull::new_unchecked(ptr),
         }
     }
 
@@ -686,7 +802,11 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
         }
 
         unsafe {
-            drop(T::from_ptr(self.stub));
+            // If the stub is static, don't drop it. It lives 5eva
+            // (that's one more than 4eva)
+            if !self.stub_is_static {
+                drop(T::from_ptr(self.stub));
+            }
         }
     }
 }
@@ -759,7 +879,7 @@ impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
     /// is in an inconsistent state.
     ///
     /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-    /// is possible for this queue design to enter an incosistent state if the
+    /// is possible for this queue design to enter an inconsistent state if the
     /// consumer tries to dequeue an element while a producer is in the middle
     /// of enqueueing a new element. If this occurs, the consumer must briefly
     /// wait before dequeueing an element. This method returns
@@ -846,6 +966,16 @@ impl<T> Links<T> {
         }
     }
 
+    #[cfg(not(loom))]
+    pub const fn new_stub() -> Self {
+        Self {
+            next: AtomicPtr::new(ptr::null_mut()),
+            _unpin: PhantomPinned,
+            #[cfg(debug_assertions)]
+            is_stub: AtomicBool::new(true),
+        }
+    }
+
     #[cfg(loom)]
     pub fn new() -> Self {
         Self {
@@ -853,6 +983,16 @@ impl<T> Links<T> {
             _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
             is_stub: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(loom)]
+    pub fn new_stub() -> Self {
+        Self {
+            next: AtomicPtr::new(ptr::null_mut()),
+            _unpin: PhantomPinned,
+            #[cfg(debug_assertions)]
+            is_stub: AtomicBool::new(true),
         }
     }
 
@@ -912,7 +1052,7 @@ feature! {
         /// Dequeue an element from the queue.
         ///
         /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-        /// is possible for this queue design to enter an incosistent state if the
+        /// is possible for this queue design to enter an inconsistent state if the
         /// consumer tries to dequeue an element while a producer is in the middle
         /// of enqueueing a new element. If this occurs, the consumer must briefly
         /// wait before dequeueing an element. This method will wait by spinning
@@ -940,7 +1080,7 @@ feature! {
         /// is in an inconsistent state.
         ///
         /// As discussed in the [algorithm description on 1024cores.net][vyukov], it
-        /// is possible for this queue design to enter an incosistent state if the
+        /// is possible for this queue design to enter an inconsistent state if the
         /// consumer tries to dequeue an element while a producer is in the middle
         /// of enqueueing a new element. If this occurs, the consumer must briefly
         /// wait before dequeueing an element. This method returns
@@ -1166,7 +1306,7 @@ mod tests {
     use super::*;
     use test_util::*;
 
-    use std::println;
+    use std::{ops::Deref, println, sync::Arc, thread};
 
     #[test]
     fn dequeue_empty() {
@@ -1216,17 +1356,39 @@ mod tests {
 
     #[test]
     fn basically_works() {
-        use std::{sync::Arc, thread};
-
-        const THREADS: i32 = if_miri(3, 8);
-        const MSGS: i32 = if_miri(10, 1000);
-
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
 
-        assert_eq!(q.dequeue(), None);
+        let q = Arc::new(q);
+        test_basically_works(q);
+    }
+
+    #[test]
+    fn basically_works_all_const() {
+        static STUB_ENTRY: Entry = const_stub_entry(666);
+        static MPSC: MpscQueue<Entry> =
+            unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
+        test_basically_works(&MPSC);
+    }
+
+    #[test]
+    fn basically_works_mixed_const() {
+        static STUB_ENTRY: Entry = const_stub_entry(666);
+        let q = unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
 
         let q = Arc::new(q);
+        test_basically_works(q)
+    }
+
+    fn test_basically_works<Q>(q: Q)
+    where
+        Q: Deref<Target = MpscQueue<Entry>> + Clone,
+        Q: Send + 'static,
+    {
+        const THREADS: i32 = if_miri(3, 8);
+        const MSGS: i32 = if_miri(10, 1000);
+
+        assert_eq!(q.dequeue(), None);
 
         let threads: Vec<_> = (0..THREADS)
             .map(|thread| {
@@ -1323,6 +1485,15 @@ mod test_util {
                 .field("links", &self.links)
                 .field("val", &self.val)
                 .finish()
+        }
+    }
+
+    #[cfg(not(loom))]
+    pub(super) const fn const_stub_entry(val: i32) -> Entry {
+        Entry {
+            links: Links::new_stub(),
+            val,
+            _track: alloc::Track::new_const(()),
         }
     }
 

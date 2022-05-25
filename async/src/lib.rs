@@ -2,8 +2,9 @@
 extern crate alloc;
 
 #[macro_use]
-mod util;
+pub(crate) mod util;
 pub(crate) mod loom;
 
 pub mod scheduler;
 pub mod task;
+pub mod wait;
