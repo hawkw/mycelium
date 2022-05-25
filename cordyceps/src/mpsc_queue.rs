@@ -488,6 +488,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// static MPMC: MpscQueue<Entry> = MpscQueue::new_with_static_stub(&STUB_ENTRY);
     /// ```
     ///
+    #[cfg(not(loom))]
     pub const fn new_with_static_stub(stub: &'static T) -> Self {
         let ptr = stub as *const T as *mut T;
         Self {
@@ -941,6 +942,7 @@ where
 // === impl Links ===
 
 impl<T> Links<T> {
+    #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
@@ -950,7 +952,28 @@ impl<T> Links<T> {
         }
     }
 
+    #[cfg(not(loom))]
     pub const fn new_stub() -> Self {
+        Self {
+            next: AtomicPtr::new(ptr::null_mut()),
+            _unpin: PhantomPinned,
+            #[cfg(debug_assertions)]
+            is_stub: AtomicBool::new(true),
+        }
+    }
+
+    #[cfg(loom)]
+    pub fn new() -> Self {
+        Self {
+            next: AtomicPtr::new(ptr::null_mut()),
+            _unpin: PhantomPinned,
+            #[cfg(debug_assertions)]
+            is_stub: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(loom)]
+    pub fn new_stub() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
             _unpin: PhantomPinned,
@@ -1474,6 +1497,7 @@ mod test_util {
         }
     }
 
+    #[cfg(not(loom))]
     pub(super) const fn const_stub_entry(val: i32) -> Entry {
         Entry {
             links: Links::new_stub(),
