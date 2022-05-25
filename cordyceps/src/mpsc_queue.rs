@@ -341,7 +341,7 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
     /// new consumer.
     has_consumer: CachePadded<AtomicBool>,
 
-    /// If the stub node is in a `static`, we cannot drop it when the 
+    /// If the stub node is in a `static`, we cannot drop it when the
     /// queue is dropped.
     stub_is_static: bool,
 
@@ -494,7 +494,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///         val: 0
     ///     };
     ///
-    ///     // SAFETY: The stub may not be used by another MPSC queue. 
+    ///     // SAFETY: The stub may not be used by another MPSC queue.
     ///     // Here, this is ensured because the `STUB_ENTRY` static is defined
     ///     // inside of the initializer for the `MPSC` static, so it cannot be referenced
     ///     // elsewhere.
@@ -1306,7 +1306,7 @@ mod tests {
     use super::*;
     use test_util::*;
 
-    use std::println;
+    use std::{ops::Deref, println, sync::Arc, thread};
 
     #[test]
     fn dequeue_empty() {
@@ -1356,110 +1356,39 @@ mod tests {
 
     #[test]
     fn basically_works() {
-        use std::{sync::Arc, thread};
-
-        const THREADS: i32 = if_miri(3, 8);
-        const MSGS: i32 = if_miri(10, 1000);
-
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
 
-        assert_eq!(q.dequeue(), None);
-
         let q = Arc::new(q);
-
-        let threads: Vec<_> = (0..THREADS)
-            .map(|thread| {
-                let q = q.clone();
-                thread::spawn(move || {
-                    for i in 0..MSGS {
-                        q.enqueue(entry(i));
-                        println!("thread {}; msg {}/{}", thread, i, MSGS);
-                    }
-                })
-            })
-            .collect();
-
-        let mut i = 0;
-        while i < THREADS * MSGS {
-            match q.try_dequeue() {
-                Ok(msg) => {
-                    i += 1;
-                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
-                }
-                Err(TryDequeueError::Busy) => {
-                    panic!("the queue should never be busy, as there is only one consumer")
-                }
-                Err(e) => {
-                    println!("recv error {:?}", e);
-                    thread::yield_now();
-                }
-            }
-        }
-
-        for thread in threads {
-            thread.join().unwrap();
-        }
+        test_basically_works(q);
     }
 
     #[test]
     fn basically_works_all_const() {
-        use std::thread;
-
-        const THREADS: i32 = if_miri(3, 8);
-        const MSGS: i32 = if_miri(10, 1000);
-
         static STUB_ENTRY: Entry = const_stub_entry(666);
         static MPSC: MpscQueue<Entry> =
             unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
-
-        assert_eq!(MPSC.dequeue(), None);
-
-        let threads: Vec<_> = (0..THREADS)
-            .map(|thread| {
-                thread::spawn(move || {
-                    for i in 0..MSGS {
-                        MPSC.enqueue(entry(i));
-                        println!("thread {}; msg {}/{}", thread, i, MSGS);
-                    }
-                })
-            })
-            .collect();
-
-        let mut i = 0;
-        while i < THREADS * MSGS {
-            match MPSC.try_dequeue() {
-                Ok(msg) => {
-                    i += 1;
-                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
-                }
-                Err(TryDequeueError::Busy) => {
-                    panic!("the queue should never be busy, as there is only one consumer")
-                }
-                Err(e) => {
-                    println!("recv error {:?}", e);
-                    thread::yield_now();
-                }
-            }
-        }
-
-        for thread in threads {
-            thread.join().unwrap();
-        }
+        test_basically_works(&MPSC);
     }
 
     #[test]
     fn basically_works_mixed_const() {
-        use std::{sync::Arc, thread};
-
-        const THREADS: i32 = if_miri(3, 8);
-        const MSGS: i32 = if_miri(10, 1000);
-
         static STUB_ENTRY: Entry = const_stub_entry(666);
         let q = unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
 
-        assert_eq!(q.dequeue(), None);
         let q = Arc::new(q);
+        test_basically_works(q)
+    }
+
+    fn test_basically_works<Q>(q: Q)
+    where
+        Q: Deref<Target = MpscQueue<Entry>> + Clone,
+        Q: Send + 'static,
+    {
+        const THREADS: i32 = if_miri(3, 8);
+        const MSGS: i32 = if_miri(10, 1000);
+
+        assert_eq!(q.dequeue(), None);
 
         let threads: Vec<_> = (0..THREADS)
             .map(|thread| {
