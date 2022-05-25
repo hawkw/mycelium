@@ -775,19 +775,40 @@ mod tests {
         Remove(usize),
     }
 
+    use core::ops::Range;
+    use proptest::collection::vec;
+    use proptest::num::usize::ANY;
+
+    /// Miri uses a significant amount of time and memory, meaning that
+    /// running 256 property tests (the default test-pass count) * (0..100)
+    /// vec elements (the default proptest vec length strategy) causes the
+    /// CI running to OOM (I think). In local testing, this required up
+    /// to 11GiB of resident memory with the default strategy, at the
+    /// time of this change.
+    ///
+    /// In the future, it may be desirable to have an "override" feature
+    /// to use a larger test case set for more exhaustive local miri testing,
+    /// where the time and memory limitations are less restrictive than in CI.
+    #[cfg(miri)]
+    const FUZZ_RANGE: Range<usize> = 0..10;
+
+    /// The default range for proptest's vec strategy is 0..100.
+    #[cfg(not(miri))]
+    const FUZZ_RANGE: Range<usize> = 0..=00;
+
     proptest::proptest! {
         #[test]
-        fn fuzz_linked_list(ops: Vec<usize>) {
+        fn fuzz_linked_list(ops in vec(ANY, FUZZ_RANGE)) {
 
-        let ops = ops
-        .iter()
-        .map(|i| match i % 3 {
-            0 => Op::Push,
-            1 => Op::Pop,
-            2 => Op::Remove(i / 3),
-            _ => unreachable!(),
-        })
-        .collect::<Vec<_>>();
+            let ops = ops
+                .iter()
+                .map(|i| match i % 3 {
+                    0 => Op::Push,
+                    1 => Op::Pop,
+                    2 => Op::Remove(i / 3),
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>();
 
             let _trace = trace_init();
             let _span = tracing::info_span!("fuzz").entered();
