@@ -320,6 +320,8 @@ pub struct MpscQueue<T: Linked<Links<T>>> {
     /// new consumer.
     has_consumer: CachePadded<AtomicBool>,
 
+    stub_is_static: bool,
+
     stub: NonNull<T>,
 }
 
@@ -394,7 +396,19 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             head: CachePadded(AtomicPtr::new(ptr)),
             tail: CachePadded(UnsafeCell::new(ptr)),
             has_consumer: CachePadded(AtomicBool::new(false)),
+            stub_is_static: false,
             stub,
+        }
+    }
+
+    pub const fn new_with_static_stub(stub: &'static T) -> Self {
+        let ptr = stub as *const T as *mut T;
+        Self {
+            head: CachePadded(AtomicPtr::new(ptr)),
+            tail: CachePadded(UnsafeCell::new(ptr)),
+            has_consumer: CachePadded(AtomicBool::new(false)),
+            stub_is_static: true,
+            stub: unsafe { NonNull::new_unchecked(ptr) },
         }
     }
 
@@ -686,7 +700,11 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
         }
 
         unsafe {
-            drop(T::from_ptr(self.stub));
+            // If the stub is static, don't drop it. It lives 5eva
+            // (that's one more than 4eva)
+            if !self.stub_is_static {
+                drop(T::from_ptr(self.stub));
+            }
         }
     }
 }
@@ -843,6 +861,16 @@ impl<T> Links<T> {
             _unpin: PhantomPinned,
             #[cfg(debug_assertions)]
             is_stub: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(not(loom))]
+    pub const fn new_stub() -> Self {
+        Self {
+            next: AtomicPtr::new(ptr::null_mut()),
+            _unpin: PhantomPinned,
+            #[cfg(debug_assertions)]
+            is_stub: AtomicBool::new(true),
         }
     }
 
