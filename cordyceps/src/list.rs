@@ -794,7 +794,7 @@ mod tests {
 
     /// The default range for proptest's vec strategy is 0..100.
     #[cfg(not(miri))]
-    const FUZZ_RANGE: Range<usize> = 0..=00;
+    const FUZZ_RANGE: Range<usize> = 0..100;
 
     proptest::proptest! {
         #[test]
