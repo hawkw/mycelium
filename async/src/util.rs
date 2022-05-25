@@ -1,7 +1,7 @@
 use core::ptr::NonNull;
 
 #[cfg(not(all(test, loom)))]
-pub(crate) use tracing;
+pub(crate) use tracing_02 as tracing;
 
 #[cfg(all(test, loom))]
 pub(crate) use tracing_01 as tracing;
