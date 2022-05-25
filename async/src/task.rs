@@ -62,8 +62,8 @@ macro_rules! trace_task {
     ($ptr:expr, $f:ty, $method:literal) => {
         tracing::trace!(
             ptr = ?$ptr,
-            concat!("Task::<Output = {}>::", $method),
-            type_name::<<$f>::Output>()
+            output = type_name::<<$f>::Output>(),
+            concat!("Task::", $method),
         );
     };
 }
@@ -144,11 +144,27 @@ impl<S: Schedule, F: Future> Task<S, F> {
     unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
         trace_task!(ptr, F, "poll");
         let ptr = ptr.cast::<Self>();
+
+        // try to transition the task to the polling state
+        let state = &ptr.as_ref().header.state;
+        match test_dbg!(state.start_poll()) {
+            // transitioned successfully!
+            Ok(_) => {}
+            Err(_) => {
+                // TODO(eliza): could run the dealloc glue here instead of going
+                // through a ref cycle?
+                return Poll::Ready(());
+            }
+        }
         let waker = Waker::from_raw(Self::raw_waker(ptr.as_ptr()));
         let cx = Context::from_waker(&waker);
         let pin = Pin::new_unchecked(ptr.cast::<Self>().as_mut());
         let poll = pin.poll_inner(cx);
-        if poll.is_ready() {
+        let completed = poll.is_ready();
+        state
+            .end_poll(completed)
+            .expect("must transition out of polling");
+        if completed {
             Self::drop_ref(ptr);
         }
 

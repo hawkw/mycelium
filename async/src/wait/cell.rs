@@ -62,10 +62,10 @@ impl WaitCell {
         // this is based on tokio's AtomicWaker synchronization strategy
         match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
             // someone else is notifying, so don't wait!
-            Err(actual) if test_dbg!(actual.contains(State::CLOSED)) => {
+            Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
                 return wait::closed();
             }
-            Err(actual) if test_dbg!(actual.contains(State::NOTIFYING)) => {
+            Err(actual) if test_dbg!(actual.is(State::NOTIFYING)) => {
                 waker.wake_by_ref();
                 crate::loom::hint::spin_loop();
                 return wait::notified();
@@ -111,7 +111,7 @@ impl WaitCell {
                     waker.wake();
                 }
 
-                if test_dbg!(state.contains(State::CLOSED)) {
+                if test_dbg!(state.is(State::CLOSED)) {
                     wait::closed()
                 } else {
                     wait::notified()
@@ -197,7 +197,7 @@ impl State {
     const NOTIFYING: Self = Self(0b10);
     const CLOSED: Self = Self(0b100);
 
-    fn contains(self, Self(state): Self) -> bool {
+    fn is(self, Self(state): Self) -> bool {
         self.0 & state == state
     }
 }
