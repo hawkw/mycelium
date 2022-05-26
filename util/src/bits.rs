@@ -135,6 +135,182 @@ use core::{
     ops::{Bound, Range, RangeBounds},
 };
 
+#[macro_export]
+macro_rules! bitfield {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $Name:ident<$T:ident> {
+            $(
+                $(#[$field_meta:meta])*
+                $field_vis:vis const $Field:ident = $value:literal;
+            )+
+        }
+    ) => {
+        $(#[$meta])*
+        #[repr(transparent)]
+        #[derive(Copy, Clone, Eq, PartialEq)]
+        $vis struct $Name($T);
+
+        impl $Name {
+            $crate::bitfield! { @field<$crate::bitfield! { @t $T }>:
+                $(
+                    $(#[$field_meta])*
+                    $field_vis const $Field = $value;
+                )+
+            }
+
+            const FIELDS: &'static [(&'static str, $crate::bitfield! { @t $T })] = &[$(
+                (stringify!($Field), Self::$Field)
+            ),+];
+
+            $vis const fn from_bits(bits: $T) -> Self {
+                Self(bits)
+            }
+
+            $vis const fn new() -> Self {
+                Self(0)
+            }
+
+            $vis fn set(self, packer: $crate::bitfield! { @t $T }, value: $T) -> Self {
+                Self(packer.pack(value, self.0))
+            }
+
+            $vis fn assert_valid() {
+                <$crate::bitfield! { @t $T }>::assert_all_valid(&Self::FIELDS);
+            }
+        }
+
+        impl core::fmt::Display for $Name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                writeln!(f, "{:0width$b}", self.0, width = $T::BITS as usize)?;
+                let mut cur_pos = $T::BITS;
+                let mut max_len = 0;
+                let mut rem = 0;
+                let mut fields = Self::FIELDS.iter().rev().peekable();
+                while let Some((name, field)) = fields.next() {
+                    while cur_pos > field.msb_position() {
+                        f.write_str(" ")?;
+                        cur_pos -= 1;
+                    }
+                    let bits = field.bits();
+                    match (name, bits) {
+                        (name, bits) if name.starts_with("_") => {
+                            for _ in 0..bits {
+                                f.write_str(" ")?;
+                            }
+                            cur_pos -= bits;
+                            continue;
+                        }
+                        (_, 1) => f.write_str("│")?,
+                        (_, 2) => f.write_str("└┤")?,
+                        (_, bits) => {
+                            f.write_str("└┬")?;
+                            for _ in 0..(bits - 3) {
+                                f.write_str("─")?;
+                            }
+                            f.write_str("┘")?;
+                        }
+                    }
+
+                    if fields.peek().is_none() {
+                        rem = cur_pos - (bits - 1);
+                    }
+
+                    max_len = core::cmp::max(max_len, name.len());
+                    cur_pos -= field.bits()
+                }
+
+                f.write_str("\n")?;
+
+                for (name, field) in Self::FIELDS {
+                    if name.starts_with("_") {
+                        continue;
+                    }
+
+                    cur_pos = $T::BITS;
+                    'line: for (cur_name, cur_field) in Self::FIELDS.iter().rev() {
+                        while cur_pos > cur_field.msb_position() {
+                            f.write_str(" ")?;
+                            cur_pos -= 1;
+                        }
+
+                        if field == cur_field {
+                            break 'line;
+                        }
+
+                        let bits = cur_field.bits();
+                        match (cur_name, bits) {
+                            (name, bits) if name.starts_with("_") => {
+                                for _ in 0..bits {
+                                    f.write_str(" ")?;
+                                }
+                            }
+                            (_, 1) => f.write_str("│")?,
+                            (_, bits) => {
+                                f.write_str(" │")?;
+                                for _ in 0..(bits - 2) {
+                                    f.write_str(" ")?;
+                                }
+                            }
+                        }
+
+                        cur_pos -= bits;
+                    }
+
+                    let field_bits = field.bits();
+                    if field_bits == 1 {
+                        f.write_str("└")?;
+                        cur_pos -= 1;
+                    } else {
+                        f.write_str(" └")?;
+                        cur_pos -= 2;
+                    }
+                    let len = cur_pos as usize + (max_len - name.len());
+                    for _ in rem as usize..len {
+                        f.write_str("─")?;
+                    }
+                    let value = field.unpack(self.0);
+                    if field_bits == 1 {
+                        writeln!(f, " {}: {:?}", name, if value == 1 { true } else { false })?
+                    } else {
+                        writeln!(f, " {}: {:0width$b} ({})", name, value, value, width = field_bits as usize)?
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    };
+
+    (@field<$T:ty>, prev: $Prev:ident:
+        $(#[$meta:meta])*
+        $vis:vis const $Field:ident = $value:literal;
+        $($rest:tt)*
+    ) => {
+        $(#[$meta])*
+        $vis const $Field: $T = Self::$Prev.next($value);
+        $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
+    };
+
+    (@field<$T:ty>, prev: $Prev:ident: ) => {  };
+    (@field<$T:ty>:
+        $(#[$meta:meta])*
+        $vis:vis const $Field:ident = $value:literal;
+        $($rest:tt)*
+    ) => {
+        $(#[$meta])*
+        $vis const $Field: $T = <$T>::least_significant($value);
+        $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
+    };
+
+    (@t usize) => { $crate::bits::PackUsize };
+    (@t u64) => { $crate::bits::Pack64 };
+    (@t u32) => { $crate::bits::Pack32 };
+    (@t u16) => { $crate::bits::Pack16 };
+    (@t u8) => { $crate::bits::Pack8 };
+    (@t $T:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u64`, `u32`, `u16`, or `u8`")) }
+}
+
 macro_rules! make_packers {
     ($(pub struct $Pack:ident { bits: $Bits:ty, packing: $Packing:ident, pair: $Pair:ident $(,)? })+) => {
         $(
@@ -373,7 +549,7 @@ macro_rules! make_packers {
                 pub fn pack(&self, value: $Bits, base: $Bits) -> $Bits {
                     assert!(
                         value <= self.max_value(),
-                        "bits outside of packed range are set!\n     value: {:0x},\n max_value: {:0x}",
+                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
                         value,
                         self.max_value(),
                     );
@@ -392,7 +568,7 @@ macro_rules! make_packers {
                 pub fn pack_into<'base>(&self, value: $Bits, base: &'base mut $Bits) -> &'base mut $Bits {
                     assert!(
                         value <= self.max_value(),
-                        "bits outside of packed range are set!\n     value: {:0x},\n max_value: {:0x}",
+                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
                         value,
                         self.max_value(),
                     );
@@ -502,6 +678,14 @@ macro_rules! make_packers {
                     self.assert_valid_inner(&"")
                 }
 
+                pub const fn lsb_position(&self) -> u32 {
+                    self.shift
+                }
+
+                pub const fn msb_position(&self) -> u32 {
+                    Self::SIZE_BITS - self.mask.leading_zeros()
+                }
+
                 #[track_caller]
                 fn assert_valid_inner(&self, cx: &impl fmt::Display) {
                     assert!(
@@ -532,6 +716,14 @@ macro_rules! make_packers {
                         self,
                         cx,
                     );
+                    assert_eq!(self.msb_position() - self.lsb_position(), self.bits(),
+                    "msb_position - lsb_position ({} + {} = {}) must equal total number of bits ({})\n\
+                    -> while checking validity of {:?}{}",
+                        self.msb_position(),
+                        self.lsb_position(),
+                        self.msb_position() - self.lsb_position(), self.bits(),
+                        self, cx
+                    )
                 }
 
                 #[track_caller]
@@ -1061,5 +1253,34 @@ mod tests {
         fn pair_least_sig_arbitrary_32<Pack32, u32>(32);
         fn pair_least_sig_arbitrary_16<Pack16, u16>(16);
         fn pair_least_sig_arbitrary_8<Pack8, u8>(8);
+    }
+
+    bitfield! {
+        struct TestBitfield<u32> {
+            const HELLO = 4;
+            const _RESERVED_1 = 3;
+            const WORLD = 1;
+            const HAVE = 3;
+            const LOTS = 5;
+            const OF = 1;
+            const FUN = 6;
+        }
+    }
+
+    #[test]
+    fn macro_bitfield_valid() {
+        TestBitfield::assert_valid();
+    }
+
+    #[test]
+    fn test_bitfield_format() {
+        let test_bitfield = TestBitfield::new()
+            .set(TestBitfield::HELLO, 0b1001)
+            .set(TestBitfield::WORLD, 1)
+            .set(TestBitfield::HAVE, 3)
+            .set(TestBitfield::LOTS, 0b11010)
+            .set(TestBitfield::OF, 0)
+            .set(TestBitfield::FUN, 9);
+        println!("{}", test_bitfield);
     }
 }
