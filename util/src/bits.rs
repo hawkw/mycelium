@@ -1268,11 +1268,6 @@ mod tests {
     }
 
     #[test]
-    fn macro_bitfield_valid() {
-        TestBitfield::assert_valid();
-    }
-
-    #[test]
     fn test_bitfield_format() {
         let test_bitfield = TestBitfield::new()
             .set(TestBitfield::HELLO, 0b1001)
@@ -1283,4 +1278,11 @@ mod tests {
             .set(TestBitfield::FUN, 9);
         println!("{}", test_bitfield);
     }
+
+
+    #[test]
+    fn macro_bitfield_valid() {
+        TestBitfield::assert_valid();
+    }
+
 }
