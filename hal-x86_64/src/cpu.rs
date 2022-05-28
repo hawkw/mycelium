@@ -1,4 +1,5 @@
 use core::{arch::asm, fmt, mem};
+use mycelium_util::bits;
 
 pub mod intrinsics;
 
@@ -129,6 +130,32 @@ impl Ring {
             0b11 => Ring::Ring3,
             bits => panic!("invalid ring {:#02b}", bits),
         }
+    }
+}
+
+impl bits::FromBits<u16> for Ring {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(u: u16) -> Result<Self, Self::Error> {
+        Ok(Self::from_u8(u as u8))
+    }
+
+    fn into_bits(self) -> u16 {
+        self as u8 as u16
+    }
+}
+
+impl bits::FromBits<u8> for Ring {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(u: u8) -> Result<Self, Self::Error> {
+        Ok(Self::from_u8(u))
+    }
+
+    fn into_bits(self) -> u8 {
+        self as u8
     }
 }
 

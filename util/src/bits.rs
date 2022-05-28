@@ -343,7 +343,7 @@ macro_rules! bitfield {
         $($rest:tt)*
     ) => {
         $(#[$meta])*
-        $vis const $Field: $crate::bitfield!{ @t $T, $Val } = <$crate::bitfield!{ @t $T, $T } >::first($value);
+        $vis const $Field: $crate::bitfield!{ @t $T, $Val } = <$crate::bitfield!{ @t $T, $Val } >::first();
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
 
@@ -642,9 +642,9 @@ macro_rules! make_packers {
                 /// [`self.bits()`]: Self::bits
                 pub fn pack_into<'base>(&self, value: T, base: &'base mut $Bits) -> &'base mut $Bits
                 where
-                    T: Into<$Bits>,
+                    T: FromBits<$Bits>,
                 {
-                    let value = value.into();
+                    let value = value.into_bits();
                     assert!(
                         value <= self.max_value(),
                         "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",

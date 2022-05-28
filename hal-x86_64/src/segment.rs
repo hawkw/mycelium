@@ -1,11 +1,5 @@
 use crate::cpu;
 use core::{arch::asm, fmt};
-use mycelium_util::bits::Pack16;
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct Selector(u16);
-
 /// Returns the current code segment selector in `%cs`.
 pub fn code_segment() -> Selector {
     let value: u16;
@@ -13,14 +7,18 @@ pub fn code_segment() -> Selector {
     Selector(value)
 }
 
-impl Selector {
-    /// The first 2 least significant bits are the selector's priveliege ring.
-    const RING: Pack16 = Pack16::least_significant(2);
-    /// The next bit is set if this is an LDT segment selector.
-    const LDT_BIT: Pack16 = Self::RING.next(1);
-    /// The remaining bits are the index in the GDT/LDT.
-    const INDEX: Pack16 = Self::LDT_BIT.next(5);
+mycelium_util::bitfield! {
+    pub struct Selector<u16> {
+        /// The first 2 least significant bits are the selector's priveliege ring.
+        const RING: cpu::Ring;
+        /// The next bit is set if this is an LDT segment selector.
+        const LDT_BIT: bool;
+        /// The remaining bits are the index in the GDT/LDT.
+        const INDEX = 5;
+    }
+}
 
+impl Selector {
     pub const fn null() -> Self {
         Self(0)
     }
@@ -78,7 +76,7 @@ impl Selector {
     }
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
-        Self::RING.pack_into(ring as u16, &mut self.0);
+        Self::RING.pack_into(ring, &mut self.0);
         self
     }
 
@@ -131,6 +129,15 @@ impl fmt::Binary for Selector {
 mod tests {
     use super::*;
     use core::mem::size_of;
+
+    #[test]
+    fn prettyprint() {
+        let selector = Selector::new()
+            .set(Selector::RING, cpu::Ring::Ring0)
+            .set(Selector::LDT_BIT, false)
+            .set(Selector::INDEX, 31);
+        println!("{selector}");
+    }
 
     #[test]
     fn segment_selector_is_correct_size() {
