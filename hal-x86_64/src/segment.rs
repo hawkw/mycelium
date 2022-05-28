@@ -8,6 +8,7 @@ pub fn code_segment() -> Selector {
 }
 
 mycelium_util::bitfield! {
+    #[derive(Eq, PartialEq)]
     pub struct Selector<u16> {
         /// The first 2 least significant bits are the selector's priveliege ring.
         const RING: cpu::Ring;
@@ -90,16 +91,16 @@ impl Selector {
     }
 }
 
-impl fmt::Debug for Selector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("segment::Selector")
-            .field("ring", &self.ring())
-            .field("index", &self.index())
-            .field("is_gdt", &self.is_gdt())
-            .field("bits", &format_args!("{:#b}", self.0))
-            .finish()
-    }
-}
+// impl fmt::Debug for Selector {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         f.debug_struct("segment::Selector")
+//             .field("ring", &self.ring())
+//             .field("index", &self.index())
+//             .field("is_gdt", &self.is_gdt())
+//             .field("bits", &format_args!("{:#b}", self.0))
+//             .finish()
+//     }
+// }
 
 impl fmt::UpperHex for Selector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -113,14 +114,6 @@ impl fmt::LowerHex for Selector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("segment::Selector")
             .field(&format_args!("{:#x}", self.0))
-            .finish()
-    }
-}
-
-impl fmt::Binary for Selector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("segment::Selector")
-            .field(&format_args!("{:#b}", self.0))
             .finish()
     }
 }

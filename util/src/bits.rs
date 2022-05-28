@@ -148,7 +148,7 @@ pub trait FromBits<B>: Sized {
 #[macro_export]
 macro_rules! bitfield {
     (
-        $(#[$meta:meta])*
+        $(#[$($meta:meta)+])*
         $vis:vis struct $Name:ident<$T:ident> {
             $(
                 $(#[$field_meta:meta])*
@@ -156,10 +156,23 @@ macro_rules! bitfield {
             )+
         }
     ) => {
-        $(#[$meta])*
+
+        $(#[$($meta)+])*
+        #[derive(Copy, Clone)]
         #[repr(transparent)]
-        #[derive(Copy, Clone, Eq, PartialEq)]
         $vis struct $Name($T);
+
+        #[automatically_derived]
+        impl core::fmt::Debug for $Name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{}", self)).finish()
+                } else {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self.0)).finish()
+                }
+
+            }
+        }
 
         impl $Name {
             $crate::bitfield! { @field<$T>:
@@ -208,9 +221,12 @@ macro_rules! bitfield {
             }
         }
 
+        #[automatically_derived]
         impl core::fmt::Display for $Name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.pad("")?;
                 writeln!(f, "{:0width$b}", self.0, width = $T::BITS as usize)?;
+                f.pad("")?;
                 let mut cur_pos = $T::BITS;
                 let mut max_len = 0;
                 let mut rem = 0;
@@ -254,6 +270,7 @@ macro_rules! bitfield {
                     let field = Self::$Field;
                     let name = stringify!($Field);
                     if !name.starts_with("_") {
+                        f.pad("")?;
                         cur_pos = $T::BITS;
                         for (cur_name, cur_field) in Self::FIELDS.iter().rev() {
                             while cur_pos > cur_field.msb_position() {
@@ -296,12 +313,23 @@ macro_rules! bitfield {
                         for _ in rem as usize..len {
                             f.write_str("─")?;
                         }
-                        writeln!(f, " {}: {:0width$b} ({:?})", name, field.unpack_bits(self.0), field.unpack(self.0), width = field_bits as usize)?
+                        writeln!(f, " {}: {:?} ({:0width$b})", name, field.unpack(self.0), field.unpack_bits(self.0), width = field_bits as usize)?
                     }
 
                 )+
 
                 Ok(())
+            }
+        }
+
+        #[automatically_derived]
+        impl core::fmt::Binary for $Name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self)).finish()
+                } else {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:b}", self)).finish()
+                }
             }
         }
     };
@@ -346,6 +374,79 @@ macro_rules! bitfield {
         $vis const $Field: $crate::bitfield!{ @t $T, $Val } = <$crate::bitfield!{ @t $T, $Val } >::first();
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
+
+
+    // (@process_meta $vis:vis struct $Name:ident<$T:ty> { $(#[$before:meta])* } #[derive($($Derive:path),+)] $(#[$after:meta])*) => {
+    //     $crate::bitfield! { @process_derives $vis struct $Name<$T> { } $($Derive),+ { $(#[$before])* $(#[$after])* } }
+
+    // };
+    // (@process_meta $vis:vis struct $Name:ident<$T:ty> {  }) => {
+    //     #[derive(Copy, Clone)]
+    //     #[repr(transparent)]
+    //     $vis struct $Name($T);
+    // };
+    // (@process_meta $vis:vis struct $Name:ident<$T:ty> { $(#[$before:meta])+ }) => {
+    //     $(#[$before])*
+    //     #[derive(Copy, Clone)]
+    //     #[repr(transparent)]
+    //     $vis struct $Name($T);
+    // };
+    // (@process_meta $vis:vis struct $Name:ident<$T:ty>  { $(#[$before:meta])* } #[$current:meta] $(#[$after:meta])*) => {
+    //     $crate::bitfield! { @process_meta $vis struct $Name<$T> { $(#[$before])* #[$current] } $(#[$after])* }
+    // };
+    // (@process_derives $vis:vis struct $Name:ident<$T:ty> { Debug, } { $($rest:tt)* }) => {
+    //     impl core::fmt::Debug for $Name {
+    //         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    //             if f.alternate() {
+    //                 f.debug_tuple(stringify!($Name)).field(&format_args!("{}", self)).finish()
+    //             } else {
+    //                 f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self)).finish()
+    //             }
+
+    //         }
+    //     }
+    //     #[derive(Copy, Clone)]
+    //     #[repr(transparent)]
+    //     $($rest)*
+    //     $vis struct $Name($T);
+    // };
+
+    // (@process_derives $vis:vis struct $Name:ident<$T:ty> { Debug, $($Before:tt),+ } $($After:tt),+ { $($rest:tt)* }) => {
+    //     impl core::fmt::Debug for $Name {
+    //         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    //             if f.alternate() {
+    //                 f.debug_tuple(stringify!($Name)).field(&format_args!("{}", self)).finish()
+    //             } else {
+    //                 f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self)).finish()
+    //             }
+
+    //         }
+    //     }
+    //     #[derive(Copy, Clone, $($Before),+ $($After),+)]
+    //     #[repr(transparent)]
+    //     $($rest)*
+    //     $vis struct $Name($T);
+    // };
+    // (@process_derives $vis:vis struct $Name:ident<$T:ty> { Debug, $($Before:tt),+ } { $($rest:tt)* }) => {
+
+    //     #[derive(Copy, Clone, $($Before),+)]
+    //     #[repr(transparent)]
+    //     $($rest)*
+    //     $vis struct $Name($T);
+    // };
+    // (@process_derives $vis:vis struct $Name:ident<$T:ty> { $($Before:tt),+ $(,)? } { $($rest:tt)* }) => {
+    //     #[derive($($Before),+)]
+    //     #[derive(Copy, Clone)]
+    //     #[repr(transparent)]
+    //     $($rest)*
+    //     $vis struct $Name($T);
+    // };
+    // (@process_derives $vis:vis struct $Name:ident<$T:ty> { $($Before:tt),* $(,)? } $Next:tt, $($After:tt),* { $($rest:tt)* }) => {
+    //     $crate::bitfield! { @process_derives $vis struct $Name<$T> { $Next, $($Before),*  } $($After),* { $($rest)* } }
+    // };
+    // (@process_derives $vis:vis struct $Name:ident<$T:ty> { $($Before:tt),* } $Next:tt { $($rest:tt)* }) => {
+    //     $crate::bitfield! { @process_derives $vis struct $Name<$T> { $Next, $($Before),* } { $($rest)* } }
+    // };
 
     (@t usize, $V:ty) => { $crate::bits::PackUsize<$V> };
     (@t u64, $V:ty) => { $crate::bits::Pack64<$V> };
@@ -1225,6 +1326,22 @@ impl_frombits_for_bool! {
     impl FromBits<u8, u16, u32, u64, usize> for bool {}
 }
 
+// mod test_expand {
+//     trace_macros!(true);
+//     bitfield! {
+//         #[allow(dead_code)]
+//         struct TestBitfield<u32> {
+//             const HELLO = 4;
+//             const _RESERVED_1 = 3;
+//             const WORLD: bool;
+//             const LOTS = 5;
+//             const OF = 1;
+//             const FUN = 6;
+//         }
+//     }
+//     trace_macros!(false);
+// }
+
 #[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
@@ -1456,6 +1573,7 @@ mod tests {
     }
 
     bitfield! {
+        #[allow(dead_code)]
         struct TestBitfield<u32> {
             const HELLO = 4;
             const _RESERVED_1 = 3;
@@ -1495,6 +1613,13 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct TestDebug {
+        value: usize,
+        bits: TestBitfield,
+    }
+
     #[test]
     fn test_bitfield_format() {
         let test_bitfield = TestBitfield::new()
@@ -1505,6 +1630,15 @@ mod tests {
             .set(TestBitfield::OF, 0)
             .set(TestBitfield::FUN, 9);
         println!("{}", test_bitfield);
+
+        let test_debug = TestDebug {
+            value: 42,
+            bits: test_bitfield,
+        };
+
+        println!("test_debug(alt): {:#?}", test_debug);
+
+        println!("test_debug: {:?}", test_debug)
     }
 
     #[test]

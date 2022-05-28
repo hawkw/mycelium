@@ -3,7 +3,7 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![allow(unused_unsafe)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
-
+#![feature(trace_macros)]
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
