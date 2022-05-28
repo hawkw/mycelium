@@ -20,9 +20,16 @@ pub struct Descriptor {
     _zero: u32,
 }
 
-#[derive(Eq, PartialEq, Copy, Clone)]
-#[repr(transparent)]
-pub struct Attrs(u8);
+mycelium_util::bitfield! {
+    #[derive(Eq, PartialEq)]
+    pub struct Attrs<u8> {
+        pub const GATE_KIND: GateKind;
+        pub const IS_32_BIT: bool;
+        pub const RING: cpu::Ring;
+        const _PAD = 1;
+        pub const PRESENT: bool;
+    }
+}
 
 impl Descriptor {
     pub const fn null() -> Self {
@@ -56,6 +63,24 @@ pub enum GateKind {
     Interrupt = 0b0000_0110,
     Trap = 0b0000_0111,
     Task = 0b0000_0101,
+}
+
+impl bits::FromBits<u8> for GateKind {
+    const BITS: u32 = 3;
+    type Error = &'static str;
+
+    fn try_from_bits(bits: u8) -> Result<Self, Self::Error> {
+        match bits {
+            bits if bits == Self::Interrupt as u8 => Ok(Self::Interrupt),
+            bits if bits == Self::Trap as u8 => Ok(Self::Trap),
+            bits if bits == Self::Task as u8 => Ok(Self::Task),
+            _ => Err("unknown GateKind pattern, expected one of [110, 111, or 101]"),
+        }
+    }
+
+    fn into_bits(self) -> u8 {
+        self as u8
+    }
 }
 
 // === impl Idt ===
@@ -152,84 +177,66 @@ impl fmt::Debug for Descriptor {
 // === impl Attrs ===
 
 impl Attrs {
-    const KIND: bits::Pack8 = bits::Pack8::least_significant(3);
-    const IS_32_BIT: bits::Pack8 = Self::KIND.next(1);
-    const RING: bits::Pack8 = Self::IS_32_BIT.next(3);
-    const PRESENT_BIT: bits::Pack8 = Self::RING.next(1);
-
     pub const fn null() -> Self {
         Self(0)
     }
 
     pub fn gate_kind(&self) -> GateKind {
-        match Self::KIND.unpack(self.0) {
-            0b0110 => GateKind::Interrupt,
-            0b0111 => GateKind::Trap,
-            0b0101 => GateKind::Task,
-            bits => unreachable!("unexpected bit pattern {:#08b}", bits),
-        }
+        self.get(Self::GATE_KIND)
     }
 
     pub fn is_32_bit(&self) -> bool {
-        Self::IS_32_BIT.contained_in_any(self.0)
+        self.get(Self::IS_32_BIT)
     }
 
     pub fn is_present(&self) -> bool {
-        Self::PRESENT_BIT.contained_in_any(self.0)
+        self.get(Self::PRESENT)
     }
 
     pub fn ring(&self) -> cpu::Ring {
-        cpu::Ring::from_u8(Self::RING.unpack(self.0))
+        self.get(Self::RING)
     }
 
     pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
-        Self::KIND.pack_into_truncating(kind as u8, &mut self.0);
+        *self = self.set(Self::GATE_KIND, kind);
         self
     }
 
     pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
-        if is_32_bit {
-            Self::IS_32_BIT.set_all_in(&mut self.0);
-        } else {
-            Self::IS_32_BIT.unset_all_in(&mut self.0);
-        }
+        *self = self.set(Self::IS_32_BIT, is_32_bit);
         self
     }
 
     pub fn set_present(&mut self, present: bool) -> &mut Self {
-        if present {
-            Self::PRESENT_BIT.set_all_in(&mut self.0);
-        } else {
-            Self::PRESENT_BIT.unset_all_in(&mut self.0);
-        }
+        *self = self.set(Self::PRESENT, present);
         self
     }
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
-        Self::RING.pack_into_truncating(ring as u8, &mut self.0);
+        *self = self.set(Self::RING, ring);
         self
     }
 }
 
-impl fmt::Debug for Attrs {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Attrs")
-            .field("gate_kind", &self.gate_kind())
-            .field("ring", &self.ring())
-            .field("is_32_bit", &self.is_32_bit())
-            .field("is_present", &self.is_present())
-            .field("bits", &format_args!("{:b}", self))
-            .finish()
-    }
-}
+// impl fmt::Debug for Attrs {
+//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+//         f.debug_struct("Attrs")
+//             .field("gate_kind", &self.gate_kind())
+//             .field("ring", &self.ring())
+//             .field("is_32_bit", &self.is_32_bit())
+//             .field("is_present", &self.is_present())
+//             .field("bits", &format_args!("{:b}", self))
+//             .finish()
+//     }
+// }
 
-impl fmt::Binary for Attrs {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Attrs")
-            .field(&format_args!("{:#08b}", self.0))
-            .finish()
-    }
-}
+// impl fmt::Binary for Attrs {
+//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+//         f.debug_tuple("Attrs")
+//             .field(&format_args!("{:#08b}", self.0))
+//             .finish()
+//     }
+// }
 
 impl fmt::UpperHex for Attrs {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -259,10 +266,7 @@ mod tests {
 
     #[test]
     fn attrs_pack_specs() {
-        Attrs::KIND.assert_valid();
-        Attrs::RING.assert_valid();
-        Attrs::IS_32_BIT.assert_valid();
-        Attrs::PRESENT_BIT.assert_valid();
+        Attrs::assert_valid()
     }
 
     #[test]
@@ -272,7 +276,7 @@ mod tests {
             .set_present(true)
             .set_32_bit(true)
             .set_gate_kind(GateKind::Interrupt);
-
+        println!("{present_32bit_interrupt}");
         // expected bit pattern here is:
         // |   1|   0    0|   0|   1    1    1    0|
         // |   P|      DPL|   Z|          Gate Type|
