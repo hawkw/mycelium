@@ -10,7 +10,7 @@ pub fn code_segment() -> Selector {
 mycelium_util::bitfield! {
     #[derive(Eq, PartialEq)]
     pub struct Selector<u16> {
-        /// The first 2 least significant bits are the selector's priveliege ring.
+        /// The first 2 least-significant bits are the selector's priveliege ring.
         const RING: cpu::Ring;
         /// The next bit is set if this is an LDT segment selector.
         const IS_LDT: bool;
@@ -126,9 +126,9 @@ mod tests {
     #[test]
     fn prettyprint() {
         let selector = Selector::new()
-            .set(Selector::RING, cpu::Ring::Ring0)
+            .set(Selector::RING, cpu::Ring::Ring3)
             .set(Selector::IS_LDT, false)
-            .set(Selector::INDEX, 31);
+            .set(Selector::INDEX, 30);
         println!("{selector}");
     }
 
