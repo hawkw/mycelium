@@ -13,7 +13,7 @@ mycelium_util::bitfield! {
         /// The first 2 least significant bits are the selector's priveliege ring.
         const RING: cpu::Ring;
         /// The next bit is set if this is an LDT segment selector.
-        const LDT_BIT: bool;
+        const IS_LDT: bool;
         /// The remaining bits are the index in the GDT/LDT.
         const INDEX = 5;
     }
@@ -33,7 +33,7 @@ impl Selector {
     }
 
     pub fn ring(self) -> cpu::Ring {
-        cpu::Ring::from_u8(Self::RING.unpack(self.0) as u8)
+        self.get(Self::RING)
     }
 
     /// Returns which descriptor table (GDT or LDT) this selector references.
@@ -42,7 +42,7 @@ impl Selector {
     ///
     /// This will never return [`cpu::DescriptorTable::Idt`], as a segment
     /// selector only references segmentation table descriptors.
-    pub const fn table(&self) -> cpu::DescriptorTable {
+    pub fn table(&self) -> cpu::DescriptorTable {
         if self.is_gdt() {
             cpu::DescriptorTable::Gdt
         } else {
@@ -51,13 +51,13 @@ impl Selector {
     }
 
     /// Returns true if this is an LDT segment selector.
-    pub const fn is_ldt(&self) -> bool {
-        Self::LDT_BIT.contained_in_any(self.0)
+    pub fn is_ldt(&self) -> bool {
+        self.get(Self::IS_LDT)
     }
 
     /// Returns true if this is a GDT segment selector.
     #[inline]
-    pub const fn is_gdt(&self) -> bool {
+    pub fn is_gdt(&self) -> bool {
         !self.is_ldt()
     }
 
@@ -67,12 +67,12 @@ impl Selector {
     }
 
     pub fn set_gdt(&mut self) -> &mut Self {
-        Self::LDT_BIT.unset_all_in(&mut self.0);
+        Self::IS_LDT.unset_all_in(&mut self.0);
         self
     }
 
     pub fn set_ldt(&mut self) -> &mut Self {
-        Self::LDT_BIT.set_all_in(&mut self.0);
+        Self::IS_LDT.set_all_in(&mut self.0);
         self
     }
 
@@ -127,7 +127,7 @@ mod tests {
     fn prettyprint() {
         let selector = Selector::new()
             .set(Selector::RING, cpu::Ring::Ring0)
-            .set(Selector::LDT_BIT, false)
+            .set(Selector::IS_LDT, false)
             .set(Selector::INDEX, 31);
         println!("{selector}");
     }
@@ -139,8 +139,6 @@ mod tests {
 
     #[test]
     fn selector_pack_specs_valid() {
-        Selector::RING.assert_valid();
-        Selector::LDT_BIT.assert_valid();
-        Selector::INDEX.assert_valid();
+        Selector::assert_valid()
     }
 }

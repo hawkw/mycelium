@@ -1,7 +1,6 @@
 use crate::{cpu, segment, VAddr};
 use core::{arch::asm, fmt, marker::PhantomData};
 use hal_core::interrupt::{ctx, Handlers};
-use mycelium_util::bits;
 
 pub mod idt;
 pub mod pic;
@@ -38,14 +37,18 @@ pub struct Interrupt<T = ()> {
 #[repr(transparent)]
 pub struct PageFaultCode(u32);
 
-/// Error code set by the "Invalid TSS", "Segment Not Present", "Stack-Segment
-/// Fault", and "General Protection Fault" faults.
-///
-/// This includes a segment selector index, and includes 2 bits describing
-/// which table the segment selector references.
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct SelectorErrorCode(u16);
+mycelium_util::bitfield! {
+    /// Error code set by the "Invalid TSS", "Segment Not Present", "Stack-Segment
+    /// Fault", and "General Protection Fault" faults.
+    ///
+    /// This includes a segment selector index, and includes 2 bits describing
+    /// which table the segment selector references.
+    pub struct SelectorErrorCode<u16> {
+        const EXTERNAL: bool;
+        const TABLE = 2;
+        const INDEX = 13;
+    }
+}
 
 #[repr(C)]
 pub struct Registers {
@@ -410,38 +413,6 @@ impl fmt::Debug for PageFaultCode {
 }
 
 impl SelectorErrorCode {
-    const EXTERNAL: bits::Pack16 = bits::Pack16::least_significant(1);
-    const TABLE: bits::Pack16 = Self::EXTERNAL.next(2);
-    const INDEX: bits::Pack16 = Self::TABLE.next(13);
-
-    /// When set, the exception originated externally to the processor.
-    #[inline]
-    pub fn is_external(self) -> bool {
-        Self::EXTERNAL.unpack(self.0) == 1
-    }
-
-    /// Returns which descriptor table the selector error code references.
-    #[inline]
-    pub fn table(self) -> cpu::DescriptorTable {
-        match self.table_bits() {
-            0b00 => cpu::DescriptorTable::Gdt,
-            0b01 => cpu::DescriptorTable::Idt,
-            0b10 => cpu::DescriptorTable::Ldt,
-            0b11 => cpu::DescriptorTable::Idt,
-            _ => unreachable!("table_bits() should only unpack a 2-bit value"),
-        }
-    }
-
-    #[inline]
-    pub fn index(self) -> u16 {
-        Self::INDEX.unpack(self.0)
-    }
-
-    #[inline]
-    fn table_bits(self) -> u8 {
-        Self::TABLE.unpack(self.0) as u8
-    }
-
     #[inline]
     fn named(self, segment_kind: &'static str) -> NamedSelectorErrorCode {
         NamedSelectorErrorCode {
@@ -453,29 +424,16 @@ impl SelectorErrorCode {
 
 // === impl SelectorErrorCode ===
 
-impl fmt::Debug for SelectorErrorCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SelectorErrorCode")
-            .field("is_external", &self.is_external())
-            .field(
-                "table",
-                &format_args!("{} ({:#b})", self.table(), self.table_bits()),
-            )
-            .field("index", &self.index())
-            .finish()
-    }
-}
+// impl fmt::Display for SelectorErrorCode {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         write!(f, "{} index {}", self.table(), self.index())?;
+//         if self.is_external() {
+//             f.write_str(" (from an external source)")?;
+//         }
 
-impl fmt::Display for SelectorErrorCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} index {}", self.table(), self.index())?;
-        if self.is_external() {
-            f.write_str(" (from an external source)")?;
-        }
-
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
 
 struct NamedSelectorErrorCode {
     segment_kind: &'static str,

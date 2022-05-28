@@ -1,4 +1,4 @@
-use core::{arch::asm, fmt, mem};
+use core::{arch::asm, convert::Infallible, fmt, mem};
 use mycelium_util::bits;
 
 pub mod intrinsics;
@@ -116,6 +116,24 @@ impl fmt::Display for DescriptorTable {
             Self::Ldt => f.pad("LDT"),
             Self::Idt => f.pad("IDT"),
         }
+    }
+}
+
+impl bits::FromBits<u16> for DescriptorTable {
+    type Error = Infallible;
+    const BITS: u32 = 2;
+    fn try_from_bits(bits: u16) -> Result<Self, Self::Error> {
+        Ok(match bits {
+            0b00 => Self::Gdt,
+            0b01 => Self::Idt,
+            0b10 => Self::Ldt,
+            0b11 => Self::Idt,
+            _ => unreachable!("only 2 bits should be unpacked!"),
+        })
+    }
+
+    fn into_bits(self) -> u16 {
+        todo!("eliza")
     }
 }
 
