@@ -64,7 +64,7 @@ impl Selector {
 
     /// Returns the index into the LDT or GDT this selector refers to.
     pub const fn index(&self) -> u16 {
-        Self::INDEX.unpack(self.0)
+        Self::INDEX.unpack_bits(self.0)
     }
 
     pub fn set_gdt(&mut self) -> &mut Self {

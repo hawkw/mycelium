@@ -84,9 +84,9 @@
 //! #     .pack(0x0f, &MID)
 //! #     .bits();
 //! #
-//! assert_eq!(LOW.unpack(coffee), 0xfee);
-//! assert_eq!(MID.unpack(coffee), 0x0f);
-//! assert_eq!(HIGH.unpack(coffee), 0xc);
+//! assert_eq!(LOW.unpack_bits(coffee), 0xfee);
+//! assert_eq!(MID.unpack_bits(coffee), 0x0f);
+//! assert_eq!(HIGH.unpack_bits(coffee), 0xc);
 //! ```
 //!
 //! Any previously set bit patterns in the packed range will be overwritten, but
@@ -131,9 +131,19 @@
 //! ```
 
 use core::{
+    convert::Infallible,
     fmt,
+    marker::PhantomData,
     ops::{Bound, Range, RangeBounds},
 };
+
+pub trait FromBits<B>: Sized {
+    type Error: fmt::Display;
+    const BITS: u32;
+
+    fn try_from_bits(bits: B) -> Result<Self, Self::Error>;
+    fn into_bits(self) -> B;
+}
 
 #[macro_export]
 macro_rules! bitfield {
@@ -142,7 +152,7 @@ macro_rules! bitfield {
         $vis:vis struct $Name:ident<$T:ident> {
             $(
                 $(#[$field_meta:meta])*
-                $field_vis:vis const $Field:ident = $value:literal;
+                $field_vis:vis const $Field:ident $(: $F:ty)? $( = $val:literal)?;
             )+
         }
     ) => {
@@ -152,15 +162,15 @@ macro_rules! bitfield {
         $vis struct $Name($T);
 
         impl $Name {
-            $crate::bitfield! { @field<$crate::bitfield! { @t $T }>:
+            $crate::bitfield! { @field<$T>:
                 $(
                     $(#[$field_meta])*
-                    $field_vis const $Field = $value;
+                    $field_vis const $Field $(: $F)? $( = $val)?;
                 )+
             }
 
-            const FIELDS: &'static [(&'static str, $crate::bitfield! { @t $T })] = &[$(
-                (stringify!($Field), Self::$Field)
+            const FIELDS: &'static [(&'static str, $crate::bitfield! { @t $T, $T })] = &[$(
+                (stringify!($Field), Self::$Field.map_ty())
             ),+];
 
             $vis const fn from_bits(bits: $T) -> Self {
@@ -171,12 +181,30 @@ macro_rules! bitfield {
                 Self(0)
             }
 
-            $vis fn set(self, packer: $crate::bitfield! { @t $T }, value: $T) -> Self {
+            $vis fn set<T>(self, packer: $crate::bitfield! { @t $T, T }, value: T) -> Self
+            where
+                T: $crate::bits::FromBits<$T>,
+            {
                 Self(packer.pack(value, self.0))
             }
 
+            $vis fn get<T>(self, packer: $crate::bitfield! { @t $T, T }) -> T
+            where
+                T: $crate::bits::FromBits<$T>,
+            {
+                packer.unpack(self.0)
+            }
+
+            $vis fn try_get<T>(self, packer: $crate::bitfield! { @t $T, T }) -> Result<T, T::Error>
+            where
+                T: $crate::bits::FromBits<$T>,
+            {
+                packer.try_unpack(self.0)
+            }
+
+
             $vis fn assert_valid() {
-                <$crate::bitfield! { @t $T }>::assert_all_valid(&Self::FIELDS);
+                <$crate::bitfield! { @t $T, $T }>::assert_all_valid(&Self::FIELDS);
             }
         }
 
@@ -222,93 +250,109 @@ macro_rules! bitfield {
 
                 f.write_str("\n")?;
 
-                for (name, field) in Self::FIELDS {
-                    if name.starts_with("_") {
-                        continue;
-                    }
+                $(
+                    let field = Self::$Field;
+                    let name = stringify!($Field);
+                    if !name.starts_with("_") {
+                        cur_pos = $T::BITS;
+                        for (cur_name, cur_field) in Self::FIELDS.iter().rev() {
+                            while cur_pos > cur_field.msb_position() {
+                                f.write_str(" ")?;
+                                cur_pos -= 1;
+                            }
 
-                    cur_pos = $T::BITS;
-                    'line: for (cur_name, cur_field) in Self::FIELDS.iter().rev() {
-                        while cur_pos > cur_field.msb_position() {
-                            f.write_str(" ")?;
+                            if field.map_ty::<$T>() == cur_field.map_ty::<$T>() {
+                                break;
+                            }
+
+                            let bits = cur_field.bits();
+                            match (cur_name, bits) {
+                                (name, bits) if name.starts_with("_") => {
+                                    for _ in 0..bits {
+                                        f.write_str(" ")?;
+                                    }
+                                }
+                                (_, 1) => f.write_str("│")?,
+                                (_, bits) => {
+                                    f.write_str(" │")?;
+                                    for _ in 0..(bits - 2) {
+                                        f.write_str(" ")?;
+                                    }
+                                }
+                            }
+
+                            cur_pos -= bits;
+                        }
+
+                        let field_bits = field.bits();
+                        if field_bits == 1 {
+                            f.write_str("└")?;
                             cur_pos -= 1;
+                        } else {
+                            f.write_str(" └")?;
+                            cur_pos -= 2;
                         }
-
-                        if field == cur_field {
-                            break 'line;
+                        let len = cur_pos as usize + (max_len - name.len());
+                        for _ in rem as usize..len {
+                            f.write_str("─")?;
                         }
-
-                        let bits = cur_field.bits();
-                        match (cur_name, bits) {
-                            (name, bits) if name.starts_with("_") => {
-                                for _ in 0..bits {
-                                    f.write_str(" ")?;
-                                }
-                            }
-                            (_, 1) => f.write_str("│")?,
-                            (_, bits) => {
-                                f.write_str(" │")?;
-                                for _ in 0..(bits - 2) {
-                                    f.write_str(" ")?;
-                                }
-                            }
-                        }
-
-                        cur_pos -= bits;
+                        writeln!(f, " {}: {:0width$b} ({:?})", name, field.unpack_bits(self.0), field.unpack(self.0), width = field_bits as usize)?
                     }
 
-                    let field_bits = field.bits();
-                    if field_bits == 1 {
-                        f.write_str("└")?;
-                        cur_pos -= 1;
-                    } else {
-                        f.write_str(" └")?;
-                        cur_pos -= 2;
-                    }
-                    let len = cur_pos as usize + (max_len - name.len());
-                    for _ in rem as usize..len {
-                        f.write_str("─")?;
-                    }
-                    let value = field.unpack(self.0);
-                    if field_bits == 1 {
-                        writeln!(f, " {}: {:?}", name, if value == 1 { true } else { false })?
-                    } else {
-                        writeln!(f, " {}: {:0width$b} ({})", name, value, value, width = field_bits as usize)?
-                    }
-                }
+                )+
 
                 Ok(())
             }
         }
     };
 
-    (@field<$T:ty>, prev: $Prev:ident:
+    (@field<$T:ident>, prev: $Prev:ident:
         $(#[$meta:meta])*
         $vis:vis const $Field:ident = $value:literal;
         $($rest:tt)*
     ) => {
         $(#[$meta])*
-        $vis const $Field: $T = Self::$Prev.next($value);
+        $vis const $Field: $crate::bitfield!{ @t $T, $T } = Self::$Prev.next($value);
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
 
-    (@field<$T:ty>, prev: $Prev:ident: ) => {  };
-    (@field<$T:ty>:
+    (@field<$T:ident>, prev: $Prev:ident:
+        $(#[$meta:meta])*
+        $vis:vis const $Field:ident: $Val:ty;
+        $($rest:tt)*
+    ) => {
+        $(#[$meta])*
+        $vis const $Field: $crate::bitfield!{ @t $T, $Val } = Self::$Prev.then::<$Val>();
+        $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
+    };
+
+    (@field<$T:ident>, prev: $Prev:ident: ) => {  };
+    (@field<$T:ident>:
         $(#[$meta:meta])*
         $vis:vis const $Field:ident = $value:literal;
         $($rest:tt)*
     ) => {
         $(#[$meta])*
-        $vis const $Field: $T = <$T>::least_significant($value);
+        $vis const $Field: $crate::bitfield!{ @t $T, $T } = <$crate::bitfield!{ @t $T, $T }>::least_significant($value);
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
 
-    (@t usize) => { $crate::bits::PackUsize };
-    (@t u64) => { $crate::bits::Pack64 };
-    (@t u32) => { $crate::bits::Pack32 };
-    (@t u16) => { $crate::bits::Pack16 };
-    (@t u8) => { $crate::bits::Pack8 };
-    (@t $T:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u64`, `u32`, `u16`, or `u8`")) }
+    (@field<$T:ident>:
+        $(#[$meta:meta])*
+        $vis:vis const $Field:ident: $Val:ty;
+        $($rest:tt)*
+    ) => {
+        $(#[$meta])*
+        $vis const $Field: $crate::bitfield!{ @t $T, $Val } = <$crate::bitfield!{ @t $T, $T } >::first($value);
+        $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
+    };
+
+    (@t usize, $V:ty) => { $crate::bits::PackUsize<$V> };
+    (@t u64, $V:ty) => { $crate::bits::Pack64<$V> };
+    (@t u32, $V:ty) => { $crate::bits::Pack32<$V> };
+    (@t u16, $V:ty) => { $crate::bits::Pack16<$V> };
+    (@t u8, $V:ty) => { $crate::bits::Pack8<$V> };
+    (@t $T:ty, $V:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u64`, `u32`, `u16`, or `u8`")) }
 }
 
 macro_rules! make_packers {
@@ -320,10 +364,11 @@ macro_rules! make_packers {
                 stringify!($Bits),
                 "`] values."
             )]
-            #[derive(Copy, Clone, PartialEq, Eq)]
-            pub struct $Pack {
+            #[derive(PartialEq, Eq)]
+            pub struct $Pack<T = $Bits> {
                 mask: $Bits,
                 shift: u32,
+                _dst_ty: core::marker::PhantomData<fn(&T)>,
             }
 
             #[doc = concat!(
@@ -336,32 +381,15 @@ macro_rules! make_packers {
             #[derive(Copy, Clone, PartialEq, Eq)]
             pub struct $Packing($Bits);
 
-            #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-            pub struct $Pair {
-                src: $Pack,
-                dst: $Pack,
+            #[derive(PartialEq, Eq)]
+            pub struct $Pair<T = $Bits> {
+                src: $Pack<T>,
+                dst: $Pack<T>,
                 dst_shl: $Bits,
                 dst_shr: $Bits,
             }
 
             impl $Pack {
-                // XXX(eliza): why is this always `u32`? ask the stdlib i guess...
-                const SIZE_BITS: u32 = <$Bits>::MAX.leading_ones();
-
-                /// Returns a value with the first `n` bits set.
-                const fn mk_mask(n: u32) -> $Bits {
-                    if n == 0 {
-                        return 0
-                    };
-                    let one: $Bits = 1; // lolmacros
-                    let shift = one.wrapping_shl(n - 1);
-                    shift | (shift.saturating_sub(1))
-                }
-
-                const fn shift_next(&self) -> u32 {
-                    Self::SIZE_BITS - self.mask.leading_zeros()
-                }
-
                 #[doc = concat!(
                     "Wrap a [`",
                     stringify!($Bits),
@@ -379,44 +407,22 @@ macro_rules! make_packers {
                     $Packing::new(value)
                 }
 
+
                 /// Returns a packer for packing a value into the first `bits` bits.
                 pub const fn least_significant(n: u32) -> Self {
                     Self {
                         mask: Self::mk_mask(n),
                         shift: 0,
+                        _dst_ty: core::marker::PhantomData,
                     }
                 }
 
-                /// Returns a packer for packing a value into the next more-significant
-                /// `n` from `self`.
-                pub const fn next(&self, n: u32) -> Self {
-                    let shift = self.shift_next();
-                    let mask = Self::mk_mask(n) << shift;
-                    Self { mask, shift }
-                }
-
-                /// Returns a packer for packing a value into all the remaining
-                /// more-significant bits after `self`.
-                pub const fn remaining(&self) -> Self {
-                    let shift = self.shift_next();
-                    let n = Self::SIZE_BITS - shift;
-                    let mask = Self::mk_mask(n) << shift;
-                    Self { mask, shift }
-                }
-
-                /// Returns a packer for packing a value into the next `n` more-significant
-                ///  after the `bit`th bit.
-                pub const fn starting_at(bit: u32, n: u32) -> Self {
-                    let shift = bit.saturating_sub(1);
-                    let mask = Self::mk_mask(n) << shift;
-                    Self { shift, mask }
-                }
 
                 /// Returns a packer that will pack a value into the provided mask.
                 pub const fn from_mask(mask: $Bits) -> Self {
                     let shift = mask.leading_zeros();
                     let mask = mask >> shift;
-                    Self { mask, shift }
+                    Self { mask, shift, _dst_ty: core::marker::PhantomData, }
                 }
 
                 /// This is a `const fn`-compatible equivalent of
@@ -469,14 +475,79 @@ macro_rules! make_packers {
                     Self::starting_at(start, end.saturating_sub(start))
                 }
 
+                /// Returns a packer for packing a value into the next `n` more-significant
+                /// after the `bit`th bit.
+                pub const fn starting_at(bit: u32, n: u32) -> Self {
+                    let shift = bit.saturating_sub(1);
+                    let mask = Self::mk_mask(n) << shift;
+                    Self { mask, shift, _dst_ty: PhantomData, }
+                }
+            }
+
+            impl<T> $Pack<T> {
+                // XXX(eliza): why is this always `u32`? ask the stdlib i guess...
+                const SIZE_BITS: u32 = <$Bits>::MAX.leading_ones();
+
+                /// Returns a value with the first `n` bits set.
+                const fn mk_mask(n: u32) -> $Bits {
+                    if n == 0 {
+                        return 0
+                    };
+                    let one: $Bits = 1; // lolmacros
+                    let shift = one.wrapping_shl(n - 1);
+                    shift | (shift.saturating_sub(1))
+                }
+
+                const fn shift_next(&self) -> u32 {
+                    Self::SIZE_BITS - self.mask.leading_zeros()
+                }
+
+                #[doc(hidden)]
+                pub const fn map_ty<T2>(self) -> $Pack<T2> {
+                    $Pack {
+                        shift: self.shift,
+                        mask: self.mask,
+                        _dst_ty: PhantomData,
+                    }
+                }
+
+                pub const fn first() -> Self
+                where T: FromBits<$Bits>
+                {
+                    $Pack::least_significant(T::BITS).map_ty()
+                }
+
+                pub const fn then<T2>(&self) -> $Pack<T2>
+                where T2: FromBits<$Bits> {
+                    self.next(T2::BITS).map_ty()
+                }
+
+                /// Returns a packer for packing a value into the next more-significant
+                /// `n` from `self`.
+                pub const fn next(&self, n: u32) -> $Pack {
+                    let shift = self.shift_next();
+                    let mask = Self::mk_mask(n) << shift;
+                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
+                }
+
+                /// Returns a packer for packing a value into all the remaining
+                /// more-significant bits after `self`.
+                pub const fn remaining(&self) -> $Pack {
+                    let shift = self.shift_next();
+                    let n = Self::SIZE_BITS - shift;
+                    let mask = Self::mk_mask(n) << shift;
+                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
+                }
+
+
                 /// Returns a pair type for packing bits from the range
                 /// specified by `self` at the specified offset `at`, which may
                 /// differ from `self`'s offset.
                 ///
                 /// The packing pair can be used to pack bits from one location
                 /// into another location, and vice versa.
-                pub const fn pair_at(&self, at: u32) -> $Pair {
-                    let dst = Self::starting_at(at, self.bits());
+                pub const fn pair_at(&self, at: u32) -> $Pair<T> {
+                    let dst = $Pack::starting_at(at, self.bits()).map_ty();
                     let at = at.saturating_sub(1);
                     // TODO(eliza): validate that `at + self.bits() < N_BITS` in
                     // const fn somehow lol
@@ -498,7 +569,7 @@ macro_rules! make_packers {
 
                 /// Returns a pair type for packing bits from the range
                 /// specified by `self` after the specified packing spec.
-                pub const fn pair_after(&self, after: &Self) -> $Pair {
+                pub const fn pair_after(&self, after: &Self) -> $Pair<T> {
                     self.pair_at(after.shift_next())
                 }
 
@@ -546,7 +617,11 @@ macro_rules! make_packers {
                 /// in `value`.
                 ///
                 /// [`self.bits()`]: Self::bits
-                pub fn pack(&self, value: $Bits, base: $Bits) -> $Bits {
+                pub fn pack(&self, value: T, base: $Bits) -> $Bits
+                where
+                    T: FromBits<$Bits>,
+                {
+                    let value = value.into_bits();
                     assert!(
                         value <= self.max_value(),
                         "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
@@ -565,7 +640,11 @@ macro_rules! make_packers {
                 /// in `value`.
                 ///
                 /// [`self.bits()`]: Self::bits
-                pub fn pack_into<'base>(&self, value: $Bits, base: &'base mut $Bits) -> &'base mut $Bits {
+                pub fn pack_into<'base>(&self, value: T, base: &'base mut $Bits) -> &'base mut $Bits
+                where
+                    T: Into<$Bits>,
+                {
+                    let value = value.into();
                     assert!(
                         value <= self.max_value(),
                         "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
@@ -647,8 +726,26 @@ macro_rules! make_packers {
 
                 /// Unpack this packer's bits from `source`.
                 #[inline]
-                pub const fn unpack(&self, src: $Bits) -> $Bits {
+                pub const fn unpack_bits(&self, src: $Bits) -> $Bits {
                     (src & self.mask) >> self.shift
+                }
+
+                pub fn try_unpack(&self, src: $Bits) -> Result<T, T::Error>
+                where
+                    T: FromBits<$Bits>,
+                {
+                    T::try_from_bits(self.unpack_bits(src))
+                }
+
+                pub fn unpack(&self, src: $Bits) -> T
+                where
+                    T: FromBits<$Bits>,
+                {
+                    let bits = self.unpack_bits(src);
+                    match T::try_from_bits(bits) {
+                        Ok(value) => value,
+                        Err(e) => panic!("failed to construct {} from bits {:#b} ({}): {}", core::any::type_name::<T>(), bits, bits, e),
+                    }
                 }
 
                 /// Returns `true` if **any** bits specified by this packing spec
@@ -754,38 +851,54 @@ macro_rules! make_packers {
                 }
             }
 
-            impl fmt::Debug for $Pack {
+            impl<T> Clone for $Pack<T> {
+                fn clone(&self) -> Self {
+                    Self {
+                        mask: self.mask,
+                        shift: self.shift,
+                        _dst_ty: core::marker::PhantomData,
+                    }
+                }
+            }
+
+            impl<T> Copy for $Pack<T> {}
+
+            impl<T> fmt::Debug for $Pack<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
                         .finish()
                 }
             }
 
-            impl fmt::UpperHex for $Pack {
+            impl<T> fmt::UpperHex for $Pack<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#X}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
                         .finish()
                 }
             }
 
-            impl fmt::LowerHex for $Pack {
+            impl<T> fmt::LowerHex for $Pack<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#x}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
                         .finish()
                 }
             }
 
-            impl fmt::Binary for $Pack {
+            impl<T> fmt::Binary for $Pack<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
                         .finish()
                 }
             }
@@ -826,7 +939,7 @@ macro_rules! make_packers {
                 /// # Panics
                 ///
                 /// If `value` contains bits outside the range specified by `packer`.
-                pub fn pack(self, value: $Bits, packer: &$Pack) -> Self {
+                pub fn pack<T: FromBits<$Bits>>(self, value: T, packer: &$Pack<T>) -> Self {
                     Self(packer.pack(value, self.0))
                 }
 
@@ -981,7 +1094,20 @@ macro_rules! make_packers {
                 }
             }
 
-            impl fmt::UpperHex for $Pair {
+            impl<T> Clone for $Pair<T> {
+                fn clone(&self) -> Self {
+                    Self {
+                        src: self.src,
+                        dst: self.dst,
+                        dst_shl: self.dst_shl,
+                        dst_shr: self.dst_shr,
+                    }
+                }
+            }
+
+            impl<T> Copy for $Pair<T> {}
+
+            impl<T> fmt::Debug for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pair))
                         .field("src", &self.src)
@@ -992,7 +1118,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl fmt::LowerHex for $Pair {
+            impl<T> fmt::UpperHex for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pair))
                         .field("src", &self.src)
@@ -1003,7 +1129,18 @@ macro_rules! make_packers {
                 }
             }
 
-            impl fmt::Binary for $Pair {
+            impl<T> fmt::LowerHex for $Pair<T> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.debug_struct(stringify!($Pair))
+                        .field("src", &self.src)
+                        .field("dst", &self.dst)
+                        .field("dst_shl", &self.dst_shl)
+                        .field("dst_shr", &self.dst_shr)
+                        .finish()
+                }
+            }
+
+            impl<T> fmt::Binary for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pair))
                         .field("src", &self.src)
@@ -1017,12 +1154,75 @@ macro_rules! make_packers {
     }
 }
 
+macro_rules! impl_frombits_for_ty {
+   ($(impl FromBits<$($F:ty),+> for $T:ty {})+) => {
+        $(
+
+            $(
+                impl FromBits<$F> for $T {
+                    const BITS: u32 = <$F>::BITS;
+                    type Error = Infallible;
+
+                    fn try_from_bits(f: $F) -> Result<Self, Self::Error> {
+                        Ok(f as $T)
+                    }
+
+                    fn into_bits(self) -> $F {
+                        self as $F
+                    }
+                }
+            )*
+        )+
+    }
+}
+
+macro_rules! impl_frombits_for_bool {
+    (impl FromBits<$($F:ty),+> for bool {}) => {
+        $(
+            impl FromBits<$F> for bool {
+                const BITS: u32 = 1;
+                type Error = Infallible;
+
+                fn try_from_bits(f: $F) -> Result<Self, Self::Error> {
+                    Ok(if f == 0 { false } else { true })
+                }
+
+                fn into_bits(self) -> $F {
+                    if self {
+                        1
+                    } else {
+                        0
+                    }
+                }
+            }
+        )+
+    }
+}
+
 make_packers! {
     pub struct PackUsize { bits: usize, packing: PackingUsize, pair: PairUsize }
     pub struct Pack64 { bits: u64, packing: Packing64, pair: Pair64, }
     pub struct Pack32 { bits: u32, packing: Packing32, pair: Pair32, }
     pub struct Pack16 { bits: u16, packing: Packing16, pair: Pair16, }
     pub struct Pack8 { bits: u8, packing: Packing8, pair: Pair8, }
+}
+
+impl_frombits_for_ty! {
+    impl FromBits<u8, u16, u32, u64, usize> for u64 {}
+    impl FromBits<u8, u16, u32, usize> for usize {}
+    impl FromBits<u8, u16, u32> for u32 {}
+    impl FromBits<u8, u16> for u16 {}
+    impl FromBits<u8> for u8 {}
+
+    impl FromBits<u8, u16, u32, u64, usize> for i64 {}
+    impl FromBits<u8, u16, u32, usize> for isize {}
+    impl FromBits<u8, u16, u32> for i32 {}
+    impl FromBits<u8, u16> for i16 {}
+    impl FromBits<u8> for i8 {}
+}
+
+impl_frombits_for_bool! {
+    impl FromBits<u8, u16, u32, u64, usize> for bool {}
 }
 
 #[cfg(all(test, not(loom)))]
@@ -1074,14 +1274,14 @@ mod tests {
                         let pack2 = pack1.next(nbits);
 
                         let packed1 = pack1.pack(val1, base);
-                        prop_assert_bits_eq!(pack1.unpack(packed1), val1);
+                        prop_assert_bits_eq!(pack1.unpack_bits(packed1), val1);
 
                         let packed2 = pack2.pack(val1, base);
-                        prop_assert_bits_eq!(pack2.unpack(packed2), val1);
+                        prop_assert_bits_eq!(pack2.unpack_bits(packed2), val1);
 
                         let packed3 = pack1.pack(val1, pack2.pack(val2, base));
-                        prop_assert_bits_eq!(pack1.unpack(packed3), val1);
-                        prop_assert_bits_eq!(pack2.unpack(packed3), val2);
+                        prop_assert_bits_eq!(pack1.unpack_bits(packed3), val1);
+                        prop_assert_bits_eq!(pack2.unpack_bits(packed3), val2);
                     }
                 )+
             }
@@ -1120,7 +1320,7 @@ mod tests {
     }
 
     macro_rules! test_from_range {
-        ($(fn $fn:ident<$Pack:ident>($max:expr);)+) => {
+        ($(fn $fn:ident<$Pack:ident, $Bits:ty>($max:expr);)+) => {
             proptest! {
                 $(
                     #[test]
@@ -1174,12 +1374,12 @@ mod tests {
 
                         let packed = pair.pack_from_src(src, dst);
                         prop_assert_bits_eq!(packed, pack_from_src.set_all(0), state);
-                        prop_assert_bits_eq!(pack_from_src.unpack(packed), pack_from_dst.unpack(dst), &state);
+                        prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);
 
                         let dst = <$Bits>::max_value();
                         let packed = pair.pack_from_src(src, dst);
                         prop_assert_bits_eq!(packed, pack_from_src.set_all(0), state);
-                        prop_assert_bits_eq!(pack_from_src.unpack(packed), pack_from_dst.unpack(dst), &state);
+                        prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);
                     }
                 )+
             }
@@ -1202,7 +1402,7 @@ mod tests {
                         )),
                     ) {
                         let pack_from_src = $Pack::least_significant(src_len);
-                        let pack_from_dst = $Pack::starting_at(dst_at, src_len);
+                        let pack_from_dst = $Pack::<$Bits>::starting_at(dst_at, src_len);
                         let pair = pack_from_src.pair_at(dst_at);
                         let state = format!(
                             "src_len={}; dst_at={}; src={:#x}; dst={:#x};\npack_from_dst={:#?}\npair={:#?}",
@@ -1210,7 +1410,7 @@ mod tests {
                         );
 
                         let packed = pair.pack_from_src(src, dst);
-                        prop_assert_bits_eq!(pack_from_src.unpack(packed), pack_from_dst.unpack(dst), &state);
+                        prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);
 
                         let dst_unset = pack_from_dst.unset_all(dst);
                         prop_assert_bits_eq!(pair.pack_from_dst(packed, dst_unset), dst, &state);
@@ -1235,10 +1435,10 @@ mod tests {
     }
 
     test_from_range! {
-        fn pack_from_src_range_64<Pack64>(64);
-        fn pack_from_src_range_32<Pack32>(32);
-        fn pack_from_src_range_16<Pack16>(16);
-        fn pack_from_src_range_8<Pack8>(8);
+        fn pack_from_src_range_64<Pack64, u64>(64);
+        fn pack_from_src_range_32<Pack32, u32>(32);
+        fn pack_from_src_range_16<Pack16, u16>(16);
+        fn pack_from_src_range_8<Pack8, u8>(8);
     }
 
     test_pair_least_sig_zeroed! {
@@ -1259,11 +1459,39 @@ mod tests {
         struct TestBitfield<u32> {
             const HELLO = 4;
             const _RESERVED_1 = 3;
-            const WORLD = 1;
-            const HAVE = 3;
+            const WORLD: bool;
+            const HAVE: TestEnum;
             const LOTS = 5;
             const OF = 1;
             const FUN = 6;
+        }
+    }
+
+    #[repr(u8)]
+    #[derive(Debug)]
+    enum TestEnum {
+        Foo = 0b00,
+        Bar = 0b01,
+        Baz = 0b10,
+        Qux = 0b11,
+    }
+
+    impl FromBits<u32> for TestEnum {
+        const BITS: u32 = 2;
+        type Error = core::convert::Infallible;
+
+        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+            Ok(match bits as u8 {
+                bits if bits == Self::Foo as u8 => Self::Foo,
+                bits if bits == Self::Bar as u8 => Self::Bar,
+                bits if bits == Self::Baz as u8 => Self::Baz,
+                bits if bits == Self::Qux as u8 => Self::Qux,
+                bits => unreachable!("all patterns are covered: {:#b}", bits),
+            })
+        }
+
+        fn into_bits(self) -> u32 {
+            self as u8 as u32
         }
     }
 
@@ -1271,18 +1499,16 @@ mod tests {
     fn test_bitfield_format() {
         let test_bitfield = TestBitfield::new()
             .set(TestBitfield::HELLO, 0b1001)
-            .set(TestBitfield::WORLD, 1)
-            .set(TestBitfield::HAVE, 3)
+            .set(TestBitfield::WORLD, true)
+            .set(TestBitfield::HAVE, TestEnum::Bar)
             .set(TestBitfield::LOTS, 0b11010)
             .set(TestBitfield::OF, 0)
             .set(TestBitfield::FUN, 9);
         println!("{}", test_bitfield);
     }
 
-
     #[test]
     fn macro_bitfield_valid() {
         TestBitfield::assert_valid();
     }
-
 }
