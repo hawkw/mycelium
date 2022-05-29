@@ -198,23 +198,19 @@ impl Attrs {
     }
 
     pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
-        *self = self.set(Self::GATE_KIND, kind);
-        self
+        self.set(Self::GATE_KIND, kind)
     }
 
     pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
-        *self = self.set(Self::IS_32_BIT, is_32_bit);
-        self
+        self.set(Self::IS_32_BIT, is_32_bit)
     }
 
     pub fn set_present(&mut self, present: bool) -> &mut Self {
-        *self = self.set(Self::PRESENT, present);
-        self
+        self.set(Self::PRESENT, present)
     }
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
-        *self = self.set(Self::RING, ring);
-        self
+        self.set(Self::RING, ring)
     }
 }
 

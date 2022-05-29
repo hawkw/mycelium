@@ -2,6 +2,8 @@
 ///
 /// # Examples
 ///
+/// Basic usage:
+///
 /// ```
 /// mycelium_util::bitfield! {
 ///     /// Bitfield types can have doc comments.
@@ -15,7 +17,7 @@
 ///         const _RESERVED = 4;
 ///         // Generates a packing spec named `WORLD` for the next 3 bits.
 ///         pub const WORLD = 3;
-///     };
+///     }
 /// }
 ///
 /// // Bitfield types can be cheaply constructed from a raw numeric
@@ -26,12 +28,22 @@
 /// assert_eq!(bitfield.get(MyBitfield::HELLO), 0b11_0101);
 /// assert_eq!(bitfield.get(MyBitfield::WORLD), 0b0101);
 ///
-/// // `set` methods can be used to pack bits into a bitfield type:
+/// // `with` methods can be used to pack bits into a bitfield type by
+/// // value:
 /// let bitfield2 = MyBitfield::new()
-///     .set(MyBitfield::HELLO, 0b11_0101)
+///     .with(MyBitfield::HELLO, 0b11_0101)
+///     .with(MyBitfield::WORLD, 0b0101);
+///
+/// assert_eq!(bitfield, bitfield2);
+///
+/// // `set` methods can be used to mutate a bitfield type in place:
+/// let mut bitfield3 = MyBitfield::new();
+///
+/// bitfield3
+///     .set(MyBitfield::HELLO, 0b011_0101)
 ///     .set(MyBitfield::WORLD, 0b0101);
 ///
-/// assert_eq!(bitfield1, bitfield2);
+/// assert_eq!(bitfield, bitfield3);
 /// ```
 #[macro_export]
 macro_rules! bitfield {
@@ -86,11 +98,19 @@ macro_rules! bitfield {
                 Self(0)
             }
 
-            $vis fn set<T>(self, packer: $crate::bitfield! { @t $T, T }, value: T) -> Self
+            $vis fn with<T>(self, packer: $crate::bitfield! { @t $T, T }, value: T) -> Self
             where
                 T: $crate::bits::FromBits<$T>,
             {
                 Self(packer.pack(value, self.0))
+            }
+
+            $vis fn set<T>(&mut self, packer: $crate::bitfield! { @t $T, T }, value: T) -> &mut Self
+            where
+                T: $crate::bits::FromBits<$T>,
+            {
+                packer.pack_into(value, &mut self.0);
+                self
             }
 
             $vis fn get<T>(self, packer: $crate::bitfield! { @t $T, T }) -> T
@@ -403,12 +423,12 @@ mod tests {
     #[test]
     fn test_bitfield_format() {
         let test_bitfield = TestBitfield::new()
-            .set(TestBitfield::HELLO, 0b1001)
-            .set(TestBitfield::WORLD, true)
-            .set(TestBitfield::HAVE, TestEnum::Bar)
-            .set(TestBitfield::LOTS, 0b11010)
-            .set(TestBitfield::OF, 0)
-            .set(TestBitfield::FUN, 9);
+            .with(TestBitfield::HELLO, 0b1001)
+            .with(TestBitfield::WORLD, true)
+            .with(TestBitfield::HAVE, TestEnum::Bar)
+            .with(TestBitfield::LOTS, 0b11010)
+            .with(TestBitfield::OF, 0)
+            .with(TestBitfield::FUN, 9);
         println!("{}", test_bitfield);
 
         let test_debug = TestDebug {

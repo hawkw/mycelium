@@ -126,9 +126,9 @@ mod tests {
     #[test]
     fn prettyprint() {
         let selector = Selector::new()
-            .set(Selector::RING, cpu::Ring::Ring3)
-            .set(Selector::IS_LDT, false)
-            .set(Selector::INDEX, 30);
+            .with(Selector::RING, cpu::Ring::Ring3)
+            .with(Selector::IS_LDT, false)
+            .with(Selector::INDEX, 30);
         println!("{selector}");
     }
 
