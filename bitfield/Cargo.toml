@@ -1,9 +1,11 @@
 [package]
-name = "hal-multiboot2"
+name = "mycelium-bitfield"
 version = "0.1.0"
-authors = ["Eliza Weisman <eliza@buoyant.io>"]
+authors = ["Eliza Weisman <eliza@elizas.website>"]
 edition = "2018"
-license = "MIT"
+rust-version = "1.61.0"
+
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
