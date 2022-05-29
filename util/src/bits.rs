@@ -212,23 +212,32 @@ macro_rules! impl_frombits_for_bool {
 }
 
 impl_frombits_for_ty! {
-    impl FromBits<u8, u16, u32, u64, usize> for u64 {}
-    impl FromBits<u8, u16, u32, usize> for usize {}
-    impl FromBits<u8, u16, u32> for u32 {}
-    impl FromBits<u8, u16> for u16 {}
-    impl FromBits<u8> for u8 {}
+    impl FromBits<u8, u16, u32, u64, usize> for u8 {}
+    impl FromBits<u16, u32, u64, usize> for u16 {}
+    impl FromBits<u32, u64, usize> for u32 {}
+    impl FromBits<u32, usize> for usize {}
+    impl FromBits<u64> for u64 {}
 
-    impl FromBits<u8, u16, u32, u64, usize> for i64 {}
-    impl FromBits<u8, u16, u32, usize> for isize {}
-    impl FromBits<u8, u16, u32> for i32 {}
-    impl FromBits<u8, u16> for i16 {}
-    impl FromBits<u8> for i8 {}
+    impl FromBits<u8, u16, u32, u64, usize> for i8 {}
+    impl FromBits<u16, u32, u64, usize> for i16 {}
+    impl FromBits<u32, u64, usize> for i32 {}
+    impl FromBits<u32, usize> for isize {}
+    impl FromBits<u64> for i64 {}
 }
 
 impl_frombits_for_bool! {
     impl FromBits<u8, u16, u32, u64, usize> for bool {}
 }
 
+#[cfg(target_pointer_width = "64")]
+impl_frombits_for_ty! {
+    impl FromBits<u64> for usize {}
+}
+
+#[cfg(target_pointer_width = "64")]
+impl_frombits_for_ty! {
+    impl FromBits<u64> for isize {}
+}
 // mod test_expand {
 //     trace_macros!(true);
 //     bitfield! {
