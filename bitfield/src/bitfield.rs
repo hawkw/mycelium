@@ -227,44 +227,71 @@ macro_rules! bitfield {
                 (stringify!($Field), Self::$Field.typed())
             ),+];
 
+            /// Constructs a new instance of `Self` from the provided raw bits.
             $vis const fn from_bits(bits: $T) -> Self {
                 Self(bits)
             }
 
+            /// Constructs a new instance of `Self` with all bits set to 0.
             $vis const fn new() -> Self {
                 Self(0)
             }
 
-            $vis fn with<T>(self, packer: $crate::bitfield! { @t $T, T }, value: T) -> Self
+            /// Packs the bit representation of `value` into `self` at the bit
+            /// range designated by `field`, returning a new bitfield.
+            $vis fn with<T>(self, field: $crate::bitfield! { @t $T, T }, value: T) -> Self
             where
                 T: $crate::FromBits<$T>,
             {
-                Self(packer.pack(value, self.0))
+                Self(field.pack(value, self.0))
             }
 
-            $vis fn set<T>(&mut self, packer: $crate::bitfield! { @t $T, T }, value: T) -> &mut Self
+
+            /// Packs the bit representation of `value` into `self` at the range
+            /// designated by `field`, mutating `self` in place.
+            $vis fn set<T>(&mut self, field: $crate::bitfield! { @t $T, T }, value: T) -> &mut Self
             where
                 T: $crate::FromBits<$T>,
             {
-                packer.pack_into(value, &mut self.0);
+                field.pack_into(value, &mut self.0);
                 self
             }
 
-            $vis fn get<T>(self, packer: $crate::bitfield! { @t $T, T }) -> T
+            /// Unpacks the bit range represented by `field` from `self`, and
+            /// converts it into a `T`-typed value.
+            ///
+            /// # Panics
+            ///
+            /// This method panics if `self` does not contain a valid bit
+            /// pattern for a `T`-typed value, as determined by `T`'s
+            /// [`mycelium_bitfield::FromBits::try_from_bits`] implementation.
+            $vis fn get<T>(self, field: $crate::bitfield! { @t $T, T }) -> T
             where
                 T: $crate::FromBits<$T>,
             {
-                packer.unpack(self.0)
+                field.unpack(self.0)
             }
 
-            $vis fn try_get<T>(self, packer: $crate::bitfield! { @t $T, T }) -> Result<T, T::Error>
+            /// Unpacks the bit range represented by `field`
+            /// from `self` and attempts to convert it into a `T`-typed value.
+            ///
+            /// # Returns
+            ///
+            /// - `Ok(T)` if a `T`-typed value could be constructed from the
+            ///   bits in `src`
+            /// - `Err(T::Error)` if `src` does not contain a valid bit
+            ///   pattern for a `T`-typed value, as determined by `T`'s
+            ///   [`mycelium_bitfield::FromBits::try_from_bits`] implementation.
+            $vis fn try_get<T>(self, field: $crate::bitfield! { @t $T, T }) -> Result<T, T::Error>
             where
                 T: $crate::FromBits<$T>,
             {
-                packer.try_unpack(self.0)
+                field.try_unpack(self.0)
             }
 
-
+            /// Asserts that all the packing specs for this type are valid.
+            ///
+            /// This is intended to be used in unit tests.
             $vis fn assert_valid() {
                 <$crate::bitfield! { @t $T, $T }>::assert_all_valid(&Self::FIELDS);
             }
