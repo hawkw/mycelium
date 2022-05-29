@@ -1,5 +1,10 @@
 /// Generates a typed bitfield struct.
 ///
+/// By default, the [`fmt::Debug`], [`fmt::Display`], [`fmt::Binary`], [`Copy`],
+/// and [`Clone`] traits are automatically derived for bitfields.
+///
+/// All bitfield types are [`#[repr(transparent)]`][transparent].
+///
 /// # Examples
 ///
 /// Basic usage:
@@ -7,7 +12,7 @@
 /// ```
 /// mycelium_util::bitfield! {
 ///     /// Bitfield types can have doc comments.
-///     #[derive(Eq, PartialEq)]
+///     #[derive(Eq, PartialEq)] // ...and attributes
 ///     pub struct MyBitfield<u16> {
 ///         // Generates a packing spec named `HELLO` for the first 6
 ///         // least-significant bits.
@@ -45,6 +50,138 @@
 ///
 /// assert_eq!(bitfield, bitfield3);
 /// ```
+///
+/// Bitfields may also contain typed values, as long as those values implement
+/// the [`FromBits`](crate::bits::FromBits) trait:
+///
+/// ```
+/// use mycelium_util::{bitfield, bits::FromBits};
+///
+/// // An enum type can implement the `FromBits` trait if it has a
+/// // `#[repr(uN)]` attribute.
+/// #[repr(u8)]
+/// #[derive(Debug, Eq, PartialEq)]
+/// enum MyEnum {
+///     Foo = 0b00,
+///     Bar = 0b01,
+///     Baz = 0b10,
+/// }
+///
+/// impl FromBits<u32> for MyEnum {
+///     // Two bits can represent all possible `MyEnum` values.
+///     const BITS: u32 = 2;
+///     type Error = &'static str;
+///
+///     fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+///         match bits as u8 {
+///             bits if bits == Self::Foo as u8 => Ok(Self::Foo),
+///             bits if bits == Self::Bar as u8 => Ok(Self::Bar),
+///             bits if bits == Self::Baz as u8 => Ok(Self::Baz),
+///             _ => Err("expected one of 0b00, 0b01, or 0b10"),
+///         }
+///     }
+///
+///     fn into_bits(self) -> u32 {
+///         self as u8 as u32
+///     }
+/// }
+///
+/// bitfield! {
+///     pub struct TypedBitfield<u32> {
+///         /// Use the first two bits to represent a typed `MyEnum` value.
+///         const ENUM_VALUE: MyEnum;
+///
+///         /// Typed values and untyped raw bit fields can be used in the
+///         /// same bitfield type.
+///         pub const SOME_BITS = 6;
+///
+///         /// The `FromBits` trait is also implemented for `bool`, which
+///         /// can be used to implement bitflags.
+///         pub const FLAG_1: bool;
+///         pub const FLAG_2: bool;
+///
+///         /// `FromBits` is also implemented by (signed and unsigned) integer
+///         /// types. This will allow the next 8 bits to be treated as a `u8`.
+///         pub const A_BYTE: u8;
+///     }
+/// }
+///
+/// // Unpacking a typed value with `get` will return that value, or panic if
+/// // the bit pattern is invalid:
+/// let my_bitfield = TypedBitfield::from_bits(0b0011_0101_1001_1110);
+///
+/// assert_eq!(my_bitfield.get(TypedBitfield::ENUM_VALUE), MyEnum::Baz);
+/// assert_eq!(my_bitfield.get(TypedBitfield::FLAG_1), true);
+/// assert_eq!(my_bitfield.get(TypedBitfield::FLAG_2), false);
+///
+/// // The `try_get` method will return an error rather than panicking if an
+/// // invalid bit pattern is encountered:
+///
+/// let invalid = TypedBitfield::from_bits(0b0011);
+///
+/// // There is no `MyEnum` variant for 0b11.
+/// assert!(invalid.try_get(TypedBitfield::ENUM_VALUE).is_err());
+/// ```
+///
+/// Bitfields will automatically generate a pretty [`fmt::Display`]
+/// implementation:
+///
+/// ```
+/// # use mycelium_util::{bitfield, bits::FromBits};
+/// #
+/// # #[repr(u8)]
+/// # #[derive(Debug, Eq, PartialEq)]
+/// # enum MyEnum {
+/// #     Foo = 0b00,
+/// #     Bar = 0b01,
+/// #     Baz = 0b10,
+/// # }
+/// #
+/// # impl FromBits<u32> for MyEnum {
+/// #     const BITS: u32 = 2;
+/// #     type Error = &'static str;
+/// #
+/// #     fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+/// #         match bits as u8 {
+/// #             bits if bits == Self::Foo as u8 => Ok(Self::Foo),
+/// #             bits if bits == Self::Bar as u8 => Ok(Self::Bar),
+/// #             bits if bits == Self::Baz as u8 => Ok(Self::Baz),
+/// #             _ => Err("expected one of 0b00, 0b01, or 0b10"),
+/// #         }
+/// #     }
+/// #
+/// #     fn into_bits(self) -> u32 {
+/// #         self as u8 as u32
+/// #     }
+/// # }
+/// # bitfield! {
+/// #      pub struct TypedBitfield<u32> {
+/// #          const ENUM_VALUE: MyEnum;
+/// #          pub const SOME_BITS = 6;
+/// #          pub const FLAG_1: bool;
+/// #          pub const FLAG_2: bool;
+/// #          pub const A_BYTE: u8;
+/// #      }
+/// # }
+///
+/// let my_bitfield = TypedBitfield::from_bits(0b0011_0101_1001_1110);
+/// let formatted = format!("{my_bitfield}");
+/// let expected = r#"
+/// 00000000000000000011010110011110
+/// └┬───────────────────┘││└┬───┘└┤
+///  │                    ││ │     └ ENUM_VALUE: Baz (10)
+///  │                    ││ └────── SOME_BITS: 39 (100111)
+///  │                    │└─────────── FLAG_1: true (1)
+///  │                    └──────────── FLAG_2: false (0)
+///  └───────────────────────────────── A_BYTE: 13 (0000000000000000001101)
+/// "#.trim_start();
+/// assert_eq!(formatted, expected);
+/// ```
+///
+/// [`fmt::Debug`]: core::fmt::Debug
+/// [`fmt::Display`]: core::fmt::Display
+/// [`fmt::Binary`]: core::fmt::Binary
+/// [transparent]: https://doc.rust-lang.org/reference/type-layout.html#the-transparent-representation
 #[macro_export]
 macro_rules! bitfield {
     (
