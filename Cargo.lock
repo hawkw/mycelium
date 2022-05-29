@@ -541,6 +541,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mycelium-bitfield"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "mycelium-kernel"
 version = "0.0.1"
 dependencies = [
@@ -579,6 +586,7 @@ version = "0.1.0"
 dependencies = [
  "cordyceps",
  "loom",
+ "mycelium-bitfield",
  "proptest",
  "tracing 0.2.0",
  "tracing-subscriber 0.3.0",

@@ -7,7 +7,7 @@ pub fn code_segment() -> Selector {
     Selector(value)
 }
 
-mycelium_util::bitfield! {
+mycelium_util::bits::bitfield! {
     #[derive(Eq, PartialEq)]
     pub struct Selector<u16> {
         /// The first 2 least-significant bits are the selector's priveliege ring.

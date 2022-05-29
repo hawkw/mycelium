@@ -10,7 +10,7 @@
 /// Basic usage:
 ///
 /// ```
-/// mycelium_util::bitfield! {
+/// mycelium_bitfield::bitfield! {
 ///     /// Bitfield types can have doc comments.
 ///     #[derive(Eq, PartialEq)] // ...and attributes
 ///     pub struct MyBitfield<u16> {
@@ -52,10 +52,10 @@
 /// ```
 ///
 /// Bitfields may also contain typed values, as long as those values implement
-/// the [`FromBits`](crate::bits::FromBits) trait:
+/// the [`FromBits`](crate::FromBits) trait:
 ///
 /// ```
-/// use mycelium_util::{bitfield, bits::FromBits};
+/// use mycelium_bitfield::{bitfield, FromBits};
 ///
 /// // An enum type can implement the `FromBits` trait if it has a
 /// // `#[repr(uN)]` attribute.
@@ -127,7 +127,7 @@
 /// implementation:
 ///
 /// ```
-/// # use mycelium_util::{bitfield, bits::FromBits};
+/// # use mycelium_bitfield::{bitfield, FromBits};
 /// #
 /// # #[repr(u8)]
 /// # #[derive(Debug, Eq, PartialEq)]
@@ -237,14 +237,14 @@ macro_rules! bitfield {
 
             $vis fn with<T>(self, packer: $crate::bitfield! { @t $T, T }, value: T) -> Self
             where
-                T: $crate::bits::FromBits<$T>,
+                T: $crate::FromBits<$T>,
             {
                 Self(packer.pack(value, self.0))
             }
 
             $vis fn set<T>(&mut self, packer: $crate::bitfield! { @t $T, T }, value: T) -> &mut Self
             where
-                T: $crate::bits::FromBits<$T>,
+                T: $crate::FromBits<$T>,
             {
                 packer.pack_into(value, &mut self.0);
                 self
@@ -252,14 +252,14 @@ macro_rules! bitfield {
 
             $vis fn get<T>(self, packer: $crate::bitfield! { @t $T, T }) -> T
             where
-                T: $crate::bits::FromBits<$T>,
+                T: $crate::FromBits<$T>,
             {
                 packer.unpack(self.0)
             }
 
             $vis fn try_get<T>(self, packer: $crate::bitfield! { @t $T, T }) -> Result<T, T::Error>
             where
-                T: $crate::bits::FromBits<$T>,
+                T: $crate::FromBits<$T>,
             {
                 packer.try_unpack(self.0)
             }
@@ -497,17 +497,17 @@ macro_rules! bitfield {
     //     $crate::bitfield! { @process_derives $vis struct $Name<$T> { $Next, $($Before),* } { $($rest)* } }
     // };
 
-    (@t usize, $V:ty) => { $crate::bits::PackUsize<$V> };
-    (@t u64, $V:ty) => { $crate::bits::Pack64<$V> };
-    (@t u32, $V:ty) => { $crate::bits::Pack32<$V> };
-    (@t u16, $V:ty) => { $crate::bits::Pack16<$V> };
-    (@t u8, $V:ty) => { $crate::bits::Pack8<$V> };
+    (@t usize, $V:ty) => { $crate::PackUsize<$V> };
+    (@t u64, $V:ty) => { $crate::Pack64<$V> };
+    (@t u32, $V:ty) => { $crate::Pack32<$V> };
+    (@t u16, $V:ty) => { $crate::Pack16<$V> };
+    (@t u8, $V:ty) => { $crate::Pack8<$V> };
     (@t $T:ty, $V:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u64`, `u32`, `u16`, or `u8`")) }
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 mod tests {
-    use crate::bits::FromBits;
+    use crate::FromBits;
 
     bitfield! {
         #[allow(dead_code)]

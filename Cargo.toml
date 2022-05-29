@@ -2,6 +2,7 @@
 members = [
     "alloc",
     "async",
+    "bitfield",
     "cordyceps",
     "util",
     "hal-core",

@@ -20,7 +20,7 @@ pub struct Descriptor {
     _zero: u32,
 }
 
-mycelium_util::bitfield! {
+mycelium_util::bits::bitfield! {
     #[derive(Eq, PartialEq)]
     pub struct Attrs<u8> {
         pub const GATE_KIND: GateKind;
