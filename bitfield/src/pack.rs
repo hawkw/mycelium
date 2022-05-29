@@ -15,10 +15,10 @@ macro_rules! make_packers {
                 stringify!($Bits),
                 "`] values."
             )]
-            pub struct $Pack<T = $Bits> {
+            pub struct $Pack<T = $Bits, F = ()> {
                 mask: $Bits,
                 shift: u32,
-                _dst_ty: PhantomData<fn(&T)>,
+                _dst_ty: PhantomData<fn(&T, &F)>,
             }
 
             #[doc = concat!(
@@ -38,7 +38,7 @@ macro_rules! make_packers {
                 dst_shr: $Bits,
             }
 
-            impl $Pack {
+            impl $Pack<$Bits> {
                 #[doc = concat!(
                     "Wrap a [`",
                     stringify!($Bits),
@@ -133,7 +133,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<T> $Pack<T> {
+            impl<T, F> $Pack<T, F> {
                 // XXX(eliza): why is this always `u32`? ask the stdlib i guess...
                 const SIZE_BITS: u32 = <$Bits>::MAX.leading_ones();
 
@@ -152,7 +152,7 @@ macro_rules! make_packers {
                 }
 
                 #[doc(hidden)]
-                pub const fn typed<T2>(self) -> $Pack<T2>
+                pub const fn typed<T2, F2>(self) -> $Pack<T2, F2>
                 where
                     T2: FromBits<$Bits>
                 {
@@ -215,7 +215,7 @@ macro_rules! make_packers {
                     base
                 }
 
-                pub const fn then<T2>(&self) -> $Pack<T2>
+                pub const fn then<T2>(&self) -> $Pack<T2, F>
                 where
                     T2: FromBits<$Bits>
                 {
@@ -224,7 +224,7 @@ macro_rules! make_packers {
 
                 /// Returns a packer for packing a value into the next more-significant
                 /// `n` from `self`.
-                pub const fn next(&self, n: u32) -> $Pack {
+                pub const fn next(&self, n: u32) -> $Pack<$Bits, F> {
                     let shift = self.shift_next();
                     let mask = Self::mk_mask(n) << shift;
                     $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
@@ -232,7 +232,7 @@ macro_rules! make_packers {
 
                 /// Returns a packer for packing a value into all the remaining
                 /// more-significant bits after `self`.
-                pub const fn remaining(&self) -> $Pack {
+                pub const fn remaining(&self) -> $Pack<$Bits, F> {
                     let shift = self.shift_next();
                     let n = Self::SIZE_BITS - shift;
                     let mask = Self::mk_mask(n) << shift;
@@ -405,14 +405,14 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<T> $Pack<T>
+            impl<T, F> $Pack<T, F>
             where
                 T: FromBits<$Bits>,
             {
                 /// Returns a packing spec for packing a `T`-typed value in the
                 /// first [`T::BITS`](FromBits::BITS) least-significant bits.
                 pub const fn first() -> Self {
-                    $Pack::least_significant(T::BITS).typed()
+                    $Pack::<$Bits, ()>::least_significant(T::BITS).typed()
                 }
 
                 /// Returns a pair type for packing bits from the range
@@ -422,7 +422,7 @@ macro_rules! make_packers {
                 /// The packing pair can be used to pack bits from one location
                 /// into another location, and vice versa.
                 pub const fn pair_at(&self, at: u32) -> $Pair<T> {
-                    let dst = $Pack::starting_at(at, self.bits()).typed();
+                    let dst = $Pack::<$Bits, ()>::starting_at(at, self.bits()).typed();
                     let at = at.saturating_sub(1);
                     // TODO(eliza): validate that `at + self.bits() < N_BITS` in
                     // const fn somehow lol
@@ -435,7 +435,7 @@ macro_rules! make_packers {
                         (0, (self.shift - at) as $Bits)
                     };
                     $Pair {
-                        src: *self,
+                        src: self.typed(),
                         dst,
                         dst_shl,
                         dst_shr,
@@ -521,7 +521,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<T> Clone for $Pack<T> {
+            impl<T, F> Clone for $Pack<T, F> {
                 fn clone(&self) -> Self {
                     Self {
                         mask: self.mask,
@@ -531,9 +531,9 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<T> Copy for $Pack<T> {}
+            impl<T, F> Copy for $Pack<T, F> {}
 
-            impl<T> fmt::Debug for $Pack<T> {
+            impl<T, F> fmt::Debug for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
@@ -543,7 +543,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<T> fmt::UpperHex for $Pack<T> {
+            impl<T, F> fmt::UpperHex for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#X}", self.mask))
@@ -553,7 +553,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<T> fmt::LowerHex for $Pack<T> {
+            impl<T, F> fmt::LowerHex for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#x}", self.mask))
@@ -563,7 +563,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<T> fmt::Binary for $Pack<T> {
+            impl<T, F> fmt::Binary for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
@@ -579,28 +579,28 @@ macro_rules! make_packers {
                 }
             }
 
-            impl<A, B> PartialEq<$Pack<B>> for $Pack<A> {
+            impl<A, B, F> PartialEq<$Pack<B, F>> for $Pack<A, F> {
                 #[inline]
-                fn eq(&self, other: &$Pack<B>) -> bool {
+                fn eq(&self, other: &$Pack<B, F>) -> bool {
                     self.mask == other.mask && self.shift == other.shift
                 }
             }
 
-            impl<A, B> PartialEq<&'_ $Pack<B>> for $Pack<A> {
+            impl<A, B, F> PartialEq<&'_ $Pack<B, F>> for $Pack<A, F> {
                 #[inline]
-                fn eq(&self, other: &&'_ $Pack<B>) -> bool {
+                fn eq(&self, other: &&'_ $Pack<B, F>) -> bool {
                     self.eq(*other)
                 }
             }
 
-            impl<A, B> PartialEq<$Pack<B>> for &'_ $Pack<A> {
+            impl<A, B, F> PartialEq<$Pack<B, F>> for &'_ $Pack<A, F> {
                 #[inline]
-                fn eq(&self, other: &$Pack<B>) -> bool {
+                fn eq(&self, other: &$Pack<B, F>) -> bool {
                     (*self).eq(other)
                 }
             }
 
-            impl<T> Eq for $Pack<T> {}
+            impl<T, F> Eq for $Pack<T, F> {}
 
             // === packing type ===
 
