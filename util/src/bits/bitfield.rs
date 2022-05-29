@@ -1,3 +1,38 @@
+/// Generates a typed bitfield struct.
+///
+/// # Examples
+///
+/// ```
+/// mycelium_util::bitfield! {
+///     /// Bitfield types can have doc comments.
+///     #[derive(Eq, PartialEq)]
+///     pub struct MyBitfield<u16> {
+///         // Generates a packing spec named `HELLO` for the first 6
+///         // least-significant bits.
+///         pub const HELLO = 6;
+///         // Fields with names starting with `_` can be used to mark bits as
+///         // reserved.
+///         const _RESERVED = 4;
+///         // Generates a packing spec named `WORLD` for the next 3 bits.
+///         pub const WORLD = 3;
+///     };
+/// }
+///
+/// // Bitfield types can be cheaply constructed from a raw numeric
+/// // representation:
+/// let bitfield = MyBitfield::from_bits(0b10100_0011_0101);
+///
+/// // `get` methods can be used to unpack fields from a bitfield type:
+/// assert_eq!(bitfield.get(MyBitfield::HELLO), 0b11_0101);
+/// assert_eq!(bitfield.get(MyBitfield::WORLD), 0b0101);
+///
+/// // `set` methods can be used to pack bits into a bitfield type:
+/// let bitfield2 = MyBitfield::new()
+///     .set(MyBitfield::HELLO, 0b11_0101)
+///     .set(MyBitfield::WORLD, 0b0101);
+///
+/// assert_eq!(bitfield1, bitfield2);
+/// ```
 #[macro_export]
 macro_rules! bitfield {
     (
