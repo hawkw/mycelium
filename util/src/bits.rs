@@ -137,11 +137,33 @@ use core::{
     ops::{Bound, Range, RangeBounds},
 };
 
+/// Trait implemented by values which can be converted to and from raw bits.
 pub trait FromBits<B>: Sized {
+    /// The error type returned by [`Self::try_from_bits`] when an invalid bit
+    /// pattern is encountered.
+    ///
+    /// If all bit patterns possible in [`Self::BITS`] bits are valid bit
+    /// patterns for a `Self`-typed value, this should generally be
+    /// [`core::convert::Infallible`].
     type Error: fmt::Display;
+
+    /// The number of bits required to represent a value of this type.
     const BITS: u32;
 
+    /// Attempt to convert `bits` into a value of this type.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` if `bits` contained a valid bit pattern for a value of this
+    ///   type.
+    /// - `Err(Self::Error)` if `bits` is an invalid bit pattern for a value of
+    ///   this type.
     fn try_from_bits(bits: B) -> Result<Self, Self::Error>;
+
+    /// Convert `self` into a raw bit representation.
+    ///
+    /// In general, this will be a low-cost conversion (e.g., for `enum`s, this
+    /// is generally an `as` cast).
     fn into_bits(self) -> B;
 }
 
@@ -177,6 +199,7 @@ macro_rules! bitfield {
         // Some generated methods may not always be used, which may emit dead
         // code warnings if the type is private.
         #[allow(dead_code)]
+        #[automatically_derived]
         impl $Name {
             $crate::bitfield! { @field<$T>:
                 $(
@@ -186,7 +209,7 @@ macro_rules! bitfield {
             }
 
             const FIELDS: &'static [(&'static str, $crate::bitfield! { @t $T, $T })] = &[$(
-                (stringify!($Field), Self::$Field.map_ty())
+                (stringify!($Field), Self::$Field.typed())
             ),+];
 
             $vis const fn from_bits(bits: $T) -> Self {
@@ -235,7 +258,7 @@ macro_rules! bitfield {
                 let mut rem = 0;
                 let mut fields = Self::FIELDS.iter().rev().peekable();
                 while let Some((name, field)) = fields.next() {
-                    while cur_pos > field.msb_position() {
+                    while cur_pos > field.most_significant_index() {
                         f.write_str(" ")?;
                         cur_pos -= 1;
                     }
@@ -276,12 +299,12 @@ macro_rules! bitfield {
                         f.pad("")?;
                         cur_pos = $T::BITS;
                         for (cur_name, cur_field) in Self::FIELDS.iter().rev() {
-                            while cur_pos > cur_field.msb_position() {
+                            while cur_pos > cur_field.most_significant_index() {
                                 f.write_str(" ")?;
                                 cur_pos -= 1;
                             }
 
-                            if field.map_ty::<$T>() == cur_field.map_ty::<$T>() {
+                            if field.typed::<$T>() == cur_field.typed::<$T>() {
                                 break;
                             }
 
@@ -607,7 +630,11 @@ macro_rules! make_packers {
                 }
 
                 #[doc(hidden)]
-                pub const fn map_ty<T2>(self) -> $Pack<T2> {
+                pub const fn typed<T2>(self) -> $Pack<T2>
+                where
+                    T2: FromBits<$Bits>
+                {
+                    assert!(T2::BITS >= self.bits());
                     $Pack {
                         shift: self.shift,
                         mask: self.mask,
@@ -615,67 +642,6 @@ macro_rules! make_packers {
                     }
                 }
 
-                pub const fn first() -> Self
-                where T: FromBits<$Bits>
-                {
-                    $Pack::least_significant(T::BITS).map_ty()
-                }
-
-                pub const fn then<T2>(&self) -> $Pack<T2>
-                where T2: FromBits<$Bits> {
-                    self.next(T2::BITS).map_ty()
-                }
-
-                /// Returns a packer for packing a value into the next more-significant
-                /// `n` from `self`.
-                pub const fn next(&self, n: u32) -> $Pack {
-                    let shift = self.shift_next();
-                    let mask = Self::mk_mask(n) << shift;
-                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
-                }
-
-                /// Returns a packer for packing a value into all the remaining
-                /// more-significant bits after `self`.
-                pub const fn remaining(&self) -> $Pack {
-                    let shift = self.shift_next();
-                    let n = Self::SIZE_BITS - shift;
-                    let mask = Self::mk_mask(n) << shift;
-                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
-                }
-
-
-                /// Returns a pair type for packing bits from the range
-                /// specified by `self` at the specified offset `at`, which may
-                /// differ from `self`'s offset.
-                ///
-                /// The packing pair can be used to pack bits from one location
-                /// into another location, and vice versa.
-                pub const fn pair_at(&self, at: u32) -> $Pair<T> {
-                    let dst = $Pack::starting_at(at, self.bits()).map_ty();
-                    let at = at.saturating_sub(1);
-                    // TODO(eliza): validate that `at + self.bits() < N_BITS` in
-                    // const fn somehow lol
-                    let (dst_shl, dst_shr) = if at > self.shift {
-                        // If the destination is greater than `self`, we need to
-                        // shift left.
-                        ((at - self.shift) as $Bits, 0)
-                    } else {
-                        // Otherwise, shift down.
-                        (0, (self.shift - at) as $Bits)
-                    };
-                    $Pair {
-                        src: *self,
-                        dst,
-                        dst_shl,
-                        dst_shr,
-                    }
-                }
-
-                /// Returns a pair type for packing bits from the range
-                /// specified by `self` after the specified packing spec.
-                pub const fn pair_after(&self, after: &Self) -> $Pair<T> {
-                    self.pair_at(after.shift_next())
-                }
 
                 /// Returns the number of bits needed to pack this value.
                 pub const fn bits(&self) -> u32 {
@@ -713,53 +679,6 @@ macro_rules! make_packers {
                     rest | (value << self.shift)
                 }
 
-                /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
-                ///
-                /// # Panics
-                ///
-                /// Panics if any other bits outside of [`self.bits()`] are set
-                /// in `value`.
-                ///
-                /// [`self.bits()`]: Self::bits
-                pub fn pack(&self, value: T, base: $Bits) -> $Bits
-                where
-                    T: FromBits<$Bits>,
-                {
-                    let value = value.into_bits();
-                    assert!(
-                        value <= self.max_value(),
-                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
-                        value,
-                        self.max_value(),
-                    );
-                    self.pack_truncating(value, base)
-                }
-
-                /// Pack the [`self.bits()`] least-significant bits from `value`
-                /// into `base`, mutating `base`.
-                ///
-                /// # Panics
-                ///
-                /// Panics if any other bits outside of [`self.bits()`] are set
-                /// in `value`.
-                ///
-                /// [`self.bits()`]: Self::bits
-                pub fn pack_into<'base>(&self, value: T, base: &'base mut $Bits) -> &'base mut $Bits
-                where
-                    T: FromBits<$Bits>,
-                {
-                    let value = value.into_bits();
-                    assert!(
-                        value <= self.max_value(),
-                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
-                        value,
-                        self.max_value(),
-                    );
-                    *base &= !self.mask;
-                    *base |= (value << self.shift);
-                    base
-                }
-
                 /// Pack the [`self.bits()`] least-significant bits from `value`
                 /// into `base`, mutating `base`.
                 ///
@@ -773,6 +692,31 @@ macro_rules! make_packers {
                     *base |= (value << self.shift);
                     base
                 }
+
+                pub const fn then<T2>(&self) -> $Pack<T2>
+                where
+                    T2: FromBits<$Bits>
+                {
+                    self.next(T2::BITS).typed()
+                }
+
+                /// Returns a packer for packing a value into the next more-significant
+                /// `n` from `self`.
+                pub const fn next(&self, n: u32) -> $Pack {
+                    let shift = self.shift_next();
+                    let mask = Self::mk_mask(n) << shift;
+                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
+                }
+
+                /// Returns a packer for packing a value into all the remaining
+                /// more-significant bits after `self`.
+                pub const fn remaining(&self) -> $Pack {
+                    let shift = self.shift_next();
+                    let n = Self::SIZE_BITS - shift;
+                    let mask = Self::mk_mask(n) << shift;
+                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
+                }
+
 
                 /// Set _all_ bits packed by this packer to 1.
                 ///
@@ -834,23 +778,6 @@ macro_rules! make_packers {
                     (src & self.mask) >> self.shift
                 }
 
-                pub fn try_unpack(&self, src: $Bits) -> Result<T, T::Error>
-                where
-                    T: FromBits<$Bits>,
-                {
-                    T::try_from_bits(self.unpack_bits(src))
-                }
-
-                pub fn unpack(&self, src: $Bits) -> T
-                where
-                    T: FromBits<$Bits>,
-                {
-                    let bits = self.unpack_bits(src);
-                    match T::try_from_bits(bits) {
-                        Ok(value) => value,
-                        Err(e) => panic!("failed to construct {} from bits {:#b} ({}): {}", core::any::type_name::<T>(), bits, bits, e),
-                    }
-                }
 
                 /// Returns `true` if **any** bits specified by this packing spec
                 /// are set in `src`.
@@ -879,11 +806,12 @@ macro_rules! make_packers {
                     self.assert_valid_inner(&"")
                 }
 
-                pub const fn lsb_position(&self) -> u32 {
+                /// Returns the position
+                pub const fn least_significant_index(&self) -> u32 {
                     self.shift
                 }
 
-                pub const fn msb_position(&self) -> u32 {
+                pub const fn most_significant_index(&self) -> u32 {
                     Self::SIZE_BITS - self.mask.leading_zeros()
                 }
 
@@ -917,12 +845,12 @@ macro_rules! make_packers {
                         self,
                         cx,
                     );
-                    assert_eq!(self.msb_position() - self.lsb_position(), self.bits(),
-                    "msb_position - lsb_position ({} + {} = {}) must equal total number of bits ({})\n\
+                    assert_eq!(self.most_significant_index() - self.least_significant_index(), self.bits(),
+                    "most_significant_index - least_significant_index ({} + {} = {}) must equal total number of bits ({})\n\
                     -> while checking validity of {:?}{}",
-                        self.msb_position(),
-                        self.lsb_position(),
-                        self.msb_position() - self.lsb_position(), self.bits(),
+                        self.most_significant_index(),
+                        self.least_significant_index(),
+                        self.most_significant_index() - self.least_significant_index(), self.bits(),
                         self, cx
                     )
                 }
@@ -951,6 +879,122 @@ macro_rules! make_packers {
                                 );
                             }
                         }
+                    }
+                }
+            }
+
+            impl<T> $Pack<T>
+            where
+                T: FromBits<$Bits>,
+            {
+                /// Returns a packing spec for packing a `T`-typed value in the
+                /// first [`T::BITS`](FromBits::BITS) least-significant bits.
+                pub const fn first() -> Self {
+                    $Pack::least_significant(T::BITS).typed()
+                }
+
+                /// Returns a pair type for packing bits from the range
+                /// specified by `self` at the specified offset `at`, which may
+                /// differ from `self`'s offset.
+                ///
+                /// The packing pair can be used to pack bits from one location
+                /// into another location, and vice versa.
+                pub const fn pair_at(&self, at: u32) -> $Pair<T> {
+                    let dst = $Pack::starting_at(at, self.bits()).typed();
+                    let at = at.saturating_sub(1);
+                    // TODO(eliza): validate that `at + self.bits() < N_BITS` in
+                    // const fn somehow lol
+                    let (dst_shl, dst_shr) = if at > self.shift {
+                        // If the destination is greater than `self`, we need to
+                        // shift left.
+                        ((at - self.shift) as $Bits, 0)
+                    } else {
+                        // Otherwise, shift down.
+                        (0, (self.shift - at) as $Bits)
+                    };
+                    $Pair {
+                        src: *self,
+                        dst,
+                        dst_shl,
+                        dst_shr,
+                    }
+                }
+
+                /// Returns a pair type for packing bits from the range
+                /// specified by `self` after the specified packing spec.
+                pub const fn pair_after(&self, after: &Self) -> $Pair<T> {
+                    self.pair_at(after.shift_next())
+                }
+
+                /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
+                ///
+                /// # Panics
+                ///
+                /// Panics if any other bits outside of [`self.bits()`] are set
+                /// in `value`.
+                ///
+                /// [`self.bits()`]: Self::bits
+                pub fn pack(&self, value: T, base: $Bits) -> $Bits {
+                    let value = value.into_bits();
+                    assert!(
+                        value <= self.max_value(),
+                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
+                        value,
+                        self.max_value(),
+                    );
+                    self.pack_truncating(value, base)
+                }
+
+                /// Pack the [`self.bits()`] least-significant bits from `value`
+                /// into `base`, mutating `base`.
+                ///
+                /// # Panics
+                ///
+                /// Panics if any other bits outside of [`self.bits()`] are set
+                /// in `value`.
+                ///
+                /// [`self.bits()`]: Self::bits
+                pub fn pack_into<'base>(&self, value: T, base: &'base mut $Bits) -> &'base mut $Bits {
+                    let value = value.into_bits();
+                    assert!(
+                        value <= self.max_value(),
+                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
+                        value,
+                        self.max_value(),
+                    );
+                    *base &= !self.mask;
+                    *base |= (value << self.shift);
+                    base
+                }
+
+                /// Attempts to unpack a `T`-typed value from `src`.
+                ///
+                /// # Returns
+                ///
+                /// - `Ok(T)` if a `T`-typed value could be constructed from the
+                ///   bits in `src`
+                /// - `Err(T::Error)` if `src` does not contain a valid bit
+                ///   pattern for a `T`-typed value, as determined by `T`'s
+                ///   [`FromBits::try_from_bits`] implementation.
+                pub fn try_unpack(&self, src: $Bits) -> Result<T, T::Error> {
+                    T::try_from_bits(self.unpack_bits(src))
+                }
+
+                /// Unpacks a `T`-typed value from `src`.
+                ///
+                /// # Panics
+                ///
+                /// This method panics if `src` does not contain a valid bit
+                /// pattern for a `T`-typed value, as determined by `T`'s
+                /// [`FromBits::try_from_bits`] implementation.
+                pub fn unpack(&self, src: $Bits) -> T
+                where
+                    T: FromBits<$Bits>,
+                {
+                    let bits = self.unpack_bits(src);
+                    match T::try_from_bits(bits) {
+                        Ok(value) => value,
+                        Err(e) => panic!("failed to construct {} from bits {:#b} ({}): {}", core::any::type_name::<T>(), bits, bits, e),
                     }
                 }
             }
