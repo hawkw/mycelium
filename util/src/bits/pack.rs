@@ -1,5 +1,6 @@
 use super::FromBits;
 use core::{
+    any::type_name,
     fmt,
     marker::PhantomData,
     ops::{Bound, Range, RangeBounds},
@@ -17,7 +18,7 @@ macro_rules! make_packers {
             pub struct $Pack<T = $Bits> {
                 mask: $Bits,
                 shift: u32,
-                _dst_ty: core::marker::PhantomData<fn(&T)>,
+                _dst_ty: PhantomData<fn(&T)>,
             }
 
             #[doc = concat!(
@@ -515,7 +516,7 @@ macro_rules! make_packers {
                     let bits = self.unpack_bits(src);
                     match T::try_from_bits(bits) {
                         Ok(value) => value,
-                        Err(e) => panic!("failed to construct {} from bits {:#b} ({}): {}", core::any::type_name::<T>(), bits, bits, e),
+                        Err(e) => panic!("failed to construct {} from bits {:#b} ({}): {}", type_name::<T>(), bits, bits, e),
                     }
                 }
             }
@@ -525,7 +526,7 @@ macro_rules! make_packers {
                     Self {
                         mask: self.mask,
                         shift: self.shift,
-                        _dst_ty: core::marker::PhantomData,
+                        _dst_ty: PhantomData,
                     }
                 }
             }
@@ -537,7 +538,7 @@ macro_rules! make_packers {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
                         .field("shift", &self.shift)
-                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
@@ -547,7 +548,7 @@ macro_rules! make_packers {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#X}", self.mask))
                         .field("shift", &self.shift)
-                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
@@ -557,7 +558,7 @@ macro_rules! make_packers {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#x}", self.mask))
                         .field("shift", &self.shift)
-                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
@@ -567,7 +568,7 @@ macro_rules! make_packers {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
                         .field("shift", &self.shift)
-                        .field("dst_type", &format_args!("{}", core::any::type_name::<T>()))
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
