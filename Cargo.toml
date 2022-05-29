@@ -17,6 +17,7 @@ name = "mycelium-kernel"
 version = "0.0.1"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
 edition = "2018"
+license = "MIT"
 
 [lib]
 name = "mycelium_kernel"

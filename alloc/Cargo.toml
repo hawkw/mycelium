@@ -6,6 +6,7 @@ authors = [
     "Eliza Weisman <eliza@elizas.website>",
 ]
 edition = "2018"
+license = "MIT"
 
 [features]
 bump = []
