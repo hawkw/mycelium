@@ -50,7 +50,7 @@ impl FromBits<u32> for AnotherTestEnum {
     fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
         match bits as u8 {
             bits if bits == Self::Alice as u8 => Ok(Self::Alice),
-            bits if bits == Self::Bob as u8 => Ok(Self::Bar),
+            bits if bits == Self::Bob as u8 => Ok(Self::Bob),
             bits if bits == Self::Charlie as u8 => Ok(Self::Charlie),
             _ => Err("invalid bit pattern for `AnotherTestEnum`, expected \
                 one of `0b1000`, `0b1100`, or `0b1110`"),
