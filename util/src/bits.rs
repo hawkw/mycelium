@@ -174,6 +174,9 @@ macro_rules! bitfield {
             }
         }
 
+        // Some generated methods may not always be used, which may emit dead
+        // code warnings if the type is private.
+        #[allow(dead_code)]
         impl $Name {
             $crate::bitfield! { @field<$T>:
                 $(

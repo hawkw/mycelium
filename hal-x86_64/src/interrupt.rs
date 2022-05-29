@@ -1,4 +1,4 @@
-use crate::{cpu, segment, VAddr};
+use crate::{segment, VAddr};
 use core::{arch::asm, fmt, marker::PhantomData};
 use hal_core::interrupt::{ctx, Handlers};
 
