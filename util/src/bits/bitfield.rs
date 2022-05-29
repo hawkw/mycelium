@@ -135,7 +135,7 @@ macro_rules! bitfield {
                                 cur_pos -= 1;
                             }
 
-                            if field.typed::<$T>() == cur_field.typed::<$T>() {
+                            if field == cur_field {
                                 break;
                             }
 

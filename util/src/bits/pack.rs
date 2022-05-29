@@ -14,7 +14,6 @@ macro_rules! make_packers {
                 stringify!($Bits),
                 "`] values."
             )]
-            #[derive(PartialEq, Eq)]
             pub struct $Pack<T = $Bits> {
                 mask: $Bits,
                 shift: u32,
@@ -31,7 +30,6 @@ macro_rules! make_packers {
             #[derive(Copy, Clone, PartialEq, Eq)]
             pub struct $Packing($Bits);
 
-            #[derive(PartialEq, Eq)]
             pub struct $Pair<T = $Bits> {
                 src: $Pack<T>,
                 dst: $Pack<T>,
@@ -580,6 +578,29 @@ macro_rules! make_packers {
                 }
             }
 
+            impl<A, B> PartialEq<$Pack<B>> for $Pack<A> {
+                #[inline]
+                fn eq(&self, other: &$Pack<B>) -> bool {
+                    self.mask == other.mask && self.shift == other.shift
+                }
+            }
+
+            impl<A, B> PartialEq<&'_ $Pack<B>> for $Pack<A> {
+                #[inline]
+                fn eq(&self, other: &&'_ $Pack<B>) -> bool {
+                    self.eq(*other)
+                }
+            }
+
+            impl<A, B> PartialEq<$Pack<B>> for &'_ $Pack<A> {
+                #[inline]
+                fn eq(&self, other: &$Pack<B>) -> bool {
+                    (*self).eq(other)
+                }
+            }
+
+            impl<T> Eq for $Pack<T> {}
+
             // === packing type ===
 
             impl $Packing {
@@ -821,6 +842,30 @@ macro_rules! make_packers {
                         .finish()
                 }
             }
+
+            impl<A, B> PartialEq<$Pair<B>> for $Pair<A> {
+                #[inline]
+                fn eq(&self, other: &$Pair<B>) -> bool {
+                    self.src == other.src && self.dst == other.dst
+                }
+            }
+
+            impl<A, B> PartialEq<&'_ $Pair<B>> for $Pair<A> {
+                #[inline]
+                fn eq(&self, other: &&'_ $Pair<B>) -> bool {
+                    self.eq(*other)
+                }
+            }
+
+            impl<A, B> PartialEq<$Pair<B>> for &'_ $Pair<A> {
+                #[inline]
+                fn eq(&self, other: &$Pair<B>) -> bool {
+                    (*self).eq(other)
+                }
+            }
+
+
+            impl<T> Eq for $Pair<T> {}
         )+
     }
 }
