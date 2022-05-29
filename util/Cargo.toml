@@ -13,6 +13,8 @@ alloc = ["cordyceps/alloc"]
 [dependencies]
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }
 cordyceps = { path = "../cordyceps", default-features = false }
+mycelium-bitfield = { path = "../bitfield", default-features = false }
+
 
 [dev-dependencies]
 proptest = "1"

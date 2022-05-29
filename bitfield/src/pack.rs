@@ -879,7 +879,7 @@ make_packers! {
     pub struct Pack8 { bits: u8, packing: Packing8, pair: Pair8, }
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;

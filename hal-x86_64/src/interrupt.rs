@@ -37,7 +37,7 @@ pub struct Interrupt<T = ()> {
 #[repr(transparent)]
 pub struct PageFaultCode(u32);
 
-mycelium_util::bitfield! {
+mycelium_util::bits::bitfield! {
     /// Error code set by the "Invalid TSS", "Segment Not Present", "Stack-Segment
     /// Fault", and "General Protection Fault" faults.
     ///
