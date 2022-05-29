@@ -1,4 +1,5 @@
-use core::{arch::asm, fmt, mem};
+use core::{arch::asm, convert::Infallible, fmt, mem};
+use mycelium_util::bits;
 
 pub mod intrinsics;
 
@@ -118,6 +119,24 @@ impl fmt::Display for DescriptorTable {
     }
 }
 
+impl bits::FromBits<u16> for DescriptorTable {
+    type Error = Infallible;
+    const BITS: u32 = 2;
+    fn try_from_bits(bits: u16) -> Result<Self, Self::Error> {
+        Ok(match bits {
+            0b00 => Self::Gdt,
+            0b01 => Self::Idt,
+            0b10 => Self::Ldt,
+            0b11 => Self::Idt,
+            _ => unreachable!("only 2 bits should be unpacked!"),
+        })
+    }
+
+    fn into_bits(self) -> u16 {
+        todo!("eliza")
+    }
+}
+
 // === impl Ring ===
 
 impl Ring {
@@ -129,6 +148,32 @@ impl Ring {
             0b11 => Ring::Ring3,
             bits => panic!("invalid ring {:#02b}", bits),
         }
+    }
+}
+
+impl bits::FromBits<u16> for Ring {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(u: u16) -> Result<Self, Self::Error> {
+        Ok(Self::from_u8(u as u8))
+    }
+
+    fn into_bits(self) -> u16 {
+        self as u8 as u16
+    }
+}
+
+impl bits::FromBits<u8> for Ring {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(u: u8) -> Result<Self, Self::Error> {
+        Ok(Self::from_u8(u))
+    }
+
+    fn into_bits(self) -> u8 {
+        self as u8
     }
 }
 
