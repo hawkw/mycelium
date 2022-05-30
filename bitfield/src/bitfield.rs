@@ -296,7 +296,7 @@ macro_rules! bitfield {
             ///
             /// This method panics if `self` does not contain a valid bit
             /// pattern for a `T`-typed value, as determined by `T`'s
-            /// [`mycelium_bitfield::FromBits::try_from_bits`] implementation.
+            /// `FromBits::try_from_bits` implementation.
             $vis fn get<T>(self, field: $crate::bitfield! { @t $T, T, Self }) -> T
             where
                 T: $crate::FromBits<$T>,
@@ -313,7 +313,7 @@ macro_rules! bitfield {
             ///   bits in `src`
             /// - `Err(T::Error)` if `src` does not contain a valid bit
             ///   pattern for a `T`-typed value, as determined by `T`'s
-            ///   [`mycelium_bitfield::FromBits::try_from_bits`] implementation.
+            ///   [`FromBits::try_from_bits` implementation.
             $vis fn try_get<T>(self, field: $crate::bitfield! { @t $T, T, Self }) -> Result<T, T::Error>
             where
                 T: $crate::FromBits<$T>,
