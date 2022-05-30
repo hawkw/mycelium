@@ -532,6 +532,7 @@ dependencies = [
  "cordyceps",
  "futures-util",
  "loom",
+ "mycelium-bitfield",
  "mycelium-util",
  "mycotest",
  "pin-project",

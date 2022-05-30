@@ -3,69 +3,180 @@ use crate::loom::sync::atomic::{
     Ordering::{self, *},
 };
 use core::fmt;
-use mycelium_util::bits::PackUsize;
 
-#[derive(Clone, Copy)]
-pub(crate) struct State(usize);
+mycelium_bitfield::bitfield! {
+    /// A snapshot of a task's current state.
+    #[derive(PartialEq, Eq)]
+    pub(crate) struct State<usize> {
+        /// If set, this task is currently being polled.
+        pub(crate) const POLLING: bool;
 
+        /// If set, this task's [`Waker`] has been woken.
+        ///
+        /// [`Waker`]: core::task::Waker
+        pub(crate) const WOKEN: bool;
+
+        /// If set, this task's [`Future`] has completed (i.e., it has returned
+        /// [`Poll::Ready`]).
+        ///
+        /// [`Future`]: core::future::Future
+        /// [`Poll::Ready`]: core::task::Poll::Ready
+        pub(crate) const COMPLETED: bool;
+
+        /// The number of currently live references to this task.
+        ///
+        /// When this is 0, the task may be deallocated.
+        const REFS = ..;
+    }
+
+}
+
+/// An atomic cell that stores a task's current [`State`].
 #[repr(transparent)]
-pub(super) struct StateVar(AtomicUsize);
+pub(super) struct StateCell(AtomicUsize);
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum ScheduleAction {
+    /// The task should be enqueued.
+    Enqueue,
+
+    /// The task does not need to be enqueued.
+    None,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum OrDrop<T> {
+    /// Another action should be performed.
+    Action(T),
+
+    /// The task should be deallocated.
+    Drop,
+}
+
+pub(super) type WakeAction = OrDrop<ScheduleAction>;
 
 impl State {
-    const RUNNING: PackUsize = PackUsize::least_significant(1);
-    const NOTIFIED: PackUsize = Self::RUNNING.next(1);
-    const COMPLETED: PackUsize = Self::NOTIFIED.next(1);
-    const REFS: PackUsize = Self::COMPLETED.remaining();
-
-    const REF_ONE: usize = Self::REFS.first_bit();
-    const REF_MAX: usize = Self::REFS.raw_mask();
-    // const STATE_MASK: usize =
-    //     Self::RUNNING.raw_mask() | Self::NOTIFIED.raw_mask() | Self::COMPLETED.raw_mask();
-
-    #[inline]
-    pub(crate) fn is_running(self) -> bool {
-        Self::RUNNING.contained_in_all(self.0)
-    }
-
-    #[inline]
-    pub(crate) fn is_notified(self) -> bool {
-        Self::NOTIFIED.contained_in_all(self.0)
-    }
-
-    #[inline]
-    pub(crate) fn is_completed(self) -> bool {
-        Self::NOTIFIED.contained_in_all(self.0)
-    }
-
     #[inline]
     pub(crate) fn ref_count(self) -> usize {
-        Self::REFS.unpack(self.0)
+        self.get(Self::REFS)
+    }
+
+    fn drop_ref(self) -> Self {
+        Self(self.0 - REF_ONE)
+    }
+
+    fn clone_ref(self) -> Self {
+        Self(self.0 + REF_ONE)
     }
 }
 
-impl fmt::Debug for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("State")
-            .field("running", &self.is_running())
-            .field("notified", &self.is_notified())
-            .field("completed", &self.is_completed())
-            .field("ref_count", &self.ref_count())
-            .field("bits", &format_args!("{:#b}", self.0))
-            .finish()
-    }
-}
+const REF_ONE: usize = State::REFS.first_bit();
+const REF_MAX: usize = State::REFS.raw_mask();
 
-impl fmt::Binary for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "State({:#b})", self.0)
-    }
-}
+// === impl StateCell ===
 
-// === impl StateVar ===
-
-impl StateVar {
+impl StateCell {
     pub fn new() -> Self {
-        Self(AtomicUsize::new(State::REF_ONE))
+        Self(AtomicUsize::new(REF_ONE))
+    }
+
+    pub(super) fn start_poll(&self) -> Result<State, State> {
+        self.transition(|state| {
+            // Cannot start polling a task which is being polled on another
+            // thread.
+            if test_dbg!(state.get(State::POLLING)) {
+                return Err(*state);
+            }
+
+            // Cannot start polling a completed task.
+            if test_dbg!(state.get(State::COMPLETED)) {
+                return Err(*state);
+            }
+
+            let new_state = state
+                // The task is now being polled.
+                .with(State::POLLING, true)
+                // If the task was woken, consume the wakeup.
+                .with(State::WOKEN, false);
+            *state = new_state;
+            Ok(new_state)
+        })
+    }
+
+    pub(super) fn end_poll(&self, completed: bool) -> WakeAction {
+        self.transition(|state| {
+            // Cannot end a poll if a task is not being polled!
+            debug_assert!(state.get(State::POLLING));
+            debug_assert!(!state.get(State::COMPLETED));
+            let next_state = state
+                .with(State::POLLING, false)
+                .with(State::COMPLETED, completed);
+
+            // Was the task woken during the poll?
+            if !test_dbg!(completed) && test_dbg!(state.get(State::WOKEN)) {
+                *state = test_dbg!(next_state);
+                return OrDrop::Action(ScheduleAction::Enqueue);
+            }
+
+            let next_state = test_dbg!(next_state.drop_ref());
+            *state = next_state;
+
+            if next_state.ref_count() == 0 {
+                OrDrop::Drop
+            } else {
+                OrDrop::Action(ScheduleAction::None)
+            }
+        })
+    }
+
+    /// Transition to the woken state by value, returning `true` if the task
+    /// should be enqueued.
+    pub(super) fn wake_by_val(&self) -> WakeAction {
+        self.transition(|state| {
+            // If the task was woken *during* a poll, it will be re-queued by the
+            // scheduler at the end of the poll if needed, so don't enqueue it now.
+            if test_dbg!(state.get(State::POLLING)) {
+                *state = state.with(State::WOKEN, true).drop_ref();
+                assert!(state.ref_count() > 0);
+
+                return OrDrop::Action(ScheduleAction::None);
+            }
+
+            // If the task is already completed or woken, we don't need to
+            // requeue it, but decrement the ref count for the waker that was
+            // used for this wakeup.
+            if test_dbg!(state.get(State::COMPLETED)) || test_dbg!(state.get(State::WOKEN)) {
+                let new_state = state.drop_ref();
+                *state = new_state;
+                return if new_state.ref_count() == 0 {
+                    OrDrop::Drop
+                } else {
+                    OrDrop::Action(ScheduleAction::None)
+                };
+            }
+
+            // Otherwise, transition to the notified state and enqueue the task.
+            *state = state.with(State::WOKEN, true).clone_ref();
+            OrDrop::Action(ScheduleAction::Enqueue)
+        })
+    }
+
+    /// Transition to the woken state by ref, returning `true` if the task
+    /// should be enqueued.
+    pub(super) fn wake_by_ref(&self) -> ScheduleAction {
+        self.transition(|state| {
+            if test_dbg!(state.get(State::COMPLETED)) || test_dbg!(state.get(State::WOKEN)) {
+                return ScheduleAction::None;
+            }
+
+            if test_dbg!(state.get(State::POLLING)) {
+                state.set(State::WOKEN, true);
+                return ScheduleAction::None;
+            }
+
+            *state = state.with(State::WOKEN, true).clone_ref();
+            ScheduleAction::Enqueue
+        })
     }
 
     #[inline]
@@ -81,7 +192,8 @@ impl StateVar {
         // another must already provide any required synchronization.
         //
         // [1]: (www.boost.org/doc/libs/1_55_0/doc/html/atomic/usage_examples.html)
-        let old_refs = test_dbg!(self.0.fetch_add(State::REF_ONE, Relaxed));
+        let old_refs = self.0.fetch_add(REF_ONE, Relaxed);
+        test_dbg!(State::REFS.unpack(old_refs));
 
         // However we need to guard against massive refcounts in case someone
         // is `mem::forget`ing tasks. If we don't do this the count can overflow
@@ -92,19 +204,27 @@ impl StateVar {
         //
         // We abort because such a program is incredibly degenerate, and we
         // don't care to support it.
-        if test_dbg!(old_refs > State::REF_MAX) {
+        if test_dbg!(old_refs > REF_MAX) {
             panic!("task reference count overflow");
         }
     }
 
     #[inline]
     pub(super) fn drop_ref(&self) -> bool {
-        // Because `cores` is already atomic, we do not need to synchronize
-        // with other threads unless we are going to delete the task.
-        let old_refs = test_dbg!(self.0.fetch_sub(State::REF_ONE, Release));
+        // We do not need to synchronize with other cores unless we are going to
+        // delete the task.
+        let old_refs = self.0.fetch_sub(REF_ONE, Release);
+
+        // Manually shift over the refcount to clear the state bits. We don't
+        // use the packing spec here, because it would also mask out any high
+        // bits, and we can avoid doing the bitwise-and (since there are no
+        // higher bits that are not part of the ref count). This is probably a
+        // premature optimization lol.
+        let old_refs = old_refs >> State::REFS.least_significant_index();
+        test_dbg!(State::REFS.unpack(old_refs));
 
         // Did we drop the last ref?
-        if test_dbg!(old_refs != State::REF_ONE) {
+        if test_dbg!(old_refs) > 1 {
             return false;
         }
 
@@ -115,25 +235,49 @@ impl StateVar {
     pub(super) fn load(&self, order: Ordering) -> State {
         State(self.0.load(order))
     }
+
+    /// Advance this task's state by running the provided
+    /// `transition` function on the current [`State`].
+    fn transition<T>(&self, mut transition: impl FnMut(&mut State) -> T) -> T {
+        let mut current = self.load(Acquire);
+        loop {
+            let mut next = test_dbg!(current);
+            // Run the transition function.
+            let res = transition(&mut next);
+
+            if current.0 == next.0 {
+                return res;
+            }
+
+            match self
+                .0
+                .compare_exchange_weak(current.0, next.0, AcqRel, Acquire)
+            {
+                Ok(_) => return res,
+                Err(actual) => current = State(actual),
+            }
+        }
+    }
 }
 
-impl fmt::Debug for StateVar {
+impl fmt::Debug for StateCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.load(Relaxed).fmt(f)
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
 
     #[test]
     fn packing_specs_valid() {
-        PackUsize::assert_all_valid(&[
-            ("RUNNING", State::RUNNING),
-            ("NOTIFIED", State::NOTIFIED),
-            ("COMPLETED", State::COMPLETED),
-            ("REFS", State::REFS),
-        ])
+        State::assert_valid()
+    }
+
+    #[test]
+    fn debug_alt() {
+        let state = StateCell::new();
+        println!("{:#?}", state);
     }
 }
