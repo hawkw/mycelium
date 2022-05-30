@@ -16,12 +16,24 @@ use core::{
     task::{RawWaker, RawWakerVTable},
 };
 
+mod allocation;
 mod state;
+pub use self::allocation::Allocation;
 
 use self::state::StateVar;
 
 #[derive(Debug)]
-pub(crate) struct TaskRef(NonNull<Header>);
+pub struct TaskRef(NonNull<Header>);
+
+#[repr(C)]
+pub struct Task<S, F: Future> {
+    header: Header,
+
+    scheduler: S,
+    inner: UnsafeCell<Cell<F>>,
+}
+
+pub trait Allocation {}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -30,14 +42,6 @@ pub(crate) struct Header {
     state: StateVar,
     // task_list: list::Links<TaskRef>,
     vtable: &'static Vtable,
-}
-
-#[repr(C)]
-struct Task<S, F: Future> {
-    header: Header,
-
-    scheduler: S,
-    inner: UnsafeCell<Cell<F>>,
 }
 
 enum Cell<F: Future> {
