@@ -56,7 +56,7 @@ impl WaitCell {
 }
 
 impl WaitCell {
-    pub fn wait(&self, waker: &Waker) -> Poll<WaitResult> {
+    pub fn poll_wait(&self, waker: &Waker) -> Poll<WaitResult> {
         tracing::trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
@@ -238,87 +238,114 @@ impl fmt::Debug for State {
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod test_util {
+    use super::*;
+
+    use crate::loom::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    pub(crate) struct Chan {
+        num: AtomicUsize,
+        task: WaitCell,
+        num_notify: usize,
+    }
+
+    impl Chan {
+        pub(crate) fn new(num_notify: usize) -> Arc<Self> {
+            Arc::new(Self {
+                num: AtomicUsize::new(0),
+                task: WaitCell::new(),
+                num_notify,
+            })
+        }
+
+        pub(crate) async fn wait(self: Arc<Chan>) {
+            let this = Arc::downgrade(&self);
+            drop(self);
+            futures_util::future::poll_fn(move |cx| {
+                let this = match this.upgrade() {
+                    Some(this) => this,
+                    None => return Poll::Ready(()),
+                };
+
+                let res = test_dbg!(this.task.poll_wait(cx.waker()));
+
+                if this.num_notify == this.num.load(Relaxed) {
+                    return Poll::Ready(());
+                }
+
+                if res.is_ready() {
+                    return Poll::Ready(());
+                }
+
+                Poll::Pending
+            })
+            .await
+        }
+
+        pub(crate) fn notify(&self) {
+            self.num.fetch_add(1, Relaxed);
+            self.task.notify();
+        }
+
+        pub(crate) fn close(&self) {
+            self.num.fetch_add(1, Relaxed);
+            self.task.close();
+        }
+    }
+
+    impl Drop for Chan {
+        fn drop(&mut self) {
+            tracing::debug!(chan = ?fmt::alt(self), "drop")
+        }
+    }
+}
+
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
-    use crate::loom::{
-        future,
-        sync::atomic::{AtomicUsize, Ordering::Relaxed},
-        thread,
-    };
-    use core::task::Poll;
-    use std::sync::Arc;
-
-    struct Chan {
-        num: AtomicUsize,
-        task: WaitCell,
-    }
+    use crate::loom::{future, thread};
 
     const NUM_NOTIFY: usize = 2;
 
-    async fn wait_on(chan: Arc<Chan>) {
-        futures_util::future::poll_fn(move |cx| {
-            let res = test_dbg!(chan.task.wait(cx.waker()));
-
-            if NUM_NOTIFY == chan.num.load(Relaxed) {
-                return Poll::Ready(());
-            }
-
-            if res.is_ready() {
-                return Poll::Ready(());
-            }
-
-            Poll::Pending
-        })
-        .await
-    }
-
     #[test]
-    fn basic_notification() {
+    fn basic_latch() {
         crate::loom::model(|| {
-            let chan = Arc::new(Chan {
-                num: AtomicUsize::new(0),
-                task: WaitCell::new(),
-            });
+            let chan = test_util::Chan::new(NUM_NOTIFY);
 
             for _ in 0..NUM_NOTIFY {
                 let chan = chan.clone();
 
-                thread::spawn(move || {
-                    chan.num.fetch_add(1, Relaxed);
-                    chan.task.notify();
-                });
+                thread::spawn(move || chan.notify());
             }
 
-            future::block_on(wait_on(chan));
+            future::block_on(chan.wait());
         });
     }
 
     #[test]
     fn close() {
         crate::loom::model(|| {
-            let chan = Arc::new(Chan {
-                num: AtomicUsize::new(0),
-                task: WaitCell::new(),
-            });
+            let chan = test_util::Chan::new(NUM_NOTIFY);
 
             thread::spawn({
                 let chan = chan.clone();
                 move || {
-                    chan.num.fetch_add(1, Relaxed);
-                    chan.task.notify();
+                    chan.notify();
                 }
             });
 
             thread::spawn({
                 let chan = chan.clone();
                 move || {
-                    chan.num.fetch_add(1, Relaxed);
-                    chan.task.close();
+                    chan.close();
                 }
             });
 
-            future::block_on(wait_on(chan));
+            future::block_on(chan.wait());
         });
     }
 }

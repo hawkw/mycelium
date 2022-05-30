@@ -184,7 +184,7 @@ impl Future for Stub {
 
 #[cfg(all(test, not(loom)))]
 mod tests {
-    use super::test_util::Yield;
+    use super::test_util::{Chan, Yield};
     use super::*;
     use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use mycelium_util::sync::Lazy;
@@ -230,6 +230,57 @@ mod tests {
     }
 
     #[test]
+    fn notify_future() {
+        static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+        let chan = Chan::new(1);
+
+        SCHEDULER.spawn({
+            let chan = chan.clone();
+            async move {
+                chan.wait().await;
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+
+        SCHEDULER.spawn(async move {
+            Yield::once().await;
+            chan.notify();
+        });
+
+        dbg!(SCHEDULER.tick());
+
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn notify_external() {
+        static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+        let chan = Chan::new(1);
+
+        SCHEDULER.spawn({
+            let chan = chan.clone();
+            async move {
+                chan.wait().await;
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+
+        dbg!(SCHEDULER.tick());
+
+        std::thread::spawn(move || {
+            chan.notify();
+        });
+
+        dbg!(SCHEDULER.tick());
+
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn many_yields() {
         static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
@@ -253,7 +304,7 @@ mod tests {
 
 #[cfg(all(test, loom))]
 mod loom {
-    use super::test_util::Yield;
+    use super::test_util::{Chan, Yield};
     use super::*;
     use crate::loom::{
         self,
@@ -261,6 +312,7 @@ mod loom {
             atomic::{AtomicBool, AtomicUsize, Ordering},
             Arc,
         },
+        thread,
     };
     use core::{
         future::Future,
@@ -313,6 +365,61 @@ mod loom {
             assert_eq!(tick.completed, 1);
             assert!(!tick.has_remaining);
             assert_eq!(tick.polled, 2)
+        })
+    }
+
+    #[test]
+    fn notify_external() {
+        loom::model(|| {
+            let scheduler = Scheduler::new();
+            let chan = Chan::new(1);
+            let it_worked = Arc::new(AtomicBool::new(false));
+
+            scheduler.spawn({
+                let it_worked = it_worked.clone();
+                let chan = chan.clone();
+                track_future(async move {
+                    chan.wait().await;
+                    it_worked.store(true, Ordering::Release);
+                })
+            });
+
+            thread::spawn(move || {
+                chan.notify();
+            });
+
+            while scheduler.tick().completed < 1 {
+                thread::yield_now();
+            }
+
+            assert!(it_worked.load(Ordering::Acquire));
+        })
+    }
+
+    #[test]
+    fn notify_future() {
+        loom::model(|| {
+            let scheduler = Scheduler::new();
+            let chan = Chan::new(1);
+            let it_worked = Arc::new(AtomicBool::new(false));
+
+            scheduler.spawn({
+                let it_worked = it_worked.clone();
+                let chan = chan.clone();
+                track_future(async move {
+                    chan.wait().await;
+                    it_worked.store(true, Ordering::Release);
+                })
+            });
+
+            scheduler.spawn(async move {
+                Yield::once().await;
+                chan.notify();
+            });
+
+            test_dbg!(scheduler.tick());
+
+            assert!(it_worked.load(Ordering::Acquire));
         })
     }
 
@@ -390,6 +497,8 @@ mod test_util {
         pin::Pin,
         task::{Context, Poll},
     };
+
+    pub(crate) use crate::wait::cell::test_util::Chan;
 
     pub(crate) struct Yield {
         yields: usize,
