@@ -133,6 +133,7 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
 #![cfg_attr(docsrs, doc(cfg_hide(docsrs)))]
+#![cfg_attr(trace_macros, feature(trace_macros))]
 use core::{convert::Infallible, fmt};
 
 mod pack;
@@ -158,7 +159,7 @@ mod bitfield;
 ///
 ///
 /// [`ExampleBitfield`]: example::ExampleBitfield
-#[cfg(any(test, docsrs))]
+#[cfg(any(test, docsrs, trace_macros))]
 pub mod example;
 
 /// Trait implemented by values which can be converted to and from raw bits.
