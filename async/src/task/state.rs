@@ -192,7 +192,8 @@ impl StateCell {
         // another must already provide any required synchronization.
         //
         // [1]: (www.boost.org/doc/libs/1_55_0/doc/html/atomic/usage_examples.html)
-        let old_refs = test_dbg!(self.0.fetch_add(REF_ONE, Relaxed));
+        let old_refs = self.0.fetch_add(REF_ONE, Relaxed);
+        test_dbg!(State::REFS.unpack(old_refs));
 
         // However we need to guard against massive refcounts in case someone
         // is `mem::forget`ing tasks. If we don't do this the count can overflow
@@ -210,12 +211,20 @@ impl StateCell {
 
     #[inline]
     pub(super) fn drop_ref(&self) -> bool {
-        // Because `cores` is already atomic, we do not need to synchronize
-        // with other threads unless we are going to delete the task.
-        let old_refs = test_dbg!(self.0.fetch_sub(REF_ONE, Release));
+        // We do not need to synchronize with other cores unless we are going to
+        // delete the task.
+        let old_refs = self.0.fetch_sub(REF_ONE, Release);
+
+        // Manually shift over the refcount to clear the state bits. We don't
+        // use the packing spec here, because it would also mask out any high
+        // bits, and we can avoid doing the bitwise-and (since there are no
+        // higher bits that are not part of the ref count). This is probably a
+        // premature optimization lol.
+        let old_refs = old_refs >> State::REFS.least_significant_index();
+        test_dbg!(State::REFS.unpack(old_refs));
 
         // Did we drop the last ref?
-        if test_dbg!(old_refs != REF_ONE) {
+        if test_dbg!(old_refs) > 1 {
             return false;
         }
 
@@ -232,7 +241,7 @@ impl StateCell {
     fn transition<T>(&self, mut transition: impl FnMut(&mut State) -> T) -> T {
         let mut current = self.load(Acquire);
         loop {
-            let mut next = current;
+            let mut next = test_dbg!(current);
             // Run the transition function.
             let res = transition(&mut next);
 
