@@ -222,7 +222,7 @@ macro_rules! bitfield {
         $vis:vis struct $Name:ident<$T:ident> {
             $(
                 $(#[$field_meta:meta])*
-                $field_vis:vis const $Field:ident $(: $F:ty)? $( = $val:literal)?;
+                $field_vis:vis const $Field:ident $(: $F:ty)? $( = $val:tt)?;
             )+
         }
     ) => {
@@ -441,7 +441,13 @@ macro_rules! bitfield {
             }
         }
     };
-
+    (@field<$T:ident>, prev: $Prev:ident:
+        $(#[$meta:meta])*
+        $vis:vis const $Field:ident = ..;
+    ) => {
+        $(#[$meta])*
+        $vis const $Field: $crate::bitfield!{ @t $T, $T, Self } = Self::$Prev.remaining();
+    };
     (@field<$T:ident>, prev: $Prev:ident:
         $(#[$meta:meta])*
         $vis:vis const $Field:ident = $value:literal;
@@ -461,6 +467,7 @@ macro_rules! bitfield {
         $vis const $Field: $crate::bitfield!{ @t $T, $Val, Self } = Self::$Prev.then::<$Val>();
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
+
 
     (@field<$T:ident>, prev: $Prev:ident: ) => {  };
     (@field<$T:ident>:

@@ -12,7 +12,7 @@ bitfield! {
     #[doc = include_str!("example_bitfield.rs")]
     /// ```
     #[derive(PartialEq, Eq, Hash)]
-    pub struct ExampleBitfield<u32> {
+    pub struct ExampleBitfield<u64> {
         /// Six bits of arbitrary meaning.
         pub const SOME_BITS = 6;
 
@@ -43,5 +43,9 @@ bitfield! {
         ///
         /// Who knows what this means.
         pub const A_BYTE: i8;
+
+        /// `..` can be used to create a packing spec for all the remaining
+        /// bits in a bitfield.
+        pub const REST = ..;
     }
 }
