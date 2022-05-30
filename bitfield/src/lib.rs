@@ -198,7 +198,7 @@ macro_rules! impl_frombits_for_ty {
 
             $(
                 impl FromBits<$F> for $T {
-                    const BITS: u32 = <$F>::BITS;
+                    const BITS: u32 = <$T>::BITS;
                     type Error = Infallible;
 
                     fn try_from_bits(f: $F) -> Result<Self, Self::Error> {
