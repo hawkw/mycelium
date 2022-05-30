@@ -5,7 +5,7 @@ use crate::loom::sync::atomic::{
 use core::fmt;
 
 mycelium_bitfield::bitfield! {
-    /// A bitfield that represents a task's current state.
+    /// A snapshot of a task's current state.
     #[derive(PartialEq, Eq)]
     pub(crate) struct State<usize> {
         /// If set, this task is currently being polled.
@@ -31,37 +31,66 @@ mycelium_bitfield::bitfield! {
 
 }
 
+/// An atomic cell that stores a task's current [`State`].
 #[repr(transparent)]
-pub(super) struct StateVar(AtomicUsize);
+pub(super) struct StateCell(AtomicUsize);
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum ScheduleAction {
+    /// The task should be enqueued.
+    Enqueue,
+
+    /// The task does not need to be enqueued.
+    None,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum OrDrop<T> {
+    /// Another action should be performed.
+    Action(T),
+
+    /// The task should be deallocated.
+    Drop,
+}
+
+pub(super) type WakeAction = OrDrop<ScheduleAction>;
 
 impl State {
     #[inline]
     pub(crate) fn ref_count(self) -> usize {
         self.get(Self::REFS)
     }
+
+    fn drop_ref(self) -> Self {
+        Self(self.0 - REF_ONE)
+    }
+
+    fn clone_ref(self) -> Self {
+        Self(self.0 + REF_ONE)
+    }
 }
 
 const REF_ONE: usize = State::REFS.first_bit();
 const REF_MAX: usize = State::REFS.raw_mask();
 
-// === impl StateVar ===
+// === impl StateCell ===
 
-impl StateVar {
+impl StateCell {
     pub fn new() -> Self {
         Self(AtomicUsize::new(REF_ONE))
     }
 
-    pub(super) fn start_poll(&self) -> Result<(), State> {
+    pub(super) fn start_poll(&self) -> Result<State, State> {
         self.transition(|state| {
             // Cannot start polling a task which is being polled on another
             // thread.
             if test_dbg!(state.get(State::POLLING)) {
-                return Err(state);
+                return Err(*state);
             }
 
             // Cannot start polling a completed task.
             if test_dbg!(state.get(State::COMPLETED)) {
-                return Err(state);
+                return Err(*state);
             }
 
             let new_state = state
@@ -69,20 +98,84 @@ impl StateVar {
                 .with(State::POLLING, true)
                 // If the task was woken, consume the wakeup.
                 .with(State::WOKEN, false);
-            Ok(test_dbg!(new_state))
+            *state = new_state;
+            Ok(new_state)
         })
     }
 
-    pub(super) fn end_poll(&self, completed: bool) -> Result<(), State> {
+    pub(super) fn end_poll(&self, completed: bool) -> WakeAction {
         self.transition(|state| {
             // Cannot end a poll if a task is not being polled!
             debug_assert!(state.get(State::POLLING));
             debug_assert!(!state.get(State::COMPLETED));
-
-            let new_state = state
+            let next_state = state
                 .with(State::POLLING, false)
                 .with(State::COMPLETED, completed);
-            Ok(test_dbg!(new_state))
+
+            // Was the task woken during the poll?
+            if !test_dbg!(completed) && test_dbg!(state.get(State::WOKEN)) {
+                *state = test_dbg!(next_state);
+                return OrDrop::Action(ScheduleAction::Enqueue);
+            }
+
+            let next_state = test_dbg!(next_state.drop_ref());
+            *state = next_state;
+
+            if next_state.ref_count() == 0 {
+                OrDrop::Drop
+            } else {
+                OrDrop::Action(ScheduleAction::None)
+            }
+        })
+    }
+
+    /// Transition to the woken state by value, returning `true` if the task
+    /// should be enqueued.
+    pub(super) fn wake_by_val(&self) -> WakeAction {
+        self.transition(|state| {
+            // If the task was woken *during* a poll, it will be re-queued by the
+            // scheduler at the end of the poll if needed, so don't enqueue it now.
+            if test_dbg!(state.get(State::POLLING)) {
+                *state = state.with(State::WOKEN, true).drop_ref();
+                assert!(state.ref_count() > 0);
+
+                return OrDrop::Action(ScheduleAction::None);
+            }
+
+            // If the task is already completed or woken, we don't need to
+            // requeue it, but decrement the ref count for the waker that was
+            // used for this wakeup.
+            if test_dbg!(state.get(State::COMPLETED)) || test_dbg!(state.get(State::WOKEN)) {
+                let new_state = state.drop_ref();
+                *state = new_state;
+                return if new_state.ref_count() == 0 {
+                    OrDrop::Drop
+                } else {
+                    OrDrop::Action(ScheduleAction::None)
+                };
+            }
+
+            // Otherwise, transition to the notified state and enqueue the task.
+            *state = state.with(State::WOKEN, true).clone_ref();
+            OrDrop::Action(ScheduleAction::Enqueue)
+        })
+    }
+
+    /// Transition to the woken state by ref, returning `true` if the task
+    /// should be enqueued.
+    pub(super) fn wake_by_ref(&self) -> ScheduleAction {
+        self.transition(|state| {
+            if test_dbg!(state.get(State::COMPLETED)) || test_dbg!(state.get(State::WOKEN)) {
+                return ScheduleAction::None;
+            }
+
+            if test_dbg!(state.get(State::POLLING)) {
+                state.set(State::WOKEN, true);
+                return ScheduleAction::None;
+            }
+
+            *state = state.with(State::WOKEN, true).clone_ref();
+            ScheduleAction::Enqueue
         })
     }
 
@@ -134,53 +227,48 @@ impl StateVar {
         State(self.0.load(order))
     }
 
-    /// Attempts to advance this task's state by running the provided fallible
+    /// Advance this task's state by running the provided
     /// `transition` function on the current [`State`].
-    ///
-    /// The `transition` function should return an error if the desired state
-    /// transition is not possible from the task's current state, or return `Ok`
-    /// with a new [`State`] if the transition is possible.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(())` if the task was successfully transitioned.
-    /// - `Err(E)` with the error returned by the transition function if the
-    ///   state transition is not possible.
-    fn transition<E>(
-        &self,
-        mut transition: impl FnMut(State) -> Result<State, E>,
-    ) -> Result<(), E> {
+    fn transition<T>(&self, mut transition: impl FnMut(&mut State) -> T) -> T {
         let mut current = self.load(Acquire);
         loop {
-            // Try to run the transition function to transition from `current`
-            // to the next state. If the transition functiion fails (indicating
-            // that the requested transition is no longer reachable from the
-            // current state), bail.
-            let State(next) = transition(current)?;
+            let mut next = current;
+            // Run the transition function.
+            let res = transition(&mut next);
+
+            if current.0 == next.0 {
+                return res;
+            }
 
             match self
                 .0
-                .compare_exchange_weak(current.0, next, AcqRel, Acquire)
+                .compare_exchange_weak(current.0, next.0, AcqRel, Acquire)
             {
-                Ok(_) => return Ok(()),
+                Ok(_) => return res,
                 Err(actual) => current = State(actual),
             }
         }
     }
 }
 
-impl fmt::Debug for StateVar {
+impl fmt::Debug for StateCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.load(Relaxed).fmt(f)
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
 
     #[test]
     fn packing_specs_valid() {
         State::assert_valid()
+    }
+
+    #[test]
+    fn debug_alt() {
+        let state = StateCell::new();
+        println!("{:#?}", state);
     }
 }

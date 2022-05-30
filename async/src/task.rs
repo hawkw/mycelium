@@ -9,16 +9,17 @@ use cordyceps::{mpsc_queue, Linked};
 pub use core::task::{Context, Poll, Waker};
 use core::{
     any::type_name,
-    fmt,
     future::Future,
+    mem,
     pin::Pin,
     ptr::NonNull,
     task::{RawWaker, RawWakerVTable},
 };
 
+use mycelium_util::fmt;
 mod state;
 
-use self::state::StateVar;
+use self::state::{OrDrop, ScheduleAction, StateCell};
 
 #[derive(Debug)]
 pub(crate) struct TaskRef(NonNull<Header>);
@@ -27,7 +28,7 @@ pub(crate) struct TaskRef(NonNull<Header>);
 #[derive(Debug)]
 pub(crate) struct Header {
     run_queue: mpsc_queue::Links<Header>,
-    state: StateVar,
+    state: StateCell,
     // task_list: list::Links<TaskRef>,
     vtable: &'static Vtable,
 }
@@ -62,7 +63,7 @@ macro_rules! trace_task {
     ($ptr:expr, $f:ty, $method:literal) => {
         tracing::trace!(
             ptr = ?$ptr,
-            output = type_name::<<$f>::Output>(),
+            output = %type_name::<<$f>::Output>(),
             concat!("Task::", $method),
         );
     };
@@ -86,7 +87,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
             header: Header {
                 run_queue: mpsc_queue::Links::new(),
                 vtable: &Self::TASK_VTABLE,
-                state: StateVar::new(),
+                state: StateCell::new(),
             },
             scheduler,
             inner: UnsafeCell::new(Cell::Future(future)),
@@ -94,14 +95,19 @@ impl<S: Schedule, F: Future> Task<S, F> {
     }
 
     fn raw_waker(this: *const Self) -> RawWaker {
-        unsafe { (*this).header.state.clone_ref() };
         RawWaker::new(this as *const (), &Self::WAKER_VTABLE)
+    }
+
+    #[inline]
+    fn state(&self) -> &StateCell {
+        &self.header.state
     }
 
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
         trace_task!(ptr, F, "clone_waker");
-
-        Self::raw_waker(ptr as *const Self)
+        let this = ptr as *const Self;
+        (*this).state().clone_ref();
+        Self::raw_waker(this)
     }
 
     unsafe fn drop_waker(ptr: *const ()) {
@@ -115,13 +121,20 @@ impl<S: Schedule, F: Future> Task<S, F> {
         trace_task!(ptr, F, "wake_by_val");
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
-        Self::schedule(this);
+        match this.as_ref().state().wake_by_val() {
+            OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
+            OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(this),
+            OrDrop::Action(ScheduleAction::None) => {}
+        }
     }
 
     unsafe fn wake_by_ref(ptr: *const ()) {
         trace_task!(ptr, F, "wake_by_ref");
 
-        Self::schedule(non_null(ptr as *mut ()).cast::<Self>())
+        let this = non_null(ptr as *mut ()).cast::<Self>();
+        if this.as_ref().state().wake_by_ref() == ScheduleAction::Enqueue {
+            Self::schedule(this);
+        }
     }
 
     #[inline(always)]
@@ -134,7 +147,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
     #[inline]
     unsafe fn drop_ref(this: NonNull<Self>) {
         trace_task!(this, F, "drop_ref");
-        if !this.as_ref().header.state.drop_ref() {
+        if !this.as_ref().state().drop_ref() {
             return;
         }
 
@@ -143,29 +156,36 @@ impl<S: Schedule, F: Future> Task<S, F> {
 
     unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
         trace_task!(ptr, F, "poll");
-        let ptr = ptr.cast::<Self>();
-
+        let mut this = ptr.cast::<Self>();
+        test_trace!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
-        let state = &ptr.as_ref().header.state;
+        let state = &this.as_ref().state();
         match test_dbg!(state.start_poll()) {
             // transitioned successfully!
             Ok(_) => {}
-            Err(_) => {
+            Err(_state) => {
                 // TODO(eliza): could run the dealloc glue here instead of going
                 // through a ref cycle?
                 return Poll::Ready(());
             }
         }
-        let waker = Waker::from_raw(Self::raw_waker(ptr.as_ptr()));
+
+        // wrap the waker in `ManuallyDrop` because we're converting it from an
+        // existing task ref, rather than incrementing the task ref count. if
+        // this waker is consumed during the poll, we don't want to decrement
+        // its ref count when the poll ends.
+        let waker = mem::ManuallyDrop::new(Waker::from_raw(Self::raw_waker(this.as_ptr())));
         let cx = Context::from_waker(&waker);
-        let pin = Pin::new_unchecked(ptr.cast::<Self>().as_mut());
+
+        // actually poll the task
+        let pin = Pin::new_unchecked(this.as_mut());
         let poll = pin.poll_inner(cx);
-        let completed = poll.is_ready();
-        state
-            .end_poll(completed)
-            .expect("must transition out of polling");
-        if completed {
-            Self::drop_ref(ptr);
+
+        // post-poll state transition
+        match test_dbg!(state.end_poll(poll.is_ready())) {
+            OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
+            OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(this),
+            OrDrop::Action(ScheduleAction::None) => {}
         }
 
         poll
@@ -201,9 +221,9 @@ unsafe impl<S: Sync, F: Future + Sync> Sync for Task<S, F> {}
 impl<S, F: Future> fmt::Debug for Task<S, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Task")
-            .field("future_type", &type_name::<F>())
-            .field("output_type", &type_name::<F::Output>())
-            .field("scheduler_type", &type_name::<S>())
+            // .field("future_type", &fmt::display(type_name::<F>()))
+            .field("output_type", &fmt::display(type_name::<F::Output>()))
+            .field("scheduler_type", &fmt::display(type_name::<S>()))
             .field("header", &self.header)
             .field("inner", &self.inner)
             .finish()
