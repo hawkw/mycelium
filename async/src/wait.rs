@@ -3,14 +3,14 @@
 //! This module implements two types of structure for waiting: a [`WaitCell`],
 //! which stores a *single* waiting task, and a wait *queue*, which
 //! stores a queue of waiting tasks.
-mod cell;
+pub(crate) mod cell;
 pub use cell::WaitCell;
 
 use core::task::Poll;
 
 /// An error indicating that a [`WaitCell`] or queue was closed while attempting
 /// register a waiter.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Closed(());
 
 pub type WaitResult = Result<(), Closed>;

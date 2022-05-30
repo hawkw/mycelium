@@ -169,14 +169,15 @@
 ///
 /// let my_bitfield = TypedBitfield::from_bits(0b0011_0101_1001_1110);
 /// let formatted = format!("{my_bitfield}");
+/// println!("{formatted}");
 /// let expected = r#"
-/// 00000000000000000011010110011110
-///               └┬─────┘││└┬───┘└┤
-///                │      ││ │     └ ENUM_VALUE: Baz (10)
-///                │      ││ └────── SOME_BITS: 39 (100111)
-///                │      │└─────────── FLAG_1: true (1)
-///                │      └──────────── FLAG_2: false (0)
-///                └─────────────────── A_BYTE: 13 (00001101)
+/// 000011010110011110
+/// └┬─────┘││└┬───┘└┤
+///  │      ││ │     └ ENUM_VALUE: Baz (10)
+///  │      ││ └────── SOME_BITS: 39 (100111)
+///  │      │└─────────── FLAG_1: true (1)
+///  │      └──────────── FLAG_2: false (0)
+///  └─────────────────── A_BYTE: 13 (00001101)
 /// "#.trim_start();
 /// assert_eq!(formatted, expected);
 /// ```
@@ -332,10 +333,25 @@ macro_rules! bitfield {
         #[automatically_derived]
         impl core::fmt::Display for $Name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                let mut truncated = self.0.leading_zeros();
+                let mut width = $T::BITS - truncated;
+                let most_sig_field = Self::FIELDS[Self::FIELDS.len() - 1].1;
+                if width < most_sig_field.least_significant_index() + 1 {
+                    width = most_sig_field.least_significant_index() + 3;
+                    truncated = $T::BITS - (most_sig_field.least_significant_index() + 3);
+                }
+                let diff = most_sig_field.most_significant_index() as i32 - (width as i32);
+                if diff > 5 {
+                    width += 1;
+                    truncated -= 1;
+                } else if diff > 0 {
+                    width += diff as u32;
+                    truncated -= diff as u32;
+                }
                 f.pad("")?;
-                writeln!(f, "{:0width$b}", self.0, width = $T::BITS as usize)?;
+                writeln!(f, "{:0width$b}", self.0, width = width as usize)?;
                 f.pad("")?;
-                let mut cur_pos = $T::BITS;
+                let mut cur_pos = width;
                 let mut max_len = 0;
                 let mut rem = 0;
                 let mut fields = Self::FIELDS.iter().rev().peekable();
@@ -345,6 +361,7 @@ macro_rules! bitfield {
                         cur_pos -= 1;
                     }
                     let bits = field.bits();
+                    let mut sub_bits = bits;
                     match (name, bits) {
                         (name, bits) if name.starts_with("_") => {
                             for _ in 0..bits {
@@ -356,8 +373,15 @@ macro_rules! bitfield {
                         (_, 1) => f.write_str("│")?,
                         (_, 2) => f.write_str("└┤")?,
                         (_, bits) => {
-                            f.write_str("└┬")?;
-                            for _ in 0..(bits - 3) {
+                            let n_underlines = if field.most_significant_index() > cur_pos {
+                                f.write_str("⋯ ┬")?;
+                                sub_bits -= (field.most_significant_index() - width);
+                                4
+                            } else {
+                                f.write_str("└┬")?;
+                                3
+                            };
+                            for _ in 0..(sub_bits.saturating_sub(n_underlines)) {
                                 f.write_str("─")?;
                             }
                             f.write_str("┘")?;
@@ -365,11 +389,11 @@ macro_rules! bitfield {
                     }
 
                     if fields.peek().is_none() {
-                        rem = cur_pos - (bits - 1);
+                        rem = cur_pos - (sub_bits - 1);
                     }
 
                     max_len = core::cmp::max(max_len, name.len());
-                    cur_pos -= field.bits()
+                    cur_pos -= sub_bits;
                 }
 
                 f.write_str("\n")?;
@@ -379,7 +403,7 @@ macro_rules! bitfield {
                     let name = stringify!($Field);
                     if !name.starts_with("_") {
                         f.pad("")?;
-                        cur_pos = $T::BITS;
+                        cur_pos = width;
                         for (cur_name, cur_field) in Self::FIELDS.iter().rev() {
                             while cur_pos > cur_field.most_significant_index() {
                                 f.write_str(" ")?;
@@ -390,7 +414,13 @@ macro_rules! bitfield {
                                 break;
                             }
 
-                            let bits = cur_field.bits();
+                            let mut bits = cur_field.bits();
+                            let whitespace = if cur_field.most_significant_index() > cur_pos {
+                                bits -= (cur_field.most_significant_index() - width);
+                                true
+                            } else {
+                                false
+                            };
                             match (cur_name, bits) {
                                 (name, bits) if name.starts_with("_") => {
                                     for _ in 0..bits {
@@ -398,6 +428,12 @@ macro_rules! bitfield {
                                     }
                                 }
                                 (_, 1) => f.write_str("│")?,
+                                (_, bits) if whitespace => {
+                                    f.write_str("  │")?;
+                                    for _ in 0..bits.saturating_sub(3) {
+                                        f.write_str(" ")?;
+                                    }
+                                }
                                 (_, bits) => {
                                     f.write_str(" │")?;
                                     for _ in 0..(bits - 2) {
@@ -409,10 +445,14 @@ macro_rules! bitfield {
                             cur_pos -= bits;
                         }
 
-                        let field_bits = field.bits();
+                        let mut field_bits = field.bits();
                         if field_bits == 1 {
                             f.write_str("└")?;
                             cur_pos -= 1;
+                        } else if field.most_significant_index() > width {
+                            f.write_str("  └")?;
+                            cur_pos -= 3;
+                            field_bits -= truncated;
                         } else {
                             f.write_str(" └")?;
                             cur_pos -= 2;
@@ -633,7 +673,7 @@ mod tests {
             .with(TestBitfield::OF, 0)
             .with(TestBitfield::FUN, 9);
         println!("{}", test_bitfield);
-
+        println!("empty:\n{}", TestBitfield::new());
         let test_debug = TestDebug {
             value: 42,
             bits: test_bitfield,
@@ -642,6 +682,24 @@ mod tests {
         println!("test_debug(alt): {:#?}", test_debug);
 
         println!("test_debug: {:?}", test_debug)
+    }
+
+    #[test]
+    fn many_leading_zeros() {
+        bitfield! {
+            #[allow(dead_code)]
+            struct ManyLeadingZeros<u32> {
+                const A = 4;
+                const B: bool;
+                const C: bool;
+                const D = ..;
+            }
+        }
+
+        let bitfield = ManyLeadingZeros::from_bits(0b1100_1011_0110);
+        println!("{bitfield}");
+        let empty = ManyLeadingZeros::new();
+        println!("{empty}");
     }
 
     #[test]
