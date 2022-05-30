@@ -121,7 +121,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
         trace_task!(ptr, F, "wake_by_val");
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
-        match this.as_ref().state().wake_by_val() {
+        match test_dbg!(this.as_ref().state().wake_by_val()) {
             OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
             OrDrop::Action(ScheduleAction::Enqueue) => {
                 // the task should be enqueued.
