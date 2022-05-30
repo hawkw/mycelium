@@ -269,13 +269,13 @@ mod tests {
             }
         });
 
-        dbg!(SCHEDULER.tick());
-
         std::thread::spawn(move || {
             chan.notify();
         });
 
-        dbg!(SCHEDULER.tick());
+        while dbg!(SCHEDULER.tick().completed) < 1 {
+            std::thread::yield_now();
+        }
 
         assert_eq!(COMPLETED.load(Ordering::SeqCst), 1);
     }
