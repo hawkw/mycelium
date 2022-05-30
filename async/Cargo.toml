@@ -10,6 +10,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }
 mycotest = { path = "../mycotest", default-features = false }
 cordyceps = { path = "../cordyceps" }

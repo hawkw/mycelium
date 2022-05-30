@@ -3,76 +3,47 @@ use crate::loom::sync::atomic::{
     Ordering::{self, *},
 };
 use core::fmt;
-use mycelium_util::bits::PackUsize;
 
-#[derive(Clone, Copy)]
-pub(crate) struct State(usize);
+mycelium_bitfield::bitfield! {
+    /// A bitfield that represents a task's current state.
+    #[derive(PartialEq, Eq)]
+    pub(crate) struct State<usize> {
+        /// If set, this task is currently being polled.
+        pub(crate) const POLLING: bool;
+
+        /// If set, this task's [`Waker`] has been woken.
+        ///
+        /// [`Waker`]: core::task::Waker
+        pub(crate) const WOKEN: bool;
+
+        /// If set, this task's [`Future`] has completed (i.e., it has returned
+        /// [`Poll::Ready`]).
+        ///
+        /// [`Future`]: core::future::Future
+        /// [`Poll::Ready`]: core::task::Poll::Ready
+        pub(crate) const COMPLETED: bool;
+
+        /// The number of currently live references to this task.
+        ///
+        /// When this is 0, the task may be deallocated.
+        const REFS = ..;
+    }
+
+}
 
 #[repr(transparent)]
 pub(super) struct StateVar(AtomicUsize);
 
 impl State {
-    // const STATE_MASK: usize =
-    //     RUNNING.raw_mask() | NOTIFIED.raw_mask() | COMPLETED.raw_mask();
-
     #[inline]
     pub(crate) fn ref_count(self) -> usize {
-        REFS.unpack(self.0)
-    }
-
-    #[inline]
-    pub(crate) fn is(self, field: PackUsize) -> bool {
-        field.contained_in_all(self.0)
-    }
-
-    #[inline]
-    pub(crate) fn set(self, field: PackUsize, value: bool) -> Self {
-        let value = if value { 1 } else { 0 };
-        Self(field.pack(value, self.0))
+        self.get(Self::REFS)
     }
 }
 
-impl fmt::Debug for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct FlagSet(State);
-        impl FlagSet {
-            const POLLING: PackUsize = POLLING;
-            const WOKEN: PackUsize = WOKEN;
-            const COMPLETED: PackUsize = COMPLETED;
+const REF_ONE: usize = State::REFS.first_bit();
+const REF_MAX: usize = State::REFS.raw_mask();
 
-            #[inline]
-            pub(crate) fn is(&self, field: PackUsize) -> bool {
-                self.0.is(field)
-            }
-        }
-
-        impl fmt::Debug for FlagSet {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let mut _has_states = false;
-                fmt_bits!(self, f, _has_states, POLLING, WOKEN, COMPLETED);
-                Ok(())
-            }
-        }
-        f.debug_struct("State")
-            .field("state", &FlagSet(*self))
-            .field("ref_count", &self.ref_count())
-            .finish()
-    }
-}
-
-impl fmt::Binary for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "State({:#b})", self.0)
-    }
-}
-
-const POLLING: PackUsize = PackUsize::least_significant(1);
-const WOKEN: PackUsize = POLLING.next(1);
-const COMPLETED: PackUsize = WOKEN.next(1);
-const REFS: PackUsize = COMPLETED.remaining();
-
-const REF_ONE: usize = REFS.first_bit();
-const REF_MAX: usize = REFS.raw_mask();
 // === impl StateVar ===
 
 impl StateVar {
@@ -84,20 +55,20 @@ impl StateVar {
         self.transition(|state| {
             // Cannot start polling a task which is being polled on another
             // thread.
-            if test_dbg!(state.is(POLLING)) {
+            if test_dbg!(state.get(State::POLLING)) {
                 return Err(state);
             }
 
             // Cannot start polling a completed task.
-            if test_dbg!(state.is(COMPLETED)) {
+            if test_dbg!(state.get(State::COMPLETED)) {
                 return Err(state);
             }
 
             let new_state = state
                 // The task is now being polled.
-                .set(POLLING, true)
+                .with(State::POLLING, true)
                 // If the task was woken, consume the wakeup.
-                .set(WOKEN, false);
+                .with(State::WOKEN, false);
             Ok(test_dbg!(new_state))
         })
     }
@@ -105,10 +76,12 @@ impl StateVar {
     pub(super) fn end_poll(&self, completed: bool) -> Result<(), State> {
         self.transition(|state| {
             // Cannot end a poll if a task is not being polled!
-            debug_assert!(state.is(POLLING));
-            debug_assert!(!state.is(COMPLETED));
+            debug_assert!(state.get(State::POLLING));
+            debug_assert!(!state.get(State::COMPLETED));
 
-            let new_state = state.set(POLLING, false).set(COMPLETED, completed);
+            let new_state = state
+                .with(State::POLLING, false)
+                .with(State::COMPLETED, completed);
             Ok(test_dbg!(new_state))
         })
     }
@@ -208,11 +181,6 @@ mod tests {
 
     #[test]
     fn packing_specs_valid() {
-        PackUsize::assert_all_valid(&[
-            ("POLLING", POLLING),
-            ("WOKEN", WOKEN),
-            ("COMPLETED", COMPLETED),
-            ("REFS", REFS),
-        ])
+        State::assert_valid()
     }
 }
