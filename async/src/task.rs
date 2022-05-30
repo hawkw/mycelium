@@ -123,7 +123,18 @@ impl<S: Schedule, F: Future> Task<S, F> {
         let this = non_null(ptr as *mut ()).cast::<Self>();
         match this.as_ref().state().wake_by_val() {
             OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
-            OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(this),
+            OrDrop::Action(ScheduleAction::Enqueue) => {
+                // the task should be enqueued.
+                //
+                // in the case that the task is enqueued, the state
+                // transition does *not* decrement the reference count. this is
+                // in order to avoid dropping the task while it is being
+                // scheduled. one reference is consumed by enqueuing the task...
+                Self::schedule(this);
+                // now that the task has been enqueued, decrement the reference
+                // count to drop the waker that performed the `wake_by_val`.
+                Self::drop_ref(this);
+            }
             OrDrop::Action(ScheduleAction::None) => {}
         }
     }
