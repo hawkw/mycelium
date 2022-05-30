@@ -1,5 +1,9 @@
 use crate::FromBits;
+#[cfg(trace_macros)]
+trace_macros!(true);
 mod example_bitfield;
+#[cfg(trace_macros)]
+trace_macros!(false);
 pub use self::example_bitfield::ExampleBitfield;
 
 /// An example enum type implementing [`FromBits`].
