@@ -41,11 +41,21 @@ pub struct Task<S, F: Future, STO> {
 
 #[repr(C)]
 #[derive(Debug)]
-pub(crate) struct Header {
+pub struct Header {
     run_queue: mpsc_queue::Links<Header>,
     state: StateCell,
     // task_list: list::Links<TaskRef>,
     vtable: &'static Vtable,
+}
+
+impl Header {
+    pub const fn new_stub() -> Self {
+        Self {
+            run_queue: mpsc_queue::Links::new_stub(),
+            state: StateCell::new(),
+            vtable: &Vtable { poll: nop },
+        }
+    }
 }
 
 enum Cell<F: Future> {
@@ -53,8 +63,11 @@ enum Cell<F: Future> {
     Finished(F::Output),
 }
 
-#[derive(Debug)]
+unsafe fn nop(_: NonNull<Header>) -> Poll<()> {
+    Poll::Pending
+}
 
+#[derive(Debug)]
 struct Vtable {
     /// Poll the future.
     poll: unsafe fn(NonNull<Header>) -> Poll<()>,
@@ -82,16 +95,7 @@ use self::allocation::BoxStorage;
 #[cfg(feature = "alloc")]
 impl<S: Schedule, F: Future> Task<S, F, BoxStorage> {
     fn allocate(scheduler: S, future: F) -> Box<Self> {
-        Box::new(Self {
-            header: Header {
-                run_queue: mpsc_queue::Links::new(),
-                vtable: &Self::TASK_VTABLE,
-                state: StateCell::new(),
-            },
-            scheduler,
-            inner: UnsafeCell::new(Cell::Future(future)),
-            storage: PhantomData,
-        })
+        Box::new(Task::new(scheduler, future))
     }
 }
 
@@ -107,6 +111,19 @@ impl<S: Schedule, F: Future, STO: Storage<S, F>> Task<S, F, STO> {
         Self::wake_by_ref,
         Self::drop_waker,
     );
+
+    pub fn new(scheduler: S, future: F) -> Self {
+        Self {
+            header: Header {
+                run_queue: mpsc_queue::Links::new(),
+                vtable: &Self::TASK_VTABLE,
+                state: StateCell::new(),
+            },
+            scheduler,
+            inner: UnsafeCell::new(Cell::Future(future)),
+            storage: PhantomData,
+        }
+    }
 
     fn raw_waker(this: *const Self) -> RawWaker {
         RawWaker::new(this as *const (), &Self::WAKER_VTABLE)

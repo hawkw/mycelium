@@ -1,5 +1,5 @@
 use crate::{
-    task::{self, Header, TaskRef},
+    task::{self, Header, TaskRef, Storage},
     util::tracing,
 };
 use cordyceps::mpsc_queue::MpscQueue;
@@ -11,7 +11,8 @@ pub use arc_scheduler::*;
 #[cfg(feature = "alloc")]
 mod arc_scheduler {
     use super::*;
-    use crate::loom::sync::Arc;
+    use crate::{loom::sync::Arc, task::{Task, allocation::BoxStorage}};
+    use alloc::boxed::Box;
 
     #[derive(Clone, Debug, Default)]
     pub struct Scheduler(Arc<Core>);
@@ -30,7 +31,16 @@ mod arc_scheduler {
 
         #[inline]
         pub fn spawn(&self, future: impl Future) {
-            Core::spawn_arc(&self.0, future)
+            self.schedule(TaskRef::new(self.clone(), future));
+        }
+
+        #[inline]
+        pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
+        where
+            F: Future,
+        {
+            let tr = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
+            self.schedule(tr);
         }
 
         pub fn tick(&self) -> Tick {
@@ -38,22 +48,21 @@ mod arc_scheduler {
         }
     }
 
-    impl Schedule for Arc<Core> {
+    impl Schedule for Scheduler {
         fn schedule(&self, task: TaskRef) {
             // self.woken.store(true, Ordering::Release);
-            self.run_queue.enqueue(task);
+            self.0.run_queue.enqueue(task);
         }
     }
 }
 
-#[cfg(feature = "alloc")]
 pub use static_scheduler::*;
 
-#[cfg(feature = "alloc")]
 mod static_scheduler {
     use super::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
+    #[cfg_attr(feature = "alloc", derive(Default))]
     pub struct StaticScheduler(Core);
 
     // === impl StaticScheduler ===
@@ -64,14 +73,29 @@ mod static_scheduler {
         /// Chosen by fair dice roll, guaranteed to be random.
         pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
 
+        #[cfg(feature = "alloc")]
         pub fn new() -> Self {
             Self::default()
         }
 
-        // TODO: This probably needs a generic alternative
+        pub const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
+            StaticScheduler(Core::new_with_static_stub(stub))
+        }
+
         #[inline]
+        #[cfg(feature = "alloc")]
         pub fn spawn(&'static self, future: impl Future) {
-            Core::spawn_static(&self.0, future)
+            self.schedule(TaskRef::new(self, future));
+        }
+
+        #[inline]
+        pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
+        where
+            F: Future,
+            STO: Storage<&'static Self, F>,
+        {
+            let tr = TaskRef::new_allocated::<&'static Self, F, STO>(task);
+            self.schedule(tr);
         }
 
         pub fn tick(&'static self) -> Tick {
@@ -79,10 +103,10 @@ mod static_scheduler {
         }
     }
 
-    impl Schedule for &'static Core {
+    impl Schedule for &'static StaticScheduler {
         fn schedule(&self, task: TaskRef) {
             // self.woken.store(true, Ordering::Release);
-            self.run_queue.enqueue(task);
+            self.0.run_queue.enqueue(task);
         }
     }
 }
@@ -119,15 +143,10 @@ impl Core {
         }
     }
 
-    // TODO: This probably needs a "generic" alternative
-    #[cfg(feature = "alloc")]
-    fn spawn_static(&'static self, future: impl Future) {
-        self.schedule(TaskRef::new(self, future));
-    }
-
-    #[cfg(feature = "alloc")]
-    fn spawn_arc(this: &crate::loom::sync::Arc<Self>, future: impl Future) {
-        this.schedule(TaskRef::new(this.clone(), future));
+    const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
+        Self {
+            run_queue: MpscQueue::new_with_static_stub(stub),
+        }
     }
 
     fn tick_n(&self, n: usize) -> Tick {
