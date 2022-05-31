@@ -48,7 +48,7 @@ operating systems, but may be useful for other projects as well.
 [scheduling]: scheduler
 [wait]: wait
 [mycelium]: https://github.com/hawkw/mycelium
-[mnemOS]: https://github.com/jamesmunns/pellegrino/tree/main/firmware/kernel
+[mnemOS]: https://mnemos.jamesmunns.com
 
 ## features
 
