@@ -32,7 +32,7 @@ pub trait Spawn<F: Future> {
     fn spawn(&self, future: F);
 }
 
-pub(crate) trait Schedule: Sized + Clone {
+pub trait Schedule: Sized + Clone {
     fn schedule(&self, task: TaskRef);
 }
 
