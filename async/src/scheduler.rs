@@ -2,117 +2,25 @@ use crate::{
     task::{self, Header, Storage, TaskRef},
     util::tracing,
 };
-use cordyceps::mpsc_queue::MpscQueue;
 use core::{future::Future, pin::Pin};
 
-#[cfg(feature = "alloc")]
-pub use arc_scheduler::*;
+use cordyceps::mpsc_queue::MpscQueue;
 
 #[cfg(feature = "alloc")]
-mod arc_scheduler {
-    use super::*;
-    use crate::{
-        loom::sync::Arc,
-        task::{allocation::BoxStorage, Task},
-    };
-    use alloc::boxed::Box;
+use crate::{
+    loom::sync::Arc,
+    task::{allocation::BoxStorage, Task},
+};
+#[cfg(feature = "alloc")]
+use alloc::boxed::Box;
 
-    #[derive(Clone, Debug, Default)]
-    pub struct Scheduler(Arc<Core>);
+#[cfg(feature = "alloc")]
+#[derive(Clone, Debug, Default)]
+pub struct Scheduler(Arc<Core>);
 
-    // === impl Scheduler ===
-
-    impl Scheduler {
-        /// How many tasks are polled per call to `Scheduler::tick`.
-        ///
-        /// Chosen by fair dice roll, guaranteed to be random.
-        pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
-
-        pub fn new() -> Self {
-            Self::default()
-        }
-
-        #[inline]
-        pub fn spawn(&self, future: impl Future) {
-            self.schedule(TaskRef::new(self.clone(), future));
-        }
-
-        #[inline]
-        pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
-        where
-            F: Future,
-        {
-            let tr = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
-            self.schedule(tr);
-        }
-
-        pub fn tick(&self) -> Tick {
-            self.0.tick_n(Self::DEFAULT_TICK_SIZE)
-        }
-    }
-
-    impl Schedule for Scheduler {
-        fn schedule(&self, task: TaskRef) {
-            // self.woken.store(true, Ordering::Release);
-            self.0.run_queue.enqueue(task);
-        }
-    }
-}
-
-pub use static_scheduler::*;
-
-mod static_scheduler {
-    use super::*;
-
-    #[derive(Debug)]
-    #[cfg_attr(feature = "alloc", derive(Default))]
-    pub struct StaticScheduler(Core);
-
-    // === impl StaticScheduler ===
-
-    impl StaticScheduler {
-        /// How many tasks are polled per call to `StaticScheduler::tick`.
-        ///
-        /// Chosen by fair dice roll, guaranteed to be random.
-        pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
-
-        #[cfg(feature = "alloc")]
-        pub fn new() -> Self {
-            Self::default()
-        }
-
-        pub const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
-            StaticScheduler(Core::new_with_static_stub(stub))
-        }
-
-        #[inline]
-        #[cfg(feature = "alloc")]
-        pub fn spawn(&'static self, future: impl Future) {
-            self.schedule(TaskRef::new(self, future));
-        }
-
-        #[inline]
-        pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
-        where
-            F: Future,
-            STO: Storage<&'static Self, F>,
-        {
-            let tr = TaskRef::new_allocated::<&'static Self, F, STO>(task);
-            self.schedule(tr);
-        }
-
-        pub fn tick(&'static self) -> Tick {
-            self.0.tick_n(Self::DEFAULT_TICK_SIZE)
-        }
-    }
-
-    impl Schedule for &'static StaticScheduler {
-        fn schedule(&self, task: TaskRef) {
-            // self.woken.store(true, Ordering::Release);
-            self.0.run_queue.enqueue(task);
-        }
-    }
-}
+#[derive(Debug)]
+#[cfg_attr(feature = "alloc", derive(Default))]
+pub struct StaticScheduler(Core);
 
 #[derive(Debug)]
 struct Core {
@@ -130,6 +38,75 @@ pub struct Tick {
 
 pub trait Schedule: Sized + Clone {
     fn schedule(&self, task: TaskRef);
+}
+
+// === impl Scheduler ===
+#[cfg(feature = "alloc")]
+impl Scheduler {
+    /// How many tasks are polled per call to `Scheduler::tick`.
+    ///
+    /// Chosen by fair dice roll, guaranteed to be random.
+    pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn spawn(&self, future: impl Future) {
+        self.schedule(TaskRef::new(self.clone(), future));
+    }
+
+    #[inline]
+    pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
+    where
+        F: Future,
+    {
+        let tr = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
+        self.schedule(tr);
+    }
+
+    pub fn tick(&self) -> Tick {
+        self.0.tick_n(Self::DEFAULT_TICK_SIZE)
+    }
+}
+
+// === impl StaticScheduler ===
+
+impl StaticScheduler {
+    /// How many tasks are polled per call to `StaticScheduler::tick`.
+    ///
+    /// Chosen by fair dice roll, guaranteed to be random.
+    pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+    #[cfg(feature = "alloc")]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
+        StaticScheduler(Core::new_with_static_stub(stub))
+    }
+
+    #[inline]
+    #[cfg(feature = "alloc")]
+    pub fn spawn(&'static self, future: impl Future) {
+        self.schedule(TaskRef::new(self, future));
+    }
+
+    #[inline]
+    pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
+    where
+        F: Future,
+        STO: Storage<&'static Self, F>,
+    {
+        let tr = TaskRef::new_allocated::<&'static Self, F, STO>(task);
+        self.schedule(tr);
+    }
+
+    pub fn tick(&'static self) -> Tick {
+        self.0.tick_n(Self::DEFAULT_TICK_SIZE)
+    }
 }
 
 impl Core {
@@ -178,6 +155,21 @@ impl Core {
         tick.has_remaining = false;
 
         tick
+    }
+}
+
+impl Schedule for &'static StaticScheduler {
+    fn schedule(&self, task: TaskRef) {
+        // self.woken.store(true, Ordering::Release);
+        self.0.run_queue.enqueue(task);
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl Schedule for Scheduler {
+    fn schedule(&self, task: TaskRef) {
+        // self.0.woken.store(true, Ordering::Release);
+        self.0.run_queue.enqueue(task);
     }
 }
 

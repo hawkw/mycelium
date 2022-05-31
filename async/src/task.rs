@@ -1,43 +1,37 @@
+pub use crate::task::allocation::Storage;
+pub use core::task::{Context, Poll, Waker};
+
+pub(crate) mod allocation;
+mod state;
+
 use crate::{
     loom::cell::UnsafeCell,
     scheduler::Schedule,
+    task::state::{OrDrop, ScheduleAction, StateCell},
     util::{non_null, tracing},
 };
-use cordyceps::{mpsc_queue, Linked};
 
-use core::marker::PhantomData;
-pub use core::task::{Context, Poll, Waker};
 use core::{
     any::type_name,
     future::Future,
+    marker::PhantomData,
     mem,
     pin::Pin,
     ptr::NonNull,
     task::{RawWaker, RawWakerVTable},
 };
 
-use mycelium_util::fmt;
-
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 
-pub(crate) mod allocation;
-mod state;
-pub use self::allocation::Storage;
+#[cfg(feature = "alloc")]
+use self::allocation::BoxStorage;
 
-use self::state::{OrDrop, ScheduleAction, StateCell};
+use cordyceps::{mpsc_queue, Linked};
+use mycelium_util::fmt;
 
 #[derive(Debug)]
 pub struct TaskRef(NonNull<Header>);
-
-#[repr(C)]
-pub struct Task<S, F: Future, STO> {
-    header: Header,
-
-    scheduler: S,
-    inner: UnsafeCell<Cell<F>>,
-    storage: PhantomData<STO>,
-}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -46,6 +40,15 @@ pub struct Header {
     state: StateCell,
     // task_list: list::Links<TaskRef>,
     vtable: &'static Vtable,
+}
+
+#[repr(C)]
+pub struct Task<S, F: Future, STO> {
+    header: Header,
+
+    scheduler: S,
+    inner: UnsafeCell<Cell<F>>,
+    storage: PhantomData<STO>,
 }
 
 impl Header {
@@ -88,9 +91,6 @@ macro_rules! trace_task {
         );
     };
 }
-
-#[cfg(feature = "alloc")]
-use self::allocation::BoxStorage;
 
 #[cfg(feature = "alloc")]
 impl<S: Schedule, F: Future> Task<S, F, BoxStorage> {
