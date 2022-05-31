@@ -138,7 +138,7 @@ impl<S: Schedule, F: Future, STO: Storage<S, F>> Task<S, F, STO> {
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
         match test_dbg!(this.as_ref().state().wake_by_val()) {
-            OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
+            OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(ScheduleAction::Enqueue) => {
                 // the task should be enqueued.
                 //
@@ -210,7 +210,7 @@ impl<S: Schedule, F: Future, STO: Storage<S, F>> Task<S, F, STO> {
 
         // post-poll state transition
         match test_dbg!(state.end_poll(poll.is_ready())) {
-            OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
+            OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(this),
             OrDrop::Action(ScheduleAction::None) => {}
         }
