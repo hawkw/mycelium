@@ -1,5 +1,9 @@
 use crate::FromBits;
+#[cfg(trace_macros)]
+trace_macros!(true);
 mod example_bitfield;
+#[cfg(trace_macros)]
+trace_macros!(false);
 pub use self::example_bitfield::ExampleBitfield;
 
 /// An example enum type implementing [`FromBits`].
@@ -12,11 +16,11 @@ pub enum TestEnum {
     Qux = 0b11,
 }
 
-impl FromBits<u32> for TestEnum {
+impl FromBits<u64> for TestEnum {
     const BITS: u32 = 2;
     type Error = core::convert::Infallible;
 
-    fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+    fn try_from_bits(bits: u64) -> Result<Self, Self::Error> {
         Ok(match bits as u8 {
             bits if bits == Self::Foo as u8 => Self::Foo,
             bits if bits == Self::Bar as u8 => Self::Bar,
@@ -26,8 +30,8 @@ impl FromBits<u32> for TestEnum {
         })
     }
 
-    fn into_bits(self) -> u32 {
-        self as u8 as u32
+    fn into_bits(self) -> u64 {
+        self as u8 as u64
     }
 }
 
@@ -43,11 +47,11 @@ pub enum AnotherTestEnum {
     Charlie = 0b1110,
 }
 
-impl FromBits<u32> for AnotherTestEnum {
+impl FromBits<u64> for AnotherTestEnum {
     const BITS: u32 = 4;
     type Error = &'static str;
 
-    fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+    fn try_from_bits(bits: u64) -> Result<Self, Self::Error> {
         match bits as u8 {
             bits if bits == Self::Alice as u8 => Ok(Self::Alice),
             bits if bits == Self::Bob as u8 => Ok(Self::Bob),
@@ -57,7 +61,7 @@ impl FromBits<u32> for AnotherTestEnum {
         }
     }
 
-    fn into_bits(self) -> u32 {
-        self as u8 as u32
+    fn into_bits(self) -> u64 {
+        self as u8 as u64
     }
 }

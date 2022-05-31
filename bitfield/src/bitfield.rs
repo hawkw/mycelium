@@ -171,16 +171,44 @@
 /// let formatted = format!("{my_bitfield}");
 /// let expected = r#"
 /// 00000000000000000011010110011110
-/// └┬───────────────────┘││└┬───┘└┤
-///  │                    ││ │     └ ENUM_VALUE: Baz (10)
-///  │                    ││ └────── SOME_BITS: 39 (100111)
-///  │                    │└─────────── FLAG_1: true (1)
-///  │                    └──────────── FLAG_2: false (0)
-///  └───────────────────────────────── A_BYTE: 13 (0000000000000000001101)
+///               └┬─────┘││└┬───┘└┤
+///                │      ││ │     └ ENUM_VALUE: Baz (10)
+///                │      ││ └────── SOME_BITS: 39 (100111)
+///                │      │└─────────── FLAG_1: true (1)
+///                │      └──────────── FLAG_2: false (0)
+///                └─────────────────── A_BYTE: 13 (00001101)
 /// "#.trim_start();
 /// assert_eq!(formatted, expected);
 /// ```
 ///
+/// Packing specs from one bitfield type may *not* be used with a different
+/// bitfield type's `get`, `set`, or `with` methods. For example, the following
+/// is a type error:
+///
+/// ```compile_fail
+/// use mycelium_bitfield::bitfield;
+///
+/// bitfield! {
+///     struct Bitfield1<u8> {
+///         pub const FOO: bool;
+///         pub const BAR: bool;
+///         pub const BAZ = 6;
+///     }
+/// }
+///
+/// bitfield! {
+///     struct Bitfield2<u8> {
+///         pub const ALICE = 2;
+///         pub const BOB = 4;
+///         pub const CHARLIE = 2;
+///     }
+/// }
+///
+///
+/// // This is a *type error*, because `Bitfield2`'s field `ALICE` cannot be
+/// // used with a `Bitfield2` value:
+/// let bits = Bitfield1::new().with(Bitfield2::ALICE, 0b11);
+/// ```
 /// [`fmt::Debug`]: core::fmt::Debug
 /// [`fmt::Display`]: core::fmt::Display
 /// [`fmt::Binary`]: core::fmt::Binary
@@ -194,7 +222,7 @@ macro_rules! bitfield {
         $vis:vis struct $Name:ident<$T:ident> {
             $(
                 $(#[$field_meta:meta])*
-                $field_vis:vis const $Field:ident $(: $F:ty)? $( = $val:literal)?;
+                $field_vis:vis const $Field:ident $(: $F:ty)? $( = $val:tt)?;
             )+
         }
     ) => {
@@ -227,7 +255,7 @@ macro_rules! bitfield {
                 )+
             }
 
-            const FIELDS: &'static [(&'static str, $crate::bitfield! { @t $T, $T })] = &[$(
+            const FIELDS: &'static [(&'static str, $crate::bitfield! { @t $T, $T, Self })] = &[$(
                 (stringify!($Field), Self::$Field.typed())
             ),+];
 
@@ -243,7 +271,7 @@ macro_rules! bitfield {
 
             /// Packs the bit representation of `value` into `self` at the bit
             /// range designated by `field`, returning a new bitfield.
-            $vis fn with<T>(self, field: $crate::bitfield! { @t $T, T }, value: T) -> Self
+            $vis fn with<T>(self, field: $crate::bitfield! { @t $T, T, Self }, value: T) -> Self
             where
                 T: $crate::FromBits<$T>,
             {
@@ -253,7 +281,7 @@ macro_rules! bitfield {
 
             /// Packs the bit representation of `value` into `self` at the range
             /// designated by `field`, mutating `self` in place.
-            $vis fn set<T>(&mut self, field: $crate::bitfield! { @t $T, T }, value: T) -> &mut Self
+            $vis fn set<T>(&mut self, field: $crate::bitfield! { @t $T, T, Self }, value: T) -> &mut Self
             where
                 T: $crate::FromBits<$T>,
             {
@@ -268,8 +296,8 @@ macro_rules! bitfield {
             ///
             /// This method panics if `self` does not contain a valid bit
             /// pattern for a `T`-typed value, as determined by `T`'s
-            /// [`mycelium_bitfield::FromBits::try_from_bits`] implementation.
-            $vis fn get<T>(self, field: $crate::bitfield! { @t $T, T }) -> T
+            /// `FromBits::try_from_bits` implementation.
+            $vis fn get<T>(self, field: $crate::bitfield! { @t $T, T, Self }) -> T
             where
                 T: $crate::FromBits<$T>,
             {
@@ -285,8 +313,8 @@ macro_rules! bitfield {
             ///   bits in `src`
             /// - `Err(T::Error)` if `src` does not contain a valid bit
             ///   pattern for a `T`-typed value, as determined by `T`'s
-            ///   [`mycelium_bitfield::FromBits::try_from_bits`] implementation.
-            $vis fn try_get<T>(self, field: $crate::bitfield! { @t $T, T }) -> Result<T, T::Error>
+            ///   [`FromBits::try_from_bits` implementation.
+            $vis fn try_get<T>(self, field: $crate::bitfield! { @t $T, T, Self }) -> Result<T, T::Error>
             where
                 T: $crate::FromBits<$T>,
             {
@@ -297,7 +325,7 @@ macro_rules! bitfield {
             ///
             /// This is intended to be used in unit tests.
             $vis fn assert_valid() {
-                <$crate::bitfield! { @t $T, $T }>::assert_all_valid(&Self::FIELDS);
+                <$crate::bitfield! { @t $T, $T, Self }>::assert_all_valid(&Self::FIELDS);
             }
         }
 
@@ -413,14 +441,20 @@ macro_rules! bitfield {
             }
         }
     };
-
+    (@field<$T:ident>, prev: $Prev:ident:
+        $(#[$meta:meta])*
+        $vis:vis const $Field:ident = ..;
+    ) => {
+        $(#[$meta])*
+        $vis const $Field: $crate::bitfield!{ @t $T, $T, Self } = Self::$Prev.remaining();
+    };
     (@field<$T:ident>, prev: $Prev:ident:
         $(#[$meta:meta])*
         $vis:vis const $Field:ident = $value:literal;
         $($rest:tt)*
     ) => {
         $(#[$meta])*
-        $vis const $Field: $crate::bitfield!{ @t $T, $T } = Self::$Prev.next($value);
+        $vis const $Field: $crate::bitfield!{ @t $T, $T, Self } = Self::$Prev.next($value);
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
 
@@ -430,9 +464,10 @@ macro_rules! bitfield {
         $($rest:tt)*
     ) => {
         $(#[$meta])*
-        $vis const $Field: $crate::bitfield!{ @t $T, $Val } = Self::$Prev.then::<$Val>();
+        $vis const $Field: $crate::bitfield!{ @t $T, $Val, Self } = Self::$Prev.then::<$Val>();
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
+
 
     (@field<$T:ident>, prev: $Prev:ident: ) => {  };
     (@field<$T:ident>:
@@ -441,7 +476,7 @@ macro_rules! bitfield {
         $($rest:tt)*
     ) => {
         $(#[$meta])*
-        $vis const $Field: $crate::bitfield!{ @t $T, $T } = <$crate::bitfield!{ @t $T, $T }>::least_significant($value);
+        $vis const $Field: $crate::bitfield!{ @t $T, $T, Self } = <$crate::bitfield!{ @t $T, $T, () }>::least_significant($value).typed();
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
 
@@ -451,7 +486,7 @@ macro_rules! bitfield {
         $($rest:tt)*
     ) => {
         $(#[$meta])*
-        $vis const $Field: $crate::bitfield!{ @t $T, $Val } = <$crate::bitfield!{ @t $T, $Val } >::first();
+        $vis const $Field: $crate::bitfield!{ @t $T, $Val, Self } = <$crate::bitfield!{ @t $T, $Val, Self } >::first();
         $crate::bitfield!{ @field<$T>, prev: $Field: $($rest)* }
     };
 
@@ -528,12 +563,12 @@ macro_rules! bitfield {
     //     $crate::bitfield! { @process_derives $vis struct $Name<$T> { $Next, $($Before),* } { $($rest)* } }
     // };
 
-    (@t usize, $V:ty) => { $crate::PackUsize<$V> };
-    (@t u64, $V:ty) => { $crate::Pack64<$V> };
-    (@t u32, $V:ty) => { $crate::Pack32<$V> };
-    (@t u16, $V:ty) => { $crate::Pack16<$V> };
-    (@t u8, $V:ty) => { $crate::Pack8<$V> };
-    (@t $T:ty, $V:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u64`, `u32`, `u16`, or `u8`")) }
+    (@t usize, $V:ty, $F:ty) => { $crate::PackUsize<$V, $F> };
+    (@t u64, $V:ty, $F:ty) => { $crate::Pack64<$V, $F> };
+    (@t u32, $V:ty, $F:ty) => { $crate::Pack32<$V, $F> };
+    (@t u16, $V:ty, $F:ty) => { $crate::Pack16<$V, $F> };
+    (@t u8, $V:ty, $F:ty) => { $crate::Pack8<$V, $F> };
+    (@t $T:ty, $V:ty, $F:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u64`, `u32`, `u16`, or `u8`")) }
 }
 
 #[cfg(test)]

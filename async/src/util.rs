@@ -40,7 +40,7 @@ macro_rules! test_trace {
 macro_rules! fmt_bits {
     ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
         $(
-            if $self.contains(Self::$name) {
+            if $self.is(Self::$name) {
                 if $has_states {
                     $f.write_str(" | ")?;
                 }

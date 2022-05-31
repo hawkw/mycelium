@@ -14,6 +14,7 @@ default = ["alloc"]
 alloc = []
 
 [dependencies]
+mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }
 mycotest = { path = "../mycotest", default-features = false }
 cordyceps = { path = "../cordyceps" }
@@ -24,11 +25,13 @@ package = "tracing"
 default_features = false
 git = "https://github.com/tokio-rs/tracing"
 
+[dev-dependencies]
+futures-util = "0.3"
+
 [target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.5.5", features = ["futures"] }
 tracing_01 = { package = "tracing", version = "0.1", default_features = false }
 tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
-futures-util = "0.3"
 
 [package.metadata.docs.rs]
 all-features = true
