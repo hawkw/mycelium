@@ -1,8 +1,7 @@
 #![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
 #![cfg_attr(docsrs, doc(cfg_hide(docsrs)))]
+#![cfg_attr(not(test), no_std)]
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
