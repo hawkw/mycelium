@@ -1,9 +1,7 @@
 use crate::{
-    loom::cell::UnsafeCell,
     scheduler::Schedule,
     util::{non_null, tracing},
 };
-use alloc::boxed::Box;
 use cordyceps::{mpsc_queue, Linked};
 
 pub use core::task::{Context, Poll, Waker};
@@ -16,9 +14,14 @@ use core::{
     task::{RawWaker, RawWakerVTable},
 };
 
+use crate::loom::cell::UnsafeCell;
+
+#[cfg(feature = "alloc")]
+use alloc::boxed::Box;
+
 mod allocation;
 mod state;
-pub use self::allocation::Allocation;
+// pub use self::allocation::Allocation;
 
 use self::state::StateVar;
 

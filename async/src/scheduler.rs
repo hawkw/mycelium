@@ -1,16 +1,107 @@
 use crate::{
-    loom::sync::Arc,
     task::{self, Header, TaskRef},
     util::tracing,
 };
 use cordyceps::mpsc_queue::MpscQueue;
 use core::{future::Future, pin::Pin};
 
-#[derive(Clone, Debug, Default)]
-pub struct Scheduler(Arc<Core>);
+#[cfg(feature = "alloc")]
+pub use arc_scheduler::*;
 
-#[derive(Debug, Default)]
-pub struct StaticScheduler(Core);
+pub use static_scheduler::*;
+
+#[cfg(feature = "alloc")]
+mod arc_scheduler {
+    use super::*;
+    use crate::loom::sync::Arc;
+
+    #[derive(Clone, Debug, Default)]
+    pub struct Scheduler(Arc<Core>);
+
+    // === impl Scheduler ===
+
+    impl Scheduler {
+        /// How many tasks are polled per call to `Scheduler::tick`.
+        ///
+        /// Chosen by fair dice roll, guaranteed to be random.
+        pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        #[inline]
+        pub fn spawn(&self, future: impl Future) {
+            Core::spawn_arc(&self.0, future)
+        }
+
+        pub fn tick(&self) -> Tick {
+            self.0.tick_n(Self::DEFAULT_TICK_SIZE)
+        }
+    }
+
+    /// A trait abstracting over spawning futures.
+    impl<F: Future> Spawn<F> for Scheduler {
+        /// Spawns `future` as a new task on this executor.
+        fn spawn(&self, future: F) {
+            Scheduler::spawn(self, future)
+        }
+    }
+
+    impl Schedule for Arc<Core> {
+        fn schedule(&self, task: TaskRef) {
+            // self.woken.store(true, Ordering::Release);
+            self.run_queue.enqueue(task);
+        }
+    }
+}
+
+mod static_scheduler {
+    use super::*;
+
+    #[derive(Debug, Default)]
+    pub struct StaticScheduler(Core);
+
+
+    // === impl StaticScheduler ===
+
+    impl StaticScheduler {
+        /// How many tasks are polled per call to `StaticScheduler::tick`.
+        ///
+        /// Chosen by fair dice roll, guaranteed to be random.
+        pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        #[inline]
+        pub fn spawn(&'static self, future: impl Future) {
+            Core::spawn_static(&self.0, future)
+        }
+
+        pub fn tick(&'static self) -> Tick {
+            self.0.tick_n(Self::DEFAULT_TICK_SIZE)
+        }
+    }
+
+    /// A trait abstracting over spawning futures.
+    impl<F: Future> Spawn<F> for &'static StaticScheduler {
+        /// Spawns `future` as a new task on this executor.
+        fn spawn(&self, future: F) {
+            StaticScheduler::spawn(self, future)
+        }
+    }
+
+    impl Schedule for &'static Core {
+        fn schedule(&self, task: TaskRef) {
+            // self.woken.store(true, Ordering::Release);
+            self.run_queue.enqueue(task);
+        }
+    }
+}
+
+
 
 #[derive(Debug)]
 struct Core {
@@ -32,68 +123,8 @@ pub trait Spawn<F: Future> {
     fn spawn(&self, future: F);
 }
 
-pub(crate) trait Schedule: Sized + Clone {
+pub trait Schedule: Sized + Clone {
     fn schedule(&self, task: TaskRef);
-}
-
-// === impl Scheduler ===
-
-impl Scheduler {
-    /// How many tasks are polled per call to `Scheduler::tick`.
-    ///
-    /// Chosen by fair dice roll, guaranteed to be random.
-    pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
-
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[inline]
-    pub fn spawn(&self, future: impl Future) {
-        Core::spawn_arc(&self.0, future)
-    }
-
-    pub fn tick(&self) -> Tick {
-        self.0.tick_n(Self::DEFAULT_TICK_SIZE)
-    }
-}
-
-/// A trait abstracting over spawning futures.
-impl<F: Future> Spawn<F> for Scheduler {
-    /// Spawns `future` as a new task on this executor.
-    fn spawn(&self, future: F) {
-        Scheduler::spawn(self, future)
-    }
-}
-
-// === impl StaticScheduler ===
-
-impl StaticScheduler {
-    /// How many tasks are polled per call to `StaticScheduler::tick`.
-    ///
-    /// Chosen by fair dice roll, guaranteed to be random.
-    pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
-
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[inline]
-    pub fn spawn(&'static self, future: impl Future) {
-        Core::spawn_static(&self.0, future)
-    }
-
-    pub fn tick(&'static self) -> Tick {
-        self.0.tick_n(Self::DEFAULT_TICK_SIZE)
-    }
-}
-
-/// A trait abstracting over spawning futures.
-impl<F: Future> Spawn<F> for &'static StaticScheduler {
-    /// Spawns `future` as a new task on this executor.
-    fn spawn(&self, future: F) {
-        StaticScheduler::spawn(self, future)
-    }
 }
 
 impl Core {
@@ -113,7 +144,8 @@ impl Core {
         self.schedule(TaskRef::new(self, future));
     }
 
-    fn spawn_arc(this: &Arc<Self>, future: impl Future) {
+    #[cfg(feature = "alloc")]
+    fn spawn_arc(this: &crate::loom::sync::Arc<Self>, future: impl Future) {
         this.schedule(TaskRef::new(this.clone(), future));
     }
 
@@ -146,19 +178,8 @@ impl Core {
     }
 }
 
-impl Schedule for &'static Core {
-    fn schedule(&self, task: TaskRef) {
-        // self.woken.store(true, Ordering::Release);
-        self.run_queue.enqueue(task);
-    }
-}
 
-impl Schedule for Arc<Core> {
-    fn schedule(&self, task: TaskRef) {
-        // self.woken.store(true, Ordering::Release);
-        self.run_queue.enqueue(task);
-    }
-}
+
 
 impl Default for Core {
     fn default() -> Self {
