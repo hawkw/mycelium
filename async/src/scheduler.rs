@@ -8,8 +8,6 @@ use core::{future::Future, pin::Pin};
 #[cfg(feature = "alloc")]
 pub use arc_scheduler::*;
 
-pub use static_scheduler::*;
-
 #[cfg(feature = "alloc")]
 mod arc_scheduler {
     use super::*;
@@ -56,6 +54,10 @@ mod arc_scheduler {
     }
 }
 
+#[cfg(feature = "alloc")]
+pub use static_scheduler::*;
+
+#[cfg(feature = "alloc")]
 mod static_scheduler {
     use super::*;
 
@@ -75,6 +77,7 @@ mod static_scheduler {
             Self::default()
         }
 
+        // TODO: This probably needs a generic alternative
         #[inline]
         pub fn spawn(&'static self, future: impl Future) {
             Core::spawn_static(&self.0, future)
@@ -118,6 +121,8 @@ pub struct Tick {
 }
 
 /// A trait abstracting over spawning futures.
+// TODO(AJM): This essentially mandates an allocator. This trait needs some kind
+// of pre-allocated alternative.
 pub trait Spawn<F: Future> {
     /// Spawns `future` as a new task on this executor.
     fn spawn(&self, future: F);
@@ -133,6 +138,7 @@ impl Core {
     /// Chosen by fair dice roll, guaranteed to be random.
     const DEFAULT_TICK_SIZE: usize = 256;
 
+    #[cfg(feature = "alloc")]
     fn new() -> Self {
         let stub_task = TaskRef::new(Stub, Stub);
         Self {
@@ -140,6 +146,8 @@ impl Core {
         }
     }
 
+    // TODO: This probably needs a "generic" alternative
+    #[cfg(feature = "alloc")]
     fn spawn_static(&'static self, future: impl Future) {
         self.schedule(TaskRef::new(self, future));
     }
@@ -178,9 +186,7 @@ impl Core {
     }
 }
 
-
-
-
+#[cfg(feature = "alloc")]
 impl Default for Core {
     fn default() -> Self {
         Self::new()

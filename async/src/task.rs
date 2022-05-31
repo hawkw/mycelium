@@ -13,6 +13,7 @@ use core::{
     ptr::NonNull,
     task::{RawWaker, RawWakerVTable},
 };
+use core::marker::PhantomData;
 
 use crate::loom::cell::UnsafeCell;
 
@@ -21,7 +22,7 @@ use alloc::boxed::Box;
 
 mod allocation;
 mod state;
-// pub use self::allocation::Allocation;
+pub use self::allocation::Storage;
 
 use self::state::StateVar;
 
@@ -29,11 +30,12 @@ use self::state::StateVar;
 pub struct TaskRef(NonNull<Header>);
 
 #[repr(C)]
-pub struct Task<S, F: Future> {
+pub struct Task<S, F: Future, STO> {
     header: Header,
 
     scheduler: S,
     inner: UnsafeCell<Cell<F>>,
+    storage: PhantomData<STO>,
 }
 
 pub trait Allocation {}
@@ -75,7 +77,26 @@ macro_rules! trace_task {
     };
 }
 
-impl<S: Schedule, F: Future> Task<S, F> {
+#[cfg(feature = "alloc")]
+use self::allocation::BoxStorage;
+
+#[cfg(feature = "alloc")]
+impl<S: Schedule, F: Future> Task<S, F, BoxStorage> {
+    fn allocate(scheduler: S, future: F) -> Box<Self> {
+        Box::new(Self {
+            header: Header {
+                run_queue: mpsc_queue::Links::new(),
+                vtable: &Self::TASK_VTABLE,
+                state: StateVar::new(),
+            },
+            scheduler,
+            inner: UnsafeCell::new(Cell::Future(future)),
+            storage: PhantomData,
+        })
+    }
+}
+
+impl<S: Schedule, F: Future, STO: Storage<S, F>> Task<S, F, STO> {
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
         // deallocate: Self::deallocate,
@@ -87,18 +108,6 @@ impl<S: Schedule, F: Future> Task<S, F> {
         Self::wake_by_ref,
         Self::drop_waker,
     );
-
-    fn allocate(scheduler: S, future: F) -> Box<Self> {
-        Box::new(Self {
-            header: Header {
-                run_queue: mpsc_queue::Links::new(),
-                vtable: &Self::TASK_VTABLE,
-                state: StateVar::new(),
-            },
-            scheduler,
-            inner: UnsafeCell::new(Cell::Future(future)),
-        })
-    }
 
     fn raw_waker(this: *const Self) -> RawWaker {
         unsafe { (*this).header.state.clone_ref() };
@@ -145,7 +154,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
             return;
         }
 
-        drop(Box::from_raw(this.as_ptr()))
+        drop(STO::from_raw(this))
     }
 
     unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
@@ -186,10 +195,10 @@ impl<S: Schedule, F: Future> Task<S, F> {
     }
 }
 
-unsafe impl<S: Send, F: Future + Send> Send for Task<S, F> {}
-unsafe impl<S: Sync, F: Future + Sync> Sync for Task<S, F> {}
+unsafe impl<S: Send, F: Future + Send, STO> Send for Task<S, F, STO> {}
+unsafe impl<S: Sync, F: Future + Sync, STO> Sync for Task<S, F, STO> {}
 
-impl<S, F: Future> fmt::Debug for Task<S, F> {
+impl<S, F: Future, STO> fmt::Debug for Task<S, F, STO> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Task")
             .field("future_type", &type_name::<F>())
@@ -204,9 +213,10 @@ impl<S, F: Future> fmt::Debug for Task<S, F> {
 // === impl TaskRef ===
 
 impl TaskRef {
+    #[cfg(feature = "alloc")]
     pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
         let task = Task::allocate(scheduler, future);
-        let ptr = unsafe { non_null(Box::into_raw(task)).cast::<Header>() };
+        let ptr = BoxStorage::into_raw(task).cast::<Header>();
         tracing::trace!(
             ?ptr,
             "Task<..., Output = {}>::new",
