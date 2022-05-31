@@ -1,5 +1,5 @@
 use crate::{
-    task::{self, Header, TaskRef, Storage},
+    task::{self, Header, Storage, TaskRef},
     util::tracing,
 };
 use cordyceps::mpsc_queue::MpscQueue;
@@ -11,7 +11,10 @@ pub use arc_scheduler::*;
 #[cfg(feature = "alloc")]
 mod arc_scheduler {
     use super::*;
-    use crate::{loom::sync::Arc, task::{Task, allocation::BoxStorage}};
+    use crate::{
+        loom::sync::Arc,
+        task::{allocation::BoxStorage, Task},
+    };
     use alloc::boxed::Box;
 
     #[derive(Clone, Debug, Default)]
