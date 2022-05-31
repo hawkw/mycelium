@@ -46,7 +46,7 @@ mod myco_async {
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         task::{Context, Poll},
     };
-    use mycelium_async::scheduler::StaticScheduler;
+    use maitake::scheduler::StaticScheduler;
     use mycelium_util::sync::Lazy;
 
     struct Yield {
