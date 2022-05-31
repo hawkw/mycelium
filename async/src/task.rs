@@ -21,7 +21,7 @@ use mycelium_util::fmt;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 
-mod allocation;
+pub(crate) mod allocation;
 mod state;
 pub use self::allocation::Storage;
 
@@ -38,8 +38,6 @@ pub struct Task<S, F: Future, STO> {
     inner: UnsafeCell<Cell<F>>,
     storage: PhantomData<STO>,
 }
-
-pub trait Allocation {}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -264,6 +262,22 @@ impl TaskRef {
     pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
         let task = Task::allocate(scheduler, future);
         let ptr = BoxStorage::into_raw(task).cast::<Header>();
+        tracing::trace!(
+            ?ptr,
+            "Task<..., Output = {}>::new",
+            type_name::<F::Output>()
+        );
+        Self(ptr)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> Self
+    where
+        S: Schedule,
+        F: Future,
+        STO: Storage<S, F>,
+    {
+        let ptr = STO::into_raw(task).cast::<Header>();
         tracing::trace!(
             ?ptr,
             "Task<..., Output = {}>::new",

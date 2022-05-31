@@ -38,14 +38,6 @@ mod arc_scheduler {
         }
     }
 
-    /// A trait abstracting over spawning futures.
-    impl<F: Future> Spawn<F> for Scheduler {
-        /// Spawns `future` as a new task on this executor.
-        fn spawn(&self, future: F) {
-            Scheduler::spawn(self, future)
-        }
-    }
-
     impl Schedule for Arc<Core> {
         fn schedule(&self, task: TaskRef) {
             // self.woken.store(true, Ordering::Release);
@@ -87,14 +79,6 @@ mod static_scheduler {
         }
     }
 
-    /// A trait abstracting over spawning futures.
-    impl<F: Future> Spawn<F> for &'static StaticScheduler {
-        /// Spawns `future` as a new task on this executor.
-        fn spawn(&self, future: F) {
-            StaticScheduler::spawn(self, future)
-        }
-    }
-
     impl Schedule for &'static Core {
         fn schedule(&self, task: TaskRef) {
             // self.woken.store(true, Ordering::Release);
@@ -115,14 +99,6 @@ pub struct Tick {
     pub polled: usize,
     pub completed: usize,
     pub has_remaining: bool,
-}
-
-/// A trait abstracting over spawning futures.
-// TODO(AJM): This essentially mandates an allocator. This trait needs some kind
-// of pre-allocated alternative.
-pub trait Spawn<F: Future> {
-    /// Spawns `future` as a new task on this executor.
-    fn spawn(&self, future: F);
 }
 
 pub trait Schedule: Sized + Clone {
