@@ -5,6 +5,7 @@ use crate::{
 };
 use cordyceps::{mpsc_queue, Linked};
 
+use core::marker::PhantomData;
 pub use core::task::{Context, Poll, Waker};
 use core::{
     any::type_name,
@@ -14,7 +15,6 @@ use core::{
     ptr::NonNull,
     task::{RawWaker, RawWakerVTable},
 };
-use core::marker::PhantomData;
 
 use mycelium_util::fmt;
 

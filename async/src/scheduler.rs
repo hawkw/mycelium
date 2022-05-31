@@ -64,7 +64,6 @@ mod static_scheduler {
     #[derive(Debug, Default)]
     pub struct StaticScheduler(Core);
 
-
     // === impl StaticScheduler ===
 
     impl StaticScheduler {
@@ -103,8 +102,6 @@ mod static_scheduler {
         }
     }
 }
-
-
 
 #[derive(Debug)]
 struct Core {

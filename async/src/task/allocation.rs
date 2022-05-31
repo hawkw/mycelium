@@ -1,6 +1,6 @@
 use super::Task;
-use core::ptr::NonNull;
 use core::future::Future;
+use core::ptr::NonNull;
 
 pub trait Storage<S, F: Future>: Sized {
     type StoredTask;
