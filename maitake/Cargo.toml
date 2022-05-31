@@ -1,11 +1,20 @@
 [package]
-name = "mycelium-async"
+name = "maitake"
 version = "0.1.0"
-edition = "2021"
 authors = [
     "Eliza Weisman <eliza@elizas.website>",
+    "James Munns <james@onevariable.com>"
 ]
+description = "Async runtime construction kit"
+repository = "https://github.com/hawkw/mycelium"
 license = "MIT"
+readme = "./README.md"
+categories = [
+    "no-std",
+    "async",
+]
+edition = "2021"
+rust-version = "1.61.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -28,3 +37,7 @@ futures-util = "0.3"
 loom = { version = "0.5.5", features = ["futures"] }
 tracing_01 = { package = "tracing", version = "0.1", default_features = false }
 tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
