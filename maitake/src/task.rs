@@ -1,3 +1,12 @@
+//! The `maitake` task system.
+//!
+//! This module contains the code that spawns tasks on a [scheduler], and
+//! manages the lifecycle of tasks once they are spawned. This includes the
+//! in-memory representation of spawned tasks (the [`Task`] type), and the
+//! handle used by the scheduler and other components of the runtime to
+//! reference a task once it is spawned (the [`TaskRef`] type).
+//!
+//! [scheduler]: crate::scheduler
 pub use crate::task::allocation::Storage;
 pub use core::task::{Context, Poll, Waker};
 
@@ -30,25 +39,114 @@ use self::allocation::BoxStorage;
 use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::fmt;
 
+/// A type-erased, reference-counted pointer to a spawned [`Task`].
+///
+/// Once a task has been spawned, it is generally referenced by a `TaskRef`.
+/// When a spawned task is placed in a scheduler's run queue, dequeuing the next
+/// task will yield a `TaskRef`, and a `TaskRef` may be converted into a
+/// [`Waker`] or used to await a spawned task's completion.
+///
+/// `TaskRef`s are reference-counted, and the task will be deallocated when the
+/// last `TaskRef` pointing to it is dropped.
 #[derive(Debug)]
 pub struct TaskRef(NonNull<Header>);
 
+/// A task.
+///
+/// This type contains the various components of a task: the [future]
+/// itself, the task's header, and a reference to the task's [scheduler]. When a
+/// task is spawned, the `Task` type is placed on the heap (or wherever spawned
+/// tasks are stored), and a type-erased [`TaskRef`] that points to that `Task`
+/// is returned. Once a task is spawned, it is primarily interacted with via
+/// [`TaskRef`]s.
+///
+/// [future]: core::future::Future
+/// [scheduler]: crate::scheduler::Schedule
+#[repr(C)]
+pub struct Task<S, F: Future, STO> {
+    /// The task's header.
+    ///
+    /// This contains the *untyped* components of the task which are identical
+    /// regardless of the task's future, output, and scheduler types: the
+    /// [vtable], [state cell], and [run queue links].
+    ///
+    /// # Safety
+    ///
+    /// This *must* be the first field in this type, to allow casting a
+    /// `NonNull<Task>` to a `NonNull<Header>`.
+    ///
+    /// [vtable]: Vtable
+    /// [state cell]: StateCell
+    /// [run queue links]: cordyceps::mpsc_queue::Links
+    header: Header,
+
+    /// A reference to the [scheduler] this task is spawned on.
+    ///
+    /// This is used to schedule the task when it is woken.
+    ///
+    /// [scheduler]: crate::scheduler::Schedule
+    scheduler: S,
+
+    /// The task itself.
+    ///
+    /// This is either the task's [`Future`], when it is running,
+    /// or the future's [`Output`], when the future has completed.
+    ///
+    /// [`Future`]: core::future::Future
+    /// [`Output`]: core::future::Future::Output
+    inner: UnsafeCell<Cell<F>>,
+
+    /// TODO(AJM) DOCS
+    storage: PhantomData<STO>,
+}
+
+/// The task's header.
+///
+/// This contains the *untyped* components of the task which are identical
+/// regardless of the task's future, output, and scheduler types: the
+/// [vtable], [state cell], and [run queue links].
+///
+/// The header is the data at which a [`TaskRef`] points, and will likely be
+/// prefetched when dereferencing a [`TaskRef`] pointer.[^1] Therefore, the
+/// header should contain the task's most frequently accessed data, and should
+/// ideally fit within a CPU cache line.
+///
+/// # Safety
+///
+/// The [run queue links] *must* be the first field in this type, in order for
+/// the [`Linked::links` implementation] for this type to be sound. Therefore,
+/// the `#[repr(C)]` attribute on this struct is load-bearing.
+///
+/// [vtable]: Vtable
+/// [state cell]: StateCell
+/// [run queue links]: cordyceps::mpsc_queue::Links
+/// [`Linked::links` implementation]: #method.links
+///
+/// [^1]: On CPU architectures which support spatial prefetch, at least...
 #[repr(C)]
 #[derive(Debug)]
 pub struct Header {
+    /// The task's links in the intrusive run queue.
+    ///
+    /// # Safety
+    ///
+    /// This MUST be the first field in this struct.
     run_queue: mpsc_queue::Links<Header>,
+
+    /// The task's state, which can be atomically updated.
     state: StateCell,
-    // task_list: list::Links<TaskRef>,
+
+    /// The task vtable for this task.
+    ///
+    /// Note that this is different from the [waker vtable], which contains
+    /// pointers to the waker methods (and depends primarily on the task's
+    /// scheduler type). The task vtable instead contains methods for
+    /// interacting with the task's future, such as polling it and reading the
+    /// task's output. These depend primarily on the type of the future rather
+    /// than the scheduler.
+    ///
+    /// [waker vtable]: core::task::RawWakerVTable
     vtable: &'static Vtable,
-}
-
-#[repr(C)]
-pub struct Task<S, F: Future, STO> {
-    header: Header,
-
-    scheduler: S,
-    inner: UnsafeCell<Cell<F>>,
-    storage: PhantomData<STO>,
 }
 
 impl Header {

@@ -1,13 +1,13 @@
 [workspace]
 members = [
     "alloc",
-    "async",
     "bitfield",
     "cordyceps",
     "util",
     "hal-core",
     "hal-x86_64",
     "inoculate",
+    "maitake",
     "mycotest",
     "trace",
 ]
@@ -35,7 +35,7 @@ opt-level = 3
 [dependencies]
 hal-core = { path = "hal-core", features = ["embedded-graphics-core"] }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
-mycelium-async = { path = "async" }
+maitake = { path = "maitake" }
 mycelium-util = { path = "util" }
 mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
 rlibc = "1.0"
