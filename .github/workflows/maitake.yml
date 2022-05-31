@@ -1,19 +1,18 @@
 # CI workflow for running `loom` tests
 #
 # This is factored out from the main workflow so that it can be triggered only
-# by changes to `mycelium-util`, `mycelium-async`, and `cordyceps`, which are
+# by changes to `mycelium-util`, `maitake`, and `cordyceps`, which are
 # the only crates that currently contain loom tests.
 #
 # Note that if other crates add loom tests in the future, they will need to be
 # added to this workflow!
-name: mycelium-async
+name: maitake
 
 on:
   pull_request:
   workflow_dispatch:
   push:
     branches: ["main"]
-
 
 env:
   # disable incremental compilation.
@@ -47,7 +46,7 @@ jobs:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@master
         with:
-          paths: '["async/**.rs", "async/Cargo.toml", ".github/workflows/async.yml"]'
+          paths: '["maitake/**.rs", "maitake/Cargo.toml", ".github/workflows/maitake.yml"]'
           do_not_skip: '["workflow_dispatch"]'
 
 
@@ -56,13 +55,13 @@ jobs:
     needs: is_enabled
     if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    name: Loom tests (mycelium-async)
+    name: Loom tests (maitake)
     steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
     - name: run loom tests
-      run: cargo test --profile loom --lib -p mycelium-async
+      run: cargo test --profile loom --lib -p maitake
       env:
         LOOM_MAX_PREEMPTIONS: 2
         LOOM_LOG: loom=trace
