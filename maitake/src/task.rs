@@ -30,12 +30,6 @@ use core::{
     task::{RawWaker, RawWakerVTable},
 };
 
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
-
-#[cfg(feature = "alloc")]
-use crate::task::storage::BoxStorage;
-
 use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::fmt;
 
@@ -96,7 +90,14 @@ pub struct Task<S, F: Future, STO> {
     /// [`Output`]: core::future::Future::Output
     inner: UnsafeCell<Cell<F>>,
 
-    /// TODO(AJM) DOCS
+    /// The Storage type associated with this struct
+    ///
+    /// In order to be agnostic over container types (e.g. [`Box`], or
+    /// other user provided types), the Task is generic over a
+    /// [`Storage`] type.
+    ///
+    /// [`Box`]: alloc::boxed::Box
+    /// [`storage`]: crate::task::storage::Storage
     storage: PhantomData<STO>,
 }
 
@@ -191,17 +192,6 @@ macro_rules! trace_task {
             concat!("Task::", $method),
         );
     };
-}
-
-#[cfg(feature = "alloc")]
-impl<S, F> Task<S, F, BoxStorage>
-where
-    S: Schedule,
-    F: Future,
-{
-    fn allocate(scheduler: S, future: F) -> Box<Self> {
-        Box::new(Task::new(scheduler, future))
-    }
 }
 
 impl<S, F, STO> Task<S, F, STO>
@@ -399,19 +389,6 @@ where
 // === impl TaskRef ===
 
 impl TaskRef {
-    #[cfg(feature = "alloc")]
-    pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
-        let task = Task::allocate(scheduler, future);
-        let ptr = BoxStorage::into_raw(task).cast::<Header>();
-        tracing::trace!(
-            ?ptr,
-            "Task<..., Output = {}>::new",
-            type_name::<F::Output>()
-        );
-        Self(ptr)
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> Self
     where
         S: Schedule,
@@ -514,4 +491,37 @@ impl<F: Future> fmt::Debug for Cell<F> {
             Cell::Future(_) => f.pad("Cell::Future(...)"),
         }
     }
+}
+
+// Additional types and capabilities only available with the "alloc"
+// feature active
+feature! {
+    #![feature = "alloc"]
+
+    use alloc::boxed::Box;
+    use crate::task::storage::BoxStorage;
+
+    impl TaskRef {
+        pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
+            let task = Task::allocate(scheduler, future);
+            let ptr = BoxStorage::into_raw(task).cast::<Header>();
+            tracing::trace!(
+                ?ptr,
+                "Task<..., Output = {}>::new",
+                type_name::<F::Output>()
+            );
+            Self(ptr)
+        }
+    }
+
+    impl<S, F> Task<S, F, BoxStorage>
+    where
+        S: Schedule,
+        F: Future,
+    {
+        fn allocate(scheduler: S, future: F) -> Box<Self> {
+            Box::new(Task::new(scheduler, future))
+        }
+    }
+
 }
