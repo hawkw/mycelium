@@ -160,14 +160,11 @@ impl<S: Schedule, F: Future> Task<S, F> {
         trace_task!(this, F, "drop_ref");
         if !this.as_ref().state().drop_ref() {
             return;
-        }
-
-        drop(Box::from_raw(this.as_ptr()))
+        } drop(Box::from_raw(this.as_ptr()))
     }
 
     unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
         trace_task!(ptr, F, "poll");
-        panic!();
         let mut this = ptr.cast::<Self>();
         test_trace!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
