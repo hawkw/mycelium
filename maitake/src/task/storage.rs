@@ -11,7 +11,7 @@ use core::ptr::NonNull;
 ///
 /// This trait is exposed publicly to allow for end users to implement
 /// it in their own heap allocation types, if they are not specifically
-/// a [`Box`]. 
+/// a [`Box`].
 ///
 /// This trait is ONLY appropriate for heap allocation types that represent
 /// exclusive ownership of the contained data, as it may be mutated while
@@ -28,7 +28,6 @@ use core::ptr::NonNull;
 /// [`Box`]: alloc::boxed::Box
 /// [`BoxStorage`]: crate::task::storage::BoxStorage
 pub trait Storage<S, F: Future>: Sized {
-
     /// The type of a stored Task.
     ///
     /// As the type that implements the Storage trait is a Marker Type,
@@ -41,7 +40,7 @@ pub trait Storage<S, F: Future>: Sized {
     /// This method should produce a NonNull pointer, while not actually
     /// dropping the contained task.
     fn into_raw(task: Self::StoredTask) -> NonNull<Task<S, F, Self>>;
-    
+
     /// Convert a raw task pointer into an owned, heap allocated Task type
     ///
     /// This method should produce a heap allocated type, which can be
