@@ -150,17 +150,6 @@ pub(crate) struct Header {
     vtable: &'static Vtable,
 }
 
-impl Header {
-    #[cfg(not(loom))]
-    const fn new_stub() -> Self {
-        Self {
-            run_queue: mpsc_queue::Links::new_stub(),
-            state: StateCell::new(),
-            vtable: &Vtable { poll: nop },
-        }
-    }
-}
-
 /// A Task Stub
 ///
 /// This represents a Task that will never actually be executed.
@@ -476,6 +465,17 @@ unsafe impl Sync for TaskRef {}
 
 // === impl Header ===
 
+impl Header {
+    #[cfg(not(loom))]
+    const fn new_stub() -> Self {
+        Self {
+            run_queue: mpsc_queue::Links::new_stub(),
+            state: StateCell::new(),
+            vtable: &Vtable { poll: nop },
+        }
+    }
+}
+
 /// # Safety
 ///
 /// A task must be pinned to be spawned.
@@ -532,24 +532,8 @@ feature! {
 
     impl TaskRef {
         pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
-            let task = Task::allocate(scheduler, future);
-            let ptr = BoxStorage::into_raw(task).cast::<Header>();
-            tracing::trace!(
-                ?ptr,
-                "Task<..., Output = {}>::new",
-                type_name::<F::Output>()
-            );
-            Self(ptr)
-        }
-    }
-
-    impl<S, F> Task<S, F, BoxStorage>
-    where
-        S: Schedule,
-        F: Future,
-    {
-        fn allocate(scheduler: S, future: F) -> Box<Self> {
-            Box::new(Task::new(scheduler, future))
+            let task = Box::new(Task::<S, F, BoxStorage>::new(scheduler, future));
+            Self::new_allocated::<S, F, BoxStorage>(task)
         }
     }
 
