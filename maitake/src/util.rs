@@ -52,7 +52,6 @@ macro_rules! fmt_bits {
     };
 }
 
-#[macro_export]
 macro_rules! feature {
     (
         #![$meta:meta]

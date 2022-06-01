@@ -123,6 +123,7 @@ impl Core {
         }
     }
 
+    #[cfg(not(loom))]
     const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
         Self {
             run_queue: MpscQueue::new_with_static_stub(stub),
