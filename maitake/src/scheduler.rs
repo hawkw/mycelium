@@ -158,6 +158,84 @@ impl Future for Stub {
     }
 }
 
+// Additional types and capabilities only available with the "alloc"
+// feature active
+feature! {
+    #![feature = "alloc"]
+
+    use crate::{
+        loom::sync::Arc,
+        task::{BoxStorage, Task},
+    };
+    use alloc::boxed::Box;
+
+    #[derive(Clone, Debug, Default)]
+    pub struct Scheduler(Arc<Core>);
+
+    // === impl Scheduler ===
+    impl Scheduler {
+        /// How many tasks are polled per call to `Scheduler::tick`.
+        ///
+        /// Chosen by fair dice roll, guaranteed to be random.
+        pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        #[inline]
+        pub fn spawn(&self, future: impl Future) {
+            self.schedule(TaskRef::new(self.clone(), future));
+        }
+
+        #[inline]
+        pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
+        where
+            F: Future,
+        {
+            let tr = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
+            self.schedule(tr);
+        }
+
+        pub fn tick(&self) -> Tick {
+            self.0.tick_n(Self::DEFAULT_TICK_SIZE)
+        }
+    }
+
+    impl Schedule for Scheduler {
+        fn schedule(&self, task: TaskRef) {
+            // self.0.woken.store(true, Ordering::Release);
+            self.0.run_queue.enqueue(task);
+        }
+    }
+
+    impl StaticScheduler {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        #[inline]
+        pub fn spawn(&'static self, future: impl Future) {
+            self.schedule(TaskRef::new(self, future));
+        }
+    }
+
+    impl Core {
+        fn new() -> Self {
+            let stub_task = TaskRef::new(Stub, Stub);
+            Self {
+                run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
+            }
+        }
+    }
+
+    impl Default for Core {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+}
+
 #[cfg(all(test, not(loom)))]
 mod tests {
     use super::test_util::{Chan, Yield};
@@ -275,84 +353,6 @@ mod tests {
         assert_eq!(tick.completed, TASKS);
         assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
         assert!(!tick.has_remaining);
-    }
-}
-
-// Additional types and capabilities only available with the "alloc"
-// feature active
-feature! {
-    #![feature = "alloc"]
-
-    use crate::{
-        loom::sync::Arc,
-        task::{BoxStorage, Task},
-    };
-    use alloc::boxed::Box;
-
-    #[derive(Clone, Debug, Default)]
-    pub struct Scheduler(Arc<Core>);
-
-    // === impl Scheduler ===
-    impl Scheduler {
-        /// How many tasks are polled per call to `Scheduler::tick`.
-        ///
-        /// Chosen by fair dice roll, guaranteed to be random.
-        pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
-
-        pub fn new() -> Self {
-            Self::default()
-        }
-
-        #[inline]
-        pub fn spawn(&self, future: impl Future) {
-            self.schedule(TaskRef::new(self.clone(), future));
-        }
-
-        #[inline]
-        pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
-        where
-            F: Future,
-        {
-            let tr = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
-            self.schedule(tr);
-        }
-
-        pub fn tick(&self) -> Tick {
-            self.0.tick_n(Self::DEFAULT_TICK_SIZE)
-        }
-    }
-
-    impl Schedule for Scheduler {
-        fn schedule(&self, task: TaskRef) {
-            // self.0.woken.store(true, Ordering::Release);
-            self.0.run_queue.enqueue(task);
-        }
-    }
-
-    impl StaticScheduler {
-        pub fn new() -> Self {
-            Self::default()
-        }
-
-        #[inline]
-        pub fn spawn(&'static self, future: impl Future) {
-            self.schedule(TaskRef::new(self, future));
-        }
-    }
-
-    impl Core {
-        fn new() -> Self {
-            let stub_task = TaskRef::new(Stub, Stub);
-            Self {
-                run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
-            }
-        }
-    }
-
-    impl Default for Core {
-        fn default() -> Self {
-            Self::new()
-        }
     }
 }
 
