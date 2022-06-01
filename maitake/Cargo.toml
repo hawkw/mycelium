@@ -18,6 +18,10 @@ rust-version = "1.61.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["alloc"]
+alloc = []
+
 [dependencies]
 mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }

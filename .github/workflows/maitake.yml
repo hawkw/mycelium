@@ -49,9 +49,21 @@ jobs:
           paths: '["maitake/**.rs", "maitake/Cargo.toml", ".github/workflows/maitake.yml"]'
           do_not_skip: '["workflow_dispatch"]'
 
+  # test with `--no-default-features`
+  no_default_features:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    name: Tests (maitake, no-default-features)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: run tests
+      run: cargo test -p maitake --no-default-features
 
   # run loom tests
-  tests:
+  loom:
     needs: is_enabled
     if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest

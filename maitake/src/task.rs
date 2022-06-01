@@ -7,28 +7,33 @@
 //! reference a task once it is spawned (the [`TaskRef`] type).
 //!
 //! [scheduler]: crate::scheduler
+#[cfg(feature = "alloc")]
+pub use self::storage::BoxStorage;
+pub use self::storage::Storage;
+pub use core::task::{Context, Poll, Waker};
+
+mod state;
+mod storage;
+
 use crate::{
     loom::cell::UnsafeCell,
     scheduler::Schedule,
+    task::state::{OrDrop, ScheduleAction, StateCell},
     util::{non_null, tracing},
 };
-use alloc::boxed::Box;
-use cordyceps::{mpsc_queue, Linked};
 
-pub use core::task::{Context, Poll, Waker};
 use core::{
     any::type_name,
     future::Future,
+    marker::PhantomData,
     mem,
     pin::Pin,
     ptr::NonNull,
     task::{RawWaker, RawWakerVTable},
 };
 
+use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::fmt;
-mod state;
-
-use self::state::{OrDrop, ScheduleAction, StateCell};
 
 /// A type-erased, reference-counted pointer to a spawned [`Task`].
 ///
@@ -54,7 +59,7 @@ pub struct TaskRef(NonNull<Header>);
 /// [future]: core::future::Future
 /// [scheduler]: crate::scheduler::Schedule
 #[repr(C)]
-pub struct Task<S, F: Future> {
+pub struct Task<S, F: Future, STO> {
     /// The task's header.
     ///
     /// This contains the *untyped* components of the task which are identical
@@ -86,6 +91,16 @@ pub struct Task<S, F: Future> {
     /// [`Future`]: core::future::Future
     /// [`Output`]: core::future::Future::Output
     inner: UnsafeCell<Cell<F>>,
+
+    /// The [`Storage`] type associated with this struct
+    ///
+    /// In order to be agnostic over container types (e.g. [`Box`], or
+    /// other user provided types), the Task is generic over a
+    /// [`Storage`] type.
+    ///
+    /// [`Box`]: alloc::boxed::Box
+    /// [`Storage`]: crate::task::Storage
+    storage: PhantomData<STO>,
 }
 
 /// The task's header.
@@ -142,8 +157,14 @@ enum Cell<F: Future> {
     Finished(F::Output),
 }
 
-#[derive(Debug)]
+unsafe fn nop(_ptr: NonNull<Header>) -> Poll<()> {
+    #[cfg(debug_assertions)]
+    unreachable!("stub task ({_ptr:p}) should never be polled!");
+    #[cfg(not(debug_assertions))]
+    Poll::Pending
+}
 
+#[derive(Debug)]
 struct Vtable {
     /// Poll the future.
     poll: unsafe fn(NonNull<Header>) -> Poll<()>,
@@ -165,7 +186,12 @@ macro_rules! trace_task {
     };
 }
 
-impl<S: Schedule, F: Future> Task<S, F> {
+impl<S, F, STO> Task<S, F, STO>
+where
+    S: Schedule,
+    F: Future,
+    STO: Storage<S, F>,
+{
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
         // deallocate: Self::deallocate,
@@ -178,8 +204,14 @@ impl<S: Schedule, F: Future> Task<S, F> {
         Self::drop_waker,
     );
 
-    fn allocate(scheduler: S, future: F) -> Box<Self> {
-        Box::new(Self {
+    /// Create a new (non-heap-allocated) Task.
+    ///
+    /// This needs to be heap allocated using an implementor of
+    /// the [`Storage`] trait to be used with the scheduler.
+    ///
+    /// [`Storage`]: crate::task::Storage
+    pub fn new(scheduler: S, future: F) -> Self {
+        Self {
             header: Header {
                 run_queue: mpsc_queue::Links::new(),
                 vtable: &Self::TASK_VTABLE,
@@ -187,7 +219,8 @@ impl<S: Schedule, F: Future> Task<S, F> {
             },
             scheduler,
             inner: UnsafeCell::new(Cell::Future(future)),
-        })
+            storage: PhantomData,
+        }
     }
 
     fn raw_waker(this: *const Self) -> RawWaker {
@@ -218,7 +251,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
         match test_dbg!(this.as_ref().state().wake_by_val()) {
-            OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
+            OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(ScheduleAction::Enqueue) => {
                 // the task should be enqueued.
                 //
@@ -258,7 +291,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
             return;
         }
 
-        drop(Box::from_raw(this.as_ptr()))
+        drop(STO::from_raw(this))
     }
 
     unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
@@ -290,7 +323,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
 
         // post-poll state transition
         match test_dbg!(state.end_poll(poll.is_ready())) {
-            OrDrop::Drop => drop(Box::from_raw(this.as_ptr())),
+            OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(this),
             OrDrop::Action(ScheduleAction::None) => {}
         }
@@ -322,13 +355,27 @@ impl<S: Schedule, F: Future> Task<S, F> {
     }
 }
 
-unsafe impl<S: Send, F: Future + Send> Send for Task<S, F> {}
-unsafe impl<S: Sync, F: Future + Sync> Sync for Task<S, F> {}
+unsafe impl<S, F, STO> Send for Task<S, F, STO>
+where
+    S: Send,
+    F: Future + Send,
+{
+}
+unsafe impl<S, F, STO> Sync for Task<S, F, STO>
+where
+    S: Sync,
+    F: Future + Sync,
+{
+}
 
-impl<S, F: Future> fmt::Debug for Task<S, F> {
+impl<S, F, STO> fmt::Debug for Task<S, F, STO>
+where
+    F: Future,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Task")
             // .field("future_type", &fmt::display(type_name::<F>()))
+            .field("storage", &fmt::display(type_name::<STO>()))
             .field("output_type", &fmt::display(type_name::<F::Output>()))
             .field("scheduler_type", &fmt::display(type_name::<S>()))
             .field("header", &self.header)
@@ -340,9 +387,13 @@ impl<S, F: Future> fmt::Debug for Task<S, F> {
 // === impl TaskRef ===
 
 impl TaskRef {
-    pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
-        let task = Task::allocate(scheduler, future);
-        let ptr = unsafe { non_null(Box::into_raw(task)).cast::<Header>() };
+    pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> Self
+    where
+        S: Schedule,
+        F: Future,
+        STO: Storage<S, F>,
+    {
+        let ptr = STO::into_raw(task).cast::<Header>();
         tracing::trace!(
             ?ptr,
             "Task<..., Output = {}>::new",
@@ -393,6 +444,17 @@ unsafe impl Sync for TaskRef {}
 
 // === impl Header ===
 
+impl Header {
+    #[cfg(not(loom))]
+    pub(crate) const fn new_stub() -> Self {
+        Self {
+            run_queue: mpsc_queue::Links::new_stub(),
+            state: StateCell::new(),
+            vtable: &Vtable { poll: nop },
+        }
+    }
+}
+
 /// # Safety
 ///
 /// A task must be pinned to be spawned.
@@ -438,4 +500,20 @@ impl<F: Future> fmt::Debug for Cell<F> {
             Cell::Future(_) => f.pad("Cell::Future(...)"),
         }
     }
+}
+
+// Additional types and capabilities only available with the "alloc"
+// feature active
+feature! {
+    #![feature = "alloc"]
+
+    use alloc::boxed::Box;
+
+    impl TaskRef {
+        pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
+            let task = Box::new(Task::<S, F, BoxStorage>::new(scheduler, future));
+            Self::new_allocated::<S, F, BoxStorage>(task)
+        }
+    }
+
 }

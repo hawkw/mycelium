@@ -76,6 +76,12 @@ const REF_MAX: usize = State::REFS.raw_mask();
 // === impl StateCell ===
 
 impl StateCell {
+    #[cfg(not(loom))]
+    pub const fn new() -> Self {
+        Self(AtomicUsize::new(REF_ONE))
+    }
+
+    #[cfg(loom)]
     pub fn new() -> Self {
         Self(AtomicUsize::new(REF_ONE))
     }
