@@ -36,6 +36,7 @@ impl StaticScheduler {
     /// Chosen by fair dice roll, guaranteed to be random.
     pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
 
+    #[cfg(not(loom))]
     pub const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
         StaticScheduler(Core::new_with_static_stub(stub))
     }
