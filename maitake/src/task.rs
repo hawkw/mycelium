@@ -90,7 +90,7 @@ pub struct Task<S, F: Future, STO> {
     /// [`Output`]: core::future::Future::Output
     inner: UnsafeCell<Cell<F>>,
 
-    /// The Storage type associated with this struct
+    /// The [`Storage`] type associated with this struct
     ///
     /// In order to be agnostic over container types (e.g. [`Box`], or
     /// other user provided types), the Task is generic over a
@@ -236,7 +236,7 @@ where
         Self::drop_waker,
     );
 
-    /// Create a new (non heap allocated) Task
+    /// Create a new (non-heap-allocated) Task.
     ///
     /// This needs to be heap allocated using an implementor of
     /// the [`Storage`] trait to be used with the scheduler.

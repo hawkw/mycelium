@@ -2,16 +2,16 @@ use super::Task;
 use core::future::Future;
 use core::ptr::NonNull;
 
-/// A trait representing the storage medium of a [`Task`].
+/// A trait representing a heap allocation that can own a [`Task`].
 ///
 /// This is used to contain tasks at runtime, and abstract over the
 /// type erasure and type recovery steps, e.g. converting a heap
-/// allocation type into a NonNull pointer, and recovering it
-/// back into a heap allocation from a NonNull pointer
+/// allocation type into a [`NonNull`] pointer, and recovering it
+/// back into a heap allocation from a [`NonNull`] pointer
 ///
 /// This trait is exposed publicly to allow for end users to implement
-/// it in their own heap allocation types, if they are not specifically
-/// a [`Box`].
+/// for their own heap allocation types, if tasks must be stored in
+/// an allocation type other than [`Box`].
 ///
 /// This trait is ONLY appropriate for heap allocation types that represent
 /// exclusive ownership of the contained data, as it may be mutated while
@@ -19,7 +19,7 @@ use core::ptr::NonNull;
 /// but the `Arc` type would not, as it allows for shared access, and NOT
 /// exclusive mutable access.
 ///
-/// NOTE: The type that implements this trait is typically NOT the heap
+/// **Note**: The type that implements this trait is typically NOT the heap
 /// allocation type itself, but a "Marker Type" that represents the
 /// intended storage medium. See the [`BoxStorage`] type (available with the
 /// "alloc" feature active) for an implementation example
@@ -35,15 +35,15 @@ pub trait Storage<S, F: Future>: Sized {
     /// to contain the Task.
     type StoredTask;
 
-    /// Convert an owned, heap allocated Task type to a raw pointer
+    /// Convert an owned, heap-allocated [`Task`] type to a raw pointer
     ///
-    /// This method should produce a NonNull pointer, while not actually
+    /// This method should produce a [`NonNull`] pointer, while not actually
     /// dropping the contained task.
     fn into_raw(task: Self::StoredTask) -> NonNull<Task<S, F, Self>>;
 
-    /// Convert a raw task pointer into an owned, heap allocated Task type
+    /// Convert a raw task pointer into an owned, heap`allocated [`Task`] type
     ///
-    /// This method should produce a heap allocated type, which can be
+    /// This method should produce a heap-allocated type, which can be
     /// dropped to perform the correct destructor actions
     fn from_raw(ptr: NonNull<Task<S, F, Self>>) -> Self::StoredTask;
 }
