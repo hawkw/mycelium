@@ -151,6 +151,7 @@ pub(crate) struct Header {
 }
 
 impl Header {
+    #[cfg(not(loom))]
     const fn new_stub() -> Self {
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
@@ -175,6 +176,7 @@ pub struct TaskStub {
 
 impl TaskStub {
     /// Create a unique Task Stub
+    #[cfg(not(loom))]
     pub const fn new_stub() -> Self {
         Self {
             hdr: Header::new_stub(),
