@@ -167,6 +167,7 @@ impl<S: Schedule, F: Future> Task<S, F> {
 
     unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
         trace_task!(ptr, F, "poll");
+        panic!();
         let mut this = ptr.cast::<Self>();
         test_trace!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
