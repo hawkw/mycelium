@@ -1,5 +1,5 @@
 use crate::{
-    task::{self, Header, Storage, TaskRef},
+    task::{self, Header, Storage, TaskRef, TaskStub},
     util::tracing,
 };
 use core::{future::Future, pin::Pin};
@@ -36,11 +36,25 @@ impl StaticScheduler {
     /// Chosen by fair dice roll, guaranteed to be random.
     pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
 
+    /// Create a StaticScheduler with a static "stub" task entity
+    ///
+    /// This is used for creating a StaticScheduler as a `static` variable.
+    ///
+    /// # Safety
+    ///
+    /// The "stub" provided must ONLY EVER be used for a single StaticScheduler.
+    /// Re-using the stub for multiple schedulers may lead to undefined behavior.
     #[cfg(not(loom))]
-    pub const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
-        StaticScheduler(Core::new_with_static_stub(stub))
+    pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
+        StaticScheduler(Core::new_with_static_stub(&stub.hdr))
     }
 
+    /// Spawn a pre-allocated task
+    ///
+    /// This method is used to spawn a task that requires some bespoke
+    /// procedure of allocation, typically of a custom [`Storage`] implementor.
+    ///
+    /// [`Storage`]: crate::task::storage::Storage
     #[inline]
     pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
     where

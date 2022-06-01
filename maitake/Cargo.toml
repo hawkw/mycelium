@@ -1,7 +1,6 @@
 [package]
 name = "maitake"
 version = "0.1.0"
-edition = "2021"
 authors = [
     "Eliza Weisman <eliza@elizas.website>",
     "James Munns <james@onevariable.com>"
@@ -14,6 +13,7 @@ categories = [
     "no-std",
     "async",
 ]
+edition = "2021"
 rust-version = "1.61.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

@@ -97,7 +97,7 @@ pub struct Task<S, F: Future, STO> {
     /// [`Storage`] type.
     ///
     /// [`Box`]: alloc::boxed::Box
-    /// [`storage`]: crate::task::storage::Storage
+    /// [`Storage`]: crate::task::storage::Storage
     storage: PhantomData<STO>,
 }
 
@@ -126,7 +126,7 @@ pub struct Task<S, F: Future, STO> {
 /// [^1]: On CPU architectures which support spatial prefetch, at least...
 #[repr(C)]
 #[derive(Debug)]
-pub struct Header {
+pub(crate) struct Header {
     /// The task's links in the intrusive run queue.
     ///
     /// # Safety
@@ -151,11 +151,33 @@ pub struct Header {
 }
 
 impl Header {
-    pub const fn new_stub() -> Self {
+    const fn new_stub() -> Self {
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
             vtable: &Vtable { poll: nop },
+        }
+    }
+}
+
+/// A Task Stub
+///
+/// This represents a Task that will never actually be executed.
+/// It is used exclusively for initializing a [`StaticScheduler`],
+/// using the unsafe [`new_with_static_stub()`] method.
+///
+/// [`StaticScheduler`]: crate::scheduler::StaticScheduler
+/// [`new_with_static_stub()`]: crate::scheduler::StaticScheduler::new_with_static_stub
+#[repr(transparent)]
+pub struct TaskStub {
+    pub(crate) hdr: Header,
+}
+
+impl TaskStub {
+    /// Create a unique Task Stub
+    pub const fn new_stub() -> Self {
+        Self {
+            hdr: Header::new_stub(),
         }
     }
 }
@@ -212,6 +234,12 @@ where
         Self::drop_waker,
     );
 
+    /// Create a new (non heap allocated) Task
+    ///
+    /// This needs to be heap allocated using an implementor of
+    /// the [`Storage`] trait to be used with the scheduler.
+    ///
+    /// [`Storage`]: crate::task::storage::Storage
     pub fn new(scheduler: S, future: F) -> Self {
         Self {
             header: Header {
