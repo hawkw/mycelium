@@ -79,7 +79,13 @@ jobs:
     - uses: actions/checkout@v2
     - uses: olix0r/cargo-action-fmt@v1.0.1
     - name: run rustdoc
-      run: cargo doc --message-format=json --no-deps --document-internal-items | cargo-action-fmt
+      run: |
+        cargo doc \
+          --message-format=json \
+          --no-deps \
+          --all-features \
+          --document-private-items |
+          cargo-action-fmt
       env:
         RUSTDOCFLAGS: "--cfg docsrs -Dwarnings"
 
