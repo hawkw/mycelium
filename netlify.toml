@@ -12,7 +12,6 @@
 
 [build.environment]
   RUSTDOCFLAGS="""
-    -D warnings \
     --cfg docsrs \
     """
 
