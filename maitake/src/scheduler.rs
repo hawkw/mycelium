@@ -285,7 +285,7 @@ feature! {
 
     use crate::{
         loom::sync::Arc,
-        task::{storage::BoxStorage, Task},
+        task::{BoxStorage, Task},
     };
     use alloc::boxed::Box;
 
