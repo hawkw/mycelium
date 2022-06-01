@@ -51,11 +51,9 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: olix0r/cargo-action-fmt@v1.0.1
     - name: run cargo check
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: check
-        args: --all --all-features
+      run: cargo check -q --message-format=json | cargo-action-fmt
 
   # check code style with `rustfmt`
   rustfmt:
@@ -66,11 +64,24 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - uses: olix0r/cargo-action-fmt@v1.0.1
     - name: run rustfmt
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: fmt
-        args: --all -- --check
+      run: cargo fmt --check --message-format=json | cargo-action-fmt
+
+  # check that RustDoc builds
+  docs:
+    needs: is_enabled
+    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - uses: olix0r/cargo-action-fmt@v1.0.1
+    - name: run rustdoc
+      run: cargo doc --message-format=json --no-deps --document-internal-items | cargo-action-fmt
+      env:
+        RUSTDOCFLAGS: "--cfg docsrs -Dwarnings"
 
   # run host tests
   #
