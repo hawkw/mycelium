@@ -26,7 +26,7 @@ use core::ptr::NonNull;
 ///
 /// [`Task`]: crate::task::Task
 /// [`Box`]: alloc::boxed::Box
-/// [`BoxStorage`]: crate::task::storage::BoxStorage
+/// [`BoxStorage`]: crate::task::BoxStorage
 pub trait Storage<S, F: Future>: Sized {
     /// The type of a stored Task.
     ///
