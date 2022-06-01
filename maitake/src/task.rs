@@ -7,7 +7,7 @@
 //! reference a task once it is spawned (the [`TaskRef`] type).
 //!
 //! [scheduler]: crate::scheduler
-pub use crate::task::storage::Storage;
+pub use crate::task::storage::{BoxStorage, Storage};
 pub use core::task::{Context, Poll, Waker};
 
 mod state;
@@ -529,7 +529,6 @@ feature! {
     #![feature = "alloc"]
 
     use alloc::boxed::Box;
-    use crate::task::storage::BoxStorage;
 
     impl TaskRef {
         pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
