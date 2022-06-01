@@ -77,7 +77,7 @@ impl StaticScheduler {
     /// This method is used to spawn a task that requires some bespoke
     /// procedure of allocation, typically of a custom [`Storage`] implementor.
     ///
-    /// [`Storage`]: crate::task::storage::Storage
+    /// [`Storage`]: crate::task::Storage
     #[inline]
     pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
     where

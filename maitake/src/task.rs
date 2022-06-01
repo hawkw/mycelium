@@ -99,7 +99,7 @@ pub struct Task<S, F: Future, STO> {
     /// [`Storage`] type.
     ///
     /// [`Box`]: alloc::boxed::Box
-    /// [`Storage`]: crate::task::storage::Storage
+    /// [`Storage`]: crate::task::Storage
     storage: PhantomData<STO>,
 }
 
@@ -209,7 +209,7 @@ where
     /// This needs to be heap allocated using an implementor of
     /// the [`Storage`] trait to be used with the scheduler.
     ///
-    /// [`Storage`]: crate::task::storage::Storage
+    /// [`Storage`]: crate::task::Storage
     pub fn new(scheduler: S, future: F) -> Self {
         Self {
             header: Header {
