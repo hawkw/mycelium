@@ -7,11 +7,11 @@
 //! reference a task once it is spawned (the [`TaskRef`] type).
 //!
 //! [scheduler]: crate::scheduler
-pub use crate::task::allocation::Storage;
+pub use crate::task::storage::Storage;
 pub use core::task::{Context, Poll, Waker};
 
-pub(crate) mod allocation;
 mod state;
+pub(crate) mod storage;
 
 use crate::{
     loom::cell::UnsafeCell,
@@ -34,7 +34,7 @@ use core::{
 use alloc::boxed::Box;
 
 #[cfg(feature = "alloc")]
-use self::allocation::BoxStorage;
+use crate::task::storage::BoxStorage;
 
 use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::fmt;
@@ -164,7 +164,10 @@ enum Cell<F: Future> {
     Finished(F::Output),
 }
 
-unsafe fn nop(_: NonNull<Header>) -> Poll<()> {
+unsafe fn nop(_ptr: NonNull<Header>) -> Poll<()> {
+    #[cfg(debug_assertions)]
+    unreachable!("stub task ({_ptr:p}) should never be polled!");
+    #[cfg(not(debug_assertions))]
     Poll::Pending
 }
 
@@ -191,13 +194,22 @@ macro_rules! trace_task {
 }
 
 #[cfg(feature = "alloc")]
-impl<S: Schedule, F: Future> Task<S, F, BoxStorage> {
+impl<S, F> Task<S, F, BoxStorage>
+where
+    S: Schedule,
+    F: Future,
+{
     fn allocate(scheduler: S, future: F) -> Box<Self> {
         Box::new(Task::new(scheduler, future))
     }
 }
 
-impl<S: Schedule, F: Future, STO: Storage<S, F>> Task<S, F, STO> {
+impl<S, F, STO> Task<S, F, STO>
+where
+    S: Schedule,
+    F: Future,
+    STO: Storage<S, F>,
+{
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
         // deallocate: Self::deallocate,
@@ -355,13 +367,27 @@ impl<S: Schedule, F: Future, STO: Storage<S, F>> Task<S, F, STO> {
     }
 }
 
-unsafe impl<S: Send, F: Future + Send, STO> Send for Task<S, F, STO> {}
-unsafe impl<S: Sync, F: Future + Sync, STO> Sync for Task<S, F, STO> {}
+unsafe impl<S, F, STO> Send for Task<S, F, STO>
+where
+    S: Send,
+    F: Future + Send,
+{
+}
+unsafe impl<S, F, STO> Sync for Task<S, F, STO>
+where
+    S: Sync,
+    F: Future + Sync,
+{
+}
 
-impl<S, F: Future, STO> fmt::Debug for Task<S, F, STO> {
+impl<S, F, STO> fmt::Debug for Task<S, F, STO>
+where
+    F: Future,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Task")
             // .field("future_type", &fmt::display(type_name::<F>()))
+            .field("storage", &fmt::display(type_name::<STO>()))
             .field("output_type", &fmt::display(type_name::<F::Output>()))
             .field("scheduler_type", &fmt::display(type_name::<S>()))
             .field("header", &self.header)

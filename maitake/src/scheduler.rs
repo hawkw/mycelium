@@ -9,7 +9,7 @@ use cordyceps::mpsc_queue::MpscQueue;
 #[cfg(feature = "alloc")]
 use crate::{
     loom::sync::Arc,
-    task::{allocation::BoxStorage, Task},
+    task::{storage::BoxStorage, Task},
 };
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
