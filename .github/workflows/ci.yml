@@ -51,7 +51,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - uses: olix0r/cargo-action-fmt@v1.0.1
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run cargo check
       run: cargo check -q --message-format=json | cargo-action-fmt
 
@@ -64,7 +64,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - uses: olix0r/cargo-action-fmt@v1.0.1
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustfmt
       run: cargo fmt --check --message-format=json | cargo-action-fmt
 
@@ -77,7 +77,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - uses: olix0r/cargo-action-fmt@v1.0.1
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustdoc
       run: |
         cargo doc \
