@@ -44,9 +44,9 @@ operating systems, but may be useful for other projects as well.
 
 [`core::task`]: https://doc.rust-lang.org/stable/core/task/index.html
 [`core::future`]: https://doc.rust-lang.org/stable/core/future/index.html
-[task system]: task
-[scheduling]: scheduler
-[wait]: wait
+[task system]: ./src/task/
+[scheduling]: ./src/scheduler/
+[wait]: ./src/wait/
 [mycelium]: https://github.com/hawkw/mycelium
 [mnemOS]: https://mnemos.jamesmunns.com
 
