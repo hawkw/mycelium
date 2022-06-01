@@ -7,11 +7,13 @@
 //! reference a task once it is spawned (the [`TaskRef`] type).
 //!
 //! [scheduler]: crate::scheduler
-pub use crate::task::storage::{BoxStorage, Storage};
+pub use self::storage::Storage;
+#[cfg(feature = "alloc")]
+pub use self::storage::BoxStorage;
 pub use core::task::{Context, Poll, Waker};
 
 mod state;
-pub(crate) mod storage;
+mod storage;
 
 use crate::{
     loom::cell::UnsafeCell,
