@@ -44,7 +44,7 @@ pub struct TaskStub {
 impl TaskStub {
     /// Create a new unique stub [`Task`].
     #[cfg(not(loom))]
-    pub const fn new_stub() -> Self {
+    pub const fn new() -> Self {
         Self {
             hdr: Header::new_stub(),
         }
