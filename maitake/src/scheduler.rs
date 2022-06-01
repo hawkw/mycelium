@@ -236,6 +236,8 @@ feature! {
     }
 }
 
+// TODO(eliza): would also be nice to have tests without liballoc
+#[cfg(feature = "alloc")]
 #[cfg(all(test, not(loom)))]
 mod tests {
     use super::test_util::{Chan, Yield};
@@ -544,6 +546,7 @@ mod loom {
     }
 }
 
+#[cfg(feature = "alloc")]
 #[cfg(test)]
 mod test_util {
     use core::{
