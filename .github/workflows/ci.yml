@@ -66,7 +66,7 @@ jobs:
     - uses: actions/checkout@v2
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustfmt
-      run: cargo fmt --check --message-format=json | cargo-action-fmt
+      run: cargo fmt --message-format=json | cargo-action-fmt
 
   # check that RustDoc builds
   docs:
