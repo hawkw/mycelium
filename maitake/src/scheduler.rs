@@ -1,5 +1,5 @@
 use crate::{
-    task::{self, Header, Storage, TaskRef, TaskStub},
+    task::{self, Header, Storage, TaskRef},
     util::tracing,
 };
 use core::{future::Future, pin::Pin};
@@ -26,6 +26,29 @@ pub struct Tick {
 
 pub trait Schedule: Sized + Clone {
     fn schedule(&self, task: TaskRef);
+}
+
+/// A stub [`Task`],
+///
+/// This represents a [`Task`] that will never actually be executed.
+/// It is used exclusively for initializing a [`StaticScheduler`],
+/// using the unsafe [`new_with_static_stub()`] method.
+///
+/// [`StaticScheduler`]: crate::scheduler::StaticScheduler
+/// [`new_with_static_stub()`]: crate::scheduler::StaticScheduler::new_with_static_stub
+#[repr(transparent)]
+pub struct TaskStub {
+    hdr: Header,
+}
+
+impl TaskStub {
+    /// Create a new unique stub [`Task`].
+    #[cfg(not(loom))]
+    pub const fn new_stub() -> Self {
+        Self {
+            hdr: Header::new_stub(),
+        }
+    }
 }
 
 // === impl StaticScheduler ===

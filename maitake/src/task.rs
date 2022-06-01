@@ -150,29 +150,6 @@ pub(crate) struct Header {
     vtable: &'static Vtable,
 }
 
-/// A Task Stub
-///
-/// This represents a Task that will never actually be executed.
-/// It is used exclusively for initializing a [`StaticScheduler`],
-/// using the unsafe [`new_with_static_stub()`] method.
-///
-/// [`StaticScheduler`]: crate::scheduler::StaticScheduler
-/// [`new_with_static_stub()`]: crate::scheduler::StaticScheduler::new_with_static_stub
-#[repr(transparent)]
-pub struct TaskStub {
-    pub(crate) hdr: Header,
-}
-
-impl TaskStub {
-    /// Create a unique Task Stub
-    #[cfg(not(loom))]
-    pub const fn new_stub() -> Self {
-        Self {
-            hdr: Header::new_stub(),
-        }
-    }
-}
-
 enum Cell<F: Future> {
     Future(F),
     Finished(F::Output),
@@ -467,7 +444,7 @@ unsafe impl Sync for TaskRef {}
 
 impl Header {
     #[cfg(not(loom))]
-    const fn new_stub() -> Self {
+    pub(crate) const fn new_stub() -> Self {
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
