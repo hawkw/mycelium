@@ -6,7 +6,7 @@ use crate::{
             Ordering::{self, *},
         },
     },
-    util::{self, tracing},
+    util,
     wait::{self, WaitResult},
 };
 use cordyceps::{
@@ -19,14 +19,19 @@ use core::{
     pin::Pin,
     ptr::NonNull,
     task::{Context, Poll, Waker},
+    mem,
 };
+use mycelium_bitfield::{FromBits, bitfield};
 use mycelium_util::{
     fmt,
     sync::{spin::Mutex, CachePadded},
 };
 use pin_project::{pin_project, pinned_drop};
 
-/// A queue of [`Waker`]s implemented using an [intrusive singly-linked list][ilist].
+#[cfg(test)]
+mod tests;
+
+/// A queue of [`Waker`]s implemented using an [intrusive doubly-linked list][ilist].
 ///
 /// The *[intrusive]* aspect of this list is important, as it means that it does
 /// not allocate memory. Instead, nodes in the linked list are stored in the
@@ -57,26 +62,6 @@ use pin_project::{pin_project, pinned_drop};
 #[derive(Debug)]
 pub struct WaitQueue {
     /// The wait queue's state variable.
-    ///
-    /// The queue is always in one of the following states:
-    ///
-    /// - [`EMPTY`]: No waiters are queued, and there is no pending notification.
-    ///   Waiting while the queue is in this state will enqueue the waiter;
-    ///   notifying while in this state will store a pending notification in the
-    ///   queue, transitioning to the `WAKING` state.
-    ///
-    /// - [`WAITING`]: There are one or more waiters in the queue. Waiting while
-    ///   the queue is in this state will not transition the state. Waking while
-    ///   in this state will wake the first waiter in the queue; if this empties
-    ///   the queue, then the queue will transition to the `EMPTY` state.
-    ///
-    /// - [`WAKING`]: The queue has a stored notification. Waiting while the queue
-    ///   is in this state will consume the pending notification *without*
-    ///   enqueueing the waiter and transition the queue to the `EMPTY` state.
-    ///   Waking while in this state will leave the queue in this state.
-    ///
-    /// - [`CLOSED`]: The queue is closed. Waiting while in this state will return
-    ///   [`WaitResult::Closed`] without transitioning the queue's state.
     state: CachePadded<AtomicUsize>,
 
     /// The linked list of waiters.
@@ -94,7 +79,7 @@ pub struct WaitQueue {
     /// A spinlock is used on `no_std` platforms; [`std::sync::Mutex`] or
     /// `parking_lot::Mutex` are used when the standard library is available
     /// (depending on feature flags).
-    list: Mutex<List<Waiter>>,
+    queue: Mutex<List<Waiter>>,
 }
 
 /// Future returned from [`WaitQueue::wait()`].
@@ -104,55 +89,36 @@ pub struct WaitQueue {
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 pub struct Wait<'a> {
-    /// The `WaitQueue` being received on.
-    q: &'a WaitQueue,
-
-    /// The future's state.
-    state: State,
+    /// The `WaitQueue` being waited on from.
+    queue: &'a WaitQueue,
 
     /// Entry in the wait queue.
     #[pin]
     waiter: Waiter,
 }
 
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum State {
-    Start,
+enum WaitState {
+    Start(usize),
     Waiting,
-    Done(WaitResult),
+    Woken,
 }
 
 /// A waiter node which may be linked into a wait queue.
 #[derive(Debug)]
 #[repr(C)]
+#[pin_project]
 struct Waiter {
     /// The intrusive linked list node.
     ///
     /// This *must* be the first field in the struct in order for the `Linked`
     /// implementation to be sound.
+    #[pin]
     node: UnsafeCell<Node>,
 
-    /// The waiter's state variable.
-    ///
-    /// A waiter is always in one of the following states:
-    ///
-    /// - [`EMPTY`]: The waiter is not linked in the queue, and does not have a
-    ///   `Thread`/`Waker`.
-    ///
-    /// - [`WAITING`]: The waiter is linked in the queue and has a
-    ///   `Thread`/`Waker`.
-    ///
-    /// - [`WAKING`]: The waiter has been notified by the wait queue. If it is in
-    ///   this state, it is *not* linked into the queue, and does not have a
-    ///   `Thread`/`Waker`.
-    ///
-    /// - [`WAKING`]: The waiter has been notified because the wait queue closed.
-    ///   If it is in this state, it is *not* linked into the queue, and does
-    ///   not have a `Thread`/`Waker`.
-    ///
-    /// This may be inspected without holding the lock; it can be used to
-    /// determine whether the lock must be acquired.
-    state: CachePadded<AtomicUsize>,
+    /// The future's state.
+    state: WaitState,
 }
 
 #[derive(Debug)]
@@ -167,122 +133,189 @@ struct Node {
     links: list::Links<Waiter>,
 
     /// The node's waker
-    waker: Option<Waker>,
+    waker: Wakeup,
+
+    // /// Optional user data.
+    // data: Option<T>,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
     _pin: PhantomPinned,
 }
 
-const EMPTY: usize = 0;
-const WAITING: usize = 1;
-const WAKING: usize = 2;
-const CLOSED: usize = 3;
+bitfield! {
+    #[derive(Eq, PartialEq)]
+    struct QueueState<usize> {
+        const STATE: State;
+        const WAKE_ALLS = ..;
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u8)]
+enum State {
+    /// No waiters are queued, and there is no pending notification.
+    /// Waiting while the queue is in this state will enqueue the waiter;
+    /// notifying while in this state will store a pending notification in the
+    /// queue, transitioning to the [`Woken`] state.
+    Empty = 0,
+
+    /// There are one or more waiters in the queue. Waiting while
+    /// the queue is in this state will not transition the state. Waking while
+    /// in this state will wake the first waiter in the queue; if this empties
+    /// the queue, then the queue will transition to the [`Empty`] state.
+    Waiting = 1,
+
+    /// The queue has a stored notification. Waiting while the queue
+    /// is in this state will consume the pending notification *without*
+    /// enqueueing the waiter and transition the queue to the [`Empty`] state.
+    /// Waking while in this state will leave the queue in this state.
+    Woken = 2,
+
+    /// The queue is closed. Waiting while in this state will return
+    /// [`Closed`] without transitioning the queue's state.
+    Closed = 3,
+
+}
+
+impl QueueState {
+    fn with_state(self, state: State) -> Self {
+        self.with(Self::STATE, state)
+    }
+}
+
+impl FromBits<usize> for State {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(bits: usize) -> Result<Self, Self::Error> {
+        Ok(match bits as u8 {
+            bits if bits == Self::Empty as u8 => Self::Empty,
+            bits if bits == Self::Waiting as u8 => Self::Waiting,
+            bits if bits == Self::Woken as u8 => Self::Woken,
+            bits if bits == Self::Closed as u8 => Self::Closed,
+            _ => unsafe { mycelium_util::unreachable_unchecked!("all potential 2-bit patterns should be covered!") },
+        })
+    }
+
+    fn into_bits(self) -> usize {
+        self as u8 as usize
+    }
+}
+
+#[derive(Clone, Debug)]
+enum Wakeup {
+    Empty,
+    Waiting(Waker),
+    One,
+    All,
+    Closed,
+}
+
 
 // === impl WaitQueue ===
 
 impl WaitQueue {
-    #[inline(always)]
-    fn start_wait(&self, node: Pin<&mut Waiter>, cx: &mut Context<'_>) -> Poll<WaitResult> {
-        // Optimistically, acquire a stored notification before trying to lock
-        // the wait list.
-        match test_dbg!(self.state.compare_exchange(WAKING, EMPTY, SeqCst, SeqCst)) {
-            Ok(_) => return wait::notified(),
-            Err(CLOSED) => return wait::closed(),
-            Err(_) => {}
-        };
 
-        // Slow path: the queue is not closed, and we failed to consume a stored
-        // notification. We need to acquire the lock and enqueue the waiter.
-        self.start_wait_slow(node, cx)
+    #[cfg(not(loom))]
+    pub const fn new() -> Self {
+        Self {
+            state: CachePadded::new(AtomicUsize::new(0)),
+            queue: Mutex::new(List::new()),
+        }
     }
 
-    /// Slow path of `start_wait`: acquires the linked list lock, and adds the
-    /// waiter to the queue.
-    #[cold]
-    #[inline(never)]
-    fn start_wait_slow(&self, node: Pin<&mut Waiter>, cx: &mut Context<'_>) -> Poll<WaitResult> {
-        // There are no queued notifications to consume, and the queue is
-        // still open. Therefore, it's time to actually push the waiter to
-        // the queue...finally lol :)
+    #[cfg(loom)]
+    pub fn new() -> Self {
+        Self {
+            state: CachePadded::new(AtomicUsize::new(0)),
+            queue: Mutex::new(List::new()),
+        }
+    }
 
-        // Grab the lock...
-        let mut list = self.list.lock();
-        // Reload the queue's state, as it may have changed while we were
-        // waiting to lock the linked list.
-        let mut state = self.state.load(Acquire);
 
-        loop {
-            match test_dbg!(state) {
-                // The queue is empty: transition the state to WAITING, as we
-                // are adding a waiter.
-                EMPTY => {
-                    match test_dbg!(self
-                        .state
-                        .compare_exchange_weak(EMPTY, WAITING, SeqCst, SeqCst))
-                    {
-                        Ok(_) => break,
-                        Err(actual) => {
-                            debug_assert!(actual == EMPTY || actual == WAKING || actual == CLOSED);
-                            state = actual;
-                        }
-                    }
-                }
-
-                // The queue was woken while we were waiting to acquire the
-                // lock. Attempt to consume the wakeup.
-                WAKING => {
-                    match test_dbg!(self
-                        .state
-                        .compare_exchange_weak(WAKING, EMPTY, SeqCst, SeqCst))
-                    {
-                        // Consumed the wakeup!
-                        Ok(_) => return wait::notified(),
-                        Err(actual) => {
-                            debug_assert!(actual == WAKING || actual == EMPTY || actual == CLOSED);
-                            state = actual;
-                        }
-                    }
-                }
-
-                // The queue closed while we were waiting to acquire the lock;
-                // we're done here!
-                CLOSED => return wait::closed(),
-
-                // The queue is already in the WAITING state, so we don't need
-                // to mess with it.
-                _state => {
-                    debug_assert_eq!(_state, WAITING,
-                        "start_wait_slow: unexpected state value {:?} (expected WAITING). this is a bug!",
-                        _state,
-                    );
-                    break;
-                }
+    pub fn wake(&self) {
+        let mut state = test_dbg!(self.load(Acquire));
+        while state.get(QueueState::STATE) != State::Waiting {
+            let next = state.with_state(State::Woken);
+            match test_dbg!(self.compare_exchange(state, next, SeqCst, SeqCst)) {
+                Ok(_) => return,
+                Err(actual) => state = actual,
             }
         }
 
-        // Time to wait! Store the waiter in the node, advance the node's state
-        // to Waiting, and add it to the queue.
+        let mut queue = self.queue.lock();
 
-        node.with_node(&mut *list, |node| {
-            let _prev = node.waker.replace(cx.waker().clone());
-            debug_assert!(
-                _prev.is_none(),
-                "start_wait_slow: called with a node that already had a waiter!"
-            );
+        test_trace!("wake: -> locked");
+        state = test_dbg!(self.load(SeqCst));
+
+        if let Some(waker) = self.wake_locked(&mut *queue, state) {
+            waker.wake();
+        }
+    }
+
+    pub fn wait(&self) -> Wait<'_> {
+        let current_wake_alls = test_dbg!(self.load(SeqCst).get(QueueState::WAKE_ALLS));
+        Wait {
+            queue: self,
+            waiter: Waiter {
+                state: WaitState::Start(current_wake_alls),
+                node: UnsafeCell::new(Node {
+                    links: list::Links::new(),
+                    waker: Wakeup::Empty,
+                    _pin: PhantomPinned,
+                }),
+            },
+        }
+    }
+
+    fn load(&self, ordering: Ordering) -> QueueState {
+        let state = self.state.load(ordering);
+        QueueState::from_bits(state)
+    }
+
+    fn store(&self, state: QueueState, ordering: Ordering) {
+        self.state.store(state.0, ordering)
+    }
+
+    fn compare_exchange(&self, current: QueueState, new: QueueState, success: Ordering, failure: Ordering) -> Result<QueueState, QueueState> {
+        self.state.compare_exchange(current.0, new.0, success, failure).map(QueueState::from_bits).map_err(QueueState::from_bits)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn wake_locked(&self, queue: &mut List<Waiter>, curr: QueueState) -> Option<Waker> {
+        let state = curr.get(QueueState::STATE);
+        if test_dbg!(state) != State::Waiting {
+
+            if let Err(actual) = test_dbg!(self.compare_exchange(curr, curr.with_state(State::Waiting), SeqCst, SeqCst)) {
+                debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
+                self.store(actual.with_state(State::Woken), SeqCst);
+            }
+
+            return None;
+        }
+
+
+        let mut waiter = queue.pop_back()
+            .expect("if we are in the Waiting state, there must be waiters in the queue");
+
+        // we are holding the lock on the queue, so it is safe to mutate any
+        // node in the queue.
+        let waker = unsafe { waiter.as_mut() }.with_node(queue, |node: &mut Node| {
+            let waker = test_dbg!(mem::replace(&mut node.waker, Wakeup::One));
+            match waker {
+                Wakeup::Waiting(waker) => waker,
+                _ => unreachable!("tried to wake a waiter in the {:?} state!", waker),
+            }
         });
 
-        let _prev_state = test_dbg!(node.state.swap(WAITING, Release));
-        debug_assert!(
-            _prev_state == EMPTY || _prev_state == WAKING,
-            "start_wait_slow: called with a node that was not empty ({}) or woken ({})! actual={}",
-            EMPTY,
-            WAKING,
-            _prev_state,
-        );
-        list.push_front(ptr(node));
+        if test_dbg!(queue.is_empty()) {
+            // we have taken the final waiter from the queue
+            self.store(curr.with_state(State::Empty), SeqCst);
+        }
 
-        Poll::Pending
+        Some(waker)
     }
 }
 
@@ -296,12 +329,110 @@ impl Waiter {
     /// this can be safe.
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
-    fn with_node<T>(&self, _list: &mut List<Self>, f: impl FnOnce(&mut Node) -> T) -> T {
+    fn with_node<U>(&self, _list: &mut List<Self>, f: impl FnOnce(&mut Node) -> U) -> U {
         self.node.with_mut(|node| unsafe {
             // Safety: the dummy `_list` argument ensures that the caller has
             // the right to mutate the list (e.g. the list is locked).
             f(&mut *node)
         })
+    }
+
+    fn poll_wait(mut self: Pin<&mut Self>, queue: &WaitQueue, cx: &mut Context<'_>) -> Poll<WaitResult> {
+        let mut this = self.as_mut().project();
+
+        match test_dbg!(*this.state) {
+            WaitState::Start(wake_alls) => {
+                let mut queue_state = test_dbg!(queue.load(SeqCst));
+
+                // can we consume a pending wakeup?
+                if test_dbg!(queue.compare_exchange(queue_state.with_state(State::Woken), queue_state.with_state(State::Empty), SeqCst, SeqCst)).is_ok() {
+                    *this.state = WaitState::Woken;
+                    return Poll::Ready(Ok(()));
+                }
+
+                // okay, no pending wakeups. try to wait...
+                test_trace!("poll_wait: locking...");
+                let mut waiters = queue.queue.lock();
+                test_trace!("poll_wait: -> locked");
+                queue_state = test_dbg!(queue.load(SeqCst));
+
+                // the whole queue was woken while we were trying to acquire
+                // the lock!
+                if queue_state.get(QueueState::WAKE_ALLS) != wake_alls {
+                    *this.state = WaitState::Woken;
+                    return Poll::Ready(Ok(()));
+                }
+
+                // transition the queue to the waiting state
+                'to_waiting: loop {
+                    match test_dbg!(queue_state.get(QueueState::STATE)) {
+                        // the queue is EMPTY, transition to WAITING
+                        State::Empty => {
+                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Waiting), SeqCst, SeqCst)) {
+                                Ok(_) => break 'to_waiting,
+                                Err(actual) => queue_state = actual,
+                            }
+                        },
+                        // the queue is already WAITING
+                        State::Waiting => break 'to_waiting,
+                        // the queue was woken, consume the wakeup.
+                        State::Woken => {
+                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Empty), SeqCst, SeqCst)) {
+                                Ok(_) => {
+                                    *this.state = WaitState::Woken;
+                                    return Poll::Ready(Ok(()));
+                                }
+                                Err(actual) => queue_state = actual,
+                            }
+                        }
+                        State::Closed => return wait::closed(),
+                    }
+                }
+
+                // enqueue the node
+                *this.state = WaitState::Waiting;
+                this.node.as_mut().with_mut(|node| {
+                    unsafe {
+                        // safety: we may mutate the node because we are
+                        // holding the lock.
+                        (*node).waker = Wakeup::Waiting(cx.waker().clone());
+                    }
+                });
+                let ptr = unsafe {
+                    NonNull::from(Pin::into_inner_unchecked(self))
+                };
+                waiters.push_front(ptr);
+
+                Poll::Pending
+            },
+            WaitState::Waiting => {
+                let mut _waiters = queue.queue.lock();
+                this.node.with_mut(|node| unsafe {
+                    // safety: we may mutate the node because we are
+                    // holding the lock.
+                    let node = &mut *node;
+                    match node.waker {
+                        Wakeup::Waiting(ref mut waker) => {
+                            if !waker.will_wake(cx.waker()) {
+                                *waker = cx.waker().clone();
+                            }
+                            Poll::Pending
+                        },
+                        Wakeup::All | Wakeup::One => {
+                            *this.state = WaitState::Woken;
+                            Poll::Ready(Ok(()))
+                        },
+                        Wakeup::Closed => {
+                            *this.state = WaitState::Woken;
+                            wait::closed()
+                        }
+                        Wakeup::Empty => unreachable!(),
+                    }
+                })
+            },
+            WaitState::Woken => Poll::Ready(Ok(())),
+        }
+
     }
 }
 
@@ -326,51 +457,27 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
 // === impl Wait ===
 
 impl Future for Wait<'_> {
-    type Output = Result<(), wait::Closed>;
+    type Output = WaitResult;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.as_mut().project();
-        let ptr = ptr(this.waiter);
-
-        tracing::trace!(self = fmt::ptr(ptr), state = ?this.state, "Wait::poll");
-
-        loop {
-            let this = self.as_mut().project();
-
-            match *this.state {
-                State::Start => match this.q.start_wait(this.waiter, cx) {
-                    Poll::Ready(x) => {
-                        *this.state = State::Done(x);
-                        return Poll::Ready(x);
-                    }
-                    Poll::Pending => {
-                        *this.state = State::Waiting;
-                        return Poll::Pending;
-                    }
-                },
-                State::Waiting => todo!(),
-                State::Done(res) => return Poll::Ready(res),
-            }
-        }
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        this.waiter.poll_wait(this.queue, cx)
     }
 }
 
 #[pinned_drop]
 impl PinnedDrop for Wait<'_> {
-    fn drop(self: Pin<&mut Self>) {
-        let this = self.project();
-        let state = this.state;
-        let ptr = ptr(this.waiter);
-
-        tracing::trace!(self = fmt::ptr(ptr), ?state, "Wait::drop");
-        if *state == State::Waiting {
+    fn drop(mut self: Pin<&mut Self>) {
+        let mut this = self.as_mut().project();
+        let state = *(this.waiter.as_mut().project().state);
+        let ptr = NonNull::from(unsafe {
+            Pin::into_inner_unchecked(this.waiter)
+        });
+        test_trace!(self = ?fmt::ptr(ptr), ?state, "Wait::drop");
+        if state == WaitState::Waiting {
             unsafe {
-                this.q.list.lock().remove(ptr);
+                this.queue.queue.lock().remove(ptr);
             }
         }
     }
-}
-
-fn ptr(pin: Pin<&mut Waiter>) -> NonNull<Waiter> {
-    pin.as_ref().get_ref().into()
 }
