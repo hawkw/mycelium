@@ -131,7 +131,7 @@ pub struct Task<S, F: Future, STO> {
 /// [^1]: On CPU architectures which support spatial prefetch, at least...
 #[repr(C)]
 #[derive(Debug)]
-pub(crate) struct Header {
+pub struct Header {
     /// The task's links in the intrusive run queue.
     ///
     /// # Safety
@@ -438,29 +438,6 @@ unsafe impl Sync for TaskRef {}
 // === impl Header ===
 
 impl Header {
-    #[cfg(not(loom))]
-    pub(crate) const fn new_stub() -> Self {
-        unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
-            #[cfg(debug_assertions)]
-            unreachable!("stub task ({_ptr:?}) should never be polled!");
-            #[cfg(not(debug_assertions))]
-            Poll::Pending
-        }
-
-        unsafe fn nop_deallocate(ptr: NonNull<Header>) {
-            unreachable!("stub task ({ptr:p}) should never be deallocated!");
-        }
-
-        Self {
-            run_queue: mpsc_queue::Links::new_stub(),
-            state: StateCell::new(),
-            vtable: &Vtable {
-                poll: nop,
-                deallocate: nop_deallocate,
-            },
-        }
-    }
-
     unsafe fn deallocate(this: NonNull<Self>) {
         #[cfg(debug_assertions)]
         let refs = this
@@ -541,4 +518,36 @@ feature! {
         }
     }
 
+}
+
+feature! {
+    #![not(loom)]
+    pub unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
+        #[cfg(debug_assertions)]
+        unreachable!("stub task ({_ptr:?}) should never be polled!");
+        #[cfg(not(debug_assertions))]
+        Poll::Pending
+    }
+
+
+    pub unsafe fn nop_deallocate(ptr: NonNull<Header>) {
+        unreachable!("stub task ({ptr:p}) should never be deallocated!");
+    }
+
+    impl Vtable {
+        const STUB: Vtable = Vtable {
+            poll: nop,
+            deallocate: nop_deallocate,
+        };
+    }
+
+    impl Header {
+        pub(crate) const fn new_stub() -> Self {
+            Self {
+                run_queue: mpsc_queue::Links::new_stub(),
+                state: StateCell::new(),
+                vtable: &Vtable::STUB,
+            }
+        }
+    }
 }
