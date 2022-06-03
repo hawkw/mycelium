@@ -275,6 +275,11 @@ impl WaitQueue {
             let waker = Waiter::wake(node, &mut queue, Wakeup::All);
             waker.wake()
         }
+
+        // now that the queue has been drained, transition to the empty state,
+        // and increment the wake_all count.
+        let next_state = QueueState::new().with_state(State::Empty).with(QueueState::WAKE_ALLS, state.get(QueueState::WAKE_ALLS) + 1);
+        self.compare_exchange(state, next_state).expect("state should not have transitioned while locked");
     }
 
 
