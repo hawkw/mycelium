@@ -270,9 +270,7 @@ where
 
     #[inline(always)]
     unsafe fn schedule(this: TaskRef) {
-        this.0.cast::<Self>().as_ref()
-            .scheduler
-            .schedule(this);
+        this.0.cast::<Self>().as_ref().scheduler.schedule(this);
     }
 
     #[inline]

@@ -123,7 +123,7 @@ impl StateCell {
                 *state = test_dbg!(next_state);
                 return OrDrop::Action(ScheduleAction::Enqueue);
             }
-            
+
             *state = next_state;
 
             if next_state.ref_count() == 0 {
