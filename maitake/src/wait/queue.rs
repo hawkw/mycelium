@@ -237,10 +237,10 @@ impl WaitQueue {
 
 
     pub fn wake(&self) {
-        let mut state = test_dbg!(self.load());
+        let mut state = self.load();
         while state.get(QueueState::STATE) != State::Waiting {
             let next = state.with_state(State::Woken);
-            match test_dbg!(self.compare_exchange(state, next)) {
+            match self.compare_exchange(state, next) {
                 Ok(_) => return,
                 Err(actual) => state = actual,
             }
@@ -249,7 +249,7 @@ impl WaitQueue {
         let mut queue = self.queue.lock();
 
         test_trace!("wake: -> locked");
-        state = test_dbg!(self.load());
+        state = self.load();
 
         if let Some(waker) = self.wake_locked(&mut *queue, state) {
             waker.wake();
@@ -258,7 +258,7 @@ impl WaitQueue {
 
     pub fn wake_all(&self) {
         let mut queue = self.queue.lock();
-        let state = test_dbg!(self.load());
+        let state = self.load();
 
         // if there are no waiters in the queue, increment the number of
         // `wake_all` calls and return.
@@ -293,17 +293,27 @@ impl WaitQueue {
         }
     }
 
+
+    #[cfg_attr(test, track_caller)]
     fn load(&self) -> QueueState {
-        let state = self.state.load(SeqCst);
-        QueueState::from_bits(state)
+        #[allow(clippy::let_and_return)]
+        let state = QueueState::from_bits(self.state.load(SeqCst));
+        test_trace!("state.load() = {state:?}");
+        state
     }
 
+    #[cfg_attr(test, track_caller)]
     fn store(&self, state: QueueState) {
-        self.state.store(state.0, SeqCst)
+        test_trace!("state.store({state:?}");
+        self.state.store(state.0, SeqCst);
     }
 
+    #[cfg_attr(test, track_caller)]
     fn compare_exchange(&self, current: QueueState, new: QueueState) -> Result<QueueState, QueueState> {
-        self.state.compare_exchange(current.0, new.0, SeqCst, SeqCst).map(QueueState::from_bits).map_err(QueueState::from_bits)
+        #[allow(clippy::let_and_return)]
+        let res = self.state.compare_exchange(current.0, new.0, SeqCst, SeqCst).map(QueueState::from_bits).map_err(QueueState::from_bits);
+        test_trace!("state.compare_exchange({current:?}, {new:?}) = {res:?}");
+        res
     }
 
     #[cold]
@@ -312,7 +322,7 @@ impl WaitQueue {
         let state = curr.get(QueueState::STATE);
         if test_dbg!(state) != State::Waiting {
 
-            if let Err(actual) = test_dbg!(self.compare_exchange(curr, curr.with_state(State::Waiting))) {
+            if let Err(actual) = self.compare_exchange(curr, curr.with_state(State::Waiting)) {
                 debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
                 self.store(actual.with_state(State::Woken));
             }
@@ -338,7 +348,7 @@ impl Drop for WaitQueue {
     fn drop(&mut self) {
         let mut queue = self.queue.lock();
         test_dbg!(self.state.fetch_or(State::Closed as u8 as usize, SeqCst));
-    
+
         // TODO(eliza): wake outside the lock using an array, a la
         // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
         while let Some(node) = queue.pop_back() {
@@ -373,14 +383,15 @@ impl Waiter {
     }
 
     fn poll_wait(mut self: Pin<&mut Self>, queue: &WaitQueue, cx: &mut Context<'_>) -> Poll<WaitResult> {
+        test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
         match test_dbg!(*this.state) {
             WaitState::Start(wake_alls) => {
-                let mut queue_state = test_dbg!(queue.load());
+                let mut queue_state = queue.load();
 
                 // can we consume a pending wakeup?
-                if test_dbg!(queue.compare_exchange(queue_state.with_state(State::Woken), queue_state.with_state(State::Empty))).is_ok() {
+                if queue.compare_exchange(queue_state.with_state(State::Woken), queue_state.with_state(State::Empty)).is_ok() {
                     *this.state = WaitState::Woken;
                     return Poll::Ready(Ok(()));
                 }
@@ -403,7 +414,7 @@ impl Waiter {
                     match test_dbg!(queue_state.get(QueueState::STATE)) {
                         // the queue is EMPTY, transition to WAITING
                         State::Empty => {
-                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Waiting))) {
+                            match queue.compare_exchange(queue_state, queue_state.with_state(State::Waiting)) {
                                 Ok(_) => break 'to_waiting,
                                 Err(actual) => queue_state = actual,
                             }
@@ -412,7 +423,7 @@ impl Waiter {
                         State::Waiting => break 'to_waiting,
                         // the queue was woken, consume the wakeup.
                         State::Woken => {
-                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Empty))) {
+                            match queue.compare_exchange(queue_state, queue_state.with_state(State::Empty)) {
                                 Ok(_) => {
                                     *this.state = WaitState::Woken;
                                     return Poll::Ready(Ok(()));

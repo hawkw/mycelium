@@ -18,7 +18,12 @@ macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
             e => {
-                crate::util::tracing::debug!("{} = {:?}", stringify!($e), &e);
+                crate::util::tracing::debug!(
+                    location = %core::panic::Location::caller(),
+                    "{} = {:?}",
+                    stringify!($e),
+                    &e
+                );
                 e
             }
         }
@@ -33,7 +38,10 @@ macro_rules! test_trace {
 #[cfg(test)]
 macro_rules! test_trace {
     ($($args:tt)+) => {
-        crate::util::tracing::debug!($($args)+);
+        crate::util::tracing::debug!(
+            location = %core::panic::Location::caller(),
+            $($args)+
+        );
     };
 }
 
