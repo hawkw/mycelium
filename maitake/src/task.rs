@@ -161,10 +161,8 @@ enum Cell<F: Future> {
 struct Vtable {
     /// Poll the future.
     poll: unsafe fn(NonNull<Header>) -> Poll<()>,
-    /* // TODO(eliza): this will be needed when tasks can be dropped through `JoinHandle` refs...
     /// Drops the task and deallocates its memory.
     deallocate: unsafe fn(NonNull<Header>),
-    */
 }
 
 // === impl Task ===
@@ -187,7 +185,7 @@ where
 {
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
-        // deallocate: Self::deallocate,
+        deallocate: Self::deallocate,
     };
 
     const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
@@ -324,10 +322,11 @@ where
         poll
     }
 
-    // unsafe fn deallocate(ptr: NonNull<Header>) {
-    //     trace_task!(ptr, F, "deallocate");
-    //     drop(Box::from_raw(ptr.cast::<Self>().as_ptr()))
-    // }
+    unsafe fn deallocate(ptr: NonNull<Header>) {
+        trace_task!(ptr, F, "deallocate");
+        let this = ptr.cast::<Self>();
+        drop(STO::from_raw(this));
+    }
 
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {
         self.inner.with_mut(|cell| {
@@ -400,10 +399,10 @@ impl TaskRef {
         unsafe { poll_fn(self.0) }
     }
 
-    // #[inline]
-    // fn state(&self) -> &StateVar {
-    //     &self.header().state
-    // }
+    #[inline]
+    fn state(&self) -> &StateCell {
+        &self.header().state
+    }
 
     #[inline]
     fn header(&self) -> &Header {
@@ -411,26 +410,26 @@ impl TaskRef {
     }
 }
 
-// impl Clone for TaskRef {
-//     #[inline]
-//     fn clone(&self) -> Self {
-//         self.state().clone_ref();
-//         Self(self.0)
-//     }
-// }
+impl Clone for TaskRef {
+    #[inline]
+    fn clone(&self) -> Self {
+        self.state().clone_ref();
+        Self(self.0)
+    }
+}
 
-// impl Drop for TaskRef {
-//     #[inline]
-//     fn drop(&mut self) {
-//         if !self.state().drop_ref() {
-//             return;
-//         }
+impl Drop for TaskRef {
+    #[inline]
+    fn drop(&mut self) {
+        if !self.state().drop_ref() {
+            return;
+        }
 
-//         unsafe {
-//             Header::drop_slow(self.0);
-//         }
-//     }
-// }
+        unsafe {
+            Header::drop_slow(self.0);
+        }
+    }
+}
 
 unsafe impl Send for TaskRef {}
 unsafe impl Sync for TaskRef {}
@@ -447,11 +446,24 @@ impl Header {
             Poll::Pending
         }
 
+        unsafe fn nop_deallocate(ptr: NonNull<Header>) {
+            unreachable!("stub task ({ptr:p}) should never be deallocated!");
+        }
+
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
-            vtable: &Vtable { poll: nop },
+            vtable: &Vtable { poll: nop, deallocate: nop_deallocate },
         }
+    }
+
+    unsafe fn drop_slow(this: NonNull<Self>) {
+        #[cfg(debug_assertions)]
+        let refs = this.as_ref().state.load(core::sync::atomic::Ordering::Acquire).ref_count();
+        debug_assert_eq!(refs, 0, "tried to deallocate a task with references!");
+
+        let deallocate = this.as_ref().vtable.deallocate;
+        deallocate(this)
     }
 }
 
