@@ -1,10 +1,13 @@
 use crate::{
     loom::{
         cell::UnsafeCell,
-        sync::atomic::{
+        sync::{
+            spin::Mutex,
+            atomic::{
             AtomicUsize,
             Ordering::*,
         },
+    }
     },
     util,
     wait::{self, WaitResult},
@@ -22,7 +25,7 @@ use core::{
     mem,
 };
 use mycelium_bitfield::{FromBits, bitfield};
-use mycelium_util::sync::{spin::Mutex, CachePadded};
+use mycelium_util::sync::CachePadded;
 #[cfg(test)]
 use mycelium_util::fmt;
 use pin_project::{pin_project, pinned_drop};

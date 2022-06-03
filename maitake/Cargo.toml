@@ -49,7 +49,7 @@ git = "https://github.com/tokio-rs/tracing"
 futures-util = "0.3"
 
 [target.'cfg(loom)'.dev-dependencies]
-loom = { version = "0.5.5", features = ["futures"] }
+loom = { version = "0.5.5", features = ["futures", "checkpoint"] }
 tracing_01 = { package = "tracing", version = "0.1", default_features = false }
 tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
 

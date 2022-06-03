@@ -3,9 +3,42 @@ pub(crate) use self::inner::*;
 
 #[cfg(loom)]
 mod inner {
+    #![allow(dead_code)]
+    
     #[cfg(feature = "alloc")]
-    pub use loom::alloc;
-    pub use loom::{cell, future, hint, model, sync, thread};
+    pub(crate) use loom::alloc;
+    pub(crate) use loom::{cell, future, hint, model, thread};
+
+    pub(crate) mod sync {
+        pub(crate) use loom::sync::*;
+
+        pub(crate) mod spin {
+            pub(crate) use loom::sync::MutexGuard;
+
+            /// Mock version of mycelium's spinlock, but using
+            /// `loom::sync::Mutex`. The API is slightly different, since the
+            /// mycelium mutex does not support poisoning.
+            #[derive(Debug)]
+            pub(crate) struct Mutex<T>(loom::sync::Mutex<T>);
+
+            impl<T> Mutex<T> {
+                #[track_caller]
+                pub(crate) fn new(t: T) -> Self {
+                    Self(loom::sync::Mutex::new(t))
+                }
+
+                #[track_caller]
+                pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+                    self.0.try_lock().ok()
+                }
+
+                #[track_caller]
+                pub fn lock(&self) -> MutexGuard<'_, T> {
+                    self.0.lock().expect("loom mutex will never poison")
+                }
+            }
+        }
+    }
 }
 
 #[cfg(not(loom))]
@@ -15,6 +48,8 @@ mod inner {
         #[cfg(feature = "alloc")]
         pub use alloc::sync::*;
         pub use core::sync::*;
+
+        pub use mycelium_util::sync::spin;
     }
 
     pub(crate) use core::sync::atomic;
