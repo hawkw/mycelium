@@ -33,7 +33,22 @@ use pin_project::{pin_project, pinned_drop};
 #[cfg(test)]
 mod tests;
 
-/// A queue of [`Waker`]s implemented using an [intrusive doubly-linked list][ilist].
+/// A queue of [`Waker`]s implemented using an [intrusive doubly-linked
+/// list][ilist].
+///
+/// A `WaitQueue` allows any number of tasks to [wait] asynchronously and be
+/// woken when some event occurs, either [individually][wake] in first-in,
+/// first-out order, or [all at once][wake_all]. This makes it a vital building
+/// block of runtime services (such as timers or I/O resources), where it may be
+/// used to wake a set of tasks when a timer completes or when a resource
+/// becomes available. It can be equally useful for implementing higher-level
+/// synchronization primitives: for example, a `WaitQueue` plus an
+/// [`UnsafeCell`] is essentially an entire implementation of a fair
+/// asynchronous mutex. Finally, a `WaitQueue` can be a useful synchronization
+/// primitive on its own: sometimes, you just need to have a bunch of tasks wait
+/// for something and then wake them all up.
+///
+/// # Implementation Notes
 ///
 /// The *[intrusive]* aspect of this list is important, as it means that it does
 /// not allocate memory. Instead, nodes in the linked list are stored in the
@@ -58,6 +73,10 @@ mod tests;
 /// mutex are short enough that we still get pretty good performance despite it.
 ///
 /// [`Waker`]: core::task::Waker
+/// [wait]: WaitQueue::wait
+/// [wake]: WaitQueue::wake
+/// [wake_all]: WaitQueue::wake_all
+/// [`UnsafeCell`]: core::cell::UnsafeCell
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
@@ -73,28 +92,30 @@ pub struct WaitQueue {
     /// This is protected by a mutex; the mutex *must* be acquired when
     /// manipulating the linked list, OR when manipulating waiter nodes that may
     /// be linked into the list. If a node is known to not be linked, it is safe
-    /// to modify that node (such as by setting or unsetting its
-    /// `Waker`/`Thread`) without holding the lock; otherwise, it may be
-    /// modified through the list, so the lock must be held when modifying the
+    /// to modify that node (such as by waking the stored [`Waker`]) without
+    /// holding the lock; otherwise, it may be modified through the list, so the
+    /// lock must be held when modifying the
     /// node.
     ///
-    /// A spinlock is used on `no_std` platforms; [`std::sync::Mutex`] or
-    /// `parking_lot::Mutex` are used when the standard library is available
-    /// (depending on feature flags).
+    /// A spinlock (from `mycelium_util`) is used here, in order to support
+    /// `no_std` platforms; when running `loom` tests, a `loom` mutex is used
+    /// instead to simulate the spinlock, because loom doesn't play nice with
+    /// real spinlocks.
     queue: Mutex<List<Waiter>>,
 }
 
 /// Future returned from [`WaitQueue::wait()`].
 ///
 /// This future is fused, so once it has completed, any future calls to poll
-/// will immediately return `Poll::Ready`.
+/// will immediately return [`Poll::Ready`].
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
+#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Wait<'a> {
-    /// The `WaitQueue` being waited on from.
+    /// The [`WaitQueue`] being waited on from.
     queue: &'a WaitQueue,
 
-    /// Entry in the wait queue.
+    /// Entry in the wait queue linked list.
     #[pin]
     waiter: Waiter,
 }
@@ -220,7 +241,8 @@ enum Wakeup {
 // === impl WaitQueue ===
 
 impl WaitQueue {
-
+    /// Returns a new `WaitQueue`.
+    #[must_use]
     #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
@@ -229,6 +251,8 @@ impl WaitQueue {
         }
     }
 
+    /// Returns a new `WaitQueue`.
+    #[must_use]
     #[cfg(loom)]
     pub fn new() -> Self {
         Self {
@@ -237,20 +261,35 @@ impl WaitQueue {
         }
     }
 
-
+    /// Wake the next task in the queue.
+    ///
+    /// If the queue is empty, a wakeup is stored in the `WaitQueue`, and the
+    /// next call to [`Wait`] will complete immediately.
+    #[inline]
     pub fn wake(&self) {
+        // snapshot the queue's current state.
         let mut state = self.load();
+
+        // check if any tasks are currently waiting on this queue. if there are
+        // no waiting tasks, store the wakeup to be consumed by the next call to
+        // `wait`.
         while state.get(QueueState::STATE) != State::Waiting {
             let next = state.with_state(State::Woken);
+            // advance the state to `Woken`, and return (if we did so
+            // successfully)
             match self.compare_exchange(state, next) {
                 Ok(_) => return,
                 Err(actual) => state = actual,
             }
         }
 
+        // okay, there are tasks waiting on the queue; we must acquire the lock
+        // on the linked list and wake the next task from the queue.
         let mut queue = self.queue.lock();
-
         test_trace!("wake: -> locked");
+
+        // the queue's state may have changed while we were waiting to acquire
+        // the lock, so we need to acquire a new snapshot.
         state = self.load();
 
         if let Some(waker) = self.wake_locked(&mut *queue, state) {
@@ -258,6 +297,7 @@ impl WaitQueue {
         }
     }
 
+    /// Wake *all* tasks currently in the queue.
     pub fn wake_all(&self) {
         let mut queue = self.queue.lock();
         let state = self.load();
@@ -285,6 +325,14 @@ impl WaitQueue {
     }
 
 
+    /// Wait to be woken up by this queue.
+    ///
+    /// This returns a [`Wait`] future that will complete when the task is
+    /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitQueue` is
+    /// dropped.
+    ///
+    /// [`wake`]: Self::wake
+    /// [`wake_all`]: Self::wake_all
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             queue: self,
@@ -292,7 +340,12 @@ impl WaitQueue {
         }
     }
 
+    /// Returns a [`Waiter`] entry in this queue.
+    ///
+    /// This is factored out into a separate function because it's used by both
+    /// [`WaitQueue::wait`] and [`WaitQueue::wait_owned`].
     fn waiter(&self) -> Waiter {
+        // how many times has `wake_all` been called when this waiter is created?
         let current_wake_alls = test_dbg!(self.load().get(QueueState::WAKE_ALLS));
         Waiter {
             state: WaitState::Start(current_wake_alls),
@@ -331,8 +384,12 @@ impl WaitQueue {
     #[inline(never)]
     fn wake_locked(&self, queue: &mut List<Waiter>, curr: QueueState) -> Option<Waker> {
         let state = curr.get(QueueState::STATE);
-        if test_dbg!(state) != State::Waiting {
 
+        // is the queue still in the `Waiting` state? it is possible that we
+        // transitioned to a different state while locking the queue.
+        if test_dbg!(state) != State::Waiting {
+            // if there are no longer any queued tasks, try to store the
+            // wakeup in the queue and bail.
             if let Err(actual) = self.compare_exchange(curr, curr.with_state(State::Waiting)) {
                 debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
                 self.store(actual.with_state(State::Woken));
@@ -341,13 +398,14 @@ impl WaitQueue {
             return None;
         }
 
-
+        // otherwise, we have to dequeue a task and wake it.
         let node = queue.pop_back()
             .expect("if we are in the Waiting state, there must be waiters in the queue");
         let waker = Waiter::wake(node, queue, Wakeup::One);
 
+        // if we took the final waiter currently in the queue, transition to the
+        // `Empty` state.
         if test_dbg!(queue.is_empty()) {
-            // we have taken the final waiter from the queue
             self.store(curr.with_state(State::Empty));
         }
 
@@ -372,11 +430,16 @@ impl Drop for WaitQueue {
 // === impl Waiter ===
 
 impl Waiter {
+    /// Wake the task that owns this `Waiter`.
+    ///
     /// # Safety
     ///
     /// This is only safe to call while the list is locked. The dummy `_list`
     /// parameter ensures this method is only called while holding the lock, so
     /// this can be safe.
+    ///
+    /// Of course, that must be the *same* list that this waiter is a member of,
+    /// and currently, there is no way to ensure that...
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
     fn wake(mut this: NonNull<Self>, _list: &mut List<Self>, wakeup: Wakeup) -> Waker {
@@ -492,6 +555,10 @@ impl Waiter {
 
     }
 
+    /// Release this `Waiter` from the queue.
+    ///
+    /// This is called from the `drop` implementation for the [`Wait`] and
+    /// [`WaitOwned`] futures.
     fn release(mut self: Pin<&mut Self>, queue: &WaitQueue) {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe {
@@ -552,12 +619,16 @@ feature!{
 
     /// Future returned from [`WaitQueue::wait_owned()`].
     ///
-    /// This is identical to the [`Wait`] future, except that it takes the
-    /// [`WaitQueue`] as an [`Arc`] clone, allowing it to live for the `'static`
-    /// lifetime.
+    /// This is identical to the [`Wait`] future, except that it takes a
+    /// [`Weak`] reference to the [`WaitQueue`], allowing the returned future to
+    /// live for the `'static` lifetime.
+    ///
+    /// A `WaitOwned` future does *not* keep the [`WaitQueue`] alive; if all
+    /// [`Arc`] clones of the [`WaitQueue`] that this future was returned by are
+    /// dropped, this future will be cancelled.
     ///
     /// This future is fused, so once it has completed, any future calls to poll
-    /// will immediately return `Poll::Ready`.
+    /// will immediately return [`Poll::Ready`].
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
     pub struct WaitOwned {
@@ -570,6 +641,24 @@ feature!{
     }
 
     impl WaitQueue {
+        /// Wait to be woken up by this queue, returning a future that's valid
+        /// for the `'static` lifetime.
+        ///
+        /// This returns a [`WaitOwned`] future that will complete when the task is
+        /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitQueue` is
+        /// dropped.
+        ///
+        /// This is identical to the [`wait`] method, except that it takes a
+        /// [`Weak`] reference to the [`WaitQueue`], allowing the returned future to
+        /// live for the `'static` lifetime.
+        ///
+        /// A `WaitOwned` future does *not* keep the [`WaitQueue`] alive; if all
+        /// [`Arc`] clones of the [`WaitQueue`] that this future was returned by are
+        /// dropped, this future will be cancelled.
+        ///
+        /// [`wake`]: Self::wake
+        /// [`wake_all`]: Self::wake_all
+        /// [`wait`]: Self::wait
         pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
             let waiter = self.waiter();
             let queue = Arc::downgrade(self);
