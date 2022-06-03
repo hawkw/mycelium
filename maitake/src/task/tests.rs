@@ -1,14 +1,16 @@
 #[cfg(loom)]
 mod loom {
-    use crate::task::*;
     use crate::loom::{self, alloc::Track};
+    use crate::task::*;
 
     #[derive(Clone)]
     struct NopScheduler;
 
     impl crate::scheduler::Schedule for NopScheduler {
         fn schedule(&self, task: TaskRef) {
-            unimplemented!("nop scheduler should not actually schedule tasks (tried to schedule {task:?})")
+            unimplemented!(
+                "nop scheduler should not actually schedule tasks (tried to schedule {task:?})"
+            )
         }
     }
 
@@ -34,19 +36,20 @@ mod loom {
                 drop(track);
             });
 
-            let mut threads = (0..2).map(|_| {
-                let task = task.clone();
-                loom::thread::spawn(move || {
-                    drop(task);
+            let mut threads = (0..2)
+                .map(|_| {
+                    let task = task.clone();
+                    loom::thread::spawn(move || {
+                        drop(task);
+                    })
                 })
-            }).collect::<Vec<_>>();
+                .collect::<Vec<_>>();
 
             drop(task);
 
             for thread in threads.drain(..) {
                 thread.join().unwrap();
             }
-
         });
     }
 }
