@@ -446,7 +446,7 @@ impl Header {
             #[cfg(not(debug_assertions))]
             Poll::Pending
         }
-        
+
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
