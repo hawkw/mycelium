@@ -157,13 +157,6 @@ enum Cell<F: Future> {
     Finished(F::Output),
 }
 
-unsafe fn nop(_ptr: NonNull<Header>) -> Poll<()> {
-    #[cfg(debug_assertions)]
-    unreachable!("stub task ({_ptr:p}) should never be polled!");
-    #[cfg(not(debug_assertions))]
-    Poll::Pending
-}
-
 #[derive(Debug)]
 struct Vtable {
     /// Poll the future.
@@ -447,6 +440,13 @@ unsafe impl Sync for TaskRef {}
 impl Header {
     #[cfg(not(loom))]
     pub(crate) const fn new_stub() -> Self {
+        unsafe fn nop(_ptr: NonNull<Header>) -> Poll<()> {
+            #[cfg(debug_assertions)]
+            unreachable!("stub task ({_ptr:p}) should never be polled!");
+            #[cfg(not(debug_assertions))]
+            Poll::Pending
+        }
+
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
