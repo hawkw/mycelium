@@ -179,6 +179,8 @@ enum State {
 }
 
 impl QueueState {
+    const ONE_WAKE_ALL: usize = Self::WAKE_ALLS.first_bit();
+
     fn with_state(self, state: State) -> Self {
         self.with(Self::STATE, state)
     }
@@ -235,10 +237,10 @@ impl WaitQueue {
 
 
     pub fn wake(&self) {
-        let mut state = test_dbg!(self.load(Acquire));
+        let mut state = test_dbg!(self.load());
         while state.get(QueueState::STATE) != State::Waiting {
             let next = state.with_state(State::Woken);
-            match test_dbg!(self.compare_exchange(state, next, SeqCst, SeqCst)) {
+            match test_dbg!(self.compare_exchange(state, next)) {
                 Ok(_) => return,
                 Err(actual) => state = actual,
             }
@@ -247,15 +249,37 @@ impl WaitQueue {
         let mut queue = self.queue.lock();
 
         test_trace!("wake: -> locked");
-        state = test_dbg!(self.load(SeqCst));
+        state = test_dbg!(self.load());
 
         if let Some(waker) = self.wake_locked(&mut *queue, state) {
             waker.wake();
         }
     }
 
+    pub fn wake_all(&self) {
+        let mut queue = self.queue.lock();
+        let state = test_dbg!(self.load());
+
+        // if there are no waiters in the queue, increment the number of
+        // `wake_all` calls and return.
+        if state.get(QueueState::STATE) != State::Waiting {
+            self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
+            return;
+        }
+
+        // okay, we actually have to wake some stuff.
+
+        // TODO(eliza): wake outside the lock using an array, a la
+        // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
+        while let Some(node) = queue.pop_back() {
+            let waker = Waiter::wake(node, &mut queue, Wakeup::All);
+            waker.wake()
+        }
+    }
+
+
     pub fn wait(&self) -> Wait<'_> {
-        let current_wake_alls = test_dbg!(self.load(SeqCst).get(QueueState::WAKE_ALLS));
+        let current_wake_alls = test_dbg!(self.load().get(QueueState::WAKE_ALLS));
         Wait {
             queue: self,
             waiter: Waiter {
@@ -269,17 +293,17 @@ impl WaitQueue {
         }
     }
 
-    fn load(&self, ordering: Ordering) -> QueueState {
-        let state = self.state.load(ordering);
+    fn load(&self) -> QueueState {
+        let state = self.state.load(SeqCst);
         QueueState::from_bits(state)
     }
 
-    fn store(&self, state: QueueState, ordering: Ordering) {
-        self.state.store(state.0, ordering)
+    fn store(&self, state: QueueState) {
+        self.state.store(state.0, SeqCst)
     }
 
-    fn compare_exchange(&self, current: QueueState, new: QueueState, success: Ordering, failure: Ordering) -> Result<QueueState, QueueState> {
-        self.state.compare_exchange(current.0, new.0, success, failure).map(QueueState::from_bits).map_err(QueueState::from_bits)
+    fn compare_exchange(&self, current: QueueState, new: QueueState) -> Result<QueueState, QueueState> {
+        self.state.compare_exchange(current.0, new.0, SeqCst, SeqCst).map(QueueState::from_bits).map_err(QueueState::from_bits)
     }
 
     #[cold]
@@ -288,34 +312,39 @@ impl WaitQueue {
         let state = curr.get(QueueState::STATE);
         if test_dbg!(state) != State::Waiting {
 
-            if let Err(actual) = test_dbg!(self.compare_exchange(curr, curr.with_state(State::Waiting), SeqCst, SeqCst)) {
+            if let Err(actual) = test_dbg!(self.compare_exchange(curr, curr.with_state(State::Waiting))) {
                 debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
-                self.store(actual.with_state(State::Woken), SeqCst);
+                self.store(actual.with_state(State::Woken));
             }
 
             return None;
         }
 
 
-        let mut waiter = queue.pop_back()
+        let node = queue.pop_back()
             .expect("if we are in the Waiting state, there must be waiters in the queue");
-
-        // we are holding the lock on the queue, so it is safe to mutate any
-        // node in the queue.
-        let waker = unsafe { waiter.as_mut() }.with_node(queue, |node: &mut Node| {
-            let waker = test_dbg!(mem::replace(&mut node.waker, Wakeup::One));
-            match waker {
-                Wakeup::Waiting(waker) => waker,
-                _ => unreachable!("tried to wake a waiter in the {:?} state!", waker),
-            }
-        });
+        let waker = Waiter::wake(node, queue, Wakeup::One);
 
         if test_dbg!(queue.is_empty()) {
             // we have taken the final waiter from the queue
-            self.store(curr.with_state(State::Empty), SeqCst);
+            self.store(curr.with_state(State::Empty));
         }
 
         Some(waker)
+    }
+}
+
+impl Drop for WaitQueue {
+    fn drop(&mut self) {
+        let mut queue = self.queue.lock();
+        test_dbg!(self.state.fetch_or(State::Closed as u8 as usize, SeqCst));
+    
+        // TODO(eliza): wake outside the lock using an array, a la
+        // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
+        while let Some(node) = queue.pop_back() {
+            let waker = Waiter::wake(node, &mut queue, Wakeup::Closed);
+            waker.wake()
+        }
     }
 }
 
@@ -329,12 +358,18 @@ impl Waiter {
     /// this can be safe.
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
-    fn with_node<U>(&self, _list: &mut List<Self>, f: impl FnOnce(&mut Node) -> U) -> U {
-        self.node.with_mut(|node| unsafe {
-            // Safety: the dummy `_list` argument ensures that the caller has
-            // the right to mutate the list (e.g. the list is locked).
-            f(&mut *node)
-        })
+    fn wake(mut this: NonNull<Self>, _list: &mut List<Self>, wakeup: Wakeup) -> Waker {
+        unsafe {
+            // safety: this is only called while holding the lock on the queue,
+            // so it's safe to mutate the waiter.
+            this.as_mut().node.with_mut(|node| {
+                let waker = test_dbg!(mem::replace(&mut (*node).waker, wakeup));
+                match waker {
+                    Wakeup::Waiting(waker) => waker,
+                    _ => unreachable!("tried to wake a waiter in the {:?} state!", waker),
+                }
+            })
+        }
     }
 
     fn poll_wait(mut self: Pin<&mut Self>, queue: &WaitQueue, cx: &mut Context<'_>) -> Poll<WaitResult> {
@@ -342,10 +377,10 @@ impl Waiter {
 
         match test_dbg!(*this.state) {
             WaitState::Start(wake_alls) => {
-                let mut queue_state = test_dbg!(queue.load(SeqCst));
+                let mut queue_state = test_dbg!(queue.load());
 
                 // can we consume a pending wakeup?
-                if test_dbg!(queue.compare_exchange(queue_state.with_state(State::Woken), queue_state.with_state(State::Empty), SeqCst, SeqCst)).is_ok() {
+                if test_dbg!(queue.compare_exchange(queue_state.with_state(State::Woken), queue_state.with_state(State::Empty))).is_ok() {
                     *this.state = WaitState::Woken;
                     return Poll::Ready(Ok(()));
                 }
@@ -354,7 +389,7 @@ impl Waiter {
                 test_trace!("poll_wait: locking...");
                 let mut waiters = queue.queue.lock();
                 test_trace!("poll_wait: -> locked");
-                queue_state = test_dbg!(queue.load(SeqCst));
+                queue_state = test_dbg!(queue.load());
 
                 // the whole queue was woken while we were trying to acquire
                 // the lock!
@@ -368,7 +403,7 @@ impl Waiter {
                     match test_dbg!(queue_state.get(QueueState::STATE)) {
                         // the queue is EMPTY, transition to WAITING
                         State::Empty => {
-                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Waiting), SeqCst, SeqCst)) {
+                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Waiting))) {
                                 Ok(_) => break 'to_waiting,
                                 Err(actual) => queue_state = actual,
                             }
@@ -377,7 +412,7 @@ impl Waiter {
                         State::Waiting => break 'to_waiting,
                         // the queue was woken, consume the wakeup.
                         State::Woken => {
-                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Empty), SeqCst, SeqCst)) {
+                            match test_dbg!(queue.compare_exchange(queue_state, queue_state.with_state(State::Empty))) {
                                 Ok(_) => {
                                     *this.state = WaitState::Woken;
                                     return Poll::Ready(Ok(()));

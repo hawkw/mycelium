@@ -24,7 +24,30 @@ mod loom {
     }
 
     #[test]
-    fn wake_many() {
+    fn wake_all_sequential() {
+        loom::model(|| {
+            let q = Arc::new(WaitQueue::new());
+            let wait1 = q.wait();
+            let wait2 = q.wait();
+
+            let thread = thread::spawn({
+                let q = q.clone();
+                move || {
+                    q.wake_all();
+                }
+            });
+
+            future::block_on(async {
+                wait1.await.unwrap();
+                wait2.await.unwrap();
+            });
+
+            thread.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn wake_one_many() {
         loom::model(|| {
             let q = Arc::new(WaitQueue::new());
 
