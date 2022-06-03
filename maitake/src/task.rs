@@ -522,22 +522,27 @@ feature! {
 
 feature! {
     #![not(loom)]
-    pub unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
-        #[cfg(debug_assertions)]
-        unreachable!("stub task ({_ptr:?}) should never be polled!");
-        #[cfg(not(debug_assertions))]
-        Poll::Pending
-    }
 
-
-    pub unsafe fn nop_deallocate(ptr: NonNull<Header>) {
-        unreachable!("stub task ({ptr:p}) should never be deallocated!");
+    mod nop {
+        use super::*;
+        pub unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
+            #[cfg(debug_assertions)]
+            unreachable!("stub task ({_ptr:?}) should never be polled!");
+            #[cfg(not(debug_assertions))]
+            Poll::Pending
+        }
+    
+    
+        pub unsafe fn nop_deallocate(ptr: NonNull<Header>) {
+            unreachable!("stub task ({ptr:p}) should never be deallocated!");
+        }
+    
     }
 
     impl Vtable {
         const STUB: Vtable = Vtable {
-            poll: nop,
-            deallocate: nop_deallocate,
+            poll: nop::nop,
+            deallocate: nop::nop_deallocate,
         };
     }
 
