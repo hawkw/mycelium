@@ -283,17 +283,21 @@ impl WaitQueue {
 
 
     pub fn wait(&self) -> Wait<'_> {
-        let current_wake_alls = test_dbg!(self.load().get(QueueState::WAKE_ALLS));
         Wait {
             queue: self,
-            waiter: Waiter {
-                state: WaitState::Start(current_wake_alls),
-                node: UnsafeCell::new(Node {
-                    links: list::Links::new(),
-                    waker: Wakeup::Empty,
-                    _pin: PhantomPinned,
-                }),
-            },
+            waiter: self.waiter()
+        }
+    }
+
+    fn waiter(&self) -> Waiter {
+        let current_wake_alls = test_dbg!(self.load().get(QueueState::WAKE_ALLS));
+        Waiter {
+            state: WaitState::Start(current_wake_alls),
+            node: UnsafeCell::new(Node {
+                links: list::Links::new(),
+                waker: Wakeup::Empty,
+                _pin: PhantomPinned,
+            }),
         }
     }
 
@@ -484,6 +488,19 @@ impl Waiter {
         }
 
     }
+
+    fn release(mut self: Pin<&mut Self>, queue: &WaitQueue) {
+        let state = *(self.as_mut().project().state);
+        let ptr = NonNull::from(unsafe {
+            Pin::into_inner_unchecked(self)
+        });
+        test_trace!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
+        if state == WaitState::Waiting {
+            unsafe {
+                queue.queue.lock().remove(ptr);
+            }
+        }
+    }
 }
 
 unsafe impl Linked<list::Links<Waiter>> for Waiter {
@@ -518,15 +535,71 @@ impl Future for Wait<'_> {
 #[pinned_drop]
 impl PinnedDrop for Wait<'_> {
     fn drop(mut self: Pin<&mut Self>) {
-        let mut this = self.as_mut().project();
-        let state = *(this.waiter.as_mut().project().state);
-        let ptr = NonNull::from(unsafe {
-            Pin::into_inner_unchecked(this.waiter)
-        });
-        test_trace!(self = ?fmt::ptr(ptr), ?state, "Wait::drop");
-        if state == WaitState::Waiting {
-            unsafe {
-                this.queue.queue.lock().remove(ptr);
+        let this = self.project();
+        this.waiter.release(this.queue);
+    }
+}
+
+// === impl WaitOwned ===
+
+feature!{
+    #![feature = "alloc"]
+
+    use alloc::sync::{Arc, Weak};
+
+    /// Future returned from [`WaitQueue::wait_owned()`].
+    ///
+    /// This is identical to the [`Wait`] future, except that it takes the
+    /// [`WaitQueue`] as an [`Arc`] clone, allowing it to live for the `'static`
+    /// lifetime.
+    ///
+    /// This future is fused, so once it has completed, any future calls to poll
+    /// will immediately return `Poll::Ready`.
+    #[derive(Debug)]
+    #[pin_project(PinnedDrop)]
+    pub struct WaitOwned {
+        /// The `WaitQueue` being waited on from.
+        queue: Weak<WaitQueue>,
+
+        /// Entry in the wait queue.
+        #[pin]
+        waiter: Waiter,
+    }
+
+    impl WaitQueue {
+        pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
+            let waiter = self.waiter();
+            let queue = Arc::downgrade(self);
+            WaitOwned { queue, waiter }
+        }
+    }
+
+    impl Future for WaitOwned {
+        type Output = WaitResult;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.project();
+            match this.queue.upgrade() {
+                Some(queue) => this.waiter.poll_wait(&*queue, cx),
+                None => wait::closed(),
+            }
+        }
+    }
+
+    #[pinned_drop]
+    impl PinnedDrop for WaitOwned {
+        fn drop(mut self: Pin<&mut Self>) {
+            let this = self.project();
+            match this.queue.upgrade() {
+                Some(ref queue) => this.waiter.release(queue),
+                None => {
+                    test_trace!("WaitOwned::drop: queue already dropped");
+                    debug_assert_ne!(
+                        *this.waiter.project().state,
+                        WaitState::Waiting,
+                        "if the queue has been dropped, the waiter should have been notified!",
+                    )
+                }
             }
         }
     }
