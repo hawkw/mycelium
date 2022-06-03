@@ -437,26 +437,32 @@ unsafe impl Sync for TaskRef {}
 
 // === impl Header ===
 
+// See https://github.com/rust-lang/rust/issues/97708 for why
+// this is necessary
+#[no_mangle]
+unsafe fn _maitake_header_nop(_ptr: TaskRef) -> Poll<()> {
+    #[cfg(debug_assertions)]
+    unreachable!("stub task ({_ptr:?}) should never be polled!");
+    #[cfg(not(debug_assertions))]
+    Poll::Pending
+}
+
+// See https://github.com/rust-lang/rust/issues/97708 for why
+// this is necessary
+#[no_mangle]
+unsafe fn _maitake_header_nop_deallocate(ptr: NonNull<Header>) {
+    unreachable!("stub task ({ptr:p}) should never be deallocated!");
+}
+
 impl Header {
     #[cfg(not(loom))]
     pub(crate) const fn new_stub() -> Self {
-        unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
-            #[cfg(debug_assertions)]
-            unreachable!("stub task ({_ptr:?}) should never be polled!");
-            #[cfg(not(debug_assertions))]
-            Poll::Pending
-        }
-
-        unsafe fn nop_deallocate(ptr: NonNull<Header>) {
-            unreachable!("stub task ({ptr:p}) should never be deallocated!");
-        }
-
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
             vtable: &Vtable {
-                poll: nop,
-                deallocate: nop_deallocate,
+                poll: _maitake_header_nop,
+                deallocate: _maitake_header_nop_deallocate,
             },
         }
     }

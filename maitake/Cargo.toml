@@ -16,6 +16,13 @@ categories = [
 edition = "2021"
 rust-version = "1.61.0"
 
+# NOTE! As a workaround for https://github.com/rust-lang/rust/issues/97708,
+# maitake uses some `no_mangle` functions. This will cause linker errors if
+# you attempt to use two versions of maitake in the same binary. Until then,
+# we use the "links" key to prevent two versions of maitake in the same
+# dependency graph
+links = "maitake"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
