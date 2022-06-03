@@ -3,7 +3,7 @@ use crate::{
         cell::UnsafeCell,
         sync::atomic::{
             AtomicUsize,
-            Ordering::{self, *},
+            Ordering::*,
         },
     },
     util,
@@ -22,10 +22,9 @@ use core::{
     mem,
 };
 use mycelium_bitfield::{FromBits, bitfield};
-use mycelium_util::{
-    fmt,
-    sync::{spin::Mutex, CachePadded},
-};
+use mycelium_util::sync::{spin::Mutex, CachePadded};
+#[cfg(test)]
+use mycelium_util::fmt;
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
