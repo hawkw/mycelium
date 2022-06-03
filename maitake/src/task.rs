@@ -453,13 +453,20 @@ impl Header {
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
-            vtable: &Vtable { poll: nop, deallocate: nop_deallocate },
+            vtable: &Vtable {
+                poll: nop,
+                deallocate: nop_deallocate,
+            },
         }
     }
 
     unsafe fn drop_slow(this: NonNull<Self>) {
         #[cfg(debug_assertions)]
-        let refs = this.as_ref().state.load(core::sync::atomic::Ordering::Acquire).ref_count();
+        let refs = this
+            .as_ref()
+            .state
+            .load(core::sync::atomic::Ordering::Acquire)
+            .ref_count();
         debug_assert_eq!(refs, 0, "tried to deallocate a task with references!");
 
         let deallocate = this.as_ref().vtable.deallocate;
