@@ -106,54 +106,73 @@ pub struct Task<S, F: Future, STO> {
     storage: PhantomData<STO>,
 }
 
-/// The task's header.
-///
-/// This contains the *untyped* components of the task which are identical
-/// regardless of the task's future, output, and scheduler types: the
-/// [vtable], [state cell], and [run queue links].
-///
-/// The header is the data at which a [`TaskRef`] points, and will likely be
-/// prefetched when dereferencing a [`TaskRef`] pointer.[^1] Therefore, the
-/// header should contain the task's most frequently accessed data, and should
-/// ideally fit within a CPU cache line.
-///
-/// # Safety
-///
-/// The [run queue links] *must* be the first field in this type, in order for
-/// the [`Linked::links` implementation] for this type to be sound. Therefore,
-/// the `#[repr(C)]` attribute on this struct is load-bearing.
-///
-/// [vtable]: Vtable
-/// [state cell]: StateCell
-/// [run queue links]: cordyceps::mpsc_queue::Links
-/// [`Linked::links` implementation]: #method.links
-///
-/// [^1]: On CPU architectures which support spatial prefetch, at least...
-#[repr(C)]
-#[derive(Debug)]
-pub struct Header {
-    /// The task's links in the intrusive run queue.
+pub(crate) mod header {
+    use super::*;
+    /// The task's header.
+    ///
+    /// This contains the *untyped* components of the task which are identical
+    /// regardless of the task's future, output, and scheduler types: the
+    /// [vtable], [state cell], and [run queue links].
+    ///
+    /// The header is the data at which a [`TaskRef`] points, and will likely be
+    /// prefetched when dereferencing a [`TaskRef`] pointer.[^1] Therefore, the
+    /// header should contain the task's most frequently accessed data, and should
+    /// ideally fit within a CPU cache line.
+    ///
+    /// # /!\ EXTREMELY SERIOUS WARNING /!\
+    ///
+    /// This is NOT a public API type and is *not* part of this crate's stable
+    /// interface. It must be made `pub` as a workaround for a [compiler
+    /// error][97708] where functions in the stub task vtable are improperly culled
+    /// by the compiler if they are not `pub`, which requires that the `Header` type
+    /// must be `pub` (as it's part of the type signature of one of those
+    /// functions).
+    ///
+    /// User code should NEVER interact with this type directly. Fortunately,
+    /// there's no way for you to construct it... :)
     ///
     /// # Safety
     ///
-    /// This MUST be the first field in this struct.
-    run_queue: mpsc_queue::Links<Header>,
-
-    /// The task's state, which can be atomically updated.
-    state: StateCell,
-
-    /// The task vtable for this task.
+    /// The [run queue links] *must* be the first field in this type, in order for
+    /// the [`Linked::links` implementation] for this type to be sound. Therefore,
+    /// the `#[repr(C)]` attribute on this struct is load-bearing.
     ///
-    /// Note that this is different from the [waker vtable], which contains
-    /// pointers to the waker methods (and depends primarily on the task's
-    /// scheduler type). The task vtable instead contains methods for
-    /// interacting with the task's future, such as polling it and reading the
-    /// task's output. These depend primarily on the type of the future rather
-    /// than the scheduler.
+    /// [vtable]: Vtable
+    /// [state cell]: StateCell
+    /// [run queue links]: cordyceps::mpsc_queue::Links
+    /// [`Linked::links` implementation]: #method.links
+    /// [97708]: https://github.com/rust-lang/rust/issues/97708
     ///
-    /// [waker vtable]: core::task::RawWakerVTable
-    vtable: &'static Vtable,
+    /// [^1]: On CPU architectures which support spatial prefetch, at least...
+    #[repr(C)]
+    #[derive(Debug)]
+    pub struct Header {
+        /// The task's links in the intrusive run queue.
+        ///
+        /// # Safety
+        ///
+        /// This MUST be the first field in this struct.
+        pub(super) run_queue: mpsc_queue::Links<Header>,
+
+        /// The task's state, which can be atomically updated.
+        pub(super) state: StateCell,
+
+        /// The task vtable for this task.
+        ///
+        /// Note that this is different from the [waker vtable], which contains
+        /// pointers to the waker methods (and depends primarily on the task's
+        /// scheduler type). The task vtable instead contains methods for
+        /// interacting with the task's future, such as polling it and reading the
+        /// task's output. These depend primarily on the type of the future rather
+        /// than the scheduler.
+        ///
+        /// [waker vtable]: core::task::RawWakerVTable
+        pub(super) vtable: &'static Vtable,
+    }
 }
+
+#[doc(inline)]
+pub(crate) use self::header::Header;
 
 enum Cell<F: Future> {
     Future(F),
@@ -523,26 +542,45 @@ feature! {
 feature! {
     #![not(loom)]
 
-    mod nop {
-        use super::*;
-        pub unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
-            #[cfg(debug_assertions)]
-            unreachable!("stub task ({_ptr:?}) should never be polled!");
-            #[cfg(not(debug_assertions))]
-            Poll::Pending
-        }
-    
-    
-        pub unsafe fn nop_deallocate(ptr: NonNull<Header>) {
-            unreachable!("stub task ({ptr:p}) should never be deallocated!");
-        }
-    
+    /// # /!\ EXTREMELY SERIOUS WARNING /!\
+    ///
+    /// This is NOT a public API and is *not* part of this crate's stable
+    /// interface. It must be made `pub` as a workaround for a [compiler
+    /// error][97708] where functions in the stub task vtable are improperly
+    /// culled as dead code by the compiler if they are not `pub`.
+    ///
+    /// User code should NEVER call this function directly. If you *do* call
+    /// it...please note that it doesn't do anything interesting.
+    ///
+    /// [97708]: https://github.com/rust-lang/rust/issues/97708
+    #[doc(hidden)]
+    pub unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
+        #[cfg(debug_assertions)]
+        unreachable!("stub task ({_ptr:?}) should never be polled!");
+        #[cfg(not(debug_assertions))]
+        Poll::Pending
+    }
+
+    /// # /!\ EXTREMELY SERIOUS WARNING /!\
+    ///
+    /// This is NOT a public API and is *not* part of this crate's stable
+    /// interface. It must be made `pub` as a workaround for a [compiler
+    /// error][97708] where functions in the stub task vtable are improperly
+    /// culled as dead code by the compiler if they are not `pub`.
+    ///
+    /// User code should NEVER call this function directly. If you *do* call
+    /// it...please note that it will always panic.
+    ///
+    /// [97708]: https://github.com/rust-lang/rust/issues/97708
+    #[doc(hidden)]
+    pub unsafe fn nop_deallocate(ptr: NonNull<Header>) {
+        unreachable!("stub task ({ptr:p}) should never be deallocated!");
     }
 
     impl Vtable {
         const STUB: Vtable = Vtable {
-            poll: nop::nop,
-            deallocate: nop::nop_deallocate,
+            poll: nop,
+            deallocate: nop_deallocate,
         };
     }
 
