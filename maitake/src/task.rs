@@ -15,6 +15,9 @@ pub use core::task::{Context, Poll, Waker};
 mod state;
 mod storage;
 
+#[cfg(test)]
+mod tests;
+
 use crate::{
     loom::cell::UnsafeCell,
     scheduler::Schedule,
@@ -160,11 +163,9 @@ enum Cell<F: Future> {
 #[derive(Debug)]
 struct Vtable {
     /// Poll the future.
-    poll: unsafe fn(NonNull<Header>) -> Poll<()>,
-    /* // TODO(eliza): this will be needed when tasks can be dropped through `JoinHandle` refs...
+    poll: unsafe fn(TaskRef) -> Poll<()>,
     /// Drops the task and deallocates its memory.
     deallocate: unsafe fn(NonNull<Header>),
-    */
 }
 
 // === impl Task ===
@@ -187,7 +188,7 @@ where
 {
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
-        // deallocate: Self::deallocate,
+        deallocate: Self::deallocate,
     };
 
     const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
@@ -252,7 +253,7 @@ where
                 // transition does *not* decrement the reference count. this is
                 // in order to avoid dropping the task while it is being
                 // scheduled. one reference is consumed by enqueuing the task...
-                Self::schedule(this);
+                Self::schedule(TaskRef(this.cast::<Header>()));
                 // now that the task has been enqueued, decrement the reference
                 // count to drop the waker that performed the `wake_by_val`.
                 Self::drop_ref(this);
@@ -266,15 +267,13 @@ where
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
         if this.as_ref().state().wake_by_ref() == ScheduleAction::Enqueue {
-            Self::schedule(this);
+            Self::schedule(TaskRef(this.cast::<Header>()));
         }
     }
 
     #[inline(always)]
-    unsafe fn schedule(this: NonNull<Self>) {
-        this.as_ref()
-            .scheduler
-            .schedule(TaskRef(this.cast::<Header>()));
+    unsafe fn schedule(this: TaskRef) {
+        this.0.cast::<Self>().as_ref().scheduler.schedule(this);
     }
 
     #[inline]
@@ -287,9 +286,9 @@ where
         drop(STO::from_raw(this))
     }
 
-    unsafe fn poll(ptr: NonNull<Header>) -> Poll<()> {
+    unsafe fn poll(ptr: TaskRef) -> Poll<()> {
         trace_task!(ptr, F, "poll");
-        let mut this = ptr.cast::<Self>();
+        let mut this = ptr.0.cast::<Self>();
         test_trace!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
         let state = &this.as_ref().state();
@@ -317,17 +316,18 @@ where
         // post-poll state transition
         match test_dbg!(state.end_poll(poll.is_ready())) {
             OrDrop::Drop => drop(STO::from_raw(this)),
-            OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(this),
+            OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(ptr),
             OrDrop::Action(ScheduleAction::None) => {}
         }
 
         poll
     }
 
-    // unsafe fn deallocate(ptr: NonNull<Header>) {
-    //     trace_task!(ptr, F, "deallocate");
-    //     drop(Box::from_raw(ptr.cast::<Self>().as_ptr()))
-    // }
+    unsafe fn deallocate(ptr: NonNull<Header>) {
+        trace_task!(ptr, F, "deallocate");
+        let this = ptr.cast::<Self>();
+        drop(STO::from_raw(this));
+    }
 
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {
         self.inner.with_mut(|cell| {
@@ -395,15 +395,15 @@ impl TaskRef {
         Self(ptr)
     }
 
-    pub(crate) fn poll(&self) -> Poll<()> {
+    pub(crate) fn poll(self) -> Poll<()> {
         let poll_fn = self.header().vtable.poll;
-        unsafe { poll_fn(self.0) }
+        unsafe { poll_fn(self) }
     }
 
-    // #[inline]
-    // fn state(&self) -> &StateVar {
-    //     &self.header().state
-    // }
+    #[inline]
+    fn state(&self) -> &StateCell {
+        &self.header().state
+    }
 
     #[inline]
     fn header(&self) -> &Header {
@@ -411,26 +411,26 @@ impl TaskRef {
     }
 }
 
-// impl Clone for TaskRef {
-//     #[inline]
-//     fn clone(&self) -> Self {
-//         self.state().clone_ref();
-//         Self(self.0)
-//     }
-// }
+impl Clone for TaskRef {
+    #[inline]
+    fn clone(&self) -> Self {
+        self.state().clone_ref();
+        Self(self.0)
+    }
+}
 
-// impl Drop for TaskRef {
-//     #[inline]
-//     fn drop(&mut self) {
-//         if !self.state().drop_ref() {
-//             return;
-//         }
+impl Drop for TaskRef {
+    #[inline]
+    fn drop(&mut self) {
+        if !self.state().drop_ref() {
+            return;
+        }
 
-//         unsafe {
-//             Header::drop_slow(self.0);
-//         }
-//     }
-// }
+        unsafe {
+            Header::deallocate(self.0);
+        }
+    }
+}
 
 unsafe impl Send for TaskRef {}
 unsafe impl Sync for TaskRef {}
@@ -440,18 +440,38 @@ unsafe impl Sync for TaskRef {}
 impl Header {
     #[cfg(not(loom))]
     pub(crate) const fn new_stub() -> Self {
-        unsafe fn nop(_ptr: NonNull<Header>) -> Poll<()> {
+        unsafe fn nop(_ptr: TaskRef) -> Poll<()> {
             #[cfg(debug_assertions)]
-            unreachable!("stub task ({_ptr:p}) should never be polled!");
+            unreachable!("stub task ({_ptr:?}) should never be polled!");
             #[cfg(not(debug_assertions))]
             Poll::Pending
+        }
+
+        unsafe fn nop_deallocate(ptr: NonNull<Header>) {
+            unreachable!("stub task ({ptr:p}) should never be deallocated!");
         }
 
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
-            vtable: &Vtable { poll: nop },
+            vtable: &Vtable {
+                poll: nop,
+                deallocate: nop_deallocate,
+            },
         }
+    }
+
+    unsafe fn deallocate(this: NonNull<Self>) {
+        #[cfg(debug_assertions)]
+        let refs = this
+            .as_ref()
+            .state
+            .load(core::sync::atomic::Ordering::Acquire)
+            .ref_count();
+        debug_assert_eq!(refs, 0, "tried to deallocate a task with references!");
+
+        let deallocate = this.as_ref().vtable.deallocate;
+        deallocate(this)
     }
 }
 
@@ -462,7 +482,12 @@ unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
     type Handle = TaskRef;
 
     fn into_ptr(task: Self::Handle) -> NonNull<Self> {
-        task.0
+        let ptr = task.0;
+        // converting a `TaskRef` into a pointer to enqueue it assigns ownership
+        // of the ref count to the queue, so we don't want to run its `Drop`
+        // impl.
+        mem::forget(task);
+        ptr
     }
 
     /// Convert a raw pointer to a `Handle`.
