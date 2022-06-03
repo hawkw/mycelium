@@ -426,7 +426,7 @@ impl Drop for TaskRef {
         }
 
         unsafe {
-            Header::drop_slow(self.0);
+            Header::deallocate(self.0);
         }
     }
 }
@@ -460,7 +460,7 @@ impl Header {
         }
     }
 
-    unsafe fn drop_slow(this: NonNull<Self>) {
+    unsafe fn deallocate(this: NonNull<Self>) {
         #[cfg(debug_assertions)]
         let refs = this
             .as_ref()
