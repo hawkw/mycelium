@@ -15,6 +15,9 @@ pub use core::task::{Context, Poll, Waker};
 mod state;
 mod storage;
 
+#[cfg(test)]
+mod tests;
+
 use crate::{
     loom::cell::UnsafeCell,
     scheduler::Schedule,
