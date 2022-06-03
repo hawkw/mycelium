@@ -123,8 +123,7 @@ impl StateCell {
                 *state = test_dbg!(next_state);
                 return OrDrop::Action(ScheduleAction::Enqueue);
             }
-
-            let next_state = test_dbg!(next_state.drop_ref());
+            
             *state = next_state;
 
             if next_state.ref_count() == 0 {
