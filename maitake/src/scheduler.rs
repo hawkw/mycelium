@@ -37,6 +37,7 @@ pub trait Schedule: Sized + Clone {
 /// [`StaticScheduler`]: crate::scheduler::StaticScheduler
 /// [`new_with_static_stub()`]: crate::scheduler::StaticScheduler::new_with_static_stub
 #[repr(transparent)]
+#[cfg_attr(loom, allow(dead_code))]
 pub struct TaskStub {
     hdr: Header,
 }
