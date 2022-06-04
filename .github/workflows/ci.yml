@@ -74,7 +74,12 @@ jobs:
     - uses: actions/checkout@v2
     - name: run cargo check
       run: |
-        cargo check --workspace --all-features --quiet --message-format=json | cargo-action-fmt
+        cargo check \
+          --workspace \
+          --all-features \
+          --quiet \
+          --message-format=json |
+          cargo-action-fmt
 
   # check code style with `rustfmt`
   rustfmt:
@@ -84,10 +89,9 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - uses: actions/checkout@v2
     - name: run rustfmt
-      run: cargo fmt --message-format=json | cargo-action-fmt
+      run: cargo fmt --check
 
   # run host tests
   #
