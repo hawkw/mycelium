@@ -37,7 +37,7 @@ env:
 
 jobs:
   is_enabled:
-    # continue-on-error: true # Uncomment once integration is finished
+    continue-on-error: true # Uncomment once integration is finished
     runs-on: ubuntu-latest
     # Map a step output to a job output
     outputs:
@@ -46,8 +46,8 @@ jobs:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@master
         with:
-          paths: '["maitake/**.rs", "maitake/Cargo.toml", ".github/workflows/maitake.yml"]'
-          do_not_skip: '["workflow_dispatch"]'
+          paths: '["maitake/**/*.rs", "maitake/Cargo.toml", ".github/workflows/maitake.yml"]'
+          do_not_skip: '["workflow_dispatch", "push"]'
 
   # test with `--no-default-features`
   no_default_features:
