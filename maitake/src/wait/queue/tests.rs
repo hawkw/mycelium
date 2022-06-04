@@ -41,7 +41,7 @@ mod alloc {
     }
 
     #[test]
-    fn close_on_drop() {
+    fn close() {
         crate::util::trace_init();
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
@@ -64,7 +64,7 @@ mod alloc {
         assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
         assert!(!tick.has_remaining);
 
-        drop(q);
+        q.close();
 
         let tick = scheduler.tick();
 
@@ -176,7 +176,7 @@ mod loom {
     }
 
     #[test]
-    fn wake_on_drop() {
+    fn wake_close() {
         use alloc::sync::Arc;
 
         loom::model(|| {
@@ -189,7 +189,7 @@ mod loom {
             let thread2 =
                 thread::spawn(move || future::block_on(wait2).expect_err("wait2 must be canceled"));
 
-            drop(q);
+            q.close();
 
             thread1.join().unwrap();
             thread2.join().unwrap();

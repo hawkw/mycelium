@@ -298,7 +298,15 @@ impl WaitQueue {
         // check if any tasks are currently waiting on this queue. if there are
         // no waiting tasks, store the wakeup to be consumed by the next call to
         // `wait`.
-        while state.get(QueueState::STATE) != State::Waiting {
+        loop {
+            match state.get(QueueState::STATE) {
+                // if the queue is closed, bail.
+                State::Closed => return,
+                // if there are waiting tasks, break out of the loop and wake one.
+                State::Waiting => break,
+                _ => {}
+            }
+
             let next = state.with_state(State::Woken);
             // advance the state to `Woken`, and return (if we did so
             // successfully)
@@ -327,11 +335,17 @@ impl WaitQueue {
         let mut queue = self.queue.lock();
         let state = self.load();
 
-        // if there are no waiters in the queue, increment the number of
-        // `wake_all` calls and return.
-        if state.get(QueueState::STATE) != State::Waiting {
-            self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
-            return;
+        match state.get(QueueState::STATE) {
+            // if the queue is closed, bail.
+            State::Closed => return,
+
+            // if there are no waiters in the queue, increment the number of
+            // `wake_all` calls and return.
+            State::Woken | State::Empty => {
+                self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
+                return;
+            }
+            State::Waiting => {}
         }
 
         // okay, we actually have to wake some stuff.
@@ -350,6 +364,22 @@ impl WaitQueue {
             .with(QueueState::WAKE_ALLS, state.get(QueueState::WAKE_ALLS) + 1);
         self.compare_exchange(state, next_state)
             .expect("state should not have transitioned while locked");
+    }
+
+    /// Close the queue, indicating that it may no longer be used.
+    ///
+    /// Once a queue is closed, all [`wait`] calls (current or future) will
+    /// return an error.
+    pub fn close(&self) {
+        let mut queue = self.queue.lock();
+        test_dbg!(self.state.fetch_or(State::Closed as u8 as usize, SeqCst));
+
+        // TODO(eliza): wake outside the lock using an array, a la
+        // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
+        while let Some(node) = queue.pop_back() {
+            let waker = Waiter::wake(node, &mut queue, Wakeup::Closed);
+            waker.wake()
+        }
     }
 
     /// Wait to be woken up by this queue.
@@ -450,15 +480,7 @@ impl WaitQueue {
 
 impl Drop for WaitQueue {
     fn drop(&mut self) {
-        let mut queue = self.queue.lock();
-        test_dbg!(self.state.fetch_or(State::Closed as u8 as usize, SeqCst));
-
-        // TODO(eliza): wake outside the lock using an array, a la
-        // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
-        while let Some(node) = queue.pop_back() {
-            let waker = Waiter::wake(node, &mut queue, Wakeup::Closed);
-            waker.wake()
-        }
+        self.close();
     }
 }
 
@@ -660,7 +682,7 @@ impl PinnedDrop for Wait<'_> {
 feature! {
     #![feature = "alloc"]
 
-    use alloc::sync::{Arc, Weak};
+    use alloc::sync::Arc;
 
     /// Future returned from [`WaitQueue::wait_owned()`].
     ///
@@ -668,17 +690,13 @@ feature! {
     /// [`Weak`] reference to the [`WaitQueue`], allowing the returned future to
     /// live for the `'static` lifetime.
     ///
-    /// A `WaitOwned` future does *not* keep the [`WaitQueue`] alive; if all
-    /// [`Arc`] clones of the [`WaitQueue`] that this future was returned by are
-    /// dropped, this future will be cancelled.
-    ///
     /// This future is fused, so once it has completed, any future calls to poll
     /// will immediately return [`Poll::Ready`].
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
     pub struct WaitOwned {
-        /// The `WaitQueue` being waited on from.
-        queue: Weak<WaitQueue>,
+        /// The `WaitQueue` being waited on.
+        queue: Arc<WaitQueue>,
 
         /// Entry in the wait queue.
         #[pin]
@@ -694,19 +712,15 @@ feature! {
         /// dropped.
         ///
         /// This is identical to the [`wait`] method, except that it takes a
-        /// [`Weak`] reference to the [`WaitQueue`], allowing the returned future to
+        /// [`Arc`] reference to the [`WaitQueue`], allowing the returned future to
         /// live for the `'static` lifetime.
-        ///
-        /// A `WaitOwned` future does *not* keep the [`WaitQueue`] alive; if all
-        /// [`Arc`] clones of the [`WaitQueue`] that this future was returned by are
-        /// dropped, this future will be cancelled.
         ///
         /// [`wake`]: Self::wake
         /// [`wake_all`]: Self::wake_all
         /// [`wait`]: Self::wait
         pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
             let waiter = self.waiter();
-            let queue = Arc::downgrade(self);
+            let queue = self.clone();
             WaitOwned { queue, waiter }
         }
     }
@@ -716,10 +730,7 @@ feature! {
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
-            match this.queue.upgrade() {
-                Some(queue) => this.waiter.poll_wait(&*queue, cx),
-                None => wait::closed(),
-            }
+            this.waiter.poll_wait(&*this.queue, cx)
         }
     }
 
@@ -727,17 +738,7 @@ feature! {
     impl PinnedDrop for WaitOwned {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
-            match this.queue.upgrade() {
-                Some(ref queue) => this.waiter.release(queue),
-                None => {
-                    test_trace!("WaitOwned::drop: queue already dropped");
-                    debug_assert_ne!(
-                        *this.waiter.project().state,
-                        WaitState::Waiting,
-                        "if the queue has been dropped, the waiter should have been notified!",
-                    )
-                }
-            }
+            this.waiter.release(&*this.queue);
         }
     }
 }
