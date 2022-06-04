@@ -4,11 +4,14 @@ version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
 edition = "2018"
 rust-version = "1.61.0"
+readme = "README.md"
 
 # See more keys and their definitions at
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
+default = []
 alloc = ["cordyceps/alloc"]
+no-cache-pad = ["cordyceps/no-cache-pad"]
 
 [dependencies]
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }

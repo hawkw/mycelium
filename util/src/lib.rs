@@ -1,5 +1,4 @@
-//! A "standard library" for programming in the Mycelium kernel and related
-//! libraries.
+#![cfg_attr(docsrs, doc = include_str!("../README.md"))]
 #![cfg_attr(target_os = "none", no_std)]
 #![allow(unused_unsafe)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
