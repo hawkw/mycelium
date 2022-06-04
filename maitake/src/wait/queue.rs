@@ -375,8 +375,13 @@ impl WaitQueue {
     /// synchronization primitives or resources: when an event makes a resource
     /// permanently unavailable, the queue can be closed.
     pub fn close(&self) {
+        let state = self.state.fetch_or(State::Closed as u8 as usize, SeqCst);
+        let state = test_dbg!(QueueState::from_bits(state));
+        if state.get(QueueState::STATE) != State::Waiting {
+            return;
+        }
+
         let mut queue = self.queue.lock();
-        test_dbg!(self.state.fetch_or(State::Closed as u8 as usize, SeqCst));
 
         // TODO(eliza): wake outside the lock using an array, a la
         // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
@@ -479,12 +484,6 @@ impl WaitQueue {
         }
 
         Some(waker)
-    }
-}
-
-impl Drop for WaitQueue {
-    fn drop(&mut self) {
-        self.close();
     }
 }
 
@@ -679,6 +678,7 @@ impl Waiter {
         // node in the queue.
         if Waiter::with_node(ptr, &mut waiters, |node| matches!(&node.waker, Wakeup::One)) {
             if let Some(waker) = queue.wake_locked(&mut waiters, state) {
+                drop(waiters);
                 waker.wake()
             }
         }
