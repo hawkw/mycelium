@@ -7,7 +7,6 @@
 [![Documentation (HEAD)][docs-main-badge]][docs-main-url]
 [![MIT licensed][mit-badge]][mit-url]
 [![Test Status][tests-badge]][tests-url]
-[![Loom Models][loom-badge]][loom-url]
 [![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
 
 [crates-badge]: https://img.shields.io/crates/v/maitake.svg
@@ -21,7 +20,6 @@
 [tests-badge]: https://github.com/hawkw/mycelium/actions/workflows/ci.yml/badge.svg?branch=main
 [tests-url]: https://github.com/hawkw/mycelium/actions/workflows/ci.yml
 [loom-badge]: https://github.com/hawkw/mycelium/actions/workflows/maitake.yml/badge.svg?branch=main
-[loom-url]: https://github.com/hawkw/mycelium/actions/workflows/maitake.yml
 [sponsor-badge]: https://img.shields.io/badge/sponsor-%F0%9F%A4%8D-ff69b4
 [sponsor-url]: https://github.com/sponsors/hawkw
 [maitake-wiki]: https://en.wikipedia.org/wiki/Grifola_frondosa
