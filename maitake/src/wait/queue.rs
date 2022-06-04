@@ -121,10 +121,31 @@ pub struct Wait<'a> {
 }
 
 
+/// The state of a [`Waiter`] node in a [`WaitQueue`].
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum WaitState {
+    /// The waiter has not yet been enqueued.
+    ///
+    /// The number of times [`WaitQueue::wake_all`] has been called is stored
+    /// when the node is created, in order to determine whether it was woken by
+    /// a stored wakeup when enqueueing.
+    ///
+    /// When in this state, the node is **not** part of the linked list, and
+    /// can be dropped without removing it from the list.
     Start(usize),
+
+    /// The waiter is waiting.
+    ///
+    /// When in this state, the node **is** part of the linked list. If the
+    /// node is dropped in this state, it **must** be removed from the list
+    /// before dropping it. Failure to ensure this will result in dangling
+    /// pointers in the linked list!
     Waiting,
+
+    /// The waiter has been woken.
+    ///
+    /// When in this state, the node is **not** part of the linked list, and
+    /// can be dropped without removing it from the list.
     Woken,
 }
 
@@ -169,34 +190,41 @@ struct Node {
 bitfield! {
     #[derive(Eq, PartialEq)]
     struct QueueState<usize> {
+        /// The queue's state.
         const STATE: State;
+
+        /// The number of times [`WaitQueue::wake_all`] has been called.
         const WAKE_ALLS = ..;
     }
 }
 
+
+/// The queue's current state.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 enum State {
     /// No waiters are queued, and there is no pending notification.
     /// Waiting while the queue is in this state will enqueue the waiter;
     /// notifying while in this state will store a pending notification in the
-    /// queue, transitioning to the [`Woken`] state.
+    /// queue, transitioning to [`State::Woken`].
     Empty = 0,
 
     /// There are one or more waiters in the queue. Waiting while
     /// the queue is in this state will not transition the state. Waking while
     /// in this state will wake the first waiter in the queue; if this empties
-    /// the queue, then the queue will transition to the [`Empty`] state.
+    /// the queue, then the queue will transition to [`State::Empty`].
     Waiting = 1,
 
     /// The queue has a stored notification. Waiting while the queue
     /// is in this state will consume the pending notification *without*
-    /// enqueueing the waiter and transition the queue to the [`Empty`] state.
+    /// enqueueing the waiter and transition the queue to [`State::Empty`].
     /// Waking while in this state will leave the queue in this state.
     Woken = 2,
 
     /// The queue is closed. Waiting while in this state will return
     /// [`Closed`] without transitioning the queue's state.
+    ///
+    /// [`Closed`]: crate::wait::Closed
     Closed = 3,
 
 }
@@ -486,14 +514,14 @@ impl Waiter {
                 // transition the queue to the waiting state
                 'to_waiting: loop {
                     match test_dbg!(queue_state.get(QueueState::STATE)) {
-                        // the queue is EMPTY, transition to WAITING
+                        // the queue is `Empty`, transition to `Waiting`
                         State::Empty => {
                             match queue.compare_exchange(queue_state, queue_state.with_state(State::Waiting)) {
                                 Ok(_) => break 'to_waiting,
                                 Err(actual) => queue_state = actual,
                             }
                         },
-                        // the queue is already WAITING
+                        // the queue is already `Waiting`
                         State::Waiting => break 'to_waiting,
                         // the queue was woken, consume the wakeup.
                         State::Woken => {
