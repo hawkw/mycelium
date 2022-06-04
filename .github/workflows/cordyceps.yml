@@ -37,7 +37,7 @@ env:
 
 jobs:
   is_enabled:
-    # continue-on-error: true # Uncomment once integration is finished
+    continue-on-error: true # Uncomment once integration is finished
     runs-on: ubuntu-latest
     # Map a step output to a job output
     outputs:
@@ -46,8 +46,8 @@ jobs:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@master
         with:
-          paths: '["cordyceps/**.rs", "cordyceps/Cargo.toml", ".github/workflows/cordyceps.yml"]'
-          do_not_skip: '["workflow_dispatch"]'
+          paths: '["cordyceps/**/*.rs", "cordyceps/Cargo.toml", ".github/workflows/cordyceps.yml"]'
+          do_not_skip: '["workflow_dispatch", "push"]'
 
 
   # run loom tests
