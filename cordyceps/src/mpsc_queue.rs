@@ -1,6 +1,8 @@
 //! A multi-producer, single-consumer (MPSC) queue, implemented using a
 //! lock-free intrusive singly-linked list.
 //!
+//! See the documentation for the [`MpscQueue`] type for details.
+//!
 //! Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
 //!
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
@@ -22,6 +24,11 @@ use core::{
 /// lock-free intrusive singly-linked list.
 ///
 /// Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
+///
+/// In order to be part of a `MpscQueue`, a type `T` must implement [`Linked`] for
+/// [`mpsc_queue::Links<T>`].
+///
+/// [`mpsc_queue::Links<T>`]: crate::mpsc_queue::Links
 ///
 /// # Examples
 ///
@@ -369,6 +376,10 @@ pub struct Consumer<'q, T: Linked<Links<T>>> {
     q: &'q MpscQueue<T>,
 }
 
+/// Links to other nodes in a [`MpscQueue`].
+///
+/// In order to be part of a [`MpscQueue`], a type must contain an instance of this
+/// type, and must implement the [`Linked`] trait for `Links<Self>`.
 pub struct Links<T> {
     /// The next node in the queue.
     next: AtomicPtr<T>,
@@ -390,14 +401,29 @@ pub struct Links<T> {
 pub enum TryDequeueError {
     /// No element was dequeued because the queue was empty.
     Empty,
+
+    /// The queue is currently in an inconsistent state.
     ///
+    /// Since inconsistent states are very short-lived, the caller may want to
+    /// try dequeueing a second time.
     Inconsistent,
+
+    /// Another thread is currently calling [`MpscQueue::try_dequeue`]  or
+    /// [`MpscQueue::dequeue`], or owns a [`Consumer`] or [`OwnedConsumer`] handle.
+    ///
+    /// This is a multi-producer, *single-consumer* queue, so only a single
+    /// thread may dequeue elements at any given time.
     Busy,
 }
 
 // === impl Queue ===
 
 impl<T: Linked<Links<T>>> MpscQueue<T> {
+    /// Returns a new `MpscQueue`.
+    ///
+    /// The [`Default`] implementation for `T::Handle` is used to produce a new
+    /// node used as the list's stub.
+    #[must_use]
     pub fn new() -> Self
     where
         T::Handle: Default,
@@ -405,6 +431,11 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
         Self::new_with_stub(Default::default())
     }
 
+    /// Returns a new `MpscQueue` with the provided stub node.
+    /// 
+    /// If a `MpscQueue` must be constructed in a `const` context, such as a
+    /// `static` initializer, see [`MpscQueue::new_with_static_stub`].
+    #[must_use]
     pub fn new_with_stub(stub: T::Handle) -> Self {
         let stub = T::into_ptr(stub);
 
@@ -424,16 +455,16 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
         }
     }
 
-    /// Create an MpscQueue with a static "stub" entity
+    /// Returns a new `MpscQueue` with a static "stub" entity
     ///
-    /// This is primarily used for creating an MpscQueue as a `static` variable.
+    /// This is primarily used for creating an `MpscQueue` as a `static` variable.
     ///
     /// # Usage notes
     ///
     /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub` item will NOT be
     /// dropped when the `MpscQueue` is dropped. This is fine if you are
     /// ALSO statically creating the `stub`, however if it is necessary to
-    /// recover that memory after the MpscQueue has been dropped, that will
+    /// recover that memory after the `MpscQueue` has been dropped, that will
     /// need to be done by the user manually.
     ///
     /// # Safety
@@ -503,6 +534,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// ```
     ///
     #[cfg(not(loom))]
+    #[must_use]
     pub const unsafe fn new_with_static_stub(stub: &'static T) -> Self {
         let ptr = stub as *const T as *mut T;
         Self {
@@ -956,7 +988,10 @@ where
 // === impl Links ===
 
 impl<T> Links<T> {
+
+    /// Returns a new set of `Links` for a [`MpscQueue`].
     #[cfg(not(loom))]
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
@@ -966,7 +1001,10 @@ impl<T> Links<T> {
         }
     }
 
+
+    /// Returns a new set of `Links` for the stub node in an [`MpscQueue`].
     #[cfg(not(loom))]
+    #[must_use]
     pub const fn new_stub() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
@@ -976,7 +1014,9 @@ impl<T> Links<T> {
         }
     }
 
+    /// Returns a new set of `Links` for a [`MpscQueue`].
     #[cfg(loom)]
+    #[must_use]
     pub fn new() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),
@@ -986,7 +1026,9 @@ impl<T> Links<T> {
         }
     }
 
+    /// Returns a new set of `Links` for the stub node in an [`MpscQueue`].
     #[cfg(loom)]
+    #[must_use]
     pub fn new_stub() -> Self {
         Self {
             next: AtomicPtr::new(ptr::null_mut()),

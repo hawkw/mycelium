@@ -1,3 +1,6 @@
+//! An intrusive doubly-linked list.
+//!
+//! See the [`List`] type for details.
 use super::Linked;
 use crate::util::FmtOption;
 use core::{
@@ -8,13 +11,44 @@ use core::{
     ptr::{self, NonNull},
 };
 
+
+/// An intrusive doubly-linked list.
+///
+/// This data structure may be used as a first-in, first-out queue by using the
+/// [`List::push_front`] and [`List::pop_back`] methods. It also supports
+/// random-access removals using the [`List::remove`] method.
+///
+/// In order to be part of a `List`, a type `T` must implement [`Linked`] for
+/// [`list::Links<T>`].
+///
+/// [`list::Links<T>`]: crate::list::Links
 pub struct List<T: ?Sized> {
     head: Link<T>,
     tail: Link<T>,
 }
 
+
+/// Links to other nodes in a [`List`].
+///
+/// In order to be part of a [`List`], a type must contain an instance of this
+/// type, and must implement the [`Linked`] trait for `Links<Self>`.
 pub struct Links<T: ?Sized> {
     inner: UnsafeCell<LinksInner<T>>,
+}
+
+/// A cursor over a [`List`].
+///
+/// This is similar to a mutable iterator (and implements the [`Iterator`]
+/// trait), but it also permits modification to the list itself. 
+pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
+    list: &'a mut List<T>,
+    curr: Link<T>,
+}
+
+/// Iterates over the items in a [`List`] by reference.
+pub struct Iter<'a, T: Linked<Links<T>> + ?Sized> {
+    _list: &'a List<T>,
+    curr: Link<T>,
 }
 
 type Link<T> = Option<NonNull<T>>;
@@ -29,19 +63,10 @@ struct LinksInner<T: ?Sized> {
     _unpin: PhantomPinned,
 }
 
-pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
-    list: &'a mut List<T>,
-    curr: Link<T>,
-}
-
-pub struct Iter<'a, T: Linked<Links<T>> + ?Sized> {
-    _list: &'a List<T>,
-    curr: Link<T>,
-}
-
 // ==== impl List ====
 impl<T: ?Sized> List<T> {
     /// Returns a new empty list.
+    #[must_use]
     pub const fn new() -> List<T> {
         List {
             head: None,
@@ -49,6 +74,7 @@ impl<T: ?Sized> List<T> {
         }
     }
 
+    /// Returns `true` if this list is empty.
     pub fn is_empty(&self) -> bool {
         if self.head.is_none() {
             debug_assert!(
@@ -134,6 +160,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         // tracing::trace!(?self, "push_front: pushed");
     }
 
+    /// Removes an item from the tail of the list.
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
         unsafe {
@@ -158,7 +185,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
-    /// Remove a node from the list.
+    /// Remove an arbitrary node from the list.
     ///
     /// # Safety
     ///
@@ -195,6 +222,12 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Some(T::from_ptr(item))
     }
 
+    /// Returns a [`Cursor`] over the items in this list.
+    ///
+    /// The [`Cursor`] type can be used as a mutable [`Iterator`]. In addition,
+    /// however, it also permits modifying the *structure* of the list by
+    /// inserting or removing elements at the cursor's current position.
+    #[must_use]
     pub fn cursor(&mut self) -> Cursor<'_, T> {
         Cursor {
             curr: self.head,
@@ -202,6 +235,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
+    /// Returns an iterator over the items in this list, by reference.
+    #[must_use]
     pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             _list: self,
@@ -225,6 +260,9 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
 // ==== impl Links ====
 
 impl<T: ?Sized> Links<T> {
+
+    /// Returns new links for a [doubly-linked intrusive list](List).
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             inner: UnsafeCell::new(LinksInner {
@@ -235,13 +273,14 @@ impl<T: ?Sized> Links<T> {
         }
     }
 
+    /// Returns `true` if this node is currently linked to a [`List`].
+    pub fn is_linked(&self) -> bool {
+        self.next().is_some() || self.prev().is_some()
+    }
+
     fn unlink(&mut self) {
         self.inner.get_mut().next = None;
         self.inner.get_mut().prev = None;
-    }
-
-    pub fn is_linked(&self) -> bool {
-        self.next().is_some() || self.prev().is_some()
     }
 
     #[inline]
@@ -366,7 +405,16 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         Some(curr)
     }
 
-    // Find and remove the first element matching a predicate.
+    /// Find and remove the first element matching the provided `predicate`.
+    ///
+    /// This traverses the list from the cursor's current position and calls
+    /// `predicate` with each element in the list. If `predicate` returns
+    /// `true` for a given element, that element is removed from the list and
+    /// returned, and the traversal ends. If the entire list is traversed
+    /// without finding a matching element, this returns `None`.
+    ///
+    /// This method may be called multiple times to remove more than one
+    /// matching element.
     pub fn remove_first(&mut self, mut predicate: impl FnMut(&T) -> bool) -> Option<T::Handle> {
         let mut item = None;
         while let Some(node) = self.next_ptr() {
