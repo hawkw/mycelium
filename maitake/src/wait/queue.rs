@@ -370,6 +370,10 @@ impl WaitQueue {
     ///
     /// Once a queue is closed, all [`wait`] calls (current or future) will
     /// return an error.
+    ///
+    /// This method is generally used when implementing higher-level
+    /// synchronization primitives or resources: when an event makes a resource
+    /// permanently unavailable, the queue can be closed.
     pub fn close(&self) {
         let mut queue = self.queue.lock();
         test_dbg!(self.state.fetch_or(State::Closed as u8 as usize, SeqCst));
@@ -499,17 +503,35 @@ impl Waiter {
     /// and currently, there is no way to ensure that...
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
-    fn wake(mut this: NonNull<Self>, _list: &mut List<Self>, wakeup: Wakeup) -> Waker {
+    fn wake(this: NonNull<Self>, list: &mut List<Self>, wakeup: Wakeup) -> Waker {
+        Waiter::with_node(this, list, |node| {
+            let waker = test_dbg!(mem::replace(&mut node.waker, wakeup));
+            match waker {
+                Wakeup::Waiting(waker) => waker,
+                _ => unreachable!("tried to wake a waiter in the {:?} state!", waker),
+            }
+        })
+    }
+
+    /// # Safety
+    ///
+    /// This is only safe to call while the list is locked. The dummy `_list`
+    /// parameter ensures this method is only called while holding the lock, so
+    /// this can be safe.
+    ///
+    /// Of course, that must be the *same* list that this waiter is a member of,
+    /// and currently, there is no way to ensure that...
+    #[inline(always)]
+    #[cfg_attr(loom, track_caller)]
+    fn with_node<T>(
+        mut this: NonNull<Self>,
+        _list: &mut List<Self>,
+        f: impl FnOnce(&mut Node) -> T,
+    ) -> T {
         unsafe {
             // safety: this is only called while holding the lock on the queue,
             // so it's safe to mutate the waiter.
-            this.as_mut().node.with_mut(|node| {
-                let waker = test_dbg!(mem::replace(&mut (*node).waker, wakeup));
-                match waker {
-                    Wakeup::Waiting(waker) => waker,
-                    _ => unreachable!("tried to wake a waiter in the {:?} state!", waker),
-                }
-            })
+            this.as_mut().node.with_mut(|node| f(&mut *node))
         }
     }
 
@@ -541,7 +563,7 @@ impl Waiter {
                 test_trace!("poll_wait: locking...");
                 let mut waiters = queue.queue.lock();
                 test_trace!("poll_wait: -> locked");
-                queue_state = test_dbg!(queue.load());
+                queue_state = queue.load();
 
                 // the whole queue was woken while we were trying to acquire
                 // the lock!
@@ -632,9 +654,32 @@ impl Waiter {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
         test_trace!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
-        if state == WaitState::Waiting {
-            unsafe {
-                queue.queue.lock().remove(ptr);
+
+        // if we're not enqueued, we don't have to do anything else.
+        if state != WaitState::Waiting {
+            return;
+        }
+
+        let mut waiters = queue.queue.lock();
+        let state = queue.load();
+
+        // remove the node
+        unsafe {
+            // safety: we have the lock on the queue, so this is safe.
+            waiters.remove(ptr);
+        };
+
+        // if we removed the last waiter from the queue, transition the state to
+        // `Empty`.
+        if test_dbg!(waiters.is_empty()) && state.get(QueueState::STATE) == State::Waiting {
+            queue.store(state.with_state(State::Empty));
+        }
+
+        // if the node has an unconsumed wakeup, it must be assigned to the next
+        // node in the queue.
+        if Waiter::with_node(ptr, &mut waiters, |node| matches!(&node.waker, Wakeup::One)) {
+            if let Some(waker) = queue.wake_locked(&mut waiters, state) {
+                waker.wake()
             }
         }
     }

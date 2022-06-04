@@ -256,7 +256,7 @@ mod loom {
 
     #[test]
     fn drop_wait_future() {
-        use futures::future::poll_fn;
+        use futures_util::future::poll_fn;
         use std::future::Future;
         use std::task::Poll;
 
@@ -280,7 +280,7 @@ mod loom {
             let thread2 = thread::spawn({
                 let q = q.clone();
                 move || {
-                    block_on(async {
+                    future::block_on(async {
                         q.wait().await.unwrap();
                         // Trigger second notification
                         q.wake();
