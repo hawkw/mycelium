@@ -71,15 +71,16 @@ pub unsafe trait Linked<L> {
     /// [`Box`]: alloc::boxed::Box
     type Handle;
 
-    /// Convert a [`Handle`] to a raw pointer, taking ownership of it in the process.
+    /// Convert a [`Self::Handle`] to a raw pointer to `Self`, taking ownership
+    /// of it in the process.
     fn into_ptr(r: Self::Handle) -> NonNull<Self>;
 
-    /// Convert a raw pointer to an owning `Handle`.
+    /// Convert a raw pointer to `Self` into an owning [`Self::Handle`].
     ///
     /// # Safety
     ///
     /// This function is safe to call when:
-    /// - It is valid to construct a `Handle` from a`raw pointer
+    /// - It is valid to construct a [`Self::Handle`] from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
     unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle;
@@ -89,7 +90,7 @@ pub unsafe trait Linked<L> {
     /// # Safety
     ///
     /// This function is safe to call when:
-    /// - It is valid to construct a `Handle` from a`raw pointer
+    /// - It is valid to construct a [`Self::Handle`] from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
     unsafe fn links(ptr: NonNull<Self>) -> NonNull<L>;
