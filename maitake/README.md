@@ -1,6 +1,9 @@
 # maitake
 
-["Dancing mushroom"][maitake-wiki] &mdash; an async runtime construction kit.
+🎶🍄 ["Dancing mushroom"][maitake-wiki] &mdash; an async runtime construction
+kit.
+
+**✨ as seen in [the rust compiler test suite][97708]!**
 
 [![crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
@@ -23,7 +26,7 @@
 [sponsor-badge]: https://img.shields.io/badge/sponsor-%F0%9F%A4%8D-ff69b4
 [sponsor-url]: https://github.com/sponsors/hawkw
 [maitake-wiki]: https://en.wikipedia.org/wiki/Grifola_frondosa
-
+[97708]: https://github.com/rust-lang/rust/blob/c7b0452ece11bf714f7cf2003747231931504d59/src/test/ui/codegen/auxiliary/issue-97708-aux.rs
 ## what is it?
 
 This library is a collection of modular components for building a Rust
@@ -42,9 +45,9 @@ operating systems, but may be useful for other projects as well.
 
 [`core::task`]: https://doc.rust-lang.org/stable/core/task/index.html
 [`core::future`]: https://doc.rust-lang.org/stable/core/future/index.html
-[task system]: task
-[scheduling]: scheduler
-[wait]: wait
+[task system]: https://mycelium.elizas.website/maitake/task/index.html
+[scheduling]: https://mycelium.elizas.website/maitake/scheduler/index.html
+[wait]: https://mycelium.elizas.website/maitake/wait/index.html
 [mycelium]: https://github.com/hawkw/mycelium
 [mnemOS]: https://mnemos.jamesmunns.com
 
