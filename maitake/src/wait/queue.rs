@@ -326,6 +326,7 @@ impl WaitQueue {
         state = self.load();
 
         if let Some(waker) = self.wake_locked(&mut *queue, state) {
+            drop(queue);
             waker.wake();
         }
     }
@@ -463,7 +464,7 @@ impl WaitQueue {
         if test_dbg!(state) != State::Waiting {
             // if there are no longer any queued tasks, try to store the
             // wakeup in the queue and bail.
-            if let Err(actual) = self.compare_exchange(curr, curr.with_state(State::Waiting)) {
+            if let Err(actual) = self.compare_exchange(curr, curr.with_state(State::Woken)) {
                 debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
                 self.store(actual.with_state(State::Woken));
             }
