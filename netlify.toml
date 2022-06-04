@@ -11,10 +11,7 @@
   publish = "target/doc"
 
 [build.environment]
-  RUSTDOCFLAGS="""
-    -D warnings \
-    --cfg docsrs \
-    """
+  RUSTDOCFLAGS="--cfg docsrs"
 
 [[redirects]]
   from = "/"
