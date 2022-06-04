@@ -38,8 +38,8 @@ jobs:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@master
         with:
-          paths: '["**.rs", "**/Cargo.toml", "Cargo.lock", ".github/workflows/ci.yml"]'
-          do_not_skip: '["workflow_dispatch"]'
+          paths: '["**/*.rs", "**/Cargo.toml", "Cargo.lock", ".github/workflows/ci_warnings.yml"]'
+          do_not_skip: '["workflow_dispatch", "push"]'
 
   # run `cargo check` with the host target triple.
   check-host:
