@@ -1,5 +1,110 @@
 use super::*;
 
+#[cfg(all(not(loom), feature = "alloc"))]
+mod alloc {
+    use super::*;
+    use crate::loom::sync::Arc;
+    use crate::scheduler::Scheduler;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn wake_all() {
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitQueue::new());
+
+        const TASKS: usize = 10;
+
+        for _ in 0..TASKS {
+            let q = q.clone();
+            scheduler.spawn(async move {
+                q.wait().await.unwrap();
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
+
+        q.wake_all();
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, TASKS);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert!(!tick.has_remaining);
+    }
+
+    #[test]
+    fn close_on_drop() {
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitQueue::new());
+
+        const TASKS: usize = 10;
+
+        for _ in 0..TASKS {
+            let wait = q.wait_owned();
+            scheduler.spawn(async move {
+                wait.await.expect_err("dropping the queue must close it");
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
+
+        drop(q);
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, TASKS);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert!(!tick.has_remaining);
+    }
+
+    #[test]
+    fn wake_one() {
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitQueue::new());
+
+        const TASKS: usize = 10;
+
+        for _ in 0..TASKS {
+            let q = q.clone();
+            scheduler.spawn(async move {
+                q.wait().await.unwrap();
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+                q.wake();
+            });
+        }
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
+
+        q.wake();
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, TASKS);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert!(!tick.has_remaining);
+    }
+}
+
 #[cfg(loom)]
 mod loom {
     use super::*;
@@ -114,6 +219,77 @@ mod loom {
             future::block_on(async {
                 q.wait().await.expect("queue must not be closed");
             });
+        });
+    }
+
+    #[test]
+    fn wake_mixed() {
+        loom::model(|| {
+            let q = Arc::new(WaitQueue::new());
+
+            let thread1 = thread::spawn({
+                let q = q.clone();
+                move || {
+                    q.wake_all();
+                }
+            });
+
+            let thread2 = thread::spawn({
+                let q = q.clone();
+                move || {
+                    q.wake();
+                }
+            });
+
+            let thread3 = thread::spawn(move || {
+                future::block_on(q.wait()).unwrap();
+            });
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+            thread3.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn drop_wait_future() {
+        use futures::future::poll_fn;
+        use std::future::Future;
+        use std::task::Poll;
+
+        loom::model(|| {
+            let q = Arc::new(WaitQueue::new());
+
+            let thread1 = thread::spawn({
+                let q = q.clone();
+                move || {
+                    let mut wait = Box::pin(q.wait());
+
+                    future::block_on(poll_fn(|cx| {
+                        if wait.as_mut().poll(cx).is_ready() {
+                            q.wake();
+                        }
+                        Poll::Ready(())
+                    }));
+                }
+            });
+
+            let thread2 = thread::spawn({
+                let q = q.clone();
+                move || {
+                    block_on(async {
+                        q.wait().await.unwrap();
+                        // Trigger second notification
+                        q.wake();
+                        q.wait().await.unwrap();
+                    });
+                }
+            });
+
+            q.wake();
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
         });
     }
 }
