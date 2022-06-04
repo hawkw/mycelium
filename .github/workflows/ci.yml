@@ -220,7 +220,7 @@ jobs:
 
   # run loom tests
   util_loom:
-    needs: is_enabled
+    needs: changed_paths
     if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).util.should_skip
     runs-on: ubuntu-latest
     name: Loom tests (mycelium-util)
