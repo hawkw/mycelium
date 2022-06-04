@@ -59,5 +59,7 @@ The following features are available (this list is incomplete; you can help by [
 | Feature | Default | Explanation |
 | :---    | :---    | :---        |
 | `alloc` | `true`  | Enables [`liballoc`] dependency |
+| `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 
 [`liballoc`]: https://doc.rust-lang.org/alloc/
+[`CachePadded`]: https://mycelium.elizas.website/mycelium_util/sync/struct.cachepadded

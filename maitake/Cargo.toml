@@ -27,7 +27,8 @@ links = "maitake"
 
 [features]
 default = ["alloc"]
-alloc = []
+alloc = ["cordyceps/alloc"]
+no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad"]
 
 [dependencies]
 mycelium-bitfield = { path = "../bitfield" }
