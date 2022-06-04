@@ -22,7 +22,6 @@ kit.
 [mit-url]: ../LICENSE
 [tests-badge]: https://github.com/hawkw/mycelium/actions/workflows/ci.yml/badge.svg?branch=main
 [tests-url]: https://github.com/hawkw/mycelium/actions/workflows/ci.yml
-[loom-badge]: https://github.com/hawkw/mycelium/actions/workflows/maitake.yml/badge.svg?branch=main
 [sponsor-badge]: https://img.shields.io/badge/sponsor-%F0%9F%A4%8D-ff69b4
 [sponsor-url]: https://github.com/sponsors/hawkw
 [maitake-wiki]: https://en.wikipedia.org/wiki/Grifola_frondosa
