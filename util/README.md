@@ -16,3 +16,4 @@ The following features are available (this list is incomplete; you can help by [
 
 [mycelium]: https://mycelium.elizas.website
 [`CachePadded`]: https://mycelium.elizas.website/mycelium_util/sync/struct.cachepadded
+[`liballoc`]: https://doc.rust-lang.org/alloc/
