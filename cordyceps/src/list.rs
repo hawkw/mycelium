@@ -11,7 +11,6 @@ use core::{
     ptr::{self, NonNull},
 };
 
-
 /// An intrusive doubly-linked list.
 ///
 /// This data structure may be used as a first-in, first-out queue by using the
@@ -27,7 +26,6 @@ pub struct List<T: ?Sized> {
     tail: Link<T>,
 }
 
-
 /// Links to other nodes in a [`List`].
 ///
 /// In order to be part of a [`List`], a type must contain an instance of this
@@ -39,7 +37,7 @@ pub struct Links<T: ?Sized> {
 /// A cursor over a [`List`].
 ///
 /// This is similar to a mutable iterator (and implements the [`Iterator`]
-/// trait), but it also permits modification to the list itself. 
+/// trait), but it also permits modification to the list itself.
 pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
     list: &'a mut List<T>,
     curr: Link<T>,
@@ -260,7 +258,6 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
 // ==== impl Links ====
 
 impl<T: ?Sized> Links<T> {
-
     /// Returns new links for a [doubly-linked intrusive list](List).
     #[must_use]
     pub const fn new() -> Self {

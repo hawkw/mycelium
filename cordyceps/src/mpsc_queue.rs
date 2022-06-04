@@ -432,7 +432,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     }
 
     /// Returns a new `MpscQueue` with the provided stub node.
-    /// 
+    ///
     /// If a `MpscQueue` must be constructed in a `const` context, such as a
     /// `static` initializer, see [`MpscQueue::new_with_static_stub`].
     #[must_use]
@@ -988,7 +988,6 @@ where
 // === impl Links ===
 
 impl<T> Links<T> {
-
     /// Returns a new set of `Links` for a [`MpscQueue`].
     #[cfg(not(loom))]
     #[must_use]
@@ -1000,7 +999,6 @@ impl<T> Links<T> {
             is_stub: AtomicBool::new(false),
         }
     }
-
 
     /// Returns a new set of `Links` for the stub node in an [`MpscQueue`].
     #[cfg(not(loom))]
