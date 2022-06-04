@@ -49,6 +49,8 @@ mod alloc {
         static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
         static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
+        crate::util::trace_init();
+
         SCHEDULER.spawn(async {
             Yield::once().await;
             IT_WORKED.store(true, Ordering::Release);
@@ -69,6 +71,7 @@ mod alloc {
 
         const TASKS: usize = 10;
 
+        crate::util::trace_init();
         for _ in 0..TASKS {
             SCHEDULER.spawn(async {
                 Yield::once().await;
@@ -89,6 +92,7 @@ mod alloc {
         static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
+        crate::util::trace_init();
         let chan = Chan::new(1);
 
         SCHEDULER.spawn({
@@ -114,6 +118,7 @@ mod alloc {
         static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
+        crate::util::trace_init();
         let chan = Chan::new(1);
 
         SCHEDULER.spawn({
@@ -141,6 +146,8 @@ mod alloc {
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         const TASKS: usize = 10;
+
+        crate::util::trace_init();
 
         for i in 0..TASKS {
             SCHEDULER.spawn(async {
@@ -196,6 +203,8 @@ mod custom_storage {
         static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
         static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
+        crate::util::trace_init();
+
         MyBoxTask::spawn(&SCHEDULER, async {
             Yield::once().await;
             IT_WORKED.store(true, Ordering::Release);
@@ -216,6 +225,8 @@ mod custom_storage {
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         const TASKS: usize = 10;
+
+        crate::util::trace_init();
 
         for _ in 0..TASKS {
             MyBoxTask::spawn(&SCHEDULER, async {
@@ -238,6 +249,7 @@ mod custom_storage {
         static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
+        crate::util::trace_init();
         let chan = Chan::new(1);
 
         MyBoxTask::spawn(&SCHEDULER, {
@@ -264,6 +276,7 @@ mod custom_storage {
         static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
+        crate::util::trace_init();
         let chan = Chan::new(1);
 
         MyBoxTask::spawn(&SCHEDULER, {
@@ -291,6 +304,7 @@ mod custom_storage {
         static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
+        crate::util::trace_init();
         const TASKS: usize = 10;
 
         for i in 0..TASKS {

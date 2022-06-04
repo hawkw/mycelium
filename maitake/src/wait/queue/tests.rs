@@ -9,6 +9,7 @@ mod alloc {
 
     #[test]
     fn wake_all() {
+        crate::util::trace_init();
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         let scheduler = Scheduler::new();
@@ -41,6 +42,7 @@ mod alloc {
 
     #[test]
     fn close_on_drop() {
+        crate::util::trace_init();
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         let scheduler = Scheduler::new();
@@ -73,6 +75,7 @@ mod alloc {
 
     #[test]
     fn wake_one() {
+        crate::util::trace_init();
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         let scheduler = Scheduler::new();

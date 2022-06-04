@@ -95,3 +95,12 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
     NonNull::new_unchecked(ptr)
 }
+
+#[cfg(all(test, not(loom)))]
+pub(crate) fn trace_init() {
+    use tracing_subscriber::filter::LevelFilter;
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::TRACE)
+        .with_test_writer()
+        .try_init();
+}
