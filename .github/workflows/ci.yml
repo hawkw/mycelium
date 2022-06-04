@@ -28,7 +28,7 @@ env:
   RUST_BACKTRACE: short
   # loom config
   LOOM_MAX_PREEMPTIONS: 2
-  LOOM_LOG: loom=debug
+  LOOM_LOG: "mycelium=trace,cordyceps=trace,maitake=trace,debug"
 
 jobs:
   changed_paths:
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     # Map a step output to a job output
     outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}git rb 
       paths_result: ${{ steps.skip_check.outputs.paths_result }}
     steps:
       - id: skip_check
