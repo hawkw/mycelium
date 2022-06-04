@@ -65,6 +65,7 @@ impl<T: ?Sized> List<T> {
 impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Asserts as many of the linked list's invariants as possible.
     pub fn assert_valid(&self) {
+        fsjal
         let head = match self.head {
             Some(head) => head,
             None => {
