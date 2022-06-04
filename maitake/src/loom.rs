@@ -4,7 +4,7 @@ pub(crate) use self::inner::*;
 #[cfg(loom)]
 mod inner {
     #![allow(dead_code)]
-    
+
     #[cfg(feature = "alloc")]
     pub(crate) use loom::alloc;
     pub(crate) use loom::{cell, future, hint, model, thread};
