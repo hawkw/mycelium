@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     # Map a step output to a job output
     outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}git rb 
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
       paths_result: ${{ steps.skip_check.outputs.paths_result }}
     steps:
       - id: skip_check
@@ -70,12 +70,16 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - uses: actions/checkout@v2
     - name: run cargo check
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: check
-        args: --all --all-features
+      run: |
+        cargo check \
+          --workspace \
+          --all-features \
+          --quiet \
+          --message-format=json |
+          cargo-action-fmt
 
   # check code style with `rustfmt`
   rustfmt:
@@ -87,10 +91,7 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - name: run rustfmt
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: fmt
-        args: --all -- --check
+      run: cargo fmt --check
 
   # run host tests
   #
@@ -132,7 +133,6 @@ jobs:
       with:
         command: build-x64
 
-
   # run kernel tests in QEMU for the `x86_64-mycelium` target.
   test-x64:
     name: cargo test (cross x64)
@@ -155,6 +155,27 @@ jobs:
       uses: actions-rs/cargo@v1.0.1
       with:
         command: test-x64
+
+  # check that RustDoc builds
+  docs:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: run rustdoc
+      run: |
+        cargo doc \
+          --message-format=json \
+          --no-deps \
+          --all-features \
+          --document-private-items |
+          cargo-action-fmt
+      env:
+        RUSTDOCFLAGS: "--cfg docsrs -Dwarnings"
 
   ### cordyceps ###
 
