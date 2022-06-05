@@ -340,6 +340,12 @@ impl FromBits<usize> for State {
     }
 
     fn into_bits(self) -> usize {
+        self.into_usize()
+    }
+}
+
+impl State {
+    const fn into_usize(self) -> usize {
         self as u8 as usize
     }
 }
@@ -361,7 +367,7 @@ impl WaitQueue {
     #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
-            state: CachePadded::new(AtomicUsize::new(0)),
+            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
             queue: Mutex::new(List::new()),
         }
     }
@@ -371,7 +377,7 @@ impl WaitQueue {
     #[cfg(loom)]
     pub fn new() -> Self {
         Self {
-            state: CachePadded::new(AtomicUsize::new(0)),
+            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
             queue: Mutex::new(List::new()),
         }
     }
@@ -379,7 +385,9 @@ impl WaitQueue {
     /// Wake the next task in the queue.
     ///
     /// If the queue is empty, a wakeup is stored in the `WaitQueue`, and the
-    /// next call to [`Wait`] will complete immediately.
+    /// next call to [`wait`] will complete immediately.
+    ///
+    /// [`wait`]: WaitQueue::wait
     #[inline]
     pub fn wake(&self) {
         // snapshot the queue's current state.
@@ -466,7 +474,7 @@ impl WaitQueue {
     /// synchronization primitives or resources: when an event makes a resource
     /// permanently unavailable, the queue can be closed.
     pub fn close(&self) {
-        let state = self.state.fetch_or(State::Closed as u8 as usize, SeqCst);
+        let state = self.state.fetch_or(State::Closed.into_usize(), SeqCst);
         let state = test_dbg!(QueueState::from_bits(state));
         if state.get(QueueState::STATE) != State::Waiting {
             return;
