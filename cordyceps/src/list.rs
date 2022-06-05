@@ -665,6 +665,9 @@ mod tests {
         let f = list.pop_back().unwrap();
         assert_eq!(5, f.val);
 
+        assert!(list.is_empty());
+        assert!(list.pop_back().is_none());
+
         list.assert_valid();
     }
 
