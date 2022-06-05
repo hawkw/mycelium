@@ -17,6 +17,9 @@ use core::{
 /// [`List::push_front`] and [`List::pop_back`] methods. It also supports
 /// random-access removals using the [`List::remove`] method.
 ///
+/// This data structure can also be used as a stack or doubly-linked list by using
+/// the [`List::pop_front`] and [`List::push_back`] methods.
+///
 /// In order to be part of a `List`, a type `T` must implement [`Linked`] for
 /// [`list::Links<T>`].
 ///
@@ -156,6 +159,42 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
 
         // tracing::trace!(?self, "push_front: pushed");
+    }
+
+    /// Appends an item to the tail of the list
+    pub fn push_back(&mut self, item: T::Handle) {
+        let ptr = T::into_ptr(item);
+        assert_ne!(self.tail, Some(ptr));
+        unsafe {
+            T::links(ptr).as_mut().set_next(None);
+            T::links(ptr).as_mut().set_prev(self.tail);
+            if let Some(tail) = self.tail {
+                T::links(tail).as_mut().set_next(Some(ptr));
+            }
+        }
+
+        self.tail = Some(ptr);
+        if self.head.is_none() {
+            self.head = Some(ptr);
+        }
+    }
+
+    /// Remove an item from the head of the list
+    pub fn pop_front(&mut self) -> Option<T::Handle> {
+        let head = self.head?;
+
+        unsafe {
+            let mut head_links = T::links(head);
+            self.head = head_links.as_ref().next();
+            if let Some(next) = head_links.as_mut().next() {
+                T::links(next).as_mut().set_prev(None);
+            } else {
+                self.tail = None;
+            }
+
+            head_links.as_mut().unlink();
+            Some(T::from_ptr(head))
+        }
     }
 
     /// Removes an item from the tail of the list.
@@ -564,6 +603,71 @@ mod tests {
     }
 
     #[test]
+    fn pop_front() {
+        let _trace = trace_init();
+
+        let a = entry(5);
+        let b = entry(7);
+        let c = entry(9);
+        let mut list = List::<Entry>::new();
+
+        list.push_front(a.as_ref());
+        list.assert_valid();
+
+        list.push_front(b.as_ref());
+        list.assert_valid();
+
+        list.push_front(c.as_ref());
+        list.assert_valid();
+
+        let d = list.pop_front().unwrap();
+        assert_eq!(9, d.val);
+
+        let e = list.pop_front().unwrap();
+        assert_eq!(7, e.val);
+
+        let f = list.pop_front().unwrap();
+        assert_eq!(5, f.val);
+
+        assert!(list.is_empty());
+        assert!(list.pop_front().is_none());
+        list.assert_valid();
+    }
+
+    #[test]
+    fn push_back() {
+        let _trace = trace_init();
+
+        let a = entry(5);
+        let b = entry(7);
+        let c = entry(9);
+        let mut list = List::<Entry>::new();
+
+        list.push_back(a.as_ref());
+        list.assert_valid();
+
+        list.push_back(b.as_ref());
+        list.assert_valid();
+
+        list.push_back(c.as_ref());
+        list.assert_valid();
+
+        let d = list.pop_back().unwrap();
+        assert_eq!(9, d.val);
+
+        let e = list.pop_back().unwrap();
+        assert_eq!(7, e.val);
+
+        let f = list.pop_back().unwrap();
+        assert_eq!(5, f.val);
+
+        assert!(list.is_empty());
+        assert!(list.pop_back().is_none());
+
+        list.assert_valid();
+    }
+
+    #[test]
     fn push_pop_push_pop() {
         let _trace = trace_init();
 
@@ -815,8 +919,10 @@ mod tests {
 
     #[derive(Debug)]
     enum Op {
-        Push,
-        Pop,
+        PushFront,
+        PopBack,
+        PushBack,
+        PopFront,
         Remove(usize),
     }
 
@@ -847,10 +953,12 @@ mod tests {
 
             let ops = ops
                 .iter()
-                .map(|i| match i % 3 {
-                    0 => Op::Push,
-                    1 => Op::Pop,
-                    2 => Op::Remove(i / 3),
+                .map(|i| match i % 5 {
+                    0 => Op::PushFront,
+                    1 => Op::PopBack,
+                    2 => Op::PushBack,
+                    3 => Op::PopFront,
+                    4 => Op::Remove(i / 5),
                     _ => unreachable!(),
                 })
                 .collect::<Vec<_>>();
@@ -874,13 +982,13 @@ mod tests {
             let _span = tracing::info_span!("op", ?i, ?op).entered();
             tracing::info!(?op);
             match op {
-                Op::Push => {
+                Op::PushFront => {
                     reference.push_front(i as i32);
                     assert_eq!(entries[i].val, i as i32);
 
                     ll.push_front(entries[i].as_ref());
                 }
-                Op::Pop => {
+                Op::PopBack => {
                     if reference.is_empty() {
                         assert!(ll.is_empty());
                         tracing::debug!("skipping pop; list is empty");
@@ -889,6 +997,22 @@ mod tests {
 
                     let v = reference.pop_back();
                     assert_eq!(v, ll.pop_back().map(|v| v.val));
+                }
+                Op::PushBack => {
+                    reference.push_back(i as i32);
+                    assert_eq!(entries[i].val, i as i32);
+
+                    ll.push_back(entries[i].as_ref());
+                }
+                Op::PopFront => {
+                    if reference.is_empty() {
+                        assert!(ll.is_empty());
+                        tracing::debug!("skipping pop: list is empty");
+                        continue;
+                    }
+
+                    let v = reference.pop_front();
+                    assert_eq!(v, ll.pop_front().map(|v| v.val));
                 }
                 Op::Remove(n) => {
                     if reference.is_empty() {
