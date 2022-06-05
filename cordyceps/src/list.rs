@@ -16,6 +16,9 @@ use core::{
 /// This data structure may be used as a first-in, first-out queue by using the
 /// [`List::push_front`] and [`List::pop_back`] methods. It also supports
 /// random-access removals using the [`List::remove`] method.
+/// 
+/// This data structure can also be used as a stack or doubly-linked list by using
+/// the [`List::pop_front`] and [`List::push_back`] methods.
 ///
 /// In order to be part of a `List`, a type `T` must implement [`Linked`] for
 /// [`list::Links<T>`].
@@ -161,15 +164,12 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Appends an item to the tail of the list
     pub fn push_back(&mut self, item: T::Handle) {
         let ptr = T::into_ptr(item);
-        // tracing::trace!(?self, ?ptr, "push_back");
         assert_ne!(self.tail, Some(ptr));
         unsafe {
             T::links(ptr).as_mut().set_next(None);
             T::links(ptr).as_mut().set_prev(self.tail);
-            // tracing::trace!(?links);
             if let Some(tail) = self.tail {
                 T::links(tail).as_mut().set_next(Some(ptr));
-                // tracing::trace!(tail.links = ?T::links(tail).as_ref(), "set tail next ptr");
             }
         }
 
@@ -177,8 +177,6 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         if self.head.is_none() {
             self.head = Some(ptr);
         }
-
-        // tracing::trace!(?self, "push_back: pushed");
     }
 
     /// Remove an item from the head of the list
@@ -187,7 +185,6 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
         unsafe {
             let mut head_links = T::links(head);
-            // tracing::trace!(?self, head.addr = ?head, head.links = ?head_links, "pop_front");
             self.head = head_links.as_ref().next();
             if let Some(next) = head_links.as_mut().next() {
                 T::links(next).as_mut().set_prev(None);
@@ -196,7 +193,6 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             }
 
             head_links.as_mut().unlink();
-            // tracing::trace!(?self, head.links = ?head.links, "pop_front: popped");
             Some(T::from_ptr(head))
         }
     }
@@ -923,8 +919,10 @@ mod tests {
 
     #[derive(Debug)]
     enum Op {
-        Push,
-        Pop,
+        PushFront,
+        PopBack,
+        PushBack,
+        PopFront,
         Remove(usize),
     }
 
@@ -955,10 +953,12 @@ mod tests {
 
             let ops = ops
                 .iter()
-                .map(|i| match i % 3 {
-                    0 => Op::Push,
-                    1 => Op::Pop,
-                    2 => Op::Remove(i / 3),
+                .map(|i| match i % 5 {
+                    0 => Op::PushFront,
+                    1 => Op::PopBack,
+                    2 => Op::PushBack,
+                    3 => Op::PopFront,
+                    4 => Op::Remove(i / 5),
                     _ => unreachable!(),
                 })
                 .collect::<Vec<_>>();
@@ -982,13 +982,13 @@ mod tests {
             let _span = tracing::info_span!("op", ?i, ?op).entered();
             tracing::info!(?op);
             match op {
-                Op::Push => {
+                Op::PushFront => {
                     reference.push_front(i as i32);
                     assert_eq!(entries[i].val, i as i32);
 
                     ll.push_front(entries[i].as_ref());
                 }
-                Op::Pop => {
+                Op::PopBack => {
                     if reference.is_empty() {
                         assert!(ll.is_empty());
                         tracing::debug!("skipping pop; list is empty");
@@ -997,6 +997,22 @@ mod tests {
 
                     let v = reference.pop_back();
                     assert_eq!(v, ll.pop_back().map(|v| v.val));
+                }
+                Op::PushBack => {
+                    reference.push_back(i as i32);
+                    assert_eq!(entries[i].val, i as i32);
+
+                    ll.push_back(entries[i].as_ref());
+                }
+                Op::PopFront => {
+                    if reference.is_empty() {
+                        assert!(ll.is_empty());
+                        tracing::debug!("skipping pop: list is empty");
+                        continue;
+                    }
+
+                    let v = reference.pop_front();
+                    assert_eq!(v, ll.pop_front().map(|v| v.val));
                 }
                 Op::Remove(n) => {
                     if reference.is_empty() {
