@@ -1,16 +1,20 @@
 //! Waiter cells and queues to allow tasks to wait for notifications.
 //!
 //! This module implements two types of structure for waiting: a [`WaitCell`],
-//! which stores a *single* waiting task, and a wait *queue*, which
+//! which stores a *single* waiting task, and a [`WaitQueue`], which
 //! stores a queue of waiting tasks.
 pub(crate) mod cell;
-pub use cell::WaitCell;
+pub mod queue;
+
+pub use self::cell::WaitCell;
+#[doc(inline)]
+pub use self::queue::WaitQueue;
 
 use core::task::Poll;
 
-/// An error indicating that a [`WaitCell`] or queue was closed while attempting
-/// register a waiter.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// An error indicating that a [`WaitCell`] or [`WaitQueue`] was closed while
+/// attempting register a waiter.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Closed(());
 
 pub type WaitResult = Result<(), Closed>;

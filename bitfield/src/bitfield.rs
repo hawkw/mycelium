@@ -234,11 +234,11 @@ macro_rules! bitfield {
         #[automatically_derived]
         impl core::fmt::Debug for $Name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                if f.alternate() {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{}", self)).finish()
-                } else {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self.0)).finish()
-                }
+                let mut dbg = f.debug_struct(stringify!($Name));
+                $(
+                    dbg.field(stringify!($Field), &self.get(Self::$Field));
+                )+
+                dbg.finish()
 
             }
         }
