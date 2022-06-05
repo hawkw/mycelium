@@ -45,16 +45,105 @@ mod tests;
 /// primitive on its own: sometimes, you just need to have a bunch of tasks wait
 /// for something and then wake them all up.
 ///
+/// # Examples
+///
+/// Waking a single task at a time by calling [`wake`][wake]:
+///
+/// ```
+/// use std::sync::Arc;
+/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+///
+/// const TASKS: usize = 10;
+///
+/// // In order to spawn tasks, we need a `Scheduler` instance.
+/// let scheduler = Scheduler::new();
+///
+/// // Construct a new `WaitQueue`.
+/// let q = Arc::new(WaitQueue::new());
+///
+/// // Spawn some tasks that will wait on the queue.
+/// for _ in 0..TASKS {
+///     let q = q.clone();
+///     scheduler.spawn(async move {
+///         // Wait to be woken by the queue.
+///         q.wait().await.expect("queue is not closed");
+///     });
+/// }
+///
+/// // Tick the scheduler once.
+/// let tick = scheduler.tick();
+///
+/// // No tasks should complete on this tick, as they are all waiting
+/// // to be woken by the queue.
+/// assert_eq!(tick.completed, 0, "no tasks have been woken");
+///
+/// let mut completed = 0;
+/// for i in 1..=TASKS {
+///     // Wake the next task from the queue.
+///     q.wake();
+///
+///     // Tick the scheduler.
+///     let tick = scheduler.tick();
+///     
+///     // A single task should have completed on this tick.
+///     completed += tick.completed;
+///     assert_eq!(completed, i);
+/// }
+///
+/// assert_eq!(completed, TASKS, "all tasks should have completed");
+/// ```
+///
+/// Waking all tasks using [`wake_all`][wake_all]:
+///
+/// ```
+/// use std::sync::Arc;
+/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+///
+/// const TASKS: usize = 10;
+///
+/// // In order to spawn tasks, we need a `Scheduler` instance.
+/// let scheduler = Scheduler::new();
+///
+/// // Construct a new `WaitQueue`.
+/// let q = Arc::new(WaitQueue::new());
+///
+/// // Spawn some tasks that will wait on the queue.
+/// for _ in 0..TASKS {
+///     let q = q.clone();
+///     scheduler.spawn(async move {
+///         // Wait to be woken by the queue.
+///         q.wait().await.expect("queue is not closed");
+///     });
+/// }
+///
+/// // Tick the scheduler once.
+/// let tick = scheduler.tick();
+///
+/// // No tasks should complete on this tick, as they are all waiting
+/// // to be woken by the queue.
+/// assert_eq!(tick.completed, 0, "no tasks have been woken");
+///
+/// // Wake all tasks waiting for the queue.
+/// q.wake_all();
+///
+/// // Tick the scheduler again to run the woken tasks.
+/// let tick = scheduler.tick();
+///
+/// // All tasks have now completed, since they were woken by the
+/// // queue.
+/// assert_eq!(tick.completed, TASKS, "all tasks should have completed");
+/// ```
+///
 /// # Implementation Notes
 ///
 /// The *[intrusive]* aspect of this list is important, as it means that it does
 /// not allocate memory. Instead, nodes in the linked list are stored in the
 /// futures of tasks trying to wait for capacity. This means that it is not
-/// necessary to allocate any heap memory for each task waiting to be notified.
+/// necessary to allocate any heap memory for each task waiting to be woken.
 ///
 /// However, the intrusive linked list introduces one new danger: because
 /// futures can be *cancelled*, and the linked list nodes live within the
-/// futures trying to wait for channel capacity, we *must* ensure that the node
+/// futures trying to wait on the queue, we *must* ensure that the node
 /// is unlinked from the list before dropping a cancelled future. Failure to do
 /// so would result in the list containing dangling pointers. Therefore, we must
 /// use a *doubly-linked* list, so that nodes can edit both the previous and
@@ -729,8 +818,8 @@ feature! {
 
     /// Future returned from [`WaitQueue::wait_owned()`].
     ///
-    /// This is identical to the [`Wait`] future, except that it takes a
-    /// [`Weak`] reference to the [`WaitQueue`], allowing the returned future to
+    /// This is identical to the [`Wait`] future, except that it takes an
+    /// [`Arc`] reference to the [`WaitQueue`], allowing the returned future to
     /// live for the `'static` lifetime.
     ///
     /// This future is fused, so once it has completed, any future calls to poll
