@@ -16,7 +16,7 @@ use core::{
 /// This data structure may be used as a first-in, first-out queue by using the
 /// [`List::push_front`] and [`List::pop_back`] methods. It also supports
 /// random-access removals using the [`List::remove`] method.
-/// 
+///
 /// This data structure can also be used as a stack or doubly-linked list by using
 /// the [`List::pop_front`] and [`List::push_back`] methods.
 ///
