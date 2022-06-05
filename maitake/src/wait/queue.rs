@@ -175,9 +175,6 @@ struct Node {
     /// The node's waker
     waker: Wakeup,
 
-    // /// Optional user data.
-    // data: Option<T>,
-
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
     _pin: PhantomPinned,
@@ -495,7 +492,7 @@ impl Waiter {
     ///
     /// # Safety
     ///
-    /// This is only safe to call while the list is locked. The dummy `_list`
+    /// This is only safe to call while the list is locked. The `list`
     /// parameter ensures this method is only called while holding the lock, so
     /// this can be safe.
     ///
