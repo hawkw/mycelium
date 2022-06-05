@@ -288,25 +288,29 @@ enum State {
     /// Waiting while the queue is in this state will enqueue the waiter;
     /// notifying while in this state will store a pending notification in the
     /// queue, transitioning to [`State::Woken`].
-    Empty = 0,
+    Empty = 0b00,
 
     /// There are one or more waiters in the queue. Waiting while
     /// the queue is in this state will not transition the state. Waking while
     /// in this state will wake the first waiter in the queue; if this empties
     /// the queue, then the queue will transition to [`State::Empty`].
-    Waiting = 1,
+    Waiting = 0b01,
 
     /// The queue has a stored notification. Waiting while the queue
     /// is in this state will consume the pending notification *without*
     /// enqueueing the waiter and transition the queue to [`State::Empty`].
     /// Waking while in this state will leave the queue in this state.
-    Woken = 2,
+    Woken = 0b10,
 
     /// The queue is closed. Waiting while in this state will return
     /// [`Closed`] without transitioning the queue's state.
     ///
+    /// *Note*: This *must* correspond to all state bits being set, as it's set
+    /// via a [`fetch_or`].
+    ///
     /// [`Closed`]: crate::wait::Closed
-    Closed = 3,
+    /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
+    Closed = 0b11,
 }
 
 impl QueueState {
