@@ -206,34 +206,6 @@ pub struct Wait<'a> {
     waiter: Waiter,
 }
 
-/// The state of a [`Waiter`] node in a [`WaitQueue`].
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum WaitState {
-    /// The waiter has not yet been enqueued.
-    ///
-    /// The number of times [`WaitQueue::wake_all`] has been called is stored
-    /// when the node is created, in order to determine whether it was woken by
-    /// a stored wakeup when enqueueing.
-    ///
-    /// When in this state, the node is **not** part of the linked list, and
-    /// can be dropped without removing it from the list.
-    Start(usize),
-
-    /// The waiter is waiting.
-    ///
-    /// When in this state, the node **is** part of the linked list. If the
-    /// node is dropped in this state, it **must** be removed from the list
-    /// before dropping it. Failure to ensure this will result in dangling
-    /// pointers in the linked list!
-    Waiting,
-
-    /// The waiter has been woken.
-    ///
-    /// When in this state, the node is **not** part of the linked list, and
-    /// can be dropped without removing it from the list.
-    Woken,
-}
-
 /// A waiter node which may be linked into a wait queue.
 #[derive(Debug)]
 #[repr(C)]
@@ -247,7 +219,7 @@ struct Waiter {
     node: UnsafeCell<Node>,
 
     /// The future's state.
-    state: WaitState,
+    state: WaitStateBits,
 }
 
 #[derive(Debug)]
@@ -278,6 +250,46 @@ bitfield! {
         /// The number of times [`WaitQueue::wake_all`] has been called.
         const WAKE_ALLS = ..;
     }
+}
+
+bitfield! {
+    #[derive(Eq, PartialEq)]
+    struct WaitStateBits<usize> {
+        /// The waiter's state.
+        const STATE: WaitState;
+
+        /// The number of times [`WaitQueue::wake_all`] has been called.
+        const WAKE_ALLS = ..;
+    }
+}
+
+/// The state of a [`Waiter`] node in a [`WaitQueue`].
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u8)]
+enum WaitState {
+    /// The waiter has not yet been enqueued.
+    ///
+    /// The number of times [`WaitQueue::wake_all`] has been called is stored
+    /// when the node is created, in order to determine whether it was woken by
+    /// a stored wakeup when enqueueing.
+    ///
+    /// When in this state, the node is **not** part of the linked list, and
+    /// can be dropped without removing it from the list.
+    Start,
+
+    /// The waiter is waiting.
+    ///
+    /// When in this state, the node **is** part of the linked list. If the
+    /// node is dropped in this state, it **must** be removed from the list
+    /// before dropping it. Failure to ensure this will result in dangling
+    /// pointers in the linked list!
+    Waiting,
+
+    /// The waiter has been woken.
+    ///
+    /// When in this state, the node is **not** part of the linked list, and
+    /// can be dropped without removing it from the list.
+    Woken,
 }
 
 /// The queue's current state.
@@ -311,43 +323,6 @@ enum State {
     /// [`Closed`]: crate::wait::Closed
     /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
     Closed = 0b11,
-}
-
-impl QueueState {
-    const ONE_WAKE_ALL: usize = Self::WAKE_ALLS.first_bit();
-
-    fn with_state(self, state: State) -> Self {
-        self.with(Self::STATE, state)
-    }
-}
-
-impl FromBits<usize> for State {
-    const BITS: u32 = 2;
-    type Error = core::convert::Infallible;
-
-    fn try_from_bits(bits: usize) -> Result<Self, Self::Error> {
-        Ok(match bits as u8 {
-            bits if bits == Self::Empty as u8 => Self::Empty,
-            bits if bits == Self::Waiting as u8 => Self::Waiting,
-            bits if bits == Self::Woken as u8 => Self::Woken,
-            bits if bits == Self::Closed as u8 => Self::Closed,
-            _ => unsafe {
-                mycelium_util::unreachable_unchecked!(
-                    "all potential 2-bit patterns should be covered!"
-                )
-            },
-        })
-    }
-
-    fn into_bits(self) -> usize {
-        self.into_usize()
-    }
-}
-
-impl State {
-    const fn into_usize(self) -> usize {
-        self as u8 as usize
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -512,8 +487,11 @@ impl WaitQueue {
     fn waiter(&self) -> Waiter {
         // how many times has `wake_all` been called when this waiter is created?
         let current_wake_alls = test_dbg!(self.load().get(QueueState::WAKE_ALLS));
+        let state = WaitStateBits::new()
+            .with(WaitStateBits::WAKE_ALLS, current_wake_alls)
+            .with(WaitStateBits::STATE, WaitState::Start);
         Waiter {
-            state: WaitState::Start(current_wake_alls),
+            state,
             node: UnsafeCell::new(Node {
                 links: list::Links::new(),
                 waker: Wakeup::Empty,
@@ -641,8 +619,8 @@ impl Waiter {
         test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
-        match test_dbg!(*this.state) {
-            WaitState::Start(wake_alls) => {
+        match test_dbg!(this.state.get(WaitStateBits::STATE)) {
+            WaitState::Start => {
                 let mut queue_state = queue.load();
 
                 // can we consume a pending wakeup?
@@ -653,7 +631,7 @@ impl Waiter {
                     )
                     .is_ok()
                 {
-                    *this.state = WaitState::Woken;
+                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
                     return Poll::Ready(Ok(()));
                 }
 
@@ -665,8 +643,10 @@ impl Waiter {
 
                 // the whole queue was woken while we were trying to acquire
                 // the lock!
-                if queue_state.get(QueueState::WAKE_ALLS) != wake_alls {
-                    *this.state = WaitState::Woken;
+                if queue_state.get(QueueState::WAKE_ALLS)
+                    != this.state.get(WaitStateBits::WAKE_ALLS)
+                {
+                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
                     return Poll::Ready(Ok(()));
                 }
 
@@ -691,7 +671,7 @@ impl Waiter {
                                 .compare_exchange(queue_state, queue_state.with_state(State::Empty))
                             {
                                 Ok(_) => {
-                                    *this.state = WaitState::Woken;
+                                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
                                     return Poll::Ready(Ok(()));
                                 }
                                 Err(actual) => queue_state = actual,
@@ -702,7 +682,7 @@ impl Waiter {
                 }
 
                 // enqueue the node
-                *this.state = WaitState::Waiting;
+                this.state.set(WaitStateBits::STATE, WaitState::Waiting);
                 this.node.as_mut().with_mut(|node| {
                     unsafe {
                         // safety: we may mutate the node because we are
@@ -729,11 +709,11 @@ impl Waiter {
                             Poll::Pending
                         }
                         Wakeup::All | Wakeup::One => {
-                            *this.state = WaitState::Woken;
+                            this.state.set(WaitStateBits::STATE, WaitState::Woken);
                             Poll::Ready(Ok(()))
                         }
                         Wakeup::Closed => {
-                            *this.state = WaitState::Woken;
+                            this.state.set(WaitStateBits::STATE, WaitState::Woken);
                             wait::closed()
                         }
                         Wakeup::Empty => unreachable!(),
@@ -754,7 +734,7 @@ impl Waiter {
         test_trace!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
 
         // if we're not enqueued, we don't have to do anything else.
-        if state != WaitState::Waiting {
+        if state.get(WaitStateBits::STATE) != WaitState::Waiting {
             return;
         }
 
@@ -818,6 +798,65 @@ impl PinnedDrop for Wait<'_> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
         this.waiter.release(this.queue);
+    }
+}
+
+// === impl QueueState ===
+
+impl QueueState {
+    const ONE_WAKE_ALL: usize = Self::WAKE_ALLS.first_bit();
+
+    fn with_state(self, state: State) -> Self {
+        self.with(Self::STATE, state)
+    }
+}
+
+impl FromBits<usize> for State {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(bits: usize) -> Result<Self, Self::Error> {
+        Ok(match bits as u8 {
+            bits if bits == Self::Empty as u8 => Self::Empty,
+            bits if bits == Self::Waiting as u8 => Self::Waiting,
+            bits if bits == Self::Woken as u8 => Self::Woken,
+            bits if bits == Self::Closed as u8 => Self::Closed,
+            _ => unsafe {
+                mycelium_util::unreachable_unchecked!(
+                    "all potential 2-bit patterns should be covered!"
+                )
+            },
+        })
+    }
+
+    fn into_bits(self) -> usize {
+        self.into_usize()
+    }
+}
+
+impl State {
+    const fn into_usize(self) -> usize {
+        self as u8 as usize
+    }
+}
+
+// === impl WaitState ===
+
+impl FromBits<usize> for WaitState {
+    const BITS: u32 = 2;
+    type Error = &'static str;
+
+    fn try_from_bits(bits: usize) -> Result<Self, Self::Error> {
+        match bits as u8 {
+            bits if bits == Self::Start as u8 => Ok(Self::Start),
+            bits if bits == Self::Waiting as u8 => Ok(Self::Waiting),
+            bits if bits == Self::Woken as u8 => Ok(Self::Woken),
+            _ => Err("invalid `WaitState`; expected one of Start, Waiting, or Woken"),
+        }
+    }
+
+    fn into_bits(self) -> usize {
+        self as u8 as usize
     }
 }
 
