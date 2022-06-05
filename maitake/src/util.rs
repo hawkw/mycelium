@@ -18,7 +18,12 @@ macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
             e => {
-                crate::util::tracing::debug!("{} = {:?}", stringify!($e), &e);
+                crate::util::tracing::debug!(
+                    location = %core::panic::Location::caller(),
+                    "{} = {:?}",
+                    stringify!($e),
+                    &e
+                );
                 e
             }
         }
@@ -33,7 +38,10 @@ macro_rules! test_trace {
 #[cfg(test)]
 macro_rules! test_trace {
     ($($args:tt)+) => {
-        crate::util::tracing::debug!($($args)+);
+        crate::util::tracing::debug!(
+            location = %core::panic::Location::caller(),
+            $($args)+
+        );
     };
 }
 
@@ -86,4 +94,13 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 #[inline(always)]
 unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
     NonNull::new_unchecked(ptr)
+}
+
+#[cfg(all(test, not(loom)))]
+pub(crate) fn trace_init() {
+    use tracing_subscriber::filter::LevelFilter;
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::TRACE)
+        .with_test_writer()
+        .try_init();
 }

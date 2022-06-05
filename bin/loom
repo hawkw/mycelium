@@ -3,7 +3,7 @@
 set -x
 
 RUSTFLAGS="--cfg loom ${RUSTFLAGS}" \
-LOOM_LOG="${LOOM_LOG:-info}" \
+LOOM_LOG="${LOOM_LOG:-debug}" \
 LOOM_LOCATION=true \
 cargo test \
     --profile loom \
