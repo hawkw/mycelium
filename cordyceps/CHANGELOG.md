@@ -12,61 +12,61 @@ types.
 
 ### Bug Fixes
 
-- [**breaking**](#-breaking)  Fix use-after-free in `List` iterators (29b7d6c](29b7d6c117e93e9c08c990134955a8daa92cc8fe))
+- [**breaking**](#-breaking) Fix use-after-free in `List` iterators (29b7d6c](https://github.com/hawkw/mycelium/29b7d6c117e93e9c08c990134955a8daa92cc8fe))
 
 ### Chore
 
--  Put list tests in their own file (d0c4faa](d0c4faafde31aa0fac68b6926cfe80f7969a6115))
+- Put list tests in their own file (d0c4faa](https://github.com/hawkw/mycelium/d0c4faafde31aa0fac68b6926cfe80f7969a6115))
 
 ### Test
 
--  Test for double free with iters (3493cd0](3493cd0b65070816586106dca5f919754e5ad47c))
+- Test for double free with iters (3493cd0](https://github.com/hawkw/mycelium/3493cd0b65070816586106dca5f919754e5ad47c))
 
 ## cordyceps-v0.1.1 - (2022-06-06)
 
-[8fe36c4](8fe36c49d724e77711e42717044832c45db3ed34)...[cae707e](cae707ea55a5a755e4eafbbce2cee1fd8751e212)
+[8fe36c4](8fe36c49d724e77711e42717044832c45db3ed34)...[cae707e](https://github.com/hawkw/mycelium/cae707ea55a5a755e4eafbbce2cee1fd8751e212)
 
 
 ### Documentation
 
--  Add basic linked list examples ([#200](https://github.com/hawkw/mycelium/issues/200)) (05c1509](05c15096db926675fb5453ecde711fa90b446849))
--  Point README links at docs.rs ([#202](https://github.com/hawkw/mycelium/issues/202)) (f0f2748](f0f27480793c2ce61d4057dbad3913de14830324))
+- Add basic linked list examples ([#200](https://github.com/hawkw/mycelium/issues/200)) (05c1509](https://github.com/hawkw/mycelium/05c15096db926675fb5453ecde711fa90b446849))
+- Point README links at docs.rs ([#202](https://github.com/hawkw/mycelium/issues/202)) (f0f2748](https://github.com/hawkw/mycelium/f0f27480793c2ce61d4057dbad3913de14830324))
 
 ### Features
 
--  Added new push_back and pop_front methods to list ([#198](https://github.com/hawkw/mycelium/issues/198)) (c555772](c555772adf1ac6a58f0039a0ac9c8dea8b0bd38b), closes [#186](https://github.com/hawkw/mycelium/issues/186))
+- Added new push_back and pop_front methods to list ([#198](https://github.com/hawkw/mycelium/issues/198)) (c555772](https://github.com/hawkw/mycelium/c555772adf1ac6a58f0039a0ac9c8dea8b0bd38b), closes [#186](https://github.com/hawkw/mycelium/issues/186))
 
 ## cordyceps-v0.1.0 - (2022-06-04)
 
 
 ### Bug Fixes
 
--  Add miri tests, fix stacked borrows ([#139](https://github.com/hawkw/mycelium/issues/139)) (3a30fbd](3a30fbd59ff84db6d802849516d79f64f0b68371))
--  Fix MPSC queue doctests ([#164](https://github.com/hawkw/mycelium/issues/164)) (6b281fc](6b281fc31e2ffcf29b844d7020a30518378cee76))
+- Add miri tests, fix stacked borrows ([#139](https://github.com/hawkw/mycelium/issues/139)) (3a30fbd](https://github.com/hawkw/mycelium/3a30fbd59ff84db6d802849516d79f64f0b68371))
+- Fix MPSC queue doctests ([#164](https://github.com/hawkw/mycelium/issues/164)) (6b281fc](https://github.com/hawkw/mycelium/6b281fc31e2ffcf29b844d7020a30518378cee76))
 
 ### Documentation
 
--  Fix broken links, add netlify config ([#144](https://github.com/hawkw/mycelium/issues/144)) (d2dae58](d2dae5859cfafc903d10e7e4148ded381b1e88b4))
--  Improve MPSC queue docs ([#160](https://github.com/hawkw/mycelium/issues/160)) (3126dab](3126dabe4c3ddc52319007e153bfa325cd594be2))
--  Fix typo: incosistent -> inconsistent ([#162](https://github.com/hawkw/mycelium/issues/162)) (3ba91ae](3ba91aef42372986a1c1edde499cfef51980b4ad))
--  Improve `maitake` & `cordyceps` documentation ([#195](https://github.com/hawkw/mycelium/issues/195)) (2c05e9e](2c05e9ecc9aaa061ab86569587529aa17a92e23a))
+- Fix broken links, add netlify config ([#144](https://github.com/hawkw/mycelium/issues/144)) (d2dae58](https://github.com/hawkw/mycelium/d2dae5859cfafc903d10e7e4148ded381b1e88b4))
+- Improve MPSC queue docs ([#160](https://github.com/hawkw/mycelium/issues/160)) (3126dab](https://github.com/hawkw/mycelium/3126dabe4c3ddc52319007e153bfa325cd594be2))
+- Fix typo: incosistent -> inconsistent ([#162](https://github.com/hawkw/mycelium/issues/162)) (3ba91ae](https://github.com/hawkw/mycelium/3ba91aef42372986a1c1edde499cfef51980b4ad))
+- Improve `maitake` & `cordyceps` documentation ([#195](https://github.com/hawkw/mycelium/issues/195)) (2c05e9e](https://github.com/hawkw/mycelium/2c05e9ecc9aaa061ab86569587529aa17a92e23a))
 
 ### Features
 
--  Add lock-free intrusive MPSC queue ([#136](https://github.com/hawkw/mycelium/issues/136)) (b5d7d19](b5d7d191d86554bc1c04ddb229b29ffd6fc346ac))
--  Initial working async executor ([#155](https://github.com/hawkw/mycelium/issues/155)) (e1f5e12](e1f5e12d1f3f5a4bd40339e007649c223de692f7))
--  Add cache padding inhibitor feature ([#161](https://github.com/hawkw/mycelium/issues/161)) (bae38c7](bae38c78c506971c3d6d2d80fc2263e20f1965c3))
--  Unsafe `MpscQueue` const constructor ([#163](https://github.com/hawkw/mycelium/issues/163)) (7a3cede](7a3cede678be7467c79047b7f93bdbf5ff3f5d3a))
+- Add lock-free intrusive MPSC queue ([#136](https://github.com/hawkw/mycelium/issues/136)) (b5d7d19](https://github.com/hawkw/mycelium/b5d7d191d86554bc1c04ddb229b29ffd6fc346ac))
+- Initial working async executor ([#155](https://github.com/hawkw/mycelium/issues/155)) (e1f5e12](https://github.com/hawkw/mycelium/e1f5e12d1f3f5a4bd40339e007649c223de692f7))
+- Add cache padding inhibitor feature ([#161](https://github.com/hawkw/mycelium/issues/161)) (bae38c7](https://github.com/hawkw/mycelium/bae38c78c506971c3d6d2d80fc2263e20f1965c3))
+- Unsafe `MpscQueue` const constructor ([#163](https://github.com/hawkw/mycelium/issues/163)) (7a3cede](https://github.com/hawkw/mycelium/7a3cede678be7467c79047b7f93bdbf5ff3f5d3a))
 
 ### Chore
 
--  Adopt MIT license globally ([#170](https://github.com/hawkw/mycelium/issues/170)) (f0b1d63](f0b1d63cdc0f6a21a696df231579a82cef930330), closes [#169](https://github.com/hawkw/mycelium/issues/169))
--  Add some more cargo metadata ([#197](https://github.com/hawkw/mycelium/issues/197)) (8fe36c4](8fe36c49d724e77711e42717044832c45db3ed34))
+- Adopt MIT license globally ([#170](https://github.com/hawkw/mycelium/issues/170)) (f0b1d63](https://github.com/hawkw/mycelium/f0b1d63cdc0f6a21a696df231579a82cef930330), closes [#169](https://github.com/hawkw/mycelium/issues/169))
+- Add some more cargo metadata ([#197](https://github.com/hawkw/mycelium/issues/197)) (8fe36c4](https://github.com/hawkw/mycelium/8fe36c49d724e77711e42717044832c45db3ed34))
 
 ### Test
 
--  Bump loom to 0.5.5, rm custom loom tracing (8b2ba7b](8b2ba7bdf5ec8182cc23ec424f9f84e0ffdf1fb1))
--  Cordyceps always exposes loom cfg (219fce1](219fce179e495bc25d083df53a132fe1dfee8305))
--  Decrease # messages in loom tests ([#159](https://github.com/hawkw/mycelium/issues/159)) (823dd80](823dd80984909398d684743267f70b36ddc634ab))
+- Bump loom to 0.5.5, rm custom loom tracing (8b2ba7b](https://github.com/hawkw/mycelium/8b2ba7bdf5ec8182cc23ec424f9f84e0ffdf1fb1))
+- Cordyceps always exposes loom cfg (219fce1](https://github.com/hawkw/mycelium/219fce179e495bc25d083df53a132fe1dfee8305))
+- Decrease # messages in loom tests ([#159](https://github.com/hawkw/mycelium/issues/159)) (823dd80](https://github.com/hawkw/mycelium/823dd80984909398d684743267f70b36ddc634ab))
 
 <!-- generated by git-cliff -->

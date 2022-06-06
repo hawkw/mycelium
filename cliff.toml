@@ -10,7 +10,7 @@ body = """
 {% if previous %}\
     {% if previous.commit_id %}
         [{{ previous.commit_id | truncate(length=7, end="") }}]({{ previous.commit_id }})...\
-            [{{ commit_id | truncate(length=7, end="") }}]({{ commit_id }})
+            [{{ commit_id | truncate(length=7, end="") }}](https://github.com/hawkw/mycelium/{{ commit_id }})
     {% endif %}\
 {% endif %}
 {% set has_breaking = false -%}
@@ -36,8 +36,8 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
     ### {{ group | upper_first }}
     {% for commit in commits %}
-        - {% if commit.breaking %}[**breaking**](#{{ version }}-breaking) {% endif %} {{ commit.message | upper_first }} (\
-            {{ commit.id | truncate(length=7, end="") }}]({{ commit.id }})\
+        - {% if commit.breaking %}[**breaking**](#{{ version }}-breaking) {% endif -%} {{ commit.message | upper_first }} (\
+            {{ commit.id | truncate(length=7, end="") }}](https://github.com/hawkw/mycelium/{{ commit.id }})\
                 {% for link in commit.links -%}
                     , {{ link.text }}({{ link.href }})\
                 {% endfor -%}
