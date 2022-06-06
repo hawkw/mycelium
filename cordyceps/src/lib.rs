@@ -32,7 +32,7 @@ pub(crate) mod util;
 
 use core::ptr::NonNull;
 
-/// Trait implemented by types which can be members of an intrusive collection.
+/// Trait implemented by types which can be members of an [intrusive collection].
 ///
 /// In order to be part of an intrusive collection, a type must contain a
 /// `Links` type that stores the pointers to other nodes in that collection. For
@@ -57,6 +57,7 @@ use core::ptr::NonNull;
 /// Failure to uphold these invariants will result in corruption of the
 /// intrusive data structure, including dangling pointers.
 ///
+/// [intrusive collection]: crate#intrusive-data-structures
 /// [`Unpin`]: core::marker::Unpin
 /// [doubly-linked list]: crate::list
 /// [MSPC queue]: crate::mpsc_queue

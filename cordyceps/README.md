@@ -30,17 +30,19 @@ implemented for the [Mycelium] operating system. Currently, it provides an
 [intrusive doubly-linked list][list] and an [intrusive, lock-free MPSC
 queue][queue].
 
+## intrusive data structures
+
 [Intrusive data structures][intrusive] are node-based data structures where the
 node data (pointers to other nodes and, potentially, any associated metadata)
 are stored _within_ the values that are contained by the data structure, rather
 than owning those values.
 
-## when should i use intrusive data structures?
+### when should i use intrusive data structures?
 
 - Because node data is stored *inside* of the elements of a collection, no
   additional heap allocation is required for those nodes. This means that when
   an element is already heap allocated, it can be added to a collection without
-  requiring an additional allcoation.
+  requiring an additional allocation.
 - Similarly, when elements are at fixed memory locations (such as pages in a
   page allocator, or `static`s), they can be added to intrusive data structures
   without allocating *at all*. This makes intrusive data structures useful in
@@ -48,7 +50,8 @@ than owning those values.
   memory regions to *implement* a heap allocator.
 - Intrusive data structures may offer better performance than other linked or
   node-based data structures, since allocator overhead is avoided.
-## when shouldn't i use intrusive data structures?
+
+### when shouldn't i use intrusive data structures?
 
 - Intrusive data structures require the elements stored in a collection to be
   _aware_ of the collection. If a `struct` is to be stored in an intrusive
