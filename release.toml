@@ -1,4 +1,4 @@
-pre-release-commit-message = "chore: release {{crate_name}} v{{version}"
+pre-release-commit-message = "chore: release {{crate_name}} v{{version}}"
 tag-message = "{{tag_name}}"
 tag-name = "{{crate_name}}-v{{version}}"
 pre-release-hook = [
