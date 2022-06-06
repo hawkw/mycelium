@@ -97,3 +97,18 @@ volatile = { git = "https://github.com/hawkw/volatile", branch = "eliza/update-f
 inherits = "test"
 lto = true
 opt-level = 3
+
+[workspace.metadata.release]
+pre-release-commit-message = "chore: release {{crate_name}} v{{version}"
+tag-message = "{{tag_name}}"
+tag-name = "{{crate_name}}-v{{version}}"
+pre-release-hook = [
+    "git-cliff",
+    "--include-path",
+    "{{crate_name}}",
+    "--prepend",
+    "{{crate_name}}/CHANGELOG.md",
+    "--latest",
+    "--tag",
+    "{{crate_name}}-v{{version}}",
+]
