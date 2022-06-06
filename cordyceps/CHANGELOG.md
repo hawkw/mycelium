@@ -1,9 +1,8 @@
 ## [unreleased]
 
 ### <a id = "-breaking"></a>Breaking Changes
-- **Fix use-after-free in `List` iterators** ([29b7d6c](29b7d6c117e93e9c08c990134955a8daa92cc8fe)<br />This changes the type signature of the `list::Iter` and `list::Cursor`
+- **Fix use-after-free in `List` iterators** ([29b7d6c](29b7d6c117e93e9c08c990134955a8daa92cc8fe))<br />This changes the type signature of the `list::Iter` and `list::Cursor`
 types.
-
 
 ### Bug Fixes
 
@@ -19,7 +18,7 @@ types.
 
 ## cordyceps-v0.1.1 - (2022-06-06)
 
-[8fe36c4](8fe36c49d724e77711e42717044832c45db3ed34)...[cae707e](https://github.com/hawkw/mycelium/cae707ea55a5a755e4eafbbce2cee1fd8751e212)
+[8fe36c4](https://github.com/hawkw/mycelium/8fe36c49d724e77711e42717044832c45db3ed34)...[cae707e](https://github.com/hawkw/mycelium/cae707ea55a5a755e4eafbbce2cee1fd8751e212)
 
 
 ### Documentation

@@ -9,7 +9,7 @@ body = """
 {% endif %}\
 {% if previous %}\
     {% if previous.commit_id %}
-        [{{ previous.commit_id | truncate(length=7, end="") }}]({{ previous.commit_id }})...\
+        [{{ previous.commit_id | truncate(length=7, end="") }}](https://github.com/hawkw/mycelium/{{ previous.commit_id }})...\
             [{{ commit_id | truncate(length=7, end="") }}](https://github.com/hawkw/mycelium/{{ commit_id }})
     {% endif %}\
 {% endif %}
@@ -23,8 +23,7 @@ body = """
     ### <a id = "{{ version }}-breaking"></a>Breaking Changes
     {% for commit in commits -%}
         {% if commit.breaking -%}
-            - **{{ commit.message | upper_first }}** ([{{ commit.id | truncate(length=7, end="") }}]({{ commit.id }})<br />{{ commit.breaking_description }}
-
+            - **{{ commit.message | upper_first }}** ([{{ commit.id | truncate(length=7, end="") }}]({{ commit.id }}))<br />{{ commit.breaking_description }}
         {% endif -%}
     {% endfor -%}
 {% endif -%}
