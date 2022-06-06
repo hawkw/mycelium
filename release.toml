@@ -3,10 +3,12 @@ tag-message = "{{tag_name}}"
 tag-name = "{{crate_name}}-v{{version}}"
 pre-release-hook = [
     "git-cliff",
+    "--workdir",
+    "$WORKSPACE_ROOT",
     "--include-path",
-    "{{crate_name}}",
+    "$CRATE_ROOT/**",
     "--prepend",
-    "{{crate_name}}/CHANGELOG.md",
+    "$CRATE_ROOT/CHANGELOG.md",
     "--latest",
     "--tag",
     "{{crate_name}}-v{{version}}",
