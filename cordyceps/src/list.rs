@@ -205,6 +205,7 @@ use core::{
 pub struct List<T: ?Sized> {
     head: Link<T>,
     tail: Link<T>,
+    len: usize,
 }
 
 /// Links to other nodes in a [`List`].
@@ -250,20 +251,36 @@ impl<T: ?Sized> List<T> {
         List {
             head: None,
             tail: None,
+            len: 0,
         }
     }
 
     /// Returns `true` if this list is empty.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         if self.head.is_none() {
             debug_assert!(
                 self.tail.is_none(),
                 "inconsistent state: a list had a tail but no head!"
             );
+            debug_assert_eq!(
+                self.len, 0,
+                "inconsistent state: a list was empty, but its length was not zero"
+            );
             return true;
         }
 
+        debug_assert_ne!(
+            self.len, 0,
+            "inconsistent state: a list was not empty, but its length was zero"
+        );
         false
+    }
+
+    /// Returns the number of elements in the list.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len
     }
 }
 
@@ -277,9 +294,18 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
                     self.tail.is_none(),
                     "if the linked list's head is null, the tail must also be null"
                 );
+                assert_eq!(
+                    self.len, 0,
+                    "if a linked list's head is null, its length must be 0"
+                );
                 return;
             }
         };
+
+        assert_ne!(
+            self.len, 0,
+            "if a linked list's head is not null, its length must be greater than 0"
+        );
 
         let tail = self
             .tail
@@ -307,12 +333,16 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
 
         let mut curr = Some(head);
+        let mut actual_len = 0;
         while let Some(node) = curr {
             let links = unsafe { T::links(node) };
             let links = unsafe { links.as_ref() };
             links.assert_valid(head_links, tail_links);
             curr = links.next();
+            actual_len += 1;
         }
+
+        assert_eq!(self.len, actual_len);
     }
 
     /// Appends an item to the head of the list.
@@ -336,6 +366,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             self.tail = Some(ptr);
         }
 
+        self.len += 1;
         // tracing::trace!(?self, "push_front: pushed");
     }
 
@@ -355,11 +386,14 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         if self.head.is_none() {
             self.head = Some(ptr);
         }
+
+        self.len += 1;
     }
 
     /// Remove an item from the head of the list
     pub fn pop_front(&mut self) -> Option<T::Handle> {
         let head = self.head?;
+        self.len -= 1;
 
         unsafe {
             let mut head_links = T::links(head);
@@ -378,6 +412,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Removes an item from the tail of the list.
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
+        self.len -= 1;
+
         unsafe {
             let mut tail_links = T::links(tail);
             // tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
@@ -433,6 +469,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             self.tail = prev;
         }
 
+        self.len -= 1;
         // tracing::trace!(?self, item.addr = ?item, "remove: done");
         Some(T::from_ptr(item))
     }
@@ -1209,6 +1246,7 @@ mod tests {
                     }
                 }
             }
+            assert_eq!(ll.len(), reference.len());
             ll.assert_valid();
         }
     }
