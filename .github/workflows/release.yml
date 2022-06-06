@@ -2,7 +2,7 @@
 on:
   push:
     tags:
-      - '[a-z\-]+-v[0-9]+.*'
+      - '[a-z]+-?[a-z]+-v[0-9]+.*'
 
 jobs:
   create-release:
@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: taiki-e/create-gh-release-action@v1.3.0
         with:
-          prefix: '[a-z\-]+'
+          prefix: '[a-z]+-?[a-z]+'
           changelog: "$prefix/CHANGELOG.md"
           title: "$prefix $version"
           branch: main
