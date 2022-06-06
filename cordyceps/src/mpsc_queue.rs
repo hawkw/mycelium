@@ -1,11 +1,12 @@
 //! A multi-producer, single-consumer (MPSC) queue, implemented using a
-//! lock-free intrusive singly-linked list.
+//! lock-free [intrusive] singly-linked list.
 //!
 //! See the documentation for the [`MpscQueue`] type for details.
 //!
 //! Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
 //!
 //! [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+//! [intrusive]: crate#intrusive-data-structures
 use crate::{
     loom::{
         cell::UnsafeCell,
@@ -21,7 +22,7 @@ use core::{
 };
 
 /// A multi-producer, single-consumer (MPSC) queue, implemented using a
-/// lock-free intrusive singly-linked list.
+/// lock-free [intrusive] singly-linked list.
 ///
 /// Based on [Dmitry Vyukov's intrusive MPSC][vyukov].
 ///
@@ -74,7 +75,7 @@ use core::{
 ///         // expect that the `NonNull` was constructed from a reference which
 ///         // was pinned.
 ///         //
-///         // If other callers besides `List`'s internals were to call this on
+///         // If other callers besides `MpscQueue`'s internals were to call this on
 ///         // some random `NonNull<Entry>`, this would not be the case, and
 ///         // this could be constructing an erroneous `Pin` from a referent
 ///         // that may not be pinned!
@@ -333,6 +334,7 @@ use core::{
 /// [`Consumer::try_dequeue`] methods will instead return [an error] when the
 /// queue is in an inconsistent state.
 ///
+/// [intrusive]: crate#intrusive-data-structures
 /// [vyukov]: http://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 /// [`dequeue`]: Self::dequeue
 /// [`enqueue`]: Self::enqueue
