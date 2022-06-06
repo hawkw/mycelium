@@ -647,9 +647,16 @@ unsafe impl<T: Sync> Sync for Links<T> {}
 // === impl Cursor ====
 
 impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
-    type Item = T::Handle;
+    type Item = &'a mut T;
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_ptr().map(|ptr| unsafe { T::from_ptr(ptr) })
+        self.next_ptr().map(|mut ptr| unsafe {
+            // safety: it is safe for us to mutate `curr`, because the cursor
+            // mutably borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // cursor, and no one else can mutate it, as we have exclusive
+            // access to the list..
+            ptr.as_mut()
+        })
     }
 }
 
@@ -687,12 +694,16 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
 // === impl Iter ====
 
 impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
-    type Item = T::Handle;
+    type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
         let curr = self.curr.take()?;
         unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
             self.curr = T::links(curr).as_ref().next();
-            Some(T::from_ptr(curr))
+            Some(curr.as_ref())
         }
     }
 }

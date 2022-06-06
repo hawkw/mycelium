@@ -224,7 +224,7 @@ where
             match list.try_lock() {
                 Some(list) => {
                     for entry in list.iter() {
-                        tracing::debug!("entry={:?}", unsafe { entry.as_ref() });
+                        tracing::debug!("entry={entry:?}");
                     }
                 }
                 None => {
