@@ -1,6 +1,6 @@
 # cordyceps
 
-the [Mycelium] intrusive data structures library.
+🍄 the [Mycelium] intrusive data structures library.
 
 [![crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
@@ -88,8 +88,8 @@ The following features are available (this list is incomplete; you can help by [
 [Mycelium]: https://github.com/hawkw/mycelium
 [intrusive]: https://www.boost.org/doc/libs/1_45_0/doc/html/intrusive/intrusive_vs_nontrusive.html
 [cordyceps]: https://en.wikipedia.org/wiki/Cordyceps#Biology
-[list]: https://mycelium.elizas.website/cordyceps/struct.list
-[queue]: https://mycelium.elizas.website/cordyceps/mpsc_queue/struct.mpscqueue
-[`Linked`]: https://mycelium.elizas.website/cordyceps/trait.linked
+[list]: https://docs.rs/cordyceps/latest/cordyceps/struct.List.html
+[queue]: https://docs.rs/cordyceps/latest/cordyceps/mpsc_queue/struct.MpscQueue.html
+[`Linked`]: https://docs.rs/cordyceps/latest/cordyceps/trait.Linked.html
 [`liballoc`]: https://doc.rust-lang.org/alloc/
 [`libstd`]: https://doc.rust-lang.org/std/
