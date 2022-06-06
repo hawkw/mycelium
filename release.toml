@@ -6,10 +6,10 @@ pre-release-hook = [
     "--workdir",
     "..",
     "--include-path",
-    "$CRATE_NAME",
+    "{{crate_name}}",
     "--prepend",
-    "$CRATE_NAME/CHANGELOG.md",
+    "{{crate_name}}/CHANGELOG.md",
     "--latest",
     "--tag",
-    "$CRATE_NAME-v$NEW_VERSION",
+    "{{crate_name}}-v{{version}}",
 ]
