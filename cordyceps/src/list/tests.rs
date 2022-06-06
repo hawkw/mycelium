@@ -414,6 +414,140 @@ mod remove_by_address {
     }
 }
 
+mod owned_entry {
+    use super::*;
+
+    /// An entry type whose ownership is assigned to the list directly.
+    #[derive(Debug)]
+    #[repr(C)]
+    struct OwnedEntry {
+        links: Links<OwnedEntry>,
+        val: i32,
+    }
+
+    unsafe impl Linked<Links<Self>> for OwnedEntry {
+        type Handle = Pin<Box<OwnedEntry>>;
+
+        fn into_ptr(handle: Pin<Box<OwnedEntry>>) -> NonNull<Self> {
+            unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+        }
+
+        unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle {
+            // Safety: if this function is only called by the linked list
+            // implementation (and it is not intended for external use), we can
+            // expect that the `NonNull` was constructed from a reference which
+            // was pinned.
+            //
+            // If other callers besides `List`'s internals were to call this on
+            // some random `NonNull<Entry>`, this would not be the case, and
+            // this could be constructing an erroneous `Pin` from a referent
+            // that may not be pinned!
+            Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+        }
+
+        unsafe fn links(target: NonNull<Self>) -> NonNull<Links<Self>> {
+            // Safety: this is safe because the `links` are the first field of
+            // `Entry`, and `Entry` is `repr(C)`.
+            target.cast()
+        }
+    }
+
+    fn owned_entry(val: i32) -> Pin<Box<OwnedEntry>> {
+        Box::pin(OwnedEntry {
+            links: Links::new(),
+            val,
+        })
+    }
+
+    #[test]
+    fn pop_front() {
+        let _trace = trace_init();
+
+        let a = owned_entry(5);
+        let b = owned_entry(7);
+        let c = owned_entry(9);
+        let mut list = List::<OwnedEntry>::new();
+
+        list.push_front(a);
+        list.assert_valid();
+
+        list.push_front(b);
+        list.assert_valid();
+
+        list.push_front(c);
+        list.assert_valid();
+
+        let d = list.pop_front().unwrap();
+        assert_eq!(9, d.val);
+
+        let e = list.pop_front().unwrap();
+        assert_eq!(7, e.val);
+
+        let f = list.pop_front().unwrap();
+        assert_eq!(5, f.val);
+
+        assert!(list.is_empty());
+        assert!(list.pop_front().is_none());
+        list.assert_valid();
+    }
+
+    #[test]
+    fn iterate_twice() {
+        let _trace = trace_init();
+
+        let a = owned_entry(1);
+        let b = owned_entry(2);
+        let c = owned_entry(3);
+        let mut list = List::<OwnedEntry>::new();
+
+        list.push_back(a);
+        list.push_back(b);
+        list.push_back(c);
+
+        // iterate over the list...
+        let mut i = 1;
+        for entry in list.iter() {
+            assert_eq!(entry.val, i);
+            i += 1;
+        }
+
+        // do it again; it should still work!
+        let mut i = 1;
+        for entry in list.iter() {
+            assert_eq!(entry.val, i);
+            i += 1;
+        }
+    }
+
+    #[test]
+    fn cursor_twice() {
+        let _trace = trace_init();
+
+        let a = owned_entry(1);
+        let b = owned_entry(2);
+        let c = owned_entry(3);
+        let mut list = List::<OwnedEntry>::new();
+
+        list.push_back(a);
+        list.push_back(b);
+        list.push_back(c);
+
+        // iterate over the list...
+        let mut i = 1;
+        for entry in list.cursor() {
+            assert_eq!(entry.val, i);
+            i += 1;
+        }
+
+        // do it again; it should still work!
+        let mut i = 1;
+        for entry in list.cursor() {
+            assert_eq!(entry.val, i);
+            i += 1;
+        }
+    }
+}
+
 // #[test]
 // fn cursor() {
 //     let _trace = trace_init();
