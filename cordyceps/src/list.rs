@@ -11,7 +11,7 @@ use core::{
     ptr::{self, NonNull},
 };
 
-/// An intrusive doubly-linked list.
+/// An [intrusive] doubly-linked list.
 ///
 /// This data structure may be used as a first-in, first-out queue by using the
 /// [`List::push_front`] and [`List::pop_back`] methods. It also supports
@@ -23,6 +23,184 @@ use core::{
 /// In order to be part of a `List`, a type `T` must implement [`Linked`] for
 /// [`list::Links<T>`].
 ///
+/// # Examples
+///
+/// Implementing the [`Linked`] trait for an entry type:
+///
+/// ```
+/// use cordyceps::{
+///     Linked,
+///     list::{self, List},
+/// };
+///
+/// // This example uses the Rust standard library for convenience, but
+/// // the doubly-linked list itself does not require std.
+/// use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+///
+/// /// A simple queue entry that stores an `i32`.
+/// // This type must be `repr(C)` in order for the cast in `Linked::links`
+/// // to be sound.
+/// #[repr(C)]
+/// #[derive(Debug, Default)]
+/// struct Entry {
+///    links: list::Links<Entry>,
+///    val: i32,
+/// }
+///
+/// // Implement the `Linked` trait for our entry type so that it can be used
+/// // as a queue entry.
+/// unsafe impl Linked<list::Links<Entry>> for Entry {
+///     // In this example, our entries will be "owned" by a `Box`, but any
+///     // heap-allocated type that owns an element may be used.
+///     //
+///     // An element *must not* move while part of an intrusive data
+///     // structure. In many cases, `Pin` may be used to enforce this.
+///     type Handle = Pin<Box<Self>>;
+///
+///     /// Convert an owned `Handle` into a raw pointer
+///     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+///        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+///     }
+///
+///     /// Convert a raw pointer back into an owned `Handle`.
+///     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+///         // Safety: if this function is only called by the linked list
+///         // implementation (and it is not intended for external use), we can
+///         // expect that the `NonNull` was constructed from a reference which
+///         // was pinned.
+///         //
+///         // If other callers besides `List`'s internals were to call this on
+///         // some random `NonNull<Entry>`, this would not be the case, and
+///         // this could be constructing an erroneous `Pin` from a referent
+///         // that may not be pinned!
+///         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+///     }
+///
+///     /// Access an element's `Links`.
+///     unsafe fn links(target: NonNull<Entry>) -> NonNull<list::Links<Entry>> {
+///         // Safety: this cast is safe only because `Entry` `is repr(C)` and
+///         // the links is the first field.
+///         target.cast()
+///     }
+/// }
+///
+/// impl Entry {
+///     fn new(val: i32) -> Self {
+///         Self {
+///             val,
+///             ..Self::default()
+///         }
+///     }
+/// }
+/// ```
+///
+/// Using a `List` as a first-in, first-out (FIFO) queue with
+/// [`List::push_back`] and [`List::pop_front`]:
+/// ```
+/// # use cordyceps::{
+/// #     Linked,
+/// #     list::{self, List},
+/// # };
+/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// # #[repr(C)]
+/// # #[derive(Debug, Default)]
+/// # struct Entry {
+/// #    links: list::Links<Entry>,
+/// #    val: i32,
+/// # }
+/// # unsafe impl Linked<list::Links<Entry>> for Entry {
+/// #     type Handle = Pin<Box<Self>>;
+/// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #     }
+/// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+/// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+/// #     }
+/// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<list::Links<Entry>> {
+/// #         target.cast()
+/// #     }
+/// # }
+/// # impl Entry {
+/// #     fn new(val: i32) -> Self {
+/// #         Self {
+/// #             val,
+/// #             ..Self::default()
+/// #         }
+/// #     }
+/// # }
+/// // Now that we've implemented the `Linked` trait for our `Entry` type, we can
+/// // create a `List` of entries:
+/// let mut list = List::<Entry>::new();
+///
+/// // Push some entries to the list:
+/// for i in 0..5 {
+///     list.push_back(Box::pin(Entry::new(i)));
+/// }
+///
+/// // The list is a doubly-ended queue. We can use the `pop_front` method with
+/// // `push_back` to dequeue elements in FIFO order:
+/// for i in 0..5 {
+///     let entry = list.pop_front()
+///         .expect("the list should have 5 entries in it");
+///     assert_eq!(entry.val, i, "entries are dequeued in FIFO order");
+/// }
+///
+/// assert!(list.is_empty());
+/// ```
+///
+/// Using a `List` as a last-in, first-out (LIFO) stack with
+/// [`List::push_back`] and [`List::pop_back`]:
+/// ```
+/// # use cordyceps::{
+/// #     Linked,
+/// #     list::{self, List},
+/// # };
+/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// # #[repr(C)]
+/// # #[derive(Debug, Default)]
+/// # struct Entry {
+/// #    links: list::Links<Entry>,
+/// #    val: i32,
+/// # }
+/// # unsafe impl Linked<list::Links<Entry>> for Entry {
+/// #     type Handle = Pin<Box<Self>>;
+/// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
+/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #     }
+/// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
+/// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+/// #     }
+/// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<list::Links<Entry>> {
+/// #         target.cast()
+/// #     }
+/// # }
+/// # impl Entry {
+/// #     fn new(val: i32) -> Self {
+/// #         Self {
+/// #             val,
+/// #             ..Self::default()
+/// #         }
+/// #     }
+/// # }
+/// let mut list = List::<Entry>::new();
+///
+/// // Push some entries to the list:
+/// for i in 0..5 {
+///     list.push_back(Box::pin(Entry::new(i)));
+/// }
+///
+/// // Note that we have reversed the direction of the iterator, since
+/// // we are popping from the *back* of the list:
+/// for i in (0..5).into_iter().rev() {
+///     let entry = list.pop_back()
+///         .expect("the list should have 5 entries in it");
+///     assert_eq!(entry.val, i, "entries are dequeued in LIFO order");
+/// }
+///
+/// assert!(list.is_empty());
+/// ```
+///
+/// [intrusive]: crate#intrusive-data-structures
 /// [`list::Links<T>`]: crate::list::Links
 pub struct List<T: ?Sized> {
     head: Link<T>,
