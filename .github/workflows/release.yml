@@ -1,0 +1,23 @@
+
+on:
+  push:
+    tags:
+      - '[a-z\-]+-v[0-9]+.*'
+
+jobs:
+  create-release:
+    name: Create GitHub release
+    # only publish from the origin repository
+    if: github.repository_owner == 'hawkw'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: taiki-e/create-gh-release-action@v1.3.0
+        with:
+          prefix: '[a-z\-]+'
+          changelog: "$prefix/CHANGELOG.md"
+          title: "$prefix $version"
+          branch: main
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
