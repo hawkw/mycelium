@@ -1,14 +1,11 @@
 ## [unreleased]
 
 ### <a id = "-breaking"></a>Breaking Changes
-<ul>
-<li>
-Fix use-after-free in `List` iterators (29b7d6c](29b7d6c117e93e9c08c990134955a8daa92cc8fe)
+- **Fix use-after-free in `List` iterators** ([29b7d6c](29b7d6c117e93e9c08c990134955a8daa92cc8fe)
 
 This changes the type signature of the `list::Iter` and `list::Cursor`
 types.
-</li>
-</ul>
+
 
 ### Bug Fixes
 

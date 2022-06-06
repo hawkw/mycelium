@@ -21,17 +21,14 @@ body = """
 {% endfor -%}
 {% if has_breaking -%}
     ### <a id = "{{ version }}-breaking"></a>Breaking Changes
-    <ul>
     {% for commit in commits -%}
         {% if commit.breaking -%}
-            <li>
-            {{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }}]({{ commit.id }})
+            - **{{ commit.message | upper_first }}** ([{{ commit.id | truncate(length=7, end="") }}]({{ commit.id }})
 
             {{ commit.breaking_description }}
-            </li>
+
         {% endif -%}
     {% endfor -%}
-    </ul>
 {% endif -%}
 {% for group, commits in commits | group_by(attribute="group") %}
     ### {{ group | upper_first }}
