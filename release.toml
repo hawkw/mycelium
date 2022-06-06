@@ -1,4 +1,15 @@
 pre-release-commit-message = "chore: release {{crate_name}} v{{version}"
 tag-message = "{{tag_name}}"
 tag-name = "{{crate_name}}-v{{version}}"
-pre-release-hook = ["../changelog.sh", "{{crate_name}}-v{{version}}"]
+pre-release-hook = [
+    "git-cliff",
+    "--workdir",
+    "..",
+    "--include-path",
+    "$CRATE_NAME",
+    "--prepend",
+    "$CRATE_NAME/CHANGELOG.md",
+    "--latest",
+    "--tag",
+    "$CRATE_NAME-v$NEW_VERSION",
+]
