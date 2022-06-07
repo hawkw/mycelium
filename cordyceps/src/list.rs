@@ -1,6 +1,7 @@
 //! An intrusive doubly-linked list.
 //!
 //! See the [`List`] type for details.
+
 use super::Linked;
 use crate::util::FmtOption;
 use core::{
@@ -557,6 +558,26 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
     }
 }
 
+impl<'list, T: Linked<Links<T>> + ?Sized> IntoIterator for &'list List<T> {
+    type Item = &'list T;
+    type IntoIter = Iter<'list, T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> IntoIterator for &'list mut List<T> {
+    type Item = &'list mut T;
+    type IntoIter = IterMut<'list, T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 impl<T: Linked<Links<T>> + ?Sized> Drop for List<T> {
     fn drop(&mut self) {
         while let Some(node) = self.pop_front() {
@@ -747,8 +768,6 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         unsafe { self.list.remove(item?) }
     }
 }
-
-// TODO(eliza): next_back
 
 // === impl Iter ====
 
