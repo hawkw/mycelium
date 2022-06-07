@@ -206,7 +206,7 @@ mod tests;
 ///
 /// [intrusive]: crate#intrusive-data-structures
 /// [`list::Links<T>`]: crate::list::Links
-pub struct List<T: ?Sized> {
+pub struct List<T: Linked<Links<T>> + ?Sized> {
     head: Link<T>,
     tail: Link<T>,
     len: usize,
@@ -248,7 +248,8 @@ struct LinksInner<T: ?Sized> {
 }
 
 // ==== impl List ====
-impl<T: ?Sized> List<T> {
+
+impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Returns a new empty list.
     #[must_use]
     pub const fn new() -> List<T> {
@@ -286,9 +287,7 @@ impl<T: ?Sized> List<T> {
     pub fn len(&self) -> usize {
         self.len
     }
-}
 
-impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Asserts as many of the linked list's invariants as possible.
     pub fn assert_valid(&self) {
         let head = match self.head {
@@ -510,6 +509,16 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
             .field("head", &FmtOption::new(&self.head))
             .field("tail", &FmtOption::new(&self.tail))
             .finish()
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> Drop for List<T> {
+    fn drop(&mut self) {
+        while let Some(node) = self.pop_front() {
+            drop(node);
+        }
+
+        debug_assert!(self.is_empty());
     }
 }
 

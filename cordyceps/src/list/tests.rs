@@ -624,10 +624,9 @@ proptest::proptest! {
 fn run_fuzz(ops: Vec<Op>) {
     use std::collections::VecDeque;
 
+    let entries: Vec<_> = (0..ops.len()).map(|i| entry(i as i32)).collect();
     let mut ll = List::<Entry<'_>>::new();
     let mut reference = VecDeque::new();
-
-    let entries: Vec<_> = (0..ops.len()).map(|i| entry(i as i32)).collect();
 
     for (i, op) in ops.iter().enumerate() {
         let _span = tracing::info_span!("op", ?i, ?op).entered();
