@@ -1,3 +1,22 @@
+## cordyceps-v0.2.0 - (2022-06-07)
+
+[cae707e](https://github.com/hawkw/mycelium/cae707ea55a5a755e4eafbbce2cee1fd8751e212)...[ea7412a](https://github.com/hawkw/mycelium/ea7412ac2d7b31e98d8a69390db7a5b975569d90)
+
+### <a id = "cordyceps-v0.2.0-breaking"></a>Breaking Changes
+- **Fix use-after-free in `List` iterators ([#203](https://github.com/hawkw/mycelium/issues/203))** ([1eea1f2](1eea1f2290f0a858851a1fcb39d6d95c7b51cf37))<br />This changes the type signature of the `list::Iter` and `list::Cursor`
+types.
+- **Add `Drop` impl for `List` ([#203](https://github.com/hawkw/mycelium/issues/203))** ([ea7412a](ea7412ac2d7b31e98d8a69390db7a5b975569d90))<br />The `List::new` constructor now requires a `T: Linked<list::Links<T>>`
+bound.
+
+### Added
+
+- Add `List::len` method ([#204](https://github.com/hawkw/mycelium/issues/204)) ([e286c61](https://github.com/hawkw/mycelium/e286c61f642dc9601f83edf2c33a1dd7d1637447))
+
+### Fixed
+
+- [**breaking**](#cordyceps-v0.2.0-breaking) Fix use-after-free in `List` iterators ([#203](https://github.com/hawkw/mycelium/issues/203)) ([1eea1f2](https://github.com/hawkw/mycelium/1eea1f2290f0a858851a1fcb39d6d95c7b51cf37))
+- [**breaking**](#cordyceps-v0.2.0-breaking) Add `Drop` impl for `List` ([#203](https://github.com/hawkw/mycelium/issues/203)) ([ea7412a](https://github.com/hawkw/mycelium/ea7412ac2d7b31e98d8a69390db7a5b975569d90), fixes [#165](https://github.com/hawkw/mycelium/issues/165))
+
 ## cordyceps-v0.1.1 - (2022-06-06)
 
 [8fe36c4](https://github.com/hawkw/mycelium/8fe36c49d724e77711e42717044832c45db3ed34)...[cae707e](https://github.com/hawkw/mycelium/cae707ea55a5a755e4eafbbce2cee1fd8751e212)
