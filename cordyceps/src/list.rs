@@ -232,7 +232,16 @@ pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
 /// Iterates over the items in a [`List`] by reference.
 pub struct Iter<'a, T: Linked<Links<T>> + ?Sized> {
     _list: &'a List<T>,
+    /// The current node when iterating head -> tail.
     curr: Link<T>,
+
+    /// The current node when iterating tail -> head.
+    ///
+    /// This is used by the [`DoubleEndedIterator`] impl.
+    curr_back: Link<T>,
+
+    /// The number of remaining entries in the iterator.
+    len: usize,
 }
 
 type Link<T> = Option<NonNull<T>>;
@@ -496,6 +505,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Iter {
             _list: self,
             curr: self.head,
+            curr_back: self.tail,
+            len: self.len(),
         }
     }
 }
@@ -705,13 +716,37 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
 impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
         let curr = self.curr.take()?;
+        self.len -= 1;
         unsafe {
             // safety: it is safe for us to borrow `curr`, because the iterator
             // borrows the `List`, ensuring that the list will not be dropped
             // while the iterator exists. the returned item will not outlive the
             // iterator.
             self.curr = T::links(curr).as_ref().next();
+            Some(curr.as_ref())
+        }
+    }
+}
+
+impl<'a, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let curr = self.curr_back.take()?;
+        self.len -= 1;
+        unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
+            self.curr_back = T::links(curr).as_ref().prev();
             Some(curr.as_ref())
         }
     }
