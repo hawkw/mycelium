@@ -224,15 +224,31 @@ pub struct Links<T: ?Sized> {
 ///
 /// This is similar to a mutable iterator (and implements the [`Iterator`]
 /// trait), but it also permits modification to the list itself.
-pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
-    list: &'a mut List<T>,
+pub struct Cursor<'list, T: Linked<Links<T>> + ?Sized> {
+    list: &'list mut List<T>,
     curr: Link<T>,
     len: usize,
 }
 
 /// Iterates over the items in a [`List`] by reference.
-pub struct Iter<'a, T: Linked<Links<T>> + ?Sized> {
-    _list: &'a List<T>,
+pub struct Iter<'list, T: Linked<Links<T>> + ?Sized> {
+    _list: &'list List<T>,
+
+    /// The current node when iterating head -> tail.
+    curr: Link<T>,
+
+    /// The current node when iterating tail -> head.
+    ///
+    /// This is used by the [`DoubleEndedIterator`] impl.
+    curr_back: Link<T>,
+
+    /// The number of remaining entries in the iterator.
+    len: usize,
+}
+
+/// Iterates over the items in a [`List`] by mutable reference.
+pub struct IterMut<'list, T: Linked<Links<T>> + ?Sized> {
+    _list: &'list mut List<T>,
 
     /// The current node when iterating head -> tail.
     curr: Link<T>,
@@ -513,6 +529,20 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             len: self.len(),
         }
     }
+
+    /// Returns an iterator over the items in this list, by mutable reference.
+    #[must_use]
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        let curr = self.head;
+        let curr_back = self.tail;
+        let len = self.len();
+        IterMut {
+            _list: self,
+            curr,
+            curr_back,
+            len,
+        }
+    }
 }
 
 unsafe impl<T: Linked<Links<T>> + ?Sized> Send for List<T> where T: Send {}
@@ -722,8 +752,8 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
 
 // === impl Iter ====
 
-impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
-    type Item = &'a T;
+impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'list, T> {
+    type Item = &'list T;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
@@ -749,14 +779,14 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
     }
 }
 
-impl<'a, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for Iter<'a, T> {
+impl<'list, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for Iter<'list, T> {
     #[inline]
     fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<'a, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'a, T> {
+impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'list, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -771,6 +801,61 @@ impl<'a, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'a, T> {
             // iterator.
             self.curr_back = T::links(curr).as_ref().prev();
             Some(curr.as_ref())
+        }
+    }
+}
+
+// === impl IterMut ====
+
+impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for IterMut<'list, T> {
+    type Item = &'list mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let mut curr = self.curr.take()?;
+        self.len -= 1;
+        unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
+            self.curr = T::links(curr).as_ref().next();
+            Some(curr.as_mut())
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for IterMut<'list, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let mut curr = self.curr_back.take()?;
+        self.len -= 1;
+        unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
+            self.curr_back = T::links(curr).as_ref().prev();
+            Some(curr.as_mut())
         }
     }
 }

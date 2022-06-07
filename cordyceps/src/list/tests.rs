@@ -590,6 +590,62 @@ mod owned_entry {
             i += 1;
         }
     }
+
+    // These tests don't work with the borrowed entry type, because we mutate
+    // entries through the iterator
+
+    #[test]
+    fn double_ended_iter_mut() {
+        let a = owned_entry(1);
+        let b = owned_entry(2);
+        let c = owned_entry(3);
+        fn incr_entry(entry: &mut OwnedEntry) -> i32 {
+            entry.val += 1;
+            entry.val
+        }
+
+        let mut list = List::new();
+
+        list.push_back(a);
+        list.push_back(b);
+        list.push_back(c);
+
+        let head_to_tail = list.iter_mut().map(incr_entry).collect::<Vec<_>>();
+        assert_eq!(&head_to_tail, &[2, 3, 4]);
+
+        let tail_to_head = list.iter_mut().rev().map(incr_entry).collect::<Vec<_>>();
+        assert_eq!(&tail_to_head, &[5, 4, 3]);
+    }
+
+    /// Per the double-ended iterator docs:
+    ///
+    /// > It is important to note that both back and forth work on the same range,
+    /// > and do not cross: iteration is over when they meet in the middle.
+    #[test]
+    fn double_ended_iter_mut_empties() {
+        let a = owned_entry(1);
+        let b = owned_entry(2);
+        let c = owned_entry(3);
+        let d = owned_entry(4);
+
+        let mut list = List::<OwnedEntry>::new();
+
+        list.push_back(a);
+        list.push_back(b);
+        list.push_back(c);
+        list.push_back(d);
+
+        let mut iter = list.iter_mut();
+
+        assert_eq!(iter.next().map(|entry| entry.val), Some(1));
+        assert_eq!(iter.next().map(|entry| entry.val), Some(2));
+
+        assert_eq!(iter.next_back().map(|entry| entry.val), Some(4));
+        assert_eq!(iter.next_back().map(|entry| entry.val), Some(3));
+
+        assert_eq!(iter.next().map(|entry| entry.val), None);
+        assert_eq!(iter.next_back().map(|entry| entry.val), None);
+    }
 }
 
 // #[test]
