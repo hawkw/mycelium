@@ -227,11 +227,13 @@ pub struct Links<T: ?Sized> {
 pub struct Cursor<'a, T: Linked<Links<T>> + ?Sized> {
     list: &'a mut List<T>,
     curr: Link<T>,
+    len: usize,
 }
 
 /// Iterates over the items in a [`List`] by reference.
 pub struct Iter<'a, T: Linked<Links<T>> + ?Sized> {
     _list: &'a List<T>,
+
     /// The current node when iterating head -> tail.
     curr: Link<T>,
 
@@ -493,9 +495,11 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
     pub fn cursor(&mut self) -> Cursor<'_, T> {
+        let len = self.len();
         Cursor {
             curr: self.head,
             list: self,
+            len,
         }
     }
 
@@ -678,6 +682,11 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
             ptr.as_mut()
         })
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
 }
 
 impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
@@ -715,6 +724,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
 
 impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
     type Item = &'a T;
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -730,6 +740,19 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'a, T> {
             self.curr = T::links(curr).as_ref().next();
             Some(curr.as_ref())
         }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<'a, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for Iter<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.len
     }
 }
 
