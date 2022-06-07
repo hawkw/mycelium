@@ -213,6 +213,23 @@ fn push_pop_push_pop() {
     list.assert_valid();
 }
 
+#[test]
+fn double_ended_iter() {
+    let a = entry(1);
+    let b = entry(2);
+    let c = entry(3);
+
+    let mut list = List::new();
+
+    push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
+
+    let head_to_tail = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
+    assert_eq!(&head_to_tail, &[1, 2, 3]);
+
+    let tail_to_head = list.iter().rev().map(|entry| entry.val).collect::<Vec<_>>();
+    assert_eq!(&tail_to_head, &[3, 2, 1]);
+}
+
 mod remove_by_address {
     use super::*;
 
