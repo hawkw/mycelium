@@ -9,6 +9,7 @@ use core::{
     fmt,
     marker::PhantomPinned,
     mem,
+    pin::Pin,
     ptr::{self, NonNull},
 };
 
@@ -569,7 +570,7 @@ impl<'list, T: Linked<Links<T>> + ?Sized> IntoIterator for &'list List<T> {
 }
 
 impl<'list, T: Linked<Links<T>> + ?Sized> IntoIterator for &'list mut List<T> {
-    type Item = &'list mut T;
+    type Item = Pin<&'list mut T>;
     type IntoIter = IterMut<'list, T>;
 
     #[inline]
@@ -827,7 +828,7 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'list, T>
 // === impl IterMut ====
 
 impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for IterMut<'list, T> {
-    type Item = &'list mut T;
+    type Item = Pin<&'list mut T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
@@ -842,7 +843,13 @@ impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for IterMut<'list, T> {
             // while the iterator exists. the returned item will not outlive the
             // iterator.
             self.curr = T::links(curr).as_ref().next();
-            Some(curr.as_mut())
+
+            // safety: pinning the returned element is actually *necessary* to
+            // uphold safety invariants here. if we returned `&mut T`, the
+            // element could be `mem::replace`d out of the list, invalidating
+            // any pointers to it. thus, we *must* pin it before returning it.
+            let pin = Pin::new_unchecked(curr.as_mut());
+            Some(pin)
         }
     }
 
@@ -874,7 +881,13 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
             // while the iterator exists. the returned item will not outlive the
             // iterator.
             self.curr_back = T::links(curr).as_ref().prev();
-            Some(curr.as_mut())
+
+            // safety: pinning the returned element is actually *necessary* to
+            // uphold safety invariants here. if we returned `&mut T`, the
+            // element could be `mem::replace`d out of the list, invalidating
+            // any pointers to it. thus, we *must* pin it before returning it.
+            let pin = Pin::new_unchecked(curr.as_mut());
+            Some(pin)
         }
     }
 }

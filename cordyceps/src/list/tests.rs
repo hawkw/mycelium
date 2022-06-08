@@ -463,8 +463,10 @@ mod owned_entry {
 
     /// An entry type whose ownership is assigned to the list directly.
     #[derive(Debug)]
+    #[pin_project::pin_project]
     #[repr(C)]
     struct OwnedEntry {
+        #[pin]
         links: Links<OwnedEntry>,
         val: i32,
     }
@@ -599,9 +601,10 @@ mod owned_entry {
         let a = owned_entry(1);
         let b = owned_entry(2);
         let c = owned_entry(3);
-        fn incr_entry(entry: &mut OwnedEntry) -> i32 {
-            entry.val += 1;
-            entry.val
+        fn incr_entry(entry: Pin<&mut OwnedEntry>) -> i32 {
+            let entry = entry.project();
+            *entry.val += 1;
+            *entry.val
         }
 
         let mut list = List::new();
