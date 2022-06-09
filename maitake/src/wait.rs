@@ -4,8 +4,8 @@
 //! which stores a *single* waiting task, and a [`WaitQueue`], which
 //! stores a queue of waiting tasks.
 pub(crate) mod cell;
-pub mod queue;
 pub mod dataqueue;
+pub mod queue;
 
 pub use self::cell::WaitCell;
 #[doc(inline)]

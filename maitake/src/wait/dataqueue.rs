@@ -14,16 +14,17 @@ use cordyceps::{
     Linked,
 };
 use core::{
+    fmt::Debug,
     future::Future,
-    marker::{PhantomPinned, PhantomData},
+    marker::{PhantomData, PhantomPinned},
     mem,
     pin::Pin,
     ptr::NonNull,
-    task::{Context, Poll, Waker}, fmt::Debug,
+    task::{Context, Poll, Waker},
 };
 use mycelium_bitfield::{bitfield, FromBits};
 use mycelium_util::fmt;
-use mycelium_util::sync::{CachePadded, spin::MutexGuard};
+use mycelium_util::sync::{spin::MutexGuard, CachePadded};
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -194,11 +195,11 @@ pub struct DataWaitQueue<K: PartialEq, V> {
 impl<K: PartialEq, V> Debug for DataWaitQueue<K, V> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("DataWaitQueue")
-         .field("state", &self.state)
-         .field("queue", &self.queue)
-         .field("key", &fmt::display(core::any::type_name::<K>()))
-         .field("val", &fmt::display(core::any::type_name::<V>()))
-         .finish()
+            .field("state", &self.state)
+            .field("queue", &self.queue)
+            .field("key", &fmt::display(core::any::type_name::<K>()))
+            .field("val", &fmt::display(core::any::type_name::<V>()))
+            .finish()
     }
 }
 
@@ -239,11 +240,11 @@ struct Waiter<K: PartialEq, V> {
 impl<K: PartialEq, V> Debug for Waiter<K, V> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Waiter")
-         .field("node", &self.node)
-         .field("state", &self.state)
-         .field("key", &fmt::display(core::any::type_name::<K>()))
-         .field("val", &fmt::display(core::any::type_name::<V>()))
-         .finish()
+            .field("node", &self.node)
+            .field("state", &self.state)
+            .field("key", &fmt::display(core::any::type_name::<K>()))
+            .field("val", &fmt::display(core::any::type_name::<V>()))
+            .finish()
     }
 }
 
@@ -268,9 +269,9 @@ struct Node<K: PartialEq, V> {
 impl<K: PartialEq, V> Debug for Node<K, V> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node")
-         .field("links", &self.links)
-         .field("waker", &self.waker)
-         .finish()
+            .field("links", &self.links)
+            .field("waker", &self.waker)
+            .finish()
     }
 }
 
@@ -492,8 +493,7 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
     /// [`DataWaitQueue::wait`] and [`DataWaitQueue::wait_owned`].
     fn waiter(&self, key: K) -> Waiter<K, V> {
         // how many times has `wake_all` been called when this waiter is created?
-        let state = WaitStateBits::new()
-            .with(WaitStateBits::STATE, WaitState::Start);
+        let state = WaitStateBits::new().with(WaitStateBits::STATE, WaitState::Start);
         Waiter {
             state,
             node: UnsafeCell::new(Node {
@@ -538,7 +538,12 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
 
     #[cold]
     #[inline(never)]
-    fn node_match_locked(&self, key: &K, queue: &mut List<Waiter<K, V>>, curr: QueueState) -> Option<NonNull<Waiter<K, V>>> {
+    fn node_match_locked(
+        &self,
+        key: &K,
+        queue: &mut List<Waiter<K, V>>,
+        curr: QueueState,
+    ) -> Option<NonNull<Waiter<K, V>>> {
         let state = curr.get(QueueState::STATE);
 
         // is the queue still in the `Waiting` state? it is possible that we
@@ -678,7 +683,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                         .with_mut(|v| unsafe { (*v).take() })
                         .expect("Woken tasks should have data!");
 
-                    return Poll::Ready(Ok(val))
+                    return Poll::Ready(Ok(val));
                 }
 
                 // okay, no pending wakeups. try to wait...
@@ -714,7 +719,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                                         .with_mut(|v| unsafe { (*v).take() })
                                         .expect("Woken tasks should have data!");
 
-                                    return Poll::Ready(Ok(val))
+                                    return Poll::Ready(Ok(val));
                                 }
                                 Err(actual) => queue_state = actual,
                             }
@@ -774,7 +779,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                     .expect("Woken tasks should have data!");
 
                 Poll::Ready(Ok(val))
-            },
+            }
         }
     }
 
