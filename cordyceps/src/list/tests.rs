@@ -257,6 +257,30 @@ fn double_ended_iter_empties() {
     assert_eq!(iter.next_back().map(|entry| entry.val), None);
 }
 
+#[test]
+fn drain_filter() {
+    let a = entry(1);
+    let b = entry(2);
+    let c = entry(3);
+    let d = entry(4);
+
+    let mut list = List::new();
+
+    push_all(&mut list, &[d.as_ref(), c.as_ref(), b.as_ref(), a.as_ref()]);
+
+    {
+        // Create a scope so that the mutable borrow on the list is released
+        // when we're done with the `drain_filter` iterator.
+        let mut df = list.drain_filter(|entry| entry.val % 2 == 0);
+        assert_eq!(df.next().map(|entry| entry.val), Some(2));
+        assert_eq!(df.next().map(|entry| entry.val), Some(4));
+        assert_eq!(df.next().map(|entry| entry.val), None);
+    }
+
+    let remaining = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
+    assert_eq!(remaining, vec![1, 3]);
+}
+
 mod remove_by_address {
     use super::*;
 
@@ -648,6 +672,27 @@ mod owned_entry {
 
         assert_eq!(iter.next().map(|entry| entry.val), None);
         assert_eq!(iter.next_back().map(|entry| entry.val), None);
+    }
+
+    #[test]
+    fn drain_filter() {
+        let mut list = List::new();
+        list.push_back(owned_entry(1));
+        list.push_back(owned_entry(2));
+        list.push_back(owned_entry(3));
+        list.push_back(owned_entry(4));
+
+        {
+            // Create a scope so that the mutable borrow on the list is released
+            // when we're done with the `drain_filter` iterator.
+            let mut df = list.drain_filter(|entry: &OwnedEntry| entry.val % 2 == 0);
+            assert_eq!(df.next().map(|entry| entry.val), Some(2));
+            assert_eq!(df.next().map(|entry| entry.val), Some(4));
+            assert_eq!(df.next().map(|entry| entry.val), None);
+        }
+
+        let remaining = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
+        assert_eq!(remaining, vec![1, 3]);
     }
 }
 
