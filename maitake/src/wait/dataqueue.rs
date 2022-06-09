@@ -15,16 +15,15 @@ use cordyceps::{
 };
 use core::{
     future::Future,
-    marker::PhantomPinned,
+    marker::{PhantomPinned, PhantomData},
     mem,
     pin::Pin,
     ptr::NonNull,
-    task::{Context, Poll, Waker},
+    task::{Context, Poll, Waker}, fmt::Debug,
 };
 use mycelium_bitfield::{bitfield, FromBits};
-#[cfg(test)]
 use mycelium_util::fmt;
-use mycelium_util::sync::CachePadded;
+use mycelium_util::sync::{CachePadded, spin::MutexGuard};
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -33,15 +32,15 @@ mod tests;
 /// A queue of [`Waker`]s implemented using an [intrusive doubly-linked
 /// list][ilist].
 ///
-/// A `WaitQueue` allows any number of tasks to [wait] asynchronously and be
+/// A `DataWaitQueue` allows any number of tasks to [wait] asynchronously and be
 /// woken when some event occurs, either [individually][wake] in first-in,
 /// first-out order, or [all at once][wake_all]. This makes it a vital building
 /// block of runtime services (such as timers or I/O resources), where it may be
 /// used to wake a set of tasks when a timer completes or when a resource
 /// becomes available. It can be equally useful for implementing higher-level
-/// synchronization primitives: for example, a `WaitQueue` plus an
+/// synchronization primitives: for example, a `DataWaitQueue` plus an
 /// [`UnsafeCell`] is essentially an entire implementation of a fair
-/// asynchronous mutex. Finally, a `WaitQueue` can be a useful synchronization
+/// asynchronous mutex. Finally, a `DataWaitQueue` can be a useful synchronization
 /// primitive on its own: sometimes, you just need to have a bunch of tasks wait
 /// for something and then wake them all up.
 ///
@@ -49,17 +48,17 @@ mod tests;
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
 ///
-/// ```
+/// ```skip
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+/// use maitake::{scheduler::Scheduler, wait::DataWaitQueue};
 ///
 /// const TASKS: usize = 10;
 ///
 /// // In order to spawn tasks, we need a `Scheduler` instance.
 /// let scheduler = Scheduler::new();
 ///
-/// // Construct a new `WaitQueue`.
-/// let q = Arc::new(WaitQueue::new());
+/// // Construct a new `DataWaitQueue`.
+/// let q = Arc::new(DataWaitQueue::new());
 ///
 /// // Spawn some tasks that will wait on the queue.
 /// for _ in 0..TASKS {
@@ -95,17 +94,17 @@ mod tests;
 ///
 /// Waking all tasks using [`wake_all`][wake_all]:
 ///
-/// ```
+/// ```skip
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+/// use maitake::{scheduler::Scheduler, wait::DataWaitQueue};
 ///
 /// const TASKS: usize = 10;
 ///
 /// // In order to spawn tasks, we need a `Scheduler` instance.
 /// let scheduler = Scheduler::new();
 ///
-/// // Construct a new `WaitQueue`.
-/// let q = Arc::new(WaitQueue::new());
+/// // Construct a new `DataWaitQueue`.
+/// let q = Arc::new(DataWaitQueue::new());
 ///
 /// // Spawn some tasks that will wait on the queue.
 /// for _ in 0..TASKS {
@@ -159,15 +158,14 @@ mod tests;
 /// mutex are short enough that we still get pretty good performance despite it.
 ///
 /// [`Waker`]: core::task::Waker
-/// [wait]: WaitQueue::wait
-/// [wake]: WaitQueue::wake
-/// [wake_all]: WaitQueue::wake_all
+/// [wait]: DataWaitQueue::wait
+/// [wake]: DataWaitQueue::wake
+/// [wake_all]: DataWaitQueue::wake_all
 /// [`UnsafeCell`]: core::cell::UnsafeCell
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-#[derive(Debug)]
-pub struct WaitQueue {
+pub struct DataWaitQueue<K: PartialEq, V> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -187,51 +185,77 @@ pub struct WaitQueue {
     /// `no_std` platforms; when running `loom` tests, a `loom` mutex is used
     /// instead to simulate the spinlock, because loom doesn't play nice with
     /// real spinlocks.
-    queue: Mutex<List<Waiter>>,
+    queue: Mutex<List<Waiter<K, V>>>,
+
+    _key: PhantomData<K>,
+    _val: PhantomData<V>,
 }
 
-/// Future returned from [`WaitQueue::wait()`].
+impl<K: PartialEq, V> Debug for DataWaitQueue<K, V> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DataWaitQueue")
+         .field("state", &self.state)
+         .field("queue", &self.queue)
+         .field("key", &fmt::display(core::any::type_name::<K>()))
+         .field("val", &fmt::display(core::any::type_name::<V>()))
+         .finish()
+    }
+}
+
+/// Future returned from [`DataWaitQueue::wait()`].
 ///
 /// This future is fused, so once it has completed, any future calls to poll
 /// will immediately return [`Poll::Ready`].
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a> {
-    /// The [`WaitQueue`] being waited on from.
-    queue: &'a WaitQueue,
+pub struct Wait<'a, K: PartialEq, V> {
+    /// The [`DataWaitQueue`] being waited on from.
+    queue: &'a DataWaitQueue<K, V>,
 
     /// Entry in the wait queue linked list.
     #[pin]
-    waiter: Waiter,
+    waiter: Waiter<K, V>,
 }
 
 /// A waiter node which may be linked into a wait queue.
-#[derive(Debug)]
 #[repr(C)]
 #[pin_project]
-struct Waiter {
+struct Waiter<K: PartialEq, V> {
     /// The intrusive linked list node.
     ///
     /// This *must* be the first field in the struct in order for the `Linked`
     /// implementation to be sound.
     #[pin]
-    node: UnsafeCell<Node>,
+    node: UnsafeCell<Node<K, V>>,
 
     /// The future's state.
     state: WaitStateBits,
+
+    key: K,
+    val: UnsafeCell<Option<V>>,
 }
 
-#[derive(Debug)]
+impl<K: PartialEq, V> Debug for Waiter<K, V> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Waiter")
+         .field("node", &self.node)
+         .field("state", &self.state)
+         .field("key", &fmt::display(core::any::type_name::<K>()))
+         .field("val", &fmt::display(core::any::type_name::<V>()))
+         .finish()
+    }
+}
+
 #[repr(C)]
-struct Node {
+struct Node<K: PartialEq, V> {
     /// Intrusive linked list pointers.
     ///
     /// # Safety
     ///
     /// This *must* be the first field in the struct in order for the `Linked`
     /// impl to be sound.
-    links: list::Links<Waiter>,
+    links: list::Links<Waiter<K, V>>,
 
     /// The node's waker
     waker: Wakeup,
@@ -241,14 +265,20 @@ struct Node {
     _pin: PhantomPinned,
 }
 
+impl<K: PartialEq, V> Debug for Node<K, V> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Node")
+         .field("links", &self.links)
+         .field("waker", &self.waker)
+         .finish()
+    }
+}
+
 bitfield! {
     #[derive(Eq, PartialEq)]
     struct QueueState<usize> {
         /// The queue's state.
         const STATE: State;
-
-        /// The number of times [`WaitQueue::wake_all`] has been called.
-        const WAKE_ALLS = ..;
     }
 }
 
@@ -257,19 +287,16 @@ bitfield! {
     struct WaitStateBits<usize> {
         /// The waiter's state.
         const STATE: WaitState;
-
-        /// The number of times [`WaitQueue::wake_all`] has been called.
-        const WAKE_ALLS = ..;
     }
 }
 
-/// The state of a [`Waiter`] node in a [`WaitQueue`].
+/// The state of a [`Waiter`] node in a [`DataWaitQueue`].
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 enum WaitState {
     /// The waiter has not yet been enqueued.
     ///
-    /// The number of times [`WaitQueue::wake_all`] has been called is stored
+    /// The number of times [`DataWaitQueue::wake_all`] has been called is stored
     /// when the node is created, in order to determine whether it was woken by
     /// a stored wakeup when enqueueing.
     ///
@@ -330,41 +357,44 @@ enum Wakeup {
     Empty,
     Waiting(Waker),
     One,
-    All,
     Closed,
 }
 
-// === impl WaitQueue ===
+// === impl DataWaitQueue ===
 
-impl WaitQueue {
-    /// Returns a new `WaitQueue`.
+impl<K: PartialEq, V> DataWaitQueue<K, V> {
+    /// Returns a new `DataWaitQueue`.
     #[must_use]
     #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
             state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
             queue: Mutex::new(List::new()),
+            _key: PhantomData,
+            _val: PhantomData,
         }
     }
 
-    /// Returns a new `WaitQueue`.
+    /// Returns a new `DataWaitQueue`.
     #[must_use]
     #[cfg(loom)]
     pub fn new() -> Self {
         Self {
             state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
             queue: Mutex::new(List::new()),
+            _key: PhantomData,
+            _val: PhantomData,
         }
     }
 
-    /// Wake the next task in the queue.
+    /// Wake a certain task in the queue.
     ///
-    /// If the queue is empty, a wakeup is stored in the `WaitQueue`, and the
+    /// If the queue is empty, a wakeup is stored in the `DataWaitQueue`, and the
     /// next call to [`wait`] will complete immediately.
     ///
-    /// [`wait`]: WaitQueue::wait
+    /// [`wait`]: DataWaitQueue::wait
     #[inline]
-    pub fn wake(&self) {
+    pub fn wake(&self, key: &K, val: V) -> WakeOutcome<V> {
         // snapshot the queue's current state.
         let mut state = self.load();
 
@@ -374,7 +404,7 @@ impl WaitQueue {
         loop {
             match state.get(QueueState::STATE) {
                 // if the queue is closed, bail.
-                State::Closed => return,
+                State::Closed => return WakeOutcome::NoMatch(val),
                 // if there are waiting tasks, break out of the loop and wake one.
                 State::Waiting => break,
                 _ => {}
@@ -384,7 +414,7 @@ impl WaitQueue {
             // advance the state to `Woken`, and return (if we did so
             // successfully)
             match self.compare_exchange(state, next) {
-                Ok(_) => return,
+                Ok(_) => return WakeOutcome::NoMatch(val),
                 Err(actual) => state = actual,
             }
         }
@@ -398,46 +428,22 @@ impl WaitQueue {
         // the lock, so we need to acquire a new snapshot.
         state = self.load();
 
-        if let Some(waker) = self.wake_locked(&mut *queue, state) {
+        if let Some(mut node) = self.node_match_locked(key, &mut *queue, state) {
+            let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::One);
             drop(queue);
-            waker.wake();
-        }
-    }
-
-    /// Wake *all* tasks currently in the queue.
-    pub fn wake_all(&self) {
-        let mut queue = self.queue.lock();
-        let state = self.load();
-
-        match state.get(QueueState::STATE) {
-            // if the queue is closed, bail.
-            State::Closed => return,
-
-            // if there are no waiters in the queue, increment the number of
-            // `wake_all` calls and return.
-            State::Woken | State::Empty => {
-                self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
-                return;
+            unsafe {
+                let mut new = UnsafeCell::new(Some(val));
+                core::mem::swap(&mut new, &mut node.as_mut().val);
+                #[cfg(debug_assertions)]
+                new.with(|v| {
+                    debug_assert!((*v).is_none());
+                });
             }
-            State::Waiting => {}
+            waker.wake();
+            WakeOutcome::Woke
+        } else {
+            WakeOutcome::NoMatch(val)
         }
-
-        // okay, we actually have to wake some stuff.
-
-        // TODO(eliza): wake outside the lock using an array, a la
-        // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
-        while let Some(node) = queue.pop_back() {
-            let waker = Waiter::wake(node, &mut queue, Wakeup::All);
-            waker.wake()
-        }
-
-        // now that the queue has been drained, transition to the empty state,
-        // and increment the wake_all count.
-        let next_state = QueueState::new()
-            .with_state(State::Empty)
-            .with(QueueState::WAKE_ALLS, state.get(QueueState::WAKE_ALLS) + 1);
-        self.compare_exchange(state, next_state)
-            .expect("state should not have transitioned while locked");
     }
 
     /// Close the queue, indicating that it may no longer be used.
@@ -468,27 +474,25 @@ impl WaitQueue {
     /// Wait to be woken up by this queue.
     ///
     /// This returns a [`Wait`] future that will complete when the task is
-    /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitQueue` is
+    /// woken by a call to [`wake`] or [`wake_all`], or when the `DataWaitQueue` is
     /// dropped.
     ///
     /// [`wake`]: Self::wake
     /// [`wake_all`]: Self::wake_all
-    pub fn wait(&self) -> Wait<'_> {
+    pub fn wait(&self, key: K) -> Wait<'_, K, V> {
         Wait {
             queue: self,
-            waiter: self.waiter(),
+            waiter: self.waiter(key),
         }
     }
 
     /// Returns a [`Waiter`] entry in this queue.
     ///
     /// This is factored out into a separate function because it's used by both
-    /// [`WaitQueue::wait`] and [`WaitQueue::wait_owned`].
-    fn waiter(&self) -> Waiter {
+    /// [`DataWaitQueue::wait`] and [`DataWaitQueue::wait_owned`].
+    fn waiter(&self, key: K) -> Waiter<K, V> {
         // how many times has `wake_all` been called when this waiter is created?
-        let current_wake_alls = test_dbg!(self.load().get(QueueState::WAKE_ALLS));
         let state = WaitStateBits::new()
-            .with(WaitStateBits::WAKE_ALLS, current_wake_alls)
             .with(WaitStateBits::STATE, WaitState::Start);
         Waiter {
             state,
@@ -497,6 +501,8 @@ impl WaitQueue {
                 waker: Wakeup::Empty,
                 _pin: PhantomPinned,
             }),
+            key,
+            val: UnsafeCell::new(None),
         }
     }
 
@@ -532,7 +538,37 @@ impl WaitQueue {
 
     #[cold]
     #[inline(never)]
-    fn wake_locked(&self, queue: &mut List<Waiter>, curr: QueueState) -> Option<Waker> {
+    fn node_match_locked(&self, key: &K, queue: &mut List<Waiter<K, V>>, curr: QueueState) -> Option<NonNull<Waiter<K, V>>> {
+        let state = curr.get(QueueState::STATE);
+
+        // is the queue still in the `Waiting` state? it is possible that we
+        // transitioned to a different state while locking the queue.
+        if test_dbg!(state) != State::Waiting {
+            // if there are no longer any queued tasks, try to store the
+            // wakeup in the queue and bail.
+            if let Err(actual) = self.compare_exchange(curr, curr.with_state(State::Woken)) {
+                debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
+                self.store(actual.with_state(State::Woken));
+            }
+
+            return None;
+        }
+
+        let mut cursor = queue.cursor();
+        let opt_node = cursor.remove_first(|t| &t.key == key);
+
+        // if we took the final waiter currently in the queue, transition to the
+        // `Empty` state.
+        if test_dbg!(queue.is_empty()) {
+            self.store(curr.with_state(State::Empty));
+        }
+
+        opt_node
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn wake_next_locked(&self, queue: &mut List<Waiter<K, V>>, curr: QueueState) -> Option<Waker> {
         let state = curr.get(QueueState::STATE);
 
         // is the queue still in the `Waiting` state? it is possible that we
@@ -552,7 +588,7 @@ impl WaitQueue {
         let node = queue
             .pop_back()
             .expect("if we are in the Waiting state, there must be waiters in the queue");
-        let waker = Waiter::wake(node, queue, Wakeup::One);
+        let waker = Waiter::<K, V>::wake(node, queue, Wakeup::One);
 
         // if we took the final waiter currently in the queue, transition to the
         // `Empty` state.
@@ -564,9 +600,14 @@ impl WaitQueue {
     }
 }
 
+pub enum WakeOutcome<V> {
+    Woke,
+    NoMatch(V),
+}
+
 // === impl Waiter ===
 
-impl Waiter {
+impl<K: PartialEq, V> Waiter<K, V> {
     /// Wake the task that owns this `Waiter`.
     ///
     /// # Safety
@@ -602,7 +643,7 @@ impl Waiter {
     fn with_node<T>(
         mut this: NonNull<Self>,
         _list: &mut List<Self>,
-        f: impl FnOnce(&mut Node) -> T,
+        f: impl FnOnce(&mut Node<K, V>) -> T,
     ) -> T {
         unsafe {
             // safety: this is only called while holding the lock on the queue,
@@ -613,9 +654,9 @@ impl Waiter {
 
     fn poll_wait(
         mut self: Pin<&mut Self>,
-        queue: &WaitQueue,
+        queue: &DataWaitQueue<K, V>,
         cx: &mut Context<'_>,
-    ) -> Poll<WaitResult<()>> {
+    ) -> Poll<WaitResult<V>> {
         test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
@@ -632,7 +673,12 @@ impl Waiter {
                     .is_ok()
                 {
                     this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                    return Poll::Ready(Ok(()));
+                    let val = this
+                        .val
+                        .with_mut(|v| unsafe { (*v).take() })
+                        .expect("Woken tasks should have data!");
+
+                    return Poll::Ready(Ok(val))
                 }
 
                 // okay, no pending wakeups. try to wait...
@@ -640,15 +686,6 @@ impl Waiter {
                 let mut waiters = queue.queue.lock();
                 test_trace!("poll_wait: -> locked");
                 queue_state = queue.load();
-
-                // the whole queue was woken while we were trying to acquire
-                // the lock!
-                if queue_state.get(QueueState::WAKE_ALLS)
-                    != this.state.get(WaitStateBits::WAKE_ALLS)
-                {
-                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                    return Poll::Ready(Ok(()));
-                }
 
                 // transition the queue to the waiting state
                 'to_waiting: loop {
@@ -672,7 +709,12 @@ impl Waiter {
                             {
                                 Ok(_) => {
                                     this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                                    return Poll::Ready(Ok(()));
+                                    let val = this
+                                        .val
+                                        .with_mut(|v| unsafe { (*v).take() })
+                                        .expect("Woken tasks should have data!");
+
+                                    return Poll::Ready(Ok(val))
                                 }
                                 Err(actual) => queue_state = actual,
                             }
@@ -708,9 +750,14 @@ impl Waiter {
                             }
                             Poll::Pending
                         }
-                        Wakeup::All | Wakeup::One => {
+                        Wakeup::One => {
                             this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                            Poll::Ready(Ok(()))
+                            let val = this
+                                .val
+                                .with_mut(|v| (*v).take())
+                                .expect("Woken tasks should have data!");
+
+                            Poll::Ready(Ok(val))
                         }
                         Wakeup::Closed => {
                             this.state.set(WaitStateBits::STATE, WaitState::Woken);
@@ -720,7 +767,14 @@ impl Waiter {
                     }
                 })
             }
-            WaitState::Woken => Poll::Ready(Ok(())),
+            WaitState::Woken => {
+                let val = this
+                    .val
+                    .with_mut(|v| unsafe { (*v).take() })
+                    .expect("Woken tasks should have data!");
+
+                Poll::Ready(Ok(val))
+            },
         }
     }
 
@@ -728,7 +782,7 @@ impl Waiter {
     ///
     /// This is called from the `drop` implementation for the [`Wait`] and
     /// [`WaitOwned`] futures.
-    fn release(mut self: Pin<&mut Self>, queue: &WaitQueue) {
+    fn release(mut self: Pin<&mut Self>, queue: &DataWaitQueue<K, V>) {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
         test_trace!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
@@ -738,7 +792,7 @@ impl Waiter {
             return;
         }
 
-        let mut waiters = queue.queue.lock();
+        let mut waiters: MutexGuard<List<Waiter<K, V>>> = queue.queue.lock();
         let state = queue.load();
 
         // remove the node
@@ -755,8 +809,8 @@ impl Waiter {
 
         // if the node has an unconsumed wakeup, it must be assigned to the next
         // node in the queue.
-        if Waiter::with_node(ptr, &mut waiters, |node| matches!(&node.waker, Wakeup::One)) {
-            if let Some(waker) = queue.wake_locked(&mut waiters, state) {
+        if Waiter::<K, V>::with_node(ptr, &mut waiters, |node| matches!(&node.waker, Wakeup::One)) {
+            if let Some(waker) = queue.wake_next_locked(&mut waiters, state) {
                 drop(waiters);
                 waker.wake()
             }
@@ -764,8 +818,8 @@ impl Waiter {
     }
 }
 
-unsafe impl Linked<list::Links<Waiter>> for Waiter {
-    type Handle = NonNull<Waiter>;
+unsafe impl<K: PartialEq, V> Linked<list::Links<Waiter<K, V>>> for Waiter<K, V> {
+    type Handle = NonNull<Waiter<K, V>>;
 
     fn into_ptr(r: Self::Handle) -> NonNull<Self> {
         r
@@ -775,17 +829,17 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
         ptr
     }
 
-    unsafe fn links(ptr: NonNull<Self>) -> NonNull<list::Links<Waiter>> {
+    unsafe fn links(ptr: NonNull<Self>) -> NonNull<list::Links<Waiter<K, V>>> {
         (*ptr.as_ptr())
             .node
-            .with_mut(|node| util::non_null(node).cast::<list::Links<Waiter>>())
+            .with_mut(|node| util::non_null(node).cast::<list::Links<Waiter<K, V>>>())
     }
 }
 
 // === impl Wait ===
 
-impl Future for Wait<'_> {
-    type Output = WaitResult<()>;
+impl<K: PartialEq, V> Future for Wait<'_, K, V> {
+    type Output = WaitResult<V>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -794,7 +848,7 @@ impl Future for Wait<'_> {
 }
 
 #[pinned_drop]
-impl PinnedDrop for Wait<'_> {
+impl<K: PartialEq, V> PinnedDrop for Wait<'_, K, V> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
         this.waiter.release(this.queue);
@@ -804,8 +858,6 @@ impl PinnedDrop for Wait<'_> {
 // === impl QueueState ===
 
 impl QueueState {
-    const ONE_WAKE_ALL: usize = Self::WAKE_ALLS.first_bit();
-
     fn with_state(self, state: State) -> Self {
         self.with(Self::STATE, state)
     }
@@ -867,49 +919,49 @@ feature! {
 
     use alloc::sync::Arc;
 
-    /// Future returned from [`WaitQueue::wait_owned()`].
+    /// Future returned from [`DataWaitQueue::wait_owned()`].
     ///
     /// This is identical to the [`Wait`] future, except that it takes an
-    /// [`Arc`] reference to the [`WaitQueue`], allowing the returned future to
+    /// [`Arc`] reference to the [`DataWaitQueue`], allowing the returned future to
     /// live for the `'static` lifetime.
     ///
     /// This future is fused, so once it has completed, any future calls to poll
     /// will immediately return [`Poll::Ready`].
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned {
-        /// The `WaitQueue` being waited on.
-        queue: Arc<WaitQueue>,
+    pub struct WaitOwned<K: PartialEq, V> {
+        /// The `DataWaitQueue` being waited on.
+        queue: Arc<DataWaitQueue<K, V>>,
 
         /// Entry in the wait queue.
         #[pin]
-        waiter: Waiter,
+        waiter: Waiter<K, V>,
     }
 
-    impl WaitQueue {
+    impl<K: PartialEq, V> DataWaitQueue<K, V> {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
         /// This returns a [`WaitOwned`] future that will complete when the task is
-        /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitQueue` is
+        /// woken by a call to [`wake`] or [`wake_all`], or when the `DataWaitQueue` is
         /// dropped.
         ///
         /// This is identical to the [`wait`] method, except that it takes a
-        /// [`Arc`] reference to the [`WaitQueue`], allowing the returned future to
+        /// [`Arc`] reference to the [`DataWaitQueue`], allowing the returned future to
         /// live for the `'static` lifetime.
         ///
         /// [`wake`]: Self::wake
         /// [`wake_all`]: Self::wake_all
         /// [`wait`]: Self::wait
-        pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
-            let waiter = self.waiter();
+        pub fn wait_owned(self: &Arc<Self>, key: K) -> WaitOwned<K, V> {
+            let waiter = self.waiter(key);
             let queue = self.clone();
             WaitOwned { queue, waiter }
         }
     }
 
-    impl Future for WaitOwned {
-        type Output = WaitResult<()>;
+    impl<K: PartialEq, V> Future for WaitOwned<K, V> {
+        type Output = WaitResult<V>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
@@ -918,7 +970,7 @@ feature! {
     }
 
     #[pinned_drop]
-    impl PinnedDrop for WaitOwned {
+    impl<K: PartialEq, V> PinnedDrop for WaitOwned<K, V> {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
             this.waiter.release(&*this.queue);
