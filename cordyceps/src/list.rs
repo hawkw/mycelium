@@ -264,6 +264,19 @@ pub struct IterMut<'list, T: Linked<Links<T>> + ?Sized> {
     len: usize,
 }
 
+/// An iterator returned by [`List::drain_filter`].
+pub struct DrainFilter<'list, T, F>
+where
+    F: FnMut(&T) -> bool,
+    T: Linked<Links<T>> + ?Sized,
+{
+    list: &'list mut List<T>,
+    curr: Link<T>,
+    pred: F,
+    seen: usize,
+    old_len: usize,
+}
+
 type Link<T> = Option<NonNull<T>>;
 
 #[repr(C)]
@@ -543,6 +556,35 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             curr,
             curr_back,
             len,
+        }
+    }
+
+    /// Returns an iterator which uses a closure to determine if an element
+    /// should be removed from the list.
+    ///
+    /// If the closure returns `true`, then the element is removed and yielded.
+    /// If the closure returns `false`, the element will remain in the list and
+    /// will not be yielded by the iterator.
+    ///
+    /// Note that *unlike* the [`drain_filter` method][std-filter] on
+    /// [`std::collections::LinkedList`], the closure is *not* permitted to
+    /// mutate the elements of the list, as a mutable reference could be used to
+    /// improperly unlink list nodes.
+    ///
+    /// [std-filter]: std::collections::LinkedList::drain_filter
+    #[must_use]
+    pub fn drain_filter<F>(&mut self, pred: F) -> DrainFilter<'_, T, F>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        let curr = self.head;
+        let old_len = self.len;
+        DrainFilter {
+            list: self,
+            curr,
+            pred,
+            seen: 0,
+            old_len,
         }
     }
 }
@@ -889,5 +931,49 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
             let pin = Pin::new_unchecked(curr.as_mut());
             Some(pin)
         }
+    }
+}
+
+// === impl DrainFilter ===
+
+impl<T, F> Iterator for DrainFilter<'_, T, F>
+where
+    F: FnMut(&T) -> bool,
+    T: Linked<Links<T>> + ?Sized,
+{
+    type Item = T::Handle;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(mut node) = self.curr {
+            unsafe {
+                self.curr = T::links(node).as_ref().next();
+                self.seen += 1;
+
+                if (self.pred)(node.as_mut()) {
+                    return self.list.remove(node);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.old_len - self.seen))
+    }
+}
+
+impl<T, F> fmt::Debug for DrainFilter<'_, T, F>
+where
+    F: FnMut(&T) -> bool,
+    T: Linked<Links<T>> + ?Sized,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DrainFilter")
+            .field("list", &self.list)
+            .field("curr", &self.curr)
+            .field("seen", &self.seen)
+            .field("old_len", &self.old_len)
+            .finish()
     }
 }
