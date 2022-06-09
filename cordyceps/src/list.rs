@@ -264,6 +264,11 @@ pub struct IterMut<'list, T: Linked<Links<T>> + ?Sized> {
     len: usize,
 }
 
+/// An iterator that moves elements out of a [`List`].
+pub struct Drain<'list, T: Linked<Links<T>> + ?Sized> {
+    list: &'list mut List<T>,
+}
+
 type Link<T> = Option<NonNull<T>>;
 
 #[repr(C)]
@@ -544,6 +549,15 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             curr_back,
             len,
         }
+    }
+
+    /// Returns an iterator that removes items from the list.
+    ///
+    /// Dropping the iterator or stopping iteration will leave any remaining
+    /// elements in the list.
+    #[must_use]
+    pub fn drain(&mut self) -> Drain<'_, T> {
+        Drain { list: self }
     }
 }
 
@@ -889,5 +903,36 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
             let pin = Pin::new_unchecked(curr.as_mut());
             Some(pin)
         }
+    }
+}
+
+// === impl Drain ===
+
+impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for Drain<'list, T> {
+    type Item = T::Handle;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.list.pop_front()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.list.len();
+        (len, Some(len))
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for Drain<'list, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.list.len()
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Drain<'list, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.list.pop_back()
     }
 }
