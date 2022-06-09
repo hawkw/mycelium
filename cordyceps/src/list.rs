@@ -264,6 +264,16 @@ pub struct IterMut<'list, T: Linked<Links<T>> + ?Sized> {
     len: usize,
 }
 
+/// An iterator returned by [`List::drain_filter`].
+pub struct DrainFilter<'list, T, F>
+where
+    F: FnMut(&T) -> bool,
+    T: Linked<Links<T>> + ?Sized,
+{
+    cursor: Cursor<'list, T>,
+    pred: F,
+}
+
 type Link<T> = Option<NonNull<T>>;
 
 #[repr(C)]
@@ -441,6 +451,90 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
+    /// Returns a reference to the first element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn front(&self) -> Option<Pin<&T>> {
+        let head = self.head?;
+        let pin = unsafe {
+            // NOTE(eliza): in this case, we don't *need* to pin the reference,
+            // because it's immutable and you can't move out of a shared
+            // reference in safe code. but...it makes the API more consistent
+            // with `front_mut` etc.
+            Pin::new_unchecked(head.as_ref())
+        };
+        Some(pin)
+    }
+
+    /// Returns a mutable reference to the first element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn front_mut(&mut self) -> Option<Pin<&mut T>> {
+        let mut node = self.head?;
+        let pin = unsafe {
+            // safety: pinning the returned element is actually *necessary* to
+            // uphold safety invariants here. if we returned `&mut T`, the
+            // element could be `mem::replace`d out of the list, invalidating
+            // any pointers to it. thus, we *must* pin it before returning it.
+            Pin::new_unchecked(node.as_mut())
+        };
+        Some(pin)
+    }
+
+    /// Returns a reference to the last element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn back(&self) -> Option<Pin<&T>> {
+        let node = self.tail?;
+        let pin = unsafe {
+            // NOTE(eliza): in this case, we don't *need* to pin the reference,
+            // because it's immutable and you can't move out of a shared
+            // reference in safe code. but...it makes the API more consistent
+            // with `front_mut` etc.
+            Pin::new_unchecked(node.as_ref())
+        };
+        Some(pin)
+    }
+
+    /// Returns a mutable reference to the last element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn back_mut(&mut self) -> Option<Pin<&mut T>> {
+        let mut node = self.tail?;
+        let pin = unsafe {
+            // safety: pinning the returned element is actually *necessary* to
+            // uphold safety invariants here. if we returned `&mut T`, the
+            // element could be `mem::replace`d out of the list, invalidating
+            // any pointers to it. thus, we *must* pin it before returning it.
+            Pin::new_unchecked(node.as_mut())
+        };
+        Some(pin)
+    }
+
     /// Removes an item from the tail of the list.
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
@@ -544,6 +638,28 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             curr_back,
             len,
         }
+    }
+
+    /// Returns an iterator which uses a closure to determine if an element
+    /// should be removed from the list.
+    ///
+    /// If the closure returns `true`, then the element is removed and yielded.
+    /// If the closure returns `false`, the element will remain in the list and
+    /// will not be yielded by the iterator.
+    ///
+    /// Note that *unlike* the [`drain_filter` method][std-filter] on
+    /// [`std::collections::LinkedList`], the closure is *not* permitted to
+    /// mutate the elements of the list, as a mutable reference could be used to
+    /// improperly unlink list nodes.
+    ///
+    /// [std-filter]: std::collections::LinkedList::drain_filter
+    #[must_use]
+    pub fn drain_filter<F>(&mut self, pred: F) -> DrainFilter<'_, T, F>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        let cursor = self.cursor();
+        DrainFilter { cursor, pred }
     }
 }
 
@@ -763,10 +879,21 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         while let Some(node) = self.next_ptr() {
             if predicate(unsafe { node.as_ref() }) {
                 item = Some(node);
+                self.len -= 1;
                 break;
             }
         }
         unsafe { self.list.remove(item?) }
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cursor")
+            .field("curr", &FmtOption::new(&self.curr))
+            .field("list", &self.list)
+            .field("len", &self.len)
+            .finish()
     }
 }
 
@@ -889,5 +1016,37 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
             let pin = Pin::new_unchecked(curr.as_mut());
             Some(pin)
         }
+    }
+}
+
+// === impl DrainFilter ===
+
+impl<T, F> Iterator for DrainFilter<'_, T, F>
+where
+    F: FnMut(&T) -> bool,
+    T: Linked<Links<T>> + ?Sized,
+{
+    type Item = T::Handle;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cursor.remove_first(&mut self.pred)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.cursor.len))
+    }
+}
+
+impl<T, F> fmt::Debug for DrainFilter<'_, T, F>
+where
+    F: FnMut(&T) -> bool,
+    T: Linked<Links<T>> + ?Sized,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DrainFilter")
+            .field("cursor", &self.cursor)
+            .field("pred", &format_args!("..."))
+            .finish()
     }
 }
