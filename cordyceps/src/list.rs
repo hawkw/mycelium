@@ -270,11 +270,8 @@ where
     F: FnMut(&T) -> bool,
     T: Linked<Links<T>> + ?Sized,
 {
-    list: &'list mut List<T>,
-    curr: Link<T>,
+    cursor: Cursor<'list, T>,
     pred: F,
-    seen: usize,
-    old_len: usize,
 }
 
 type Link<T> = Option<NonNull<T>>;
@@ -577,15 +574,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     where
         F: FnMut(&T) -> bool,
     {
-        let curr = self.head;
-        let old_len = self.len;
-        DrainFilter {
-            list: self,
-            curr,
-            pred,
-            seen: 0,
-            old_len,
-        }
+        let cursor = self.cursor();
+        DrainFilter { cursor, pred }
     }
 }
 
@@ -805,10 +795,21 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         while let Some(node) = self.next_ptr() {
             if predicate(unsafe { node.as_ref() }) {
                 item = Some(node);
+                self.len -= 1;
                 break;
             }
         }
         unsafe { self.list.remove(item?) }
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cursor")
+            .field("curr", &FmtOption::new(&self.curr))
+            .field("list", &self.list)
+            .field("len", &self.len)
+            .finish()
     }
 }
 
@@ -943,23 +944,13 @@ where
 {
     type Item = T::Handle;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(node) = self.curr {
-            unsafe {
-                self.curr = T::links(node).as_ref().next();
-                self.seen += 1;
-
-                if (self.pred)(node.as_ref()) {
-                    return self.list.remove(node);
-                }
-            }
-        }
-
-        None
+        self.cursor.remove_first(&mut self.pred)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.old_len - self.seen))
+        (0, Some(self.cursor.len))
     }
 }
 
@@ -970,10 +961,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DrainFilter")
-            .field("list", &self.list)
-            .field("curr", &self.curr)
-            .field("seen", &self.seen)
-            .field("old_len", &self.old_len)
+            .field("cursor", &self.cursor)
+            .field("pred", &format_args!("..."))
             .finish()
     }
 }
