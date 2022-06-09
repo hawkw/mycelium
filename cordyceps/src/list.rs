@@ -952,6 +952,17 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'list, T>
     }
 }
 
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Iter<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("list::Iter")
+            .field("curr", &FmtOption::new(&self.curr))
+            .field("curr_back", &FmtOption::new(&self.curr_back))
+            .field("list", &self._list)
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
 // === impl IterMut ====
 
 impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for IterMut<'list, T> {
@@ -1016,6 +1027,17 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
             let pin = Pin::new_unchecked(curr.as_mut());
             Some(pin)
         }
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for IterMut<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("list::IterMut")
+            .field("curr", &FmtOption::new(&self.curr))
+            .field("curr_back", &FmtOption::new(&self.curr_back))
+            .field("list", &self._list)
+            .field("len", &self.len)
+            .finish()
     }
 }
 
