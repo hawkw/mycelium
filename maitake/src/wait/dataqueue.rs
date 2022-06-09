@@ -166,6 +166,7 @@ mod tests;
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
+#[derive(Debug)]
 pub struct DataWaitQueue<K: PartialEq, V> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
@@ -187,20 +188,6 @@ pub struct DataWaitQueue<K: PartialEq, V> {
     /// instead to simulate the spinlock, because loom doesn't play nice with
     /// real spinlocks.
     queue: Mutex<List<Waiter<K, V>>>,
-
-    _key: PhantomData<K>,
-    _val: PhantomData<V>,
-}
-
-impl<K: PartialEq, V> Debug for DataWaitQueue<K, V> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("DataWaitQueue")
-            .field("state", &self.state)
-            .field("queue", &self.queue)
-            .field("key", &fmt::display(core::any::type_name::<K>()))
-            .field("val", &fmt::display(core::any::type_name::<V>()))
-            .finish()
-    }
 }
 
 /// Future returned from [`DataWaitQueue::wait()`].
@@ -371,8 +358,6 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
         Self {
             state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
             queue: Mutex::new(List::new()),
-            _key: PhantomData,
-            _val: PhantomData,
         }
     }
 
@@ -383,8 +368,6 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
         Self {
             state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
             queue: Mutex::new(List::new()),
-            _key: PhantomData,
-            _val: PhantomData,
         }
     }
 
