@@ -451,6 +451,90 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
+    /// Returns a reference to the first element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn front(&self) -> Option<Pin<&T>> {
+        let head = self.head?;
+        let pin = unsafe {
+            // NOTE(eliza): in this case, we don't *need* to pin the reference,
+            // because it's immutable and you can't move out of a shared
+            // reference in safe code. but...it makes the API more consistent
+            // with `front_mut` etc.
+            Pin::new_unchecked(head.as_ref())
+        };
+        Some(pin)
+    }
+
+    /// Returns a mutable reference to the first element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn front_mut(&mut self) -> Option<Pin<&mut T>> {
+        let mut node = self.head?;
+        let pin = unsafe {
+            // safety: pinning the returned element is actually *necessary* to
+            // uphold safety invariants here. if we returned `&mut T`, the
+            // element could be `mem::replace`d out of the list, invalidating
+            // any pointers to it. thus, we *must* pin it before returning it.
+            Pin::new_unchecked(node.as_mut())
+        };
+        Some(pin)
+    }
+
+    /// Returns a reference to the last element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn back(&self) -> Option<Pin<&T>> {
+        let node = self.tail?;
+        let pin = unsafe {
+            // NOTE(eliza): in this case, we don't *need* to pin the reference,
+            // because it's immutable and you can't move out of a shared
+            // reference in safe code. but...it makes the API more consistent
+            // with `front_mut` etc.
+            Pin::new_unchecked(node.as_ref())
+        };
+        Some(pin)
+    }
+
+    /// Returns a mutable reference to the last element in the list, or `None`
+    /// if the list is empty.
+    ///
+    /// The node is [`Pin`]ned in memory, as moving it to a different memory
+    /// location while it is in the list would corrupt the links pointing to
+    /// that node.
+    ///
+    /// This operation should complete in *O*(1) time.
+    #[must_use]
+    pub fn back_mut(&mut self) -> Option<Pin<&mut T>> {
+        let mut node = self.tail?;
+        let pin = unsafe {
+            // safety: pinning the returned element is actually *necessary* to
+            // uphold safety invariants here. if we returned `&mut T`, the
+            // element could be `mem::replace`d out of the list, invalidating
+            // any pointers to it. thus, we *must* pin it before returning it.
+            Pin::new_unchecked(node.as_mut())
+        };
+        Some(pin)
+    }
+
     /// Removes an item from the tail of the list.
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
