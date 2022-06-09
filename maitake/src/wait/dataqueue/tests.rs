@@ -61,7 +61,7 @@ mod alloc {
                 if i < (TASKS - 1) {
                     assert!(matches!(q.wake(&(i + 1), 100 + i + 1), WakeOutcome::Woke));
                 } else {
-                    assert!(!matches!(q.wake(&(i + 1), 100 + i + 1), WakeOutcome::Woke));
+                    assert!(matches!(q.wake(&(i + 1), 100 + i + 1), WakeOutcome::NoMatch(_)));
                 }
             });
         }
