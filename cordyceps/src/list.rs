@@ -944,12 +944,12 @@ where
     type Item = T::Handle;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(mut node) = self.curr {
+        while let Some(node) = self.curr {
             unsafe {
                 self.curr = T::links(node).as_ref().next();
                 self.seen += 1;
 
-                if (self.pred)(node.as_mut()) {
+                if (self.pred)(node.as_ref()) {
                     return self.list.remove(node);
                 }
             }
