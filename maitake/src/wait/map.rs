@@ -166,7 +166,6 @@ mod tests;
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-#[derive(Debug)]
 pub struct WaitMap<K: PartialEq, V> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
@@ -190,6 +189,14 @@ pub struct WaitMap<K: PartialEq, V> {
     queue: Mutex<List<Waiter<K, V>>>,
 }
 
+impl<K: PartialEq, V> Debug for WaitMap<K, V> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WaitMap")
+            .field("state", &self.state)
+            .field("queue", &self.queue)
+            .finish()
+    }
+}
 /// Future returned from [`WaitMap::wait()`].
 ///
 /// This future is fused, so once it has completed, any future calls to poll
@@ -641,7 +648,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
         test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
-        match test_dbg!(this.state) {
+        match test_dbg!(&this.state) {
             WaitState::Start => {
                 // can we consume a pending wakeup?
                 if queue.compare_exchange(State::Woken, State::Empty).is_ok() {

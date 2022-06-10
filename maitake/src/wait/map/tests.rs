@@ -13,7 +13,7 @@ mod alloc {
     //         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
     //         let scheduler = Scheduler::new();
-    //         let q = Arc::new(DataWaitQueue::new());
+    //         let q = Arc::new(WaitMap::new());
 
     //         const TASKS: usize = 10;
 
@@ -46,7 +46,7 @@ mod alloc {
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
         let scheduler = Scheduler::new();
-        let q = Arc::new(DataWaitQueue::new());
+        let q = Arc::new(WaitMap::new());
 
         const TASKS: usize = 10;
 
@@ -56,7 +56,7 @@ mod alloc {
                 let val = q.wait(i).await.unwrap();
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
 
-                assert_eq!(val, 100 + i);
+                assert_eq!(val, Some(100 + i));
 
                 if i < (TASKS - 1) {
                     assert!(matches!(q.wake(&(i + 1), 100 + i + 1), WakeOutcome::Woke));
@@ -93,7 +93,7 @@ mod alloc {
 //     #[test]
 //     fn wake_one() {
 //         loom::model(|| {
-//             let q = Arc::new(DataWaitQueue::new());
+//             let q = Arc::new(WaitMap::new());
 //             let thread = thread::spawn({
 //                 let q = q.clone();
 //                 move || {
@@ -111,7 +111,7 @@ mod alloc {
 //     #[test]
 //     fn wake_all_sequential() {
 //         loom::model(|| {
-//             let q = Arc::new(DataWaitQueue::new());
+//             let q = Arc::new(WaitMap::new());
 //             let wait1 = q.wait();
 //             let wait2 = q.wait();
 
@@ -136,7 +136,7 @@ mod alloc {
 //         use alloc::sync::Arc;
 
 //         loom::model(|| {
-//             let q = Arc::new(DataWaitQueue::new());
+//             let q = Arc::new(WaitMap::new());
 //             let wait1 = q.wait_owned();
 //             let wait2 = q.wait_owned();
 
@@ -157,7 +157,7 @@ mod alloc {
 //         use alloc::sync::Arc;
 
 //         loom::model(|| {
-//             let q = Arc::new(DataWaitQueue::new());
+//             let q = Arc::new(WaitMap::new());
 //             let wait1 = q.wait_owned();
 //             let wait2 = q.wait_owned();
 
@@ -176,9 +176,9 @@ mod alloc {
 //     #[test]
 //     fn wake_one_many() {
 //         loom::model(|| {
-//             let q = Arc::new(DataWaitQueue::new());
+//             let q = Arc::new(WaitMap::new());
 
-//             fn thread(q: &Arc<DataWaitQueue>) -> thread::JoinHandle<()> {
+//             fn thread(q: &Arc<WaitMap>) -> thread::JoinHandle<()> {
 //                 let q = q.clone();
 //                 thread::spawn(move || {
 //                     future::block_on(async {
@@ -205,7 +205,7 @@ mod alloc {
 //     #[test]
 //     fn wake_mixed() {
 //         loom::model(|| {
-//             let q = Arc::new(DataWaitQueue::new());
+//             let q = Arc::new(WaitMap::new());
 
 //             let thread1 = thread::spawn({
 //                 let q = q.clone();
@@ -238,7 +238,7 @@ mod alloc {
 //         use std::task::Poll;
 
 //         loom::model(|| {
-//             let q = Arc::new(DataWaitQueue::new());
+//             let q = Arc::new(WaitMap::new());
 
 //             let thread1 = thread::spawn({
 //                 let q = q.clone();
