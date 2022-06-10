@@ -303,23 +303,16 @@ enum WaitState {
 #[repr(u8)]
 enum State {
     /// No waiters are queued, and there is no pending notification.
-    /// Waiting while the queue is in this state will enqueue the waiter;
-    /// notifying while in this state will store a pending notification in the
-    /// queue, transitioning to [`State::Woken`].
+    /// Waiting while the queue is in this state will enqueue the waiter
     Empty = 0b00,
 
     /// There are one or more waiters in the queue. Waiting while
     /// the queue is in this state will not transition the state. Waking while
-    /// in this state will wake the first waiter in the queue; if this empties
+    /// in this state will wake the appropriate waiter in the queue; if this empties
     /// the queue, then the queue will transition to [`State::Empty`].
     Waiting = 0b01,
 
-    /// The queue has a stored notification. Waiting while the queue
-    /// is in this state will consume the pending notification *without*
-    /// enqueueing the waiter and transition the queue to [`State::Empty`].
-    /// Waking while in this state will leave the queue in this state.
-    Woken = 0b10,
-
+    // TODO(AJM): We have a state gap here. Is this okay?
     /// The queue is closed. Waiting while in this state will return
     /// [`Closed`] without transitioning the queue's state.
     ///
@@ -333,9 +326,23 @@ enum State {
 
 #[derive(Clone, Debug)]
 enum Wakeup {
+    /// The Waiter has been created, but no wake has occurred. This should
+    /// be the ONLY state while in `WaitState::Start`
     Empty,
+
+    /// The Waiter has moved to the `WaitState::Waiting` state. We now
+    /// have the relevant waker, and are still waiting for data. This
+    /// corresponds to `WaitState::Waiting`.
     Waiting(Waker),
-    One,
+
+    /// The Waiter has received data, and is waiting for the woken task
+    /// to notice, and take the data by polling+completing the future.
+    /// This corresponds to `WaitState::Woken`.
+    DataReceived,
+
+    /// The Queue the waiter is part of has been closed. No data will
+    /// be received from this future. This corresponds to
+    /// `WaitState::Woken`.
     Closed,
 }
 
@@ -376,22 +383,15 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         // check if any tasks are currently waiting on this queue. if there are
         // no waiting tasks, store the wakeup to be consumed by the next call to
         // `wait`.
-        loop {
-            match state {
-                // if the queue is closed, bail.
-                State::Closed => return WakeOutcome::NoMatch(val),
-                // if there are waiting tasks, break out of the loop and wake one.
-                State::Waiting => break,
-                _ => {}
-            }
+        match state {
+            // Something is waiting!
+            State::Waiting => {}
 
-            let next = State::Woken;
-            // advance the state to `Woken`, and return (if we did so
-            // successfully)
-            match self.compare_exchange(state, next) {
-                Ok(_) => return WakeOutcome::NoMatch(val),
-                Err(actual) => state = actual,
-            }
+            // if the queue is closed, bail.
+            State::Closed => return WakeOutcome::Closed(val),
+
+            // if the queue is empty, bail.
+            State::Empty => return WakeOutcome::NoMatch(val),
         }
 
         // okay, there are tasks waiting on the queue; we must acquire the lock
@@ -404,15 +404,11 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         state = self.load();
 
         if let Some(mut node) = self.node_match_locked(key, &mut *queue, state) {
-            let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::One);
+            let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived);
             drop(queue);
             unsafe {
-                let mut new = UnsafeCell::new(Some(val));
-                core::mem::swap(&mut new, &mut node.as_mut().val);
-                #[cfg(debug_assertions)]
-                new.with(|v| {
-                    debug_assert!((*v).is_none());
-                });
+                let old = node.as_mut().val.with_mut(|v| (*v).replace(val));
+                debug_assert!(old.is_none());
             }
             waker.wake();
             WakeOutcome::Woke
@@ -532,13 +528,8 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         // is the queue still in the `Waiting` state? it is possible that we
         // transitioned to a different state while locking the queue.
         if test_dbg!(state) != State::Waiting {
-            // if there are no longer any queued tasks, try to store the
-            // wakeup in the queue and bail.
-            if let Err(actual) = self.compare_exchange(curr, State::Woken) {
-                debug_assert!(actual != State::Waiting);
-                self.store(State::Woken);
-            }
-
+            // If we are not waiting, we are either empty or closed.
+            // Not much to do.
             return None;
         }
 
@@ -559,16 +550,9 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     fn wake_next_locked(&self, queue: &mut List<Waiter<K, V>>, curr: State) -> Option<Waker> {
         let state = curr;
 
-        // is the queue still in the `Waiting` state? it is possible that we
-        // transitioned to a different state while locking the queue.
         if test_dbg!(state) != State::Waiting {
-            // if there are no longer any queued tasks, try to store the
-            // wakeup in the queue and bail.
-            if let Err(actual) = self.compare_exchange(curr, State::Woken) {
-                debug_assert!(actual != State::Waiting);
-                self.store(State::Woken);
-            }
-
+            // If we are not waiting, we are either empty or closed.
+            // Not much to do.
             return None;
         }
 
@@ -576,7 +560,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         let node = queue
             .pop_back()
             .expect("if we are in the Waiting state, there must be waiters in the queue");
-        let waker = Waiter::<K, V>::wake(node, queue, Wakeup::One);
+        let waker = Waiter::<K, V>::wake(node, queue, Wakeup::DataReceived);
 
         // if we took the final waiter currently in the queue, transition to the
         // `Empty` state.
@@ -591,6 +575,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
 pub enum WakeOutcome<V> {
     Woke,
     NoMatch(V),
+    Closed(V),
 }
 
 // === impl Waiter ===
@@ -650,14 +635,6 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
         match test_dbg!(&this.state) {
             WaitState::Start => {
-                // can we consume a pending wakeup?
-                if queue.compare_exchange(State::Woken, State::Empty).is_ok() {
-                    *this.state = WaitState::Woken;
-                    let val = this.val.with_mut(|v| unsafe { (*v).take() });
-
-                    return Poll::Ready(Ok(val));
-                }
-
                 // okay, no pending wakeups. try to wait...
                 test_trace!("poll_wait: locking...");
                 let mut waiters = queue.queue.lock();
@@ -674,16 +651,6 @@ impl<K: PartialEq, V> Waiter<K, V> {
                         },
                         // the queue is already `Waiting`
                         State::Waiting => break 'to_waiting,
-                        // the queue was woken, consume the wakeup.
-                        State::Woken => match queue.compare_exchange(queue_state, State::Empty) {
-                            Ok(_) => {
-                                *this.state = WaitState::Woken;
-                                let val = this.val.with_mut(|v| unsafe { (*v).take() });
-
-                                return Poll::Ready(Ok(val));
-                            }
-                            Err(actual) => queue_state = actual,
-                        },
                         State::Closed => return wait::closed(),
                     }
                 }
@@ -709,29 +676,35 @@ impl<K: PartialEq, V> Waiter<K, V> {
                     // holding the lock.
                     let node = &mut *node;
                     match node.waker {
+                        // We already had a waker, but are now getting another one.
+                        // Store the new one, droping the old one
                         Wakeup::Waiting(ref mut waker) => {
                             if !waker.will_wake(cx.waker()) {
                                 *waker = cx.waker().clone();
                             }
                             Poll::Pending
                         }
-                        Wakeup::One => {
+                        // We have received the data, take the data out of the
+                        // future, and provide it to the poller
+                        Wakeup::DataReceived => {
                             *this.state = WaitState::Woken;
                             let val = this.val.with_mut(|v| (*v).take());
 
                             Poll::Ready(Ok(val))
                         }
+
                         Wakeup::Closed => {
                             *this.state = WaitState::Woken;
                             wait::closed()
                         }
-                        Wakeup::Empty => unreachable!(),
+                        Wakeup::Empty => unreachable!(
+                            "Waiter should never be polled before adding to the queue!"
+                        ),
                     }
                 })
             }
             WaitState::Woken => {
                 let val = this.val.with_mut(|v| unsafe { (*v).take() });
-
                 Poll::Ready(Ok(val))
             }
         }
@@ -768,7 +741,9 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
         // if the node has an unconsumed wakeup, it must be assigned to the next
         // node in the queue.
-        if Waiter::<K, V>::with_node(ptr, &mut waiters, |node| matches!(&node.waker, Wakeup::One)) {
+        if Waiter::<K, V>::with_node(ptr, &mut waiters, |node| {
+            matches!(&node.waker, Wakeup::DataReceived)
+        }) {
             if let Some(waker) = queue.wake_next_locked(&mut waiters, state) {
                 drop(waiters);
                 waker.wake()
@@ -817,18 +792,9 @@ impl<K: PartialEq, V> PinnedDrop for Wait<'_, K, V> {
 // === impl MapState ===
 
 impl State {
+    #[inline]
     fn from_bits(bits: usize) -> Self {
-        match bits as u8 {
-            bits if bits == Self::Empty as u8 => Self::Empty,
-            bits if bits == Self::Waiting as u8 => Self::Waiting,
-            bits if bits == Self::Woken as u8 => Self::Woken,
-            bits if bits == Self::Closed as u8 => Self::Closed,
-            _ => unsafe {
-                mycelium_util::unreachable_unchecked!(
-                    "all potential 2-bit patterns should be covered!"
-                )
-            },
-        }
+        Self::try_from_bits(bits).expect("This shouldn't be possible")
     }
 }
 
@@ -840,9 +806,9 @@ impl FromBits<usize> for State {
         Ok(match bits as u8 {
             bits if bits == Self::Empty as u8 => Self::Empty,
             bits if bits == Self::Waiting as u8 => Self::Waiting,
-            bits if bits == Self::Woken as u8 => Self::Woken,
             bits if bits == Self::Closed as u8 => Self::Closed,
             _ => unsafe {
+                // TODO(AJM): this isn't *totally* true anymore...
                 mycelium_util::unreachable_unchecked!(
                     "all potential 2-bit patterns should be covered!"
                 )
