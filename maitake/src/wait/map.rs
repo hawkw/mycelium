@@ -3,7 +3,7 @@ use crate::{
         cell::UnsafeCell,
         sync::{
             atomic::{AtomicUsize, Ordering::*},
-            spin::Mutex,
+            spin::{Mutex, MutexGuard},
         },
     },
     util,
@@ -24,7 +24,7 @@ use core::{
 };
 use mycelium_bitfield::FromBits;
 use mycelium_util::fmt;
-use mycelium_util::sync::{spin::MutexGuard, CachePadded};
+use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -409,10 +409,10 @@ impl<K: PartialEq, V> WaitMap<K, V> {
 
         if let Some(mut node) = self.node_match_locked(key, &mut *queue, state) {
             let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived);
-            drop(queue);
             unsafe {
                 node.as_mut().val.with_mut(|v| (*v).write(val));
             }
+            drop(queue);
             waker.wake();
             WakeOutcome::Woke
         } else {
@@ -638,7 +638,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
         match test_dbg!(&this.state) {
             WaitState::Start => {
-                // okay, no pending wakeups. try to wait...
+                // Try to wait...
                 test_trace!("poll_wait: locking...");
                 let mut waiters = queue.queue.lock();
                 test_trace!("poll_wait: -> locked");
@@ -695,7 +695,8 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
                             let val = this.val.with_mut(|v| {
                                 let mut retval = MaybeUninit::<V>::uninit();
-                                (*v).as_mut_ptr().copy_to_nonoverlapping(retval.as_mut_ptr(), 1);
+                                (*v).as_mut_ptr()
+                                    .copy_to_nonoverlapping(retval.as_mut_ptr(), 1);
                                 retval.assume_init()
                             });
 
@@ -714,14 +715,14 @@ impl<K: PartialEq, V> Waiter<K, V> {
                         Wakeup::Empty => {
                             // TODO: Should I change the result type to also return an error
                             // for this case? Right now error can only be `Closed`
-                            unreachable!("Waiter should never be polled before adding to the queue!");
+                            unreachable!(
+                                "Waiter should never be polled before adding to the queue!"
+                            );
                         }
                     }
                 })
             }
-            WaitState::Completed => unreachable!(
-                "Waiter should never be polled after completion!"
-            )
+            WaitState::Completed => unreachable!("Waiter should never be polled after completion!"),
         }
     }
 
