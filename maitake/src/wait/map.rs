@@ -457,7 +457,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         let mut mg = self.queue.lock();
         let mut cursor = mg.cursor();
         if cursor.find(|n| n.key == key).is_some() {
-            return Err(())
+            return Err(());
         }
         drop(mg);
 
@@ -501,11 +501,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 
     #[cfg_attr(test, track_caller)]
-    fn compare_exchange(
-        &self,
-        current: State,
-        new: State,
-    ) -> Result<State, State> {
+    fn compare_exchange(&self, current: State, new: State) -> Result<State, State> {
         #[allow(clippy::let_and_return)]
         let res = self
             .state
@@ -648,17 +644,9 @@ impl<K: PartialEq, V> Waiter<K, V> {
         match test_dbg!(this.state) {
             WaitState::Start => {
                 // can we consume a pending wakeup?
-                if queue
-                    .compare_exchange(
-                        State::Woken,
-                        State::Empty,
-                    )
-                    .is_ok()
-                {
+                if queue.compare_exchange(State::Woken, State::Empty).is_ok() {
                     *this.state = WaitState::Woken;
-                    let val = this
-                        .val
-                        .with_mut(|v| unsafe { (*v).take() });
+                    let val = this.val.with_mut(|v| unsafe { (*v).take() });
 
                     return Poll::Ready(Ok(val));
                 }
@@ -673,33 +661,22 @@ impl<K: PartialEq, V> Waiter<K, V> {
                 'to_waiting: loop {
                     match test_dbg!(queue_state) {
                         // the queue is `Empty`, transition to `Waiting`
-                        State::Empty => {
-                            match queue.compare_exchange(
-                                queue_state,
-                                State::Waiting,
-                            ) {
-                                Ok(_) => break 'to_waiting,
-                                Err(actual) => queue_state = actual,
-                            }
-                        }
+                        State::Empty => match queue.compare_exchange(queue_state, State::Waiting) {
+                            Ok(_) => break 'to_waiting,
+                            Err(actual) => queue_state = actual,
+                        },
                         // the queue is already `Waiting`
                         State::Waiting => break 'to_waiting,
                         // the queue was woken, consume the wakeup.
-                        State::Woken => {
-                            match queue
-                                .compare_exchange(queue_state, State::Empty)
-                            {
-                                Ok(_) => {
-                                    *this.state = WaitState::Woken;
-                                    let val = this
-                                        .val
-                                        .with_mut(|v| unsafe { (*v).take() });
+                        State::Woken => match queue.compare_exchange(queue_state, State::Empty) {
+                            Ok(_) => {
+                                *this.state = WaitState::Woken;
+                                let val = this.val.with_mut(|v| unsafe { (*v).take() });
 
-                                    return Poll::Ready(Ok(val));
-                                }
-                                Err(actual) => queue_state = actual,
+                                return Poll::Ready(Ok(val));
                             }
-                        }
+                            Err(actual) => queue_state = actual,
+                        },
                         State::Closed => return wait::closed(),
                     }
                 }
@@ -733,9 +710,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                         }
                         Wakeup::One => {
                             *this.state = WaitState::Woken;
-                            let val = this
-                                .val
-                                .with_mut(|v| (*v).take());
+                            let val = this.val.with_mut(|v| (*v).take());
 
                             Poll::Ready(Ok(val))
                         }
@@ -748,9 +723,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                 })
             }
             WaitState::Woken => {
-                let val = this
-                    .val
-                    .with_mut(|v| unsafe { (*v).take() });
+                let val = this.val.with_mut(|v| unsafe { (*v).take() });
 
                 Poll::Ready(Ok(val))
             }

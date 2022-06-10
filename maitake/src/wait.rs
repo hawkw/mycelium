@@ -9,9 +9,9 @@ pub mod queue;
 
 pub use self::cell::WaitCell;
 #[doc(inline)]
-pub use self::queue::WaitQueue;
-#[doc(inline)]
 pub use self::map::WaitMap;
+#[doc(inline)]
+pub use self::queue::WaitQueue;
 
 use core::task::Poll;
 
