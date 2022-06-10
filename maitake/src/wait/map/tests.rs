@@ -7,38 +7,38 @@ mod alloc {
     use crate::scheduler::Scheduler;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    //     #[test]
-    //     fn close() {
-    //         crate::util::trace_init();
-    //         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+    #[test]
+    fn close() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    //         let scheduler = Scheduler::new();
-    //         let q = Arc::new(WaitMap::new());
+        let scheduler = Scheduler::new();
+        let q: Arc<WaitMap<usize, ()>> = Arc::new(WaitMap::new());
 
-    //         const TASKS: usize = 10;
+        const TASKS: usize = 10;
 
-    //         for _ in 0..TASKS {
-    //             let wait = q.wait_owned();
-    //             scheduler.spawn(async move {
-    //                 wait.await.expect_err("dropping the queue must close it");
-    //                 COMPLETED.fetch_add(1, Ordering::SeqCst);
-    //             });
-    //         }
+        for i in 0..TASKS {
+            let wait = q.wait_owned(i);
+            scheduler.spawn(async move {
+                wait.await.expect_err("dropping the queue must close it");
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            });
+        }
 
-    //         let tick = scheduler.tick();
+        let tick = scheduler.tick();
 
-    //         assert_eq!(tick.completed, 0);
-    //         assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-    //         assert!(!tick.has_remaining);
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
 
-    //         q.close();
+        q.close();
 
-    //         let tick = scheduler.tick();
+        let tick = scheduler.tick();
 
-    //         assert_eq!(tick.completed, TASKS);
-    //         assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-    //         assert!(!tick.has_remaining);
-    //     }
+        assert_eq!(tick.completed, TASKS);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert!(!tick.has_remaining);
+    }
 
     #[test]
     fn wake_one() {
@@ -56,7 +56,7 @@ mod alloc {
                 let val = q.wait(i).await.unwrap();
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
 
-                assert_eq!(val, Some(100 + i));
+                assert_eq!(val, 100 + i);
 
                 if i < (TASKS - 1) {
                     assert!(matches!(q.wake(&(i + 1), 100 + i + 1), WakeOutcome::Woke));

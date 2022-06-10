@@ -17,7 +17,7 @@ use core::{
     fmt::Debug,
     future::Future,
     marker::PhantomPinned,
-    mem,
+    mem::{self, MaybeUninit},
     pin::Pin,
     ptr::NonNull,
     task::{Context, Poll, Waker},
@@ -228,7 +228,7 @@ struct Waiter<K: PartialEq, V> {
     state: WaitState,
 
     key: K,
-    val: UnsafeCell<Option<V>>,
+    val: UnsafeCell<MaybeUninit<V>>,
 }
 
 impl<K: PartialEq, V> Debug for Waiter<K, V> {
@@ -295,7 +295,7 @@ enum WaitState {
     ///
     /// When in this state, the node is **not** part of the linked list, and
     /// can be dropped without removing it from the list.
-    Woken,
+    Completed,
 }
 
 /// The queue's current state.
@@ -337,12 +337,16 @@ enum Wakeup {
 
     /// The Waiter has received data, and is waiting for the woken task
     /// to notice, and take the data by polling+completing the future.
-    /// This corresponds to `WaitState::Woken`.
+    /// This corresponds to `WaitState::Completed`.
     DataReceived,
+
+    /// The waiter has received data, and already given it away, and has
+    /// no more data to give. This corresponds to `WaitState::Completed`.
+    Retreived,
 
     /// The Queue the waiter is part of has been closed. No data will
     /// be received from this future. This corresponds to
-    /// `WaitState::Woken`.
+    /// `WaitState::Completed`.
     Closed,
 }
 
@@ -407,8 +411,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
             let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived);
             drop(queue);
             unsafe {
-                let old = node.as_mut().val.with_mut(|v| (*v).replace(val));
-                debug_assert!(old.is_none());
+                node.as_mut().val.with_mut(|v| (*v).write(val));
             }
             waker.wake();
             WakeOutcome::Woke
@@ -485,7 +488,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
                 _pin: PhantomPinned,
             }),
             key,
-            val: UnsafeCell::new(None),
+            val: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
 
@@ -629,7 +632,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
         mut self: Pin<&mut Self>,
         queue: &WaitMap<K, V>,
         cx: &mut Context<'_>,
-    ) -> Poll<WaitResult<Option<V>>> {
+    ) -> Poll<WaitResult<V>> {
         test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
@@ -687,26 +690,38 @@ impl<K: PartialEq, V> Waiter<K, V> {
                         // We have received the data, take the data out of the
                         // future, and provide it to the poller
                         Wakeup::DataReceived => {
-                            *this.state = WaitState::Woken;
-                            let val = this.val.with_mut(|v| (*v).take());
+                            *this.state = WaitState::Completed;
+                            node.waker = Wakeup::Retreived;
+
+                            let val = this.val.with_mut(|v| {
+                                let mut retval = MaybeUninit::<V>::uninit();
+                                (*v).as_mut_ptr().copy_to_nonoverlapping(retval.as_mut_ptr(), 1);
+                                retval.assume_init()
+                            });
 
                             Poll::Ready(Ok(val))
                         }
+                        Wakeup::Retreived => {
+                            // TODO: Should I change the result type to also return an error
+                            // for this case? Right now error can only be `Closed`
+                            unreachable!("Future should not be polled after completion!");
+                        }
 
                         Wakeup::Closed => {
-                            *this.state = WaitState::Woken;
+                            *this.state = WaitState::Completed;
                             wait::closed()
                         }
-                        Wakeup::Empty => unreachable!(
-                            "Waiter should never be polled before adding to the queue!"
-                        ),
+                        Wakeup::Empty => {
+                            // TODO: Should I change the result type to also return an error
+                            // for this case? Right now error can only be `Closed`
+                            unreachable!("Waiter should never be polled before adding to the queue!");
+                        }
                     }
                 })
             }
-            WaitState::Woken => {
-                let val = this.val.with_mut(|v| unsafe { (*v).take() });
-                Poll::Ready(Ok(val))
-            }
+            WaitState::Completed => unreachable!(
+                "Waiter should never be polled after completion!"
+            )
         }
     }
 
@@ -773,7 +788,7 @@ unsafe impl<K: PartialEq, V> Linked<list::Links<Waiter<K, V>>> for Waiter<K, V> 
 // === impl Wait ===
 
 impl<K: PartialEq, V> Future for Wait<'_, K, V> {
-    type Output = WaitResult<Option<V>>;
+    type Output = WaitResult<V>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -837,8 +852,8 @@ impl FromBits<usize> for WaitState {
         match bits as u8 {
             bits if bits == Self::Start as u8 => Ok(Self::Start),
             bits if bits == Self::Waiting as u8 => Ok(Self::Waiting),
-            bits if bits == Self::Woken as u8 => Ok(Self::Woken),
-            _ => Err("invalid `WaitState`; expected one of Start, Waiting, or Woken"),
+            bits if bits == Self::Completed as u8 => Ok(Self::Completed),
+            _ => Err("invalid `WaitState`; expected one of Start, Waiting, or Completed"),
         }
     }
 
@@ -896,7 +911,7 @@ feature! {
     }
 
     impl<K: PartialEq, V> Future for WaitOwned<K, V> {
-        type Output = WaitResult<Option<V>>;
+        type Output = WaitResult<V>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
