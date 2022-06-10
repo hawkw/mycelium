@@ -4,12 +4,14 @@
 //! which stores a *single* waiting task, and a [`WaitQueue`], which
 //! stores a queue of waiting tasks.
 pub(crate) mod cell;
-pub mod dataqueue;
+pub mod map;
 pub mod queue;
 
 pub use self::cell::WaitCell;
 #[doc(inline)]
 pub use self::queue::WaitQueue;
+#[doc(inline)]
+pub use self::map::WaitMap;
 
 use core::task::Poll;
 

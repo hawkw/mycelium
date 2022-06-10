@@ -16,13 +16,13 @@ use cordyceps::{
 use core::{
     fmt::Debug,
     future::Future,
-    marker::{PhantomData, PhantomPinned},
+    marker::PhantomPinned,
     mem,
     pin::Pin,
     ptr::NonNull,
     task::{Context, Poll, Waker},
 };
-use mycelium_bitfield::{bitfield, FromBits};
+use mycelium_bitfield::FromBits;
 use mycelium_util::fmt;
 use mycelium_util::sync::{spin::MutexGuard, CachePadded};
 use pin_project::{pin_project, pinned_drop};
@@ -33,15 +33,15 @@ mod tests;
 /// A queue of [`Waker`]s implemented using an [intrusive doubly-linked
 /// list][ilist].
 ///
-/// A `DataWaitQueue` allows any number of tasks to [wait] asynchronously and be
+/// A `WaitMap` allows any number of tasks to [wait] asynchronously and be
 /// woken when some event occurs, either [individually][wake] in first-in,
 /// first-out order, or [all at once][wake_all]. This makes it a vital building
 /// block of runtime services (such as timers or I/O resources), where it may be
 /// used to wake a set of tasks when a timer completes or when a resource
 /// becomes available. It can be equally useful for implementing higher-level
-/// synchronization primitives: for example, a `DataWaitQueue` plus an
+/// synchronization primitives: for example, a `WaitMap` plus an
 /// [`UnsafeCell`] is essentially an entire implementation of a fair
-/// asynchronous mutex. Finally, a `DataWaitQueue` can be a useful synchronization
+/// asynchronous mutex. Finally, a `WaitMap` can be a useful synchronization
 /// primitive on its own: sometimes, you just need to have a bunch of tasks wait
 /// for something and then wake them all up.
 ///
@@ -51,15 +51,15 @@ mod tests;
 ///
 /// ```skip
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::DataWaitQueue};
+/// use maitake::{scheduler::Scheduler, wait::WaitMap};
 ///
 /// const TASKS: usize = 10;
 ///
 /// // In order to spawn tasks, we need a `Scheduler` instance.
 /// let scheduler = Scheduler::new();
 ///
-/// // Construct a new `DataWaitQueue`.
-/// let q = Arc::new(DataWaitQueue::new());
+/// // Construct a new `WaitMap`.
+/// let q = Arc::new(WaitMap::new());
 ///
 /// // Spawn some tasks that will wait on the queue.
 /// for _ in 0..TASKS {
@@ -97,15 +97,15 @@ mod tests;
 ///
 /// ```skip
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::DataWaitQueue};
+/// use maitake::{scheduler::Scheduler, wait::WaitMap};
 ///
 /// const TASKS: usize = 10;
 ///
 /// // In order to spawn tasks, we need a `Scheduler` instance.
 /// let scheduler = Scheduler::new();
 ///
-/// // Construct a new `DataWaitQueue`.
-/// let q = Arc::new(DataWaitQueue::new());
+/// // Construct a new `WaitMap`.
+/// let q = Arc::new(WaitMap::new());
 ///
 /// // Spawn some tasks that will wait on the queue.
 /// for _ in 0..TASKS {
@@ -159,15 +159,15 @@ mod tests;
 /// mutex are short enough that we still get pretty good performance despite it.
 ///
 /// [`Waker`]: core::task::Waker
-/// [wait]: DataWaitQueue::wait
-/// [wake]: DataWaitQueue::wake
-/// [wake_all]: DataWaitQueue::wake_all
+/// [wait]: WaitMap::wait
+/// [wake]: WaitMap::wake
+/// [wake_all]: WaitMap::wake_all
 /// [`UnsafeCell`]: core::cell::UnsafeCell
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
-pub struct DataWaitQueue<K: PartialEq, V> {
+pub struct WaitMap<K: PartialEq, V> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -190,7 +190,7 @@ pub struct DataWaitQueue<K: PartialEq, V> {
     queue: Mutex<List<Waiter<K, V>>>,
 }
 
-/// Future returned from [`DataWaitQueue::wait()`].
+/// Future returned from [`WaitMap::wait()`].
 ///
 /// This future is fused, so once it has completed, any future calls to poll
 /// will immediately return [`Poll::Ready`].
@@ -198,8 +198,8 @@ pub struct DataWaitQueue<K: PartialEq, V> {
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Wait<'a, K: PartialEq, V> {
-    /// The [`DataWaitQueue`] being waited on from.
-    queue: &'a DataWaitQueue<K, V>,
+    /// The [`WaitMap`] being waited on from.
+    queue: &'a WaitMap<K, V>,
 
     /// Entry in the wait queue linked list.
     #[pin]
@@ -218,7 +218,7 @@ struct Waiter<K: PartialEq, V> {
     node: UnsafeCell<Node<K, V>>,
 
     /// The future's state.
-    state: WaitStateBits,
+    state: WaitState,
 
     key: K,
     val: UnsafeCell<Option<V>>,
@@ -262,29 +262,13 @@ impl<K: PartialEq, V> Debug for Node<K, V> {
     }
 }
 
-bitfield! {
-    #[derive(Eq, PartialEq)]
-    struct QueueState<usize> {
-        /// The queue's state.
-        const STATE: State;
-    }
-}
-
-bitfield! {
-    #[derive(Eq, PartialEq)]
-    struct WaitStateBits<usize> {
-        /// The waiter's state.
-        const STATE: WaitState;
-    }
-}
-
-/// The state of a [`Waiter`] node in a [`DataWaitQueue`].
+/// The state of a [`Waiter`] node in a [`WaitMap`].
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 enum WaitState {
     /// The waiter has not yet been enqueued.
     ///
-    /// The number of times [`DataWaitQueue::wake_all`] has been called is stored
+    /// The number of times [`WaitMap::wake_all`] has been called is stored
     /// when the node is created, in order to determine whether it was woken by
     /// a stored wakeup when enqueueing.
     ///
@@ -348,10 +332,10 @@ enum Wakeup {
     Closed,
 }
 
-// === impl DataWaitQueue ===
+// === impl WaitMap ===
 
-impl<K: PartialEq, V> DataWaitQueue<K, V> {
-    /// Returns a new `DataWaitQueue`.
+impl<K: PartialEq, V> WaitMap<K, V> {
+    /// Returns a new `WaitMap`.
     #[must_use]
     #[cfg(not(loom))]
     pub const fn new() -> Self {
@@ -361,7 +345,7 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
         }
     }
 
-    /// Returns a new `DataWaitQueue`.
+    /// Returns a new `WaitMap`.
     #[must_use]
     #[cfg(loom)]
     pub fn new() -> Self {
@@ -373,10 +357,10 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
 
     /// Wake a certain task in the queue.
     ///
-    /// If the queue is empty, a wakeup is stored in the `DataWaitQueue`, and the
+    /// If the queue is empty, a wakeup is stored in the `WaitMap`, and the
     /// next call to [`wait`] will complete immediately.
     ///
-    /// [`wait`]: DataWaitQueue::wait
+    /// [`wait`]: WaitMap::wait
     #[inline]
     pub fn wake(&self, key: &K, val: V) -> WakeOutcome<V> {
         // snapshot the queue's current state.
@@ -386,7 +370,7 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
         // no waiting tasks, store the wakeup to be consumed by the next call to
         // `wait`.
         loop {
-            match state.get(QueueState::STATE) {
+            match state {
                 // if the queue is closed, bail.
                 State::Closed => return WakeOutcome::NoMatch(val),
                 // if there are waiting tasks, break out of the loop and wake one.
@@ -394,7 +378,7 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
                 _ => {}
             }
 
-            let next = state.with_state(State::Woken);
+            let next = State::Woken;
             // advance the state to `Woken`, and return (if we did so
             // successfully)
             match self.compare_exchange(state, next) {
@@ -440,8 +424,8 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
     /// permanently unavailable, the queue can be closed.
     pub fn close(&self) {
         let state = self.state.fetch_or(State::Closed.into_usize(), SeqCst);
-        let state = test_dbg!(QueueState::from_bits(state));
-        if state.get(QueueState::STATE) != State::Waiting {
+        let state = test_dbg!(State::from_bits(state));
+        if state != State::Waiting {
             return;
         }
 
@@ -458,25 +442,38 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
     /// Wait to be woken up by this queue.
     ///
     /// This returns a [`Wait`] future that will complete when the task is
-    /// woken by a call to [`wake`] or [`wake_all`], or when the `DataWaitQueue` is
+    /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitMap` is
     /// dropped.
     ///
     /// [`wake`]: Self::wake
     /// [`wake_all`]: Self::wake_all
     pub fn wait(&self, key: K) -> Wait<'_, K, V> {
-        Wait {
+        self.try_wait(key)
+            .expect("Keys should be unique in a `WaitMap`!")
+    }
+
+    pub fn try_wait(&self, key: K) -> Result<Wait<'_, K, V>, ()> {
+        // Check if key already exists
+        let mut mg = self.queue.lock();
+        let mut cursor = mg.cursor();
+        if cursor.find(|n| n.key == key).is_some() {
+            return Err(())
+        }
+        drop(mg);
+
+        Ok(Wait {
             queue: self,
             waiter: self.waiter(key),
-        }
+        })
     }
 
     /// Returns a [`Waiter`] entry in this queue.
     ///
     /// This is factored out into a separate function because it's used by both
-    /// [`DataWaitQueue::wait`] and [`DataWaitQueue::wait_owned`].
+    /// [`WaitMap::wait`] and [`WaitMap::wait_owned`].
     fn waiter(&self, key: K) -> Waiter<K, V> {
         // how many times has `wake_all` been called when this waiter is created?
-        let state = WaitStateBits::new().with(WaitStateBits::STATE, WaitState::Start);
+        let state = WaitState::Start;
         Waiter {
             state,
             node: UnsafeCell::new(Node {
@@ -490,31 +487,31 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
     }
 
     #[cfg_attr(test, track_caller)]
-    fn load(&self) -> QueueState {
+    fn load(&self) -> State {
         #[allow(clippy::let_and_return)]
-        let state = QueueState::from_bits(self.state.load(SeqCst));
+        let state = State::from_bits(self.state.load(SeqCst));
         test_trace!("state.load() = {state:?}");
         state
     }
 
     #[cfg_attr(test, track_caller)]
-    fn store(&self, state: QueueState) {
+    fn store(&self, state: State) {
         test_trace!("state.store({state:?}");
-        self.state.store(state.0, SeqCst);
+        self.state.store(state as usize, SeqCst);
     }
 
     #[cfg_attr(test, track_caller)]
     fn compare_exchange(
         &self,
-        current: QueueState,
-        new: QueueState,
-    ) -> Result<QueueState, QueueState> {
+        current: State,
+        new: State,
+    ) -> Result<State, State> {
         #[allow(clippy::let_and_return)]
         let res = self
             .state
-            .compare_exchange(current.0, new.0, SeqCst, SeqCst)
-            .map(QueueState::from_bits)
-            .map_err(QueueState::from_bits);
+            .compare_exchange(current as usize, new as usize, SeqCst, SeqCst)
+            .map(State::from_bits)
+            .map_err(State::from_bits);
         test_trace!("state.compare_exchange({current:?}, {new:?}) = {res:?}");
         res
     }
@@ -525,18 +522,18 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
         &self,
         key: &K,
         queue: &mut List<Waiter<K, V>>,
-        curr: QueueState,
+        curr: State,
     ) -> Option<NonNull<Waiter<K, V>>> {
-        let state = curr.get(QueueState::STATE);
+        let state = curr;
 
         // is the queue still in the `Waiting` state? it is possible that we
         // transitioned to a different state while locking the queue.
         if test_dbg!(state) != State::Waiting {
             // if there are no longer any queued tasks, try to store the
             // wakeup in the queue and bail.
-            if let Err(actual) = self.compare_exchange(curr, curr.with_state(State::Woken)) {
-                debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
-                self.store(actual.with_state(State::Woken));
+            if let Err(actual) = self.compare_exchange(curr, State::Woken) {
+                debug_assert!(actual != State::Waiting);
+                self.store(State::Woken);
             }
 
             return None;
@@ -548,7 +545,7 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
         // if we took the final waiter currently in the queue, transition to the
         // `Empty` state.
         if test_dbg!(queue.is_empty()) {
-            self.store(curr.with_state(State::Empty));
+            self.store(State::Empty);
         }
 
         opt_node
@@ -556,17 +553,17 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
 
     #[cold]
     #[inline(never)]
-    fn wake_next_locked(&self, queue: &mut List<Waiter<K, V>>, curr: QueueState) -> Option<Waker> {
-        let state = curr.get(QueueState::STATE);
+    fn wake_next_locked(&self, queue: &mut List<Waiter<K, V>>, curr: State) -> Option<Waker> {
+        let state = curr;
 
         // is the queue still in the `Waiting` state? it is possible that we
         // transitioned to a different state while locking the queue.
         if test_dbg!(state) != State::Waiting {
             // if there are no longer any queued tasks, try to store the
             // wakeup in the queue and bail.
-            if let Err(actual) = self.compare_exchange(curr, curr.with_state(State::Woken)) {
-                debug_assert!(actual.get(QueueState::STATE) != State::Waiting);
-                self.store(actual.with_state(State::Woken));
+            if let Err(actual) = self.compare_exchange(curr, State::Woken) {
+                debug_assert!(actual != State::Waiting);
+                self.store(State::Woken);
             }
 
             return None;
@@ -581,7 +578,7 @@ impl<K: PartialEq, V> DataWaitQueue<K, V> {
         // if we took the final waiter currently in the queue, transition to the
         // `Empty` state.
         if test_dbg!(queue.is_empty()) {
-            self.store(curr.with_state(State::Empty));
+            self.store(State::Empty);
         }
 
         Some(waker)
@@ -642,29 +639,26 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
     fn poll_wait(
         mut self: Pin<&mut Self>,
-        queue: &DataWaitQueue<K, V>,
+        queue: &WaitMap<K, V>,
         cx: &mut Context<'_>,
-    ) -> Poll<WaitResult<V>> {
+    ) -> Poll<WaitResult<Option<V>>> {
         test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
-        match test_dbg!(this.state.get(WaitStateBits::STATE)) {
+        match test_dbg!(this.state) {
             WaitState::Start => {
-                let mut queue_state = queue.load();
-
                 // can we consume a pending wakeup?
                 if queue
                     .compare_exchange(
-                        queue_state.with_state(State::Woken),
-                        queue_state.with_state(State::Empty),
+                        State::Woken,
+                        State::Empty,
                     )
                     .is_ok()
                 {
-                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                    *this.state = WaitState::Woken;
                     let val = this
                         .val
-                        .with_mut(|v| unsafe { (*v).take() })
-                        .expect("Woken tasks should have data!");
+                        .with_mut(|v| unsafe { (*v).take() });
 
                     return Poll::Ready(Ok(val));
                 }
@@ -673,16 +667,16 @@ impl<K: PartialEq, V> Waiter<K, V> {
                 test_trace!("poll_wait: locking...");
                 let mut waiters = queue.queue.lock();
                 test_trace!("poll_wait: -> locked");
-                queue_state = queue.load();
+                let mut queue_state = queue.load();
 
                 // transition the queue to the waiting state
                 'to_waiting: loop {
-                    match test_dbg!(queue_state.get(QueueState::STATE)) {
+                    match test_dbg!(queue_state) {
                         // the queue is `Empty`, transition to `Waiting`
                         State::Empty => {
                             match queue.compare_exchange(
                                 queue_state,
-                                queue_state.with_state(State::Waiting),
+                                State::Waiting,
                             ) {
                                 Ok(_) => break 'to_waiting,
                                 Err(actual) => queue_state = actual,
@@ -693,14 +687,13 @@ impl<K: PartialEq, V> Waiter<K, V> {
                         // the queue was woken, consume the wakeup.
                         State::Woken => {
                             match queue
-                                .compare_exchange(queue_state, queue_state.with_state(State::Empty))
+                                .compare_exchange(queue_state, State::Empty)
                             {
                                 Ok(_) => {
-                                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                                    *this.state = WaitState::Woken;
                                     let val = this
                                         .val
-                                        .with_mut(|v| unsafe { (*v).take() })
-                                        .expect("Woken tasks should have data!");
+                                        .with_mut(|v| unsafe { (*v).take() });
 
                                     return Poll::Ready(Ok(val));
                                 }
@@ -712,7 +705,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                 }
 
                 // enqueue the node
-                this.state.set(WaitStateBits::STATE, WaitState::Waiting);
+                *this.state = WaitState::Waiting;
                 this.node.as_mut().with_mut(|node| {
                     unsafe {
                         // safety: we may mutate the node because we are
@@ -739,16 +732,15 @@ impl<K: PartialEq, V> Waiter<K, V> {
                             Poll::Pending
                         }
                         Wakeup::One => {
-                            this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                            *this.state = WaitState::Woken;
                             let val = this
                                 .val
-                                .with_mut(|v| (*v).take())
-                                .expect("Woken tasks should have data!");
+                                .with_mut(|v| (*v).take());
 
                             Poll::Ready(Ok(val))
                         }
                         Wakeup::Closed => {
-                            this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                            *this.state = WaitState::Woken;
                             wait::closed()
                         }
                         Wakeup::Empty => unreachable!(),
@@ -758,8 +750,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
             WaitState::Woken => {
                 let val = this
                     .val
-                    .with_mut(|v| unsafe { (*v).take() })
-                    .expect("Woken tasks should have data!");
+                    .with_mut(|v| unsafe { (*v).take() });
 
                 Poll::Ready(Ok(val))
             }
@@ -770,13 +761,13 @@ impl<K: PartialEq, V> Waiter<K, V> {
     ///
     /// This is called from the `drop` implementation for the [`Wait`] and
     /// [`WaitOwned`] futures.
-    fn release(mut self: Pin<&mut Self>, queue: &DataWaitQueue<K, V>) {
+    fn release(mut self: Pin<&mut Self>, queue: &WaitMap<K, V>) {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
         test_trace!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
 
         // if we're not enqueued, we don't have to do anything else.
-        if state.get(WaitStateBits::STATE) != WaitState::Waiting {
+        if state != WaitState::Waiting {
             return;
         }
 
@@ -791,8 +782,8 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
         // if we removed the last waiter from the queue, transition the state to
         // `Empty`.
-        if test_dbg!(waiters.is_empty()) && state.get(QueueState::STATE) == State::Waiting {
-            queue.store(state.with_state(State::Empty));
+        if test_dbg!(waiters.is_empty()) && state == State::Waiting {
+            queue.store(State::Empty);
         }
 
         // if the node has an unconsumed wakeup, it must be assigned to the next
@@ -827,7 +818,7 @@ unsafe impl<K: PartialEq, V> Linked<list::Links<Waiter<K, V>>> for Waiter<K, V> 
 // === impl Wait ===
 
 impl<K: PartialEq, V> Future for Wait<'_, K, V> {
-    type Output = WaitResult<V>;
+    type Output = WaitResult<Option<V>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -843,11 +834,21 @@ impl<K: PartialEq, V> PinnedDrop for Wait<'_, K, V> {
     }
 }
 
-// === impl QueueState ===
+// === impl MapState ===
 
-impl QueueState {
-    fn with_state(self, state: State) -> Self {
-        self.with(Self::STATE, state)
+impl State {
+    fn from_bits(bits: usize) -> Self {
+        match bits as u8 {
+            bits if bits == Self::Empty as u8 => Self::Empty,
+            bits if bits == Self::Waiting as u8 => Self::Waiting,
+            bits if bits == Self::Woken as u8 => Self::Woken,
+            bits if bits == Self::Closed as u8 => Self::Closed,
+            _ => unsafe {
+                mycelium_util::unreachable_unchecked!(
+                    "all potential 2-bit patterns should be covered!"
+                )
+            },
+        }
     }
 }
 
@@ -907,10 +908,10 @@ feature! {
 
     use alloc::sync::Arc;
 
-    /// Future returned from [`DataWaitQueue::wait_owned()`].
+    /// Future returned from [`WaitMap::wait_owned()`].
     ///
     /// This is identical to the [`Wait`] future, except that it takes an
-    /// [`Arc`] reference to the [`DataWaitQueue`], allowing the returned future to
+    /// [`Arc`] reference to the [`WaitMap`], allowing the returned future to
     /// live for the `'static` lifetime.
     ///
     /// This future is fused, so once it has completed, any future calls to poll
@@ -918,24 +919,24 @@ feature! {
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
     pub struct WaitOwned<K: PartialEq, V> {
-        /// The `DataWaitQueue` being waited on.
-        queue: Arc<DataWaitQueue<K, V>>,
+        /// The `WaitMap` being waited on.
+        queue: Arc<WaitMap<K, V>>,
 
         /// Entry in the wait queue.
         #[pin]
         waiter: Waiter<K, V>,
     }
 
-    impl<K: PartialEq, V> DataWaitQueue<K, V> {
+    impl<K: PartialEq, V> WaitMap<K, V> {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
         /// This returns a [`WaitOwned`] future that will complete when the task is
-        /// woken by a call to [`wake`] or [`wake_all`], or when the `DataWaitQueue` is
+        /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitMap` is
         /// dropped.
         ///
         /// This is identical to the [`wait`] method, except that it takes a
-        /// [`Arc`] reference to the [`DataWaitQueue`], allowing the returned future to
+        /// [`Arc`] reference to the [`WaitMap`], allowing the returned future to
         /// live for the `'static` lifetime.
         ///
         /// [`wake`]: Self::wake
@@ -949,7 +950,7 @@ feature! {
     }
 
     impl<K: PartialEq, V> Future for WaitOwned<K, V> {
-        type Output = WaitResult<V>;
+        type Output = WaitResult<Option<V>>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
