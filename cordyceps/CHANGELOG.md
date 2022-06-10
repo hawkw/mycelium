@@ -1,6 +1,24 @@
+## cordyceps-v0.2.1 - (2022-06-09)
+
+[e3fe8f8](https://github.com/hawkw/mycelium/e3fe8f84212fa5c4ac5865d36a3cad9267c98c7c)...[dc2e638](https://github.com/hawkw/mycelium/dc2e638e056e183ac6eedfa7b821393f5447ba45)
+
+
+### Added
+
+- `DoubleEndedIterator` for `List` ([#207](https://github.com/hawkw/mycelium/issues/207)) ([a9c4f1b](https://github.com/hawkw/mycelium/a9c4f1b0697a9fcda834d550ef6f2bc34dc14a02))
+- Impl `ExactSizeIterator` for `List` ([#208](https://github.com/hawkw/mycelium/issues/208)) ([a5e6814](https://github.com/hawkw/mycelium/a5e681415d7a43f4facd5f9b89d9b36f220a3a71))
+- Add `list::IterMut` ([#208](https://github.com/hawkw/mycelium/issues/208)) ([f5d6ea1](https://github.com/hawkw/mycelium/f5d6ea1e65ef4f10dc256555be0ceafba7639cb0))
+- Impl `IntoIterator` for `List` ([#208](https://github.com/hawkw/mycelium/issues/208)) ([1e95127](https://github.com/hawkw/mycelium/1e9512700d9f4635eb5e704f48defb6e3cce448a))
+- Add `List::{front, back, front_mut, back_mut}` ([#211](https://github.com/hawkw/mycelium/issues/211)) ([f120827](https://github.com/hawkw/mycelium/f12082763bb18b4622b8de95a31b23432b904d69))
+- Add `List::drain_filter` ([#212](https://github.com/hawkw/mycelium/issues/212)) ([dc2e638](https://github.com/hawkw/mycelium/dc2e638e056e183ac6eedfa7b821393f5447ba45))
+
+### Fixed
+
+- Pin `list::IterMut` items ([#209](https://github.com/hawkw/mycelium/issues/209)) ([2e5a270](https://github.com/hawkw/mycelium/2e5a270235fc6a31efe61f61c128463b96ab02a2))
+
 ## cordyceps-v0.2.0 - (2022-06-07)
 
-[cae707e](https://github.com/hawkw/mycelium/cae707ea55a5a755e4eafbbce2cee1fd8751e212)...[ea7412a](https://github.com/hawkw/mycelium/ea7412ac2d7b31e98d8a69390db7a5b975569d90)
+[cae707e](https://github.com/hawkw/mycelium/cae707ea55a5a755e4eafbbce2cee1fd8751e212)...[e3fe8f8](https://github.com/hawkw/mycelium/e3fe8f84212fa5c4ac5865d36a3cad9267c98c7c)
 
 ### <a id = "cordyceps-v0.2.0-breaking"></a>Breaking Changes
 - **Fix use-after-free in `List` iterators ([#203](https://github.com/hawkw/mycelium/issues/203))** ([1eea1f2](1eea1f2290f0a858851a1fcb39d6d95c7b51cf37))<br />This changes the type signature of the `list::Iter` and `list::Cursor`
