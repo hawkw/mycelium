@@ -256,8 +256,10 @@ git add "${files[@]}"
 git diff --staged
 
 if [[ "$dry_run" ]]; then
-    git reset HEAD "${files[@]}"
+    git reset HEAD -- "${files[@]}"
+    git checkout HEAD -- "${files[@]}"
 fi
+
 echo ""
 
 if confirm "commit and push?"; then
@@ -265,6 +267,8 @@ if confirm "commit and push?"; then
     git_push=(git push -u origin)
 
     if [[ "$dry_run" ]]; then
+
+        echo ""
         echo "# " "${git_commit[@]}"
         echo "# " "${git_push[@]}"
     else
@@ -276,6 +280,8 @@ else
 fi
 
 if confirm "publish the crate?"; then
+
+    echo ""
     publish
 else
     echo "okay, exiting"
