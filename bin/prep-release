@@ -13,11 +13,11 @@ set -euo pipefail
 cd "$(dirname "$0")"/..
 
 err() {
-    echo -e "\e[31m\e[1merror:\e[0m $@" 1>&2;
+    echo -e "\e[31m\e[1merror:\e[0m" "$@" 1>&2;
 }
 
 note() {
-    echo -e "\e[31m\e[1mnote:\e[0m $@" 1>&2;
+    echo -e "\e[31m\e[1mnote:\e[0m" "$@" 1>&2;
 }
 
 status() {
@@ -79,8 +79,8 @@ fi
 mycoprefix='mycelium-';
 if [[ -d $crate ]]; then
     path="$crate"
-elif [[ -d "${crate#$mycoprefix}" ]]; then
-    path="${crate#$mycoprefix}"
+elif [[ -d "${crate#"$mycoprefix"}" ]]; then
+    path="${crate#"$mycoprefix"}"
 else
     err "unknown crate $crate"
     echo "$usage"
@@ -133,7 +133,7 @@ read -r -p "commit it? [Y/n] " input
 case "$input" in
     [yY][eE][sS]|[yY])
         git commit -sS -m "chore: prepare to release ${crate} ${version}"
-        git push -u origin $(git branch-name)
+        git push -u origin "$(git branch-name)"
         ;;
     [nN][oO]|[nN])
         echo "okay, exiting"
