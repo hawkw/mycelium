@@ -25,6 +25,23 @@ status() {
     printf "\e[32m\e[1m%${width}s\e[0m %s\n" "$1" "$2"
 }
 
+confirm() {
+    while read -r -p "$1 [Y/n] " input
+    do
+        case "$input" in
+            [yY][eE][sS]|[yY])
+                return 0
+                ;;
+            [nN][oO]|[nN])
+                return 1
+                ;;
+            *)
+                err "invalid input $input"
+                ;;
+        esac
+    done
+}
+
 for arg in "$@"
 do
     case "$arg" in
@@ -87,23 +104,14 @@ else
     exit 1
 fi
 
-if ! [[ -x "$(command -v git-cliff)" ]]; then
+if ! [[ -x "$(command -v git-cloff)" ]]; then
     err "missing git-cliff executable"
-    read -r -p "install it? [Y/n] " input
-
-    case "$input" in
-        [yY][eE][sS]|[yY])
-            cargo install git-cliff
-            ;;
-        [nN][oO]|[nN])
-            echo "okay, exiting"
-            exit 1
-            ;;
-        *)
-            err "invalid input $input"
-            exit 1
-            ;;
-    esac
+    if confirm "       install it?"; then
+        cargo install git-cliff
+    else
+        echo "okay, exiting"
+        exit 0
+    fi
 fi
 
 status "Updating" "$crate version to $version"
@@ -128,19 +136,9 @@ git diff --staged
 
 echo ""
 
-read -r -p "commit it? [Y/n] " input
-
-case "$input" in
-    [yY][eE][sS]|[yY])
-        git commit -sS -m "chore: prepare to release ${crate} ${version}"
-        git push -u origin "$(git branch-name)"
-        ;;
-    [nN][oO]|[nN])
-        echo "okay, exiting"
-        exit 0
-        ;;
-    *)
-        err "invalid input $input"
-        exit 1
-        ;;
-esac
+if confirm "commit and push?"; then
+    git commit -sS  -m "chore($crate): prepare to release $crate $version"
+    git push -u origin
+else
+    echo "okay, exiting"
+fi
