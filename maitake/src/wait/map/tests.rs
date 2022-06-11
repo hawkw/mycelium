@@ -166,169 +166,69 @@ mod loom {
         });
     }
 
-        #[test]
-        fn wake_two_concurrent() {
-            use alloc::sync::Arc;
+    #[test]
+    fn wake_two_concurrent() {
+        use alloc::sync::Arc;
 
-            loom::model(|| {
-                let q = Arc::new(WaitMap::new());
-                let wait1 = q.wait_owned(123);
-                let wait2 = q.wait_owned(456);
+        loom::model(|| {
+            let q = Arc::new(WaitMap::new());
+            let wait1 = q.wait_owned(123);
+            let wait2 = q.wait_owned(456);
 
-                let thread1 =
-                    thread::spawn(move || future::block_on(wait1).expect("wait1 must not fail"));
-                let thread2 =
-                    thread::spawn(move || future::block_on(wait2).expect("wait2 must not fail"));
+            let thread1 =
+                thread::spawn(move || future::block_on(wait1).expect("wait1 must not fail"));
+            let thread2 =
+                thread::spawn(move || future::block_on(wait2).expect("wait2 must not fail"));
 
-                let mut ct = 0;
+            let mut ct = 0;
 
-                let mut pass1 = false;
-                let mut pass2 = false;
+            let mut pass1 = false;
+            let mut pass2 = false;
 
-                while ct < 100 {
-                    if matches!(q.wake(&123, 321), WakeOutcome::Woke) {
-                        pass1 = true;
-                        break;
-                    }
-                    loom::thread::yield_now();
-                    ct += 1;
+            while ct < 100 {
+                if matches!(q.wake(&123, 321), WakeOutcome::Woke) {
+                    pass1 = true;
+                    break;
                 }
+                loom::thread::yield_now();
+                ct += 1;
+            }
 
-                while ct < 100 {
-                    if matches!(q.wake(&456, 654), WakeOutcome::Woke) {
-                        pass2 = true;
-                        break;
-                    }
-                    loom::thread::yield_now();
-                    ct += 1;
+            while ct < 100 {
+                if matches!(q.wake(&456, 654), WakeOutcome::Woke) {
+                    pass2 = true;
+                    break;
                 }
+                loom::thread::yield_now();
+                ct += 1;
+            }
 
-                assert!(pass1);
-                assert!(pass2);
+            assert!(pass1);
+            assert!(pass2);
 
-                thread1.join().unwrap();
-                thread2.join().unwrap();
-            });
-        }
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+        });
+    }
 
-    //     #[test]
-    //     fn wake_close() {
-    //         use alloc::sync::Arc;
+    #[test]
+    fn wake_close() {
+        use alloc::sync::Arc;
 
-    //         loom::model(|| {
-    //             let q = Arc::new(WaitMap::new());
-    //             let wait1 = q.wait_owned();
-    //             let wait2 = q.wait_owned();
+        loom::model(|| {
+            let q = Arc::new(WaitMap::<usize, usize>::new());
+            let wait1 = q.wait_owned(123);
+            let wait2 = q.wait_owned(456);
 
-    //             let thread1 =
-    //                 thread::spawn(move || future::block_on(wait1).expect_err("wait1 must be canceled"));
-    //             let thread2 =
-    //                 thread::spawn(move || future::block_on(wait2).expect_err("wait2 must be canceled"));
+            let thread1 =
+                thread::spawn(move || future::block_on(wait1).expect_err("wait1 must be canceled"));
+            let thread2 =
+                thread::spawn(move || future::block_on(wait2).expect_err("wait2 must be canceled"));
 
-    //             q.close();
+            q.close();
 
-    //             thread1.join().unwrap();
-    //             thread2.join().unwrap();
-    //         });
-    //     }
-
-    //     #[test]
-    //     fn wake_one_many() {
-    //         loom::model(|| {
-    //             let q = Arc::new(WaitMap::new());
-
-    //             fn thread(q: &Arc<WaitMap>) -> thread::JoinHandle<()> {
-    //                 let q = q.clone();
-    //                 thread::spawn(move || {
-    //                     future::block_on(async {
-    //                         q.wait().await.expect("queue must not be closed");
-    //                         q.wake();
-    //                     })
-    //                 })
-    //             }
-
-    //             q.wake();
-
-    //             let thread1 = thread(&q);
-    //             let thread2 = thread(&q);
-
-    //             thread1.join().unwrap();
-    //             thread2.join().unwrap();
-
-    //             future::block_on(async {
-    //                 q.wait().await.expect("queue must not be closed");
-    //             });
-    //         });
-    //     }
-
-    //     #[test]
-    //     fn wake_mixed() {
-    //         loom::model(|| {
-    //             let q = Arc::new(WaitMap::new());
-
-    //             let thread1 = thread::spawn({
-    //                 let q = q.clone();
-    //                 move || {
-    //                     q.wake_all();
-    //                 }
-    //             });
-
-    //             let thread2 = thread::spawn({
-    //                 let q = q.clone();
-    //                 move || {
-    //                     q.wake();
-    //                 }
-    //             });
-
-    //             let thread3 = thread::spawn(move || {
-    //                 future::block_on(q.wait()).unwrap();
-    //             });
-
-    //             thread1.join().unwrap();
-    //             thread2.join().unwrap();
-    //             thread3.join().unwrap();
-    //         });
-    //     }
-
-    //     #[test]
-    //     fn drop_wait_future() {
-    //         use futures_util::future::poll_fn;
-    //         use std::future::Future;
-    //         use std::task::Poll;
-
-    //         loom::model(|| {
-    //             let q = Arc::new(WaitMap::new());
-
-    //             let thread1 = thread::spawn({
-    //                 let q = q.clone();
-    //                 move || {
-    //                     let mut wait = Box::pin(q.wait());
-
-    //                     future::block_on(poll_fn(|cx| {
-    //                         if wait.as_mut().poll(cx).is_ready() {
-    //                             q.wake();
-    //                         }
-    //                         Poll::Ready(())
-    //                     }));
-    //                 }
-    //             });
-
-    //             let thread2 = thread::spawn({
-    //                 let q = q.clone();
-    //                 move || {
-    //                     future::block_on(async {
-    //                         q.wait().await.unwrap();
-    //                         // Trigger second notification
-    //                         q.wake();
-    //                         q.wait().await.unwrap();
-    //                     });
-    //                 }
-    //             });
-
-    //             q.wake();
-
-    //             thread1.join().unwrap();
-    //             thread2.join().unwrap();
-    //         });
-    //     }
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+        });
+    }
 }
