@@ -31,6 +31,7 @@ mod tests;
 
 /// An error indicating a failed wake
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum WaitError {
     Closed,
     AlreadyConsumed,
@@ -38,9 +39,6 @@ pub enum WaitError {
 }
 
 /// An indication of the result of a call to `wait()`
-// Note: We duplicate the WaitResult type as it currently only has "Closed"
-// as an error condition. We should merge these two on the next breaking
-// change.
 pub type WaitResult<T> = Result<T, WaitError>;
 
 const fn closed<T>() -> Poll<WaitResult<T>> {
@@ -221,6 +219,9 @@ struct Waiter<K: PartialEq, V> {
     state: WaitState,
 
     key: K,
+
+    // TODO(AJM): This could likely be added to `WaitState::DataReceived`
+    // at some point in the future.
     val: UnsafeCell<MaybeUninit<V>>,
 }
 
@@ -239,8 +240,9 @@ impl<K: PartialEq, V> Debug for Waiter<K, V> {
 impl<K: PartialEq, V> PinnedDrop for Waiter<K, V> {
     fn drop(self: Pin<&mut Self>) {
         // SAFETY: If we are being dropped, then we have already been removed
-        // from the map via Waiter::release(). This means we now have exclusive
-        // access to the node, and no lock is required.
+        // from the map via Waiter::release(), OR we never entered the map at
+        // all. This means we now have exclusive access to the node, and
+        // no lock is required.
         self.node.with_mut(|node| unsafe {
             let nr = &mut *node;
             match nr.waker {
@@ -431,6 +433,8 @@ impl<K: PartialEq, V> WaitMap<K, V> {
 
         if let Some(mut node) = self.node_match_locked(key, &mut *queue, state) {
             let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived);
+            // SAFETY: We are holding the lock (as `queue`), so it is safe to
+            // mutate the node
             unsafe {
                 node.as_mut().val.with_mut(|v| (*v).write(val));
             }
@@ -473,7 +477,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// woken by a call to [`wake`] with a matching `key`, or when the `WaitMap`
     /// is dropped.
     ///
-    /// NOTE: `key`s must be unique. If the given key already exists in the
+    /// **Note**: `key`s must be unique. If the given key already exists in the
     /// `WaitMap`, this function will panic. See [`try_wait`] for a non-
     /// panicking alternative.
     ///
@@ -499,12 +503,12 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// [`wake`]: Self::wake
     pub fn try_wait(&self, key: K) -> Result<Wait<'_, K, V>, K> {
         // Check if key already exists
-        let mut mg = self.queue.lock();
-        let mut cursor = mg.cursor();
+        let mut guard = self.queue.lock();
+        let mut cursor = guard.cursor();
         if cursor.find(|n| n.key == key).is_some() {
             return Err(key);
         }
-        drop(mg);
+        drop(guard);
 
         Ok(Wait {
             queue: self,
@@ -588,9 +592,16 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 }
 
+/// The result of an attempted wake operation
 pub enum WakeOutcome<V> {
+    /// The `Waiter` was successfully woken, and the data was provided.
     Woke,
+
+    /// No `Waiter` matching the given key was found in the queue.
     NoMatch(V),
+
+    /// The queue was already closed when the wake was attempted,
+    /// and the data was not provided to any waiter.
     Closed(V),
 }
 
@@ -715,11 +726,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
                             notified(val)
                         }
-                        Wakeup::Retreived => {
-                            // TODO: Should I change the result type to also return an error
-                            // for this case? Right now error can only be `Closed`
-                            consumed()
-                        }
+                        Wakeup::Retreived => consumed(),
 
                         Wakeup::Closed => {
                             *this.state = WaitState::Completed;

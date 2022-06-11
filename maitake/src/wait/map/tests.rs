@@ -1,5 +1,4 @@
 use super::*;
-use futures::{future::poll_fn, pin_mut, select_biased, FutureExt};
 
 #[cfg(all(not(loom), feature = "alloc"))]
 mod alloc {
@@ -7,6 +6,7 @@ mod alloc {
     use crate::loom::sync::Arc;
     use crate::scheduler::Scheduler;
     use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use futures::{future::poll_fn, pin_mut, select_biased, FutureExt};
 
     #[test]
     fn close() {
@@ -22,14 +22,14 @@ mod alloc {
             let wait = q.wait_owned(i);
             scheduler.spawn(async move {
                 wait.await.expect_err("dropping the queue must close it");
-                COMPLETED.fetch_add(1, Ordering::SeqCst);
+                COMPLETED.fetch_add(1, Ordering::Relaxed);
             });
         }
 
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, 0);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
         assert!(!tick.has_remaining);
 
         q.close();
@@ -37,7 +37,7 @@ mod alloc {
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, TASKS);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), TASKS);
         assert!(!tick.has_remaining);
     }
 
@@ -55,7 +55,7 @@ mod alloc {
             let q = q.clone();
             scheduler.spawn(async move {
                 let val = q.wait(i).await.unwrap();
-                COMPLETED.fetch_add(1, Ordering::SeqCst);
+                COMPLETED.fetch_add(1, Ordering::Relaxed);
 
                 assert_eq!(val, 100 + i);
 
@@ -73,7 +73,7 @@ mod alloc {
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, 0);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
         assert!(!tick.has_remaining);
 
         q.wake(&0, 100);
@@ -81,7 +81,7 @@ mod alloc {
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, TASKS);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), TASKS);
         assert!(!tick.has_remaining);
     }
 
@@ -99,7 +99,7 @@ mod alloc {
 
     impl Drop for CountDropKey {
         fn drop(&mut self) {
-            self.cnt.fetch_add(1, Ordering::SeqCst);
+            self.cnt.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -110,7 +110,7 @@ mod alloc {
 
     impl Drop for CountDropVal {
         fn drop(&mut self) {
-            self.cnt.fetch_add(1, Ordering::SeqCst);
+            self.cnt.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -135,16 +135,16 @@ mod alloc {
                 })
                 .await
                 .unwrap_err();
-                COMPLETED.fetch_add(1, Ordering::SeqCst);
+                COMPLETED.fetch_add(1, Ordering::Relaxed);
             });
         }
 
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, 0);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), 0);
         assert!(!tick.has_remaining);
 
         q.close();
@@ -152,9 +152,9 @@ mod alloc {
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, TASKS);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), TASKS);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), TASKS);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), TASKS);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), 0);
         assert!(!tick.has_remaining);
     }
 
@@ -174,24 +174,22 @@ mod alloc {
         for i in 0..TASKS {
             let q = q.clone();
             scheduler.spawn(async move {
-                // TODO(AJM): I need to select!() against a one shot channel or something
-                // for the "wait hanging" test
                 q.wait(CountDropKey {
                     idx: i,
                     cnt: &KEY_DROPS,
                 })
                 .await
                 .unwrap();
-                COMPLETED.fetch_add(1, Ordering::SeqCst);
+                COMPLETED.fetch_add(1, Ordering::Relaxed);
             });
         }
 
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, 0);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), 0);
         assert!(!tick.has_remaining);
 
         for i in 0..TASKS {
@@ -204,16 +202,16 @@ mod alloc {
             );
         }
 
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), 0);
 
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, TASKS);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), TASKS);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), TASKS);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), TASKS);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), TASKS);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), TASKS);
         assert!(!tick.has_remaining);
     }
 
@@ -234,7 +232,7 @@ mod alloc {
         for i in 0..TASKS {
             let q = q.clone();
             scheduler.spawn(async move {
-                let mut bail_fut = poll_fn(|_| match BAIL.load(Ordering::SeqCst) {
+                let mut bail_fut = poll_fn(|_| match BAIL.load(Ordering::Relaxed) {
                     false => Poll::Pending,
                     true => Poll::Ready(()),
                 })
@@ -253,7 +251,7 @@ mod alloc {
                 select_biased! {
                     _a = bail_fut => {},
                     _b = wait_fut => {
-                        COMPLETED.fetch_add(1, Ordering::SeqCst);
+                        COMPLETED.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             });
@@ -262,9 +260,9 @@ mod alloc {
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, 0);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), 0);
         assert!(!tick.has_remaining);
 
         for i in 0..TASKS {
@@ -277,17 +275,17 @@ mod alloc {
             );
         }
 
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
-        BAIL.store(true, Ordering::SeqCst);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), 0);
+        BAIL.store(true, Ordering::Relaxed);
 
         let tick = scheduler.tick();
 
         assert_eq!(tick.completed, TASKS);
-        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), TASKS);
-        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), TASKS);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::Relaxed), TASKS);
+        assert_eq!(VAL_DROPS.load(Ordering::Relaxed), TASKS);
         assert!(!tick.has_remaining);
     }
 }
