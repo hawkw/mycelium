@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-usage="Prepares to release a mycelium crate.
+usage="Releases a mycelium crate.
 
 USAGE:
     $(basename "$0") [FLAGS] <CRATE> <VERSION>
@@ -137,9 +137,11 @@ if [[ "$is_uncommitted" ]]; then
     exit 1
 fi
 
-status "Updating" "$crate version to $version"
+curr_version=$(cargo pkgid -p "$crate" | sed -n 's/.*#\(.*\)/\1/p')
+
+status "Updating" "$crate from $curr_version to $version"
 sed -i \
-    "/\[package\]/,/\[.*dependencies\]/{s/^version = \".*\"/version = \"$version\"/}" \
+    "/\[package\]/,/\[.*dependencies\]/{s/^version = \"$curr_version\"/version = \"$version\"/}" \
     "$cargo_toml"
 
 status "Updating" "changelog for $crate $version"
