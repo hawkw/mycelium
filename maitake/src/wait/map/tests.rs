@@ -1,17 +1,12 @@
 use super::*;
-use futures::{
-    future::poll_fn,
-    select_biased,
-    FutureExt,
-    pin_mut,
-};
+use futures::{future::poll_fn, pin_mut, select_biased, FutureExt};
 
 #[cfg(all(not(loom), feature = "alloc"))]
 mod alloc {
     use super::*;
     use crate::loom::sync::Arc;
     use crate::scheduler::Scheduler;
-    use core::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
+    use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[test]
     fn close() {
@@ -239,17 +234,18 @@ mod alloc {
         for i in 0..TASKS {
             let q = q.clone();
             scheduler.spawn(async move {
-                let mut bail_fut = poll_fn(|_| {
-                    match BAIL.load(Ordering::SeqCst) {
-                        false => Poll::Pending,
-                        true => Poll::Ready(()),
-                    }
-                }).fuse();
+                let mut bail_fut = poll_fn(|_| match BAIL.load(Ordering::SeqCst) {
+                    false => Poll::Pending,
+                    true => Poll::Ready(()),
+                })
+                .fuse();
 
-                let wait_fut = q.wait(CountDropKey {
-                    idx: i,
-                    cnt: &KEY_DROPS,
-                }).fuse();
+                let wait_fut = q
+                    .wait(CountDropKey {
+                        idx: i,
+                        cnt: &KEY_DROPS,
+                    })
+                    .fuse();
                 pin_mut!(wait_fut);
 
                 // NOTE: `select_baised is used specifically to ensure the bail
