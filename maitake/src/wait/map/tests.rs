@@ -128,7 +128,12 @@ mod alloc {
         for i in 0..TASKS {
             let q = q.clone();
             scheduler.spawn(async move {
-                q.wait(CountDropKey { idx: i, cnt: &KEY_DROPS }).await.unwrap_err();
+                q.wait(CountDropKey {
+                    idx: i,
+                    cnt: &KEY_DROPS,
+                })
+                .await
+                .unwrap_err();
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             });
         }
@@ -170,7 +175,12 @@ mod alloc {
             scheduler.spawn(async move {
                 // TODO(AJM): I need to select!() against a one shot channel or something
                 // for the "wait hanging" test
-                q.wait(CountDropKey { idx: i, cnt: &KEY_DROPS }).await.unwrap();
+                q.wait(CountDropKey {
+                    idx: i,
+                    cnt: &KEY_DROPS,
+                })
+                .await
+                .unwrap();
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             });
         }
@@ -184,7 +194,13 @@ mod alloc {
         assert!(!tick.has_remaining);
 
         for i in 0..TASKS {
-            q.wake(&CountDropKey { idx: i, cnt: &DONT_CARE }, CountDropVal { cnt: &VAL_DROPS });
+            q.wake(
+                &CountDropKey {
+                    idx: i,
+                    cnt: &DONT_CARE,
+                },
+                CountDropVal { cnt: &VAL_DROPS },
+            );
         }
 
         assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);

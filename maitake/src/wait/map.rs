@@ -189,6 +189,7 @@ impl<K: PartialEq, V> Debug for WaitMap<K, V> {
             .finish()
     }
 }
+
 /// Future returned from [`WaitMap::wait()`].
 ///
 /// This future is fused, so once it has completed, any future calls to poll
@@ -245,19 +246,19 @@ impl<K: PartialEq, V> PinnedDrop for Waiter<K, V> {
             match nr.waker {
                 Wakeup::Empty | Wakeup::Retreived | Wakeup::Closed => {
                     // We either have no data, or it's already gone. Nothing to do here.
-                },
+                }
                 Wakeup::Waiting(_) => {
                     // TODO: If the Waiter is being dropped - then it's probably pretty
                     // certain that the task it comes from doesn't really care anymore.
                     // I see no need to wake it, so this is also a no-op
-                },
+                }
                 Wakeup::DataReceived => {
                     // Oh what a shame! The data arrived, but no one ever came to pick
                     // it up. Let's make sure it gets properly dropped.
                     self.val.with_mut(|val| {
                         core::ptr::drop_in_place((*val).as_mut_ptr());
                     });
-                },
+                }
             }
         });
     }
@@ -724,9 +725,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                             *this.state = WaitState::Completed;
                             closed()
                         }
-                        Wakeup::Empty => {
-                            never_added()
-                        }
+                        Wakeup::Empty => never_added(),
                     }
                 })
             }
