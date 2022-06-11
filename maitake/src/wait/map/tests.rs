@@ -1,11 +1,17 @@
 use super::*;
+use futures::{
+    future::poll_fn,
+    select_biased,
+    FutureExt,
+    pin_mut,
+};
 
 #[cfg(all(not(loom), feature = "alloc"))]
 mod alloc {
     use super::*;
     use crate::loom::sync::Arc;
     use crate::scheduler::Scheduler;
-    use core::sync::atomic::{AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 
     #[test]
     fn close() {
@@ -211,6 +217,79 @@ mod alloc {
 
         assert_eq!(tick.completed, TASKS);
         assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), TASKS);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), TASKS);
+        assert!(!tick.has_remaining);
+    }
+
+    #[test]
+    fn drop_wake_bailed() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+        static KEY_DROPS: AtomicUsize = AtomicUsize::new(0);
+        static VAL_DROPS: AtomicUsize = AtomicUsize::new(0);
+        static DONT_CARE: AtomicUsize = AtomicUsize::new(0);
+        static BAIL: AtomicBool = AtomicBool::new(false);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitMap::<CountDropKey, CountDropVal>::new());
+
+        const TASKS: usize = 10;
+
+        for i in 0..TASKS {
+            let q = q.clone();
+            scheduler.spawn(async move {
+                let mut bail_fut = poll_fn(|_| {
+                    match BAIL.load(Ordering::SeqCst) {
+                        false => Poll::Pending,
+                        true => Poll::Ready(()),
+                    }
+                }).fuse();
+
+                let wait_fut = q.wait(CountDropKey {
+                    idx: i,
+                    cnt: &KEY_DROPS,
+                }).fuse();
+                pin_mut!(wait_fut);
+
+                // NOTE: `select_baised is used specifically to ensure the bail
+                // future is processed first.
+                select_biased! {
+                    _a = bail_fut => {},
+                    _b = wait_fut => {
+                        COMPLETED.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            });
+        }
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
+
+        for i in 0..TASKS {
+            q.wake(
+                &CountDropKey {
+                    idx: i,
+                    cnt: &DONT_CARE,
+                },
+                CountDropVal { cnt: &VAL_DROPS },
+            );
+        }
+
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        BAIL.store(true, Ordering::SeqCst);
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, TASKS);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
         assert_eq!(KEY_DROPS.load(Ordering::SeqCst), TASKS);
         assert_eq!(VAL_DROPS.load(Ordering::SeqCst), TASKS);
         assert!(!tick.has_remaining);
