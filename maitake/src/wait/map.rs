@@ -215,7 +215,7 @@ pub struct Wait<'a, K: PartialEq, V> {
 
 /// A waiter node which may be linked into a wait queue.
 #[repr(C)]
-#[pin_project]
+#[pin_project(PinnedDrop)]
 struct Waiter<K: PartialEq, V> {
     /// The intrusive linked list node.
     ///
@@ -239,6 +239,35 @@ impl<K: PartialEq, V> Debug for Waiter<K, V> {
             .field("key", &fmt::display(core::any::type_name::<K>()))
             .field("val", &fmt::display(core::any::type_name::<V>()))
             .finish()
+    }
+}
+
+#[pinned_drop]
+impl<K: PartialEq, V> PinnedDrop for Waiter<K, V> {
+    fn drop(self: Pin<&mut Self>) {
+        // SAFETY: If we are being dropped, then we have already been removed
+        // from the map via Waiter::release(). This means we now have exclusive
+        // access to the node, and no lock is required.
+        self.node.with_mut(|node| unsafe {
+            let nr = &mut *node;
+            match nr.waker {
+                Wakeup::Empty | Wakeup::Retreived | Wakeup::Closed => {
+                    // We either have no data, or it's already gone. Nothing to do here.
+                },
+                Wakeup::Waiting(_) => {
+                    // TODO: If the Waiter is being dropped - then it's probably pretty
+                    // certain that the task it comes from doesn't really care anymore.
+                    // I see no need to wake it, so this is also a no-op
+                },
+                Wakeup::DataReceived => {
+                    // Oh what a shame! The data arrived, but no one ever came to pick
+                    // it up. Let's make sure it gets properly dropped.
+                    self.val.with_mut(|val| {
+                        core::ptr::drop_in_place((*val).as_mut_ptr());
+                    });
+                },
+            }
+        });
     }
 }
 
@@ -448,11 +477,16 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// Wait to be woken up by this queue.
     ///
     /// This returns a [`Wait`] future that will complete when the task is
-    /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitMap` is
-    /// dropped.
+    /// woken by a call to [`wake`] with a matching `key`, or when the `WaitMap`
+    /// is dropped.
     ///
     /// [`wake`]: Self::wake
-    /// [`wake_all`]: Self::wake_all
+    ///
+    /// # ⚠️ Mycelium Proposition 65 Warning ⚠️
+    ///
+    /// This `Future` can expose you to behavior such as "Use After Frees" which
+    /// is known to the project of Mycelium to cause undefined behavior or other
+    /// harms when forgotten via `mem::forget()`.
     pub fn wait(&self, key: K) -> Wait<'_, K, V> {
         self.try_wait(key)
             .expect("Keys should be unique in a `WaitMap`!")
@@ -546,32 +580,6 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         }
 
         opt_node
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn wake_next_locked(&self, queue: &mut List<Waiter<K, V>>, curr: State) -> Option<Waker> {
-        let state = curr;
-
-        if test_dbg!(state) != State::Waiting {
-            // If we are not waiting, we are either empty or closed.
-            // Not much to do.
-            return None;
-        }
-
-        // otherwise, we have to dequeue a task and wake it.
-        let node = queue
-            .pop_back()
-            .expect("if we are in the Waiting state, there must be waiters in the queue");
-        let waker = Waiter::<K, V>::wake(node, queue, Wakeup::DataReceived);
-
-        // if we took the final waiter currently in the queue, transition to the
-        // `Empty` state.
-        if test_dbg!(queue.is_empty()) {
-            self.store(State::Empty);
-        }
-
-        Some(waker)
     }
 }
 
@@ -753,17 +761,6 @@ impl<K: PartialEq, V> Waiter<K, V> {
         // `Empty`.
         if test_dbg!(waiters.is_empty()) && state == State::Waiting {
             queue.store(State::Empty);
-        }
-
-        // if the node has an unconsumed wakeup, it must be assigned to the next
-        // node in the queue.
-        if Waiter::<K, V>::with_node(ptr, &mut waiters, |node| {
-            matches!(&node.waker, Wakeup::DataReceived)
-        }) {
-            if let Some(waker) = queue.wake_next_locked(&mut waiters, state) {
-                drop(waiters);
-                waker.wake()
-            }
         }
     }
 }

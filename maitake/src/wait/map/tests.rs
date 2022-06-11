@@ -83,6 +83,122 @@ mod alloc {
         assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
         assert!(!tick.has_remaining);
     }
+
+    #[derive(Debug)]
+    struct CountDropKey {
+        idx: usize,
+        cnt: &'static AtomicUsize,
+    }
+
+    impl PartialEq for CountDropKey {
+        fn eq(&self, other: &Self) -> bool {
+            self.idx.eq(&other.idx)
+        }
+    }
+
+    impl Drop for CountDropKey {
+        fn drop(&mut self) {
+            self.cnt.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[derive(Debug)]
+    struct CountDropVal {
+        cnt: &'static AtomicUsize,
+    }
+
+    impl Drop for CountDropVal {
+        fn drop(&mut self) {
+            self.cnt.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn drop_no_wake() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+        static KEY_DROPS: AtomicUsize = AtomicUsize::new(0);
+        static VAL_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitMap::<CountDropKey, CountDropVal>::new());
+
+        const TASKS: usize = 10;
+
+        for i in 0..TASKS {
+            let q = q.clone();
+            scheduler.spawn(async move {
+                q.wait(CountDropKey { idx: i, cnt: &KEY_DROPS }).await.unwrap_err();
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
+
+        q.close();
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, TASKS);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), TASKS);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
+    }
+
+    #[test]
+    fn drop_wake_completed() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+        static KEY_DROPS: AtomicUsize = AtomicUsize::new(0);
+        static VAL_DROPS: AtomicUsize = AtomicUsize::new(0);
+        static DONT_CARE: AtomicUsize = AtomicUsize::new(0);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitMap::<CountDropKey, CountDropVal>::new());
+
+        const TASKS: usize = 10;
+
+        for i in 0..TASKS {
+            let q = q.clone();
+            scheduler.spawn(async move {
+                // TODO(AJM): I need to select!() against a one shot channel or something
+                // for the "wait hanging" test
+                q.wait(CountDropKey { idx: i, cnt: &KEY_DROPS }).await.unwrap();
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+        assert!(!tick.has_remaining);
+
+        for i in 0..TASKS {
+            q.wake(&CountDropKey { idx: i, cnt: &DONT_CARE }, CountDropVal { cnt: &VAL_DROPS });
+        }
+
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), 0);
+
+        let tick = scheduler.tick();
+
+        assert_eq!(tick.completed, TASKS);
+        assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
+        assert_eq!(KEY_DROPS.load(Ordering::SeqCst), TASKS);
+        assert_eq!(VAL_DROPS.load(Ordering::SeqCst), TASKS);
+        assert!(!tick.has_remaining);
+    }
 }
 
 #[cfg(loom)]
@@ -106,7 +222,7 @@ mod loom {
             let mut ct = 0;
             let mut pass = false;
 
-            while ct < 100 {
+            while ct < 5 {
                 let result = q.wake(&123, 666);
                 if matches!(result, WakeOutcome::Woke) {
                     pass = true;
@@ -135,7 +251,7 @@ mod loom {
                 let mut pass1 = false;
                 let mut pass2 = false;
 
-                while ct < 100 {
+                while ct < 5 {
                     if matches!(q2.wake(&123, 321), WakeOutcome::Woke) {
                         pass1 = true;
                         break;
@@ -144,7 +260,7 @@ mod loom {
                     ct += 1;
                 }
 
-                while ct < 100 {
+                while ct < 5 {
                     if matches!(q2.wake(&456, 654), WakeOutcome::Woke) {
                         pass2 = true;
                         break;
@@ -185,7 +301,7 @@ mod loom {
             let mut pass1 = false;
             let mut pass2 = false;
 
-            while ct < 100 {
+            while ct < 5 {
                 if matches!(q.wake(&123, 321), WakeOutcome::Woke) {
                     pass1 = true;
                     break;
@@ -194,7 +310,7 @@ mod loom {
                 ct += 1;
             }
 
-            while ct < 100 {
+            while ct < 5 {
                 if matches!(q.wake(&456, 654), WakeOutcome::Woke) {
                     pass2 = true;
                     break;
