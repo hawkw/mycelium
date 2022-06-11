@@ -43,6 +43,116 @@ confirm() {
     done
 }
 
+verify() {
+    status "Verifying" "if $crate v$version can be released"
+
+    if ! cargo --list | grep -q "hack"; then
+        err "missing cargo-hack executable"
+        if confirm "      install it?"; then
+            cargo install cargo-hack
+        else
+            echo "okay, exiting"
+            exit 1
+        fi
+    fi
+
+    status "Checking" "if $crate builds across feature combinations"
+
+    local cargo_hack=(cargo hack -p "$crate" --feature-powerset --no-dev-deps)
+
+    if [[ "$verbose" ]]; then
+        cargo_hack+=("$verbose" check)
+    else
+        cargo_hack+=(check --quiet)
+    fi
+
+    "${cargo_hack[@]}"
+    local cargo_hack_status="$?"
+
+    if [[ "$cargo_hack_status" != "0" ]] ; then
+        err "$crate did not build with all feature combinations (cargo hack exited with $cargo_hack_status)!"
+        exit 1
+    fi
+
+
+    if git tag -l | grep -Fxq "$tag" ; then
+        err "git tag \`$tag\` already exists"
+        exit 1
+    fi
+}
+
+update_version() {
+    # check the current version of the crate
+    local curr_version
+    curr_version=$(cargo pkgid -p "$crate" | sed -n 's/.*#\(.*\)/\1/p')
+    if [[ "$curr_version" == "$version" ]]; then
+        err "crate $crate is already at version $version!"
+        if ! confirm "       are you sure you want to release $version?"; then
+            echo "okay, exiting"
+            exit 0
+        fi
+    else
+        status "Updating" "$crate from $curr_version to $version"
+        sed -i \
+            "/\[package\]/,/\[.*dependencies\]/{s/^version = \"$curr_version\"/version = \"$version\"/}" \
+            "$cargo_toml"
+    fi
+}
+
+update_changelog() {
+    if ! [[ -x "$(command -v git-cliff)" ]]; then
+        err "missing git-cliff executable"
+        if confirm "       install it?"; then
+            cargo install git-cliff
+        else
+            echo "okay, exiting"
+            exit 0
+        fi
+    fi
+
+    status "Updating" "changelog for $crate $version"
+
+    local git_cliff=(
+        git-cliff
+        --include-path "${path}/**"
+        --output "$changelog"
+        --config cliff.toml
+        --tag "$tag"
+    )
+
+    if [[ "$verbose" ]]; then
+        git_cliff+=("$verbose")
+    fi
+
+    "${git_cliff[@]}"
+}
+
+release() {
+    status "Releasing" "$crate v$version"
+    local cargo_package=(cargo package)
+    local cargo_publish=(cargo publish)
+
+    if [[ "$verbose" ]]; then
+        cargo_package+=("$verbose")
+        cargo_publish+=("$verbose")
+    fi
+
+    if [[ "$dry_run" ]]; then
+        cargo_publish+=("$dry_run")
+    fi
+
+    "${cargo_package[@]}"
+    "${cargo_publish[@]}"
+
+    status "Tagging" "$TAG"
+    local git_tag=(git tag "$TAG" "&&" git push --tags)
+    if [[ "$dry_run" ]]; then
+        echo "# " "${git_tag[@]}"
+    else
+        "${git_tag[@]}"
+    fi
+}
+
 verbose=''
 dry_run=''
 
@@ -110,16 +220,6 @@ else
     exit 1
 fi
 
-if ! [[ -x "$(command -v git-cliff)" ]]; then
-    err "missing git-cliff executable"
-    if confirm "       install it?"; then
-        cargo install git-cliff
-    else
-        echo "okay, exiting"
-        exit 0
-    fi
-fi
-
 cargo_toml="${path}/Cargo.toml"
 changelog="${path}/CHANGELOG.md"
 
@@ -137,22 +237,11 @@ if [[ "$is_uncommitted" ]]; then
     exit 1
 fi
 
-curr_version=$(cargo pkgid -p "$crate" | sed -n 's/.*#\(.*\)/\1/p')
+verify
+update_version
+update_changelog
 
-status "Updating" "$crate from $curr_version to $version"
-sed -i \
-    "/\[package\]/,/\[.*dependencies\]/{s/^version = \"$curr_version\"/version = \"$version\"/}" \
-    "$cargo_toml"
-
-status "Updating" "changelog for $crate $version"
-
-git-cliff \
-    --include-path "${path}/**" \
-    -o "$changelog" \
-     --config cliff.toml \
-     --tag "$tag"
-
-staged="$(git diff-index --cached HEAD -- | rev | cut -d' ' -f 1 | rev)"
+staged="$(git diff-index --cached --name-only HEAD --)"
 if [[ "$staged" ]]; then
     err "skipping commit, as it would include the following unrelated staged files:"
     echo "$staged"
@@ -165,11 +254,28 @@ echo ""
 git add "${files[@]}"
 git diff --staged
 
+if [[ "$dry_run" ]]; then
+    git reset HEAD "${files[@]}"
+fi
 echo ""
 
 if confirm "commit and push?"; then
-    git commit -sS -m "chore($crate): prepare to release $crate $version"
-    git push -u origin
+    git_commit=(git commit -sS -m "chore($crate): prepare to release $crate $version")
+    git_push=(git push -u origin)
+
+    if [[ "$dry_run" ]]; then
+        echo "# " "${git_commit[@]}"
+        echo "# " "${git_push[@]}"
+    else
+        "${git_commit[@]}"
+        "${git_push[@]}"
+    fi
+else
+    echo "okay, exiting"
+fi
+
+if confirm "publish the crate?"; then
+    release
 else
     echo "okay, exiting"
 fi
