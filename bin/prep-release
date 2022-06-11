@@ -127,8 +127,9 @@ update_changelog() {
     "${git_cliff[@]}"
 }
 
-release() {
-    status "Releasing" "$crate v$version"
+publish() {
+    status "Publishing" "$crate v$version"
+    cd "$path"
     local cargo_package=(cargo package)
     local cargo_publish=(cargo publish)
 
@@ -275,7 +276,7 @@ else
 fi
 
 if confirm "publish the crate?"; then
-    release
+    publish
 else
     echo "okay, exiting"
 fi
