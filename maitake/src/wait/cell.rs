@@ -56,7 +56,7 @@ impl WaitCell {
 }
 
 impl WaitCell {
-    pub fn poll_wait(&self, waker: &Waker) -> Poll<WaitResult> {
+    pub fn poll_wait(&self, waker: &Waker) -> Poll<WaitResult<()>> {
         tracing::trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
@@ -68,7 +68,7 @@ impl WaitCell {
             Err(actual) if test_dbg!(actual.is(State::NOTIFYING)) => {
                 waker.wake_by_ref();
                 crate::loom::hint::spin_loop();
-                return wait::notified();
+                return wait::notified(());
             }
 
             Err(actual) => {
@@ -114,7 +114,7 @@ impl WaitCell {
                 if test_dbg!(state.is(State::CLOSED)) {
                     wait::closed()
                 } else {
-                    wait::notified()
+                    wait::notified(())
                 }
             }
         }

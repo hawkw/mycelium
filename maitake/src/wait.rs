@@ -4,9 +4,12 @@
 //! which stores a *single* waiting task, and a [`WaitQueue`], which
 //! stores a queue of waiting tasks.
 pub(crate) mod cell;
+pub mod map;
 pub mod queue;
 
 pub use self::cell::WaitCell;
+#[doc(inline)]
+pub use self::map::WaitMap;
 #[doc(inline)]
 pub use self::queue::WaitQueue;
 
@@ -17,14 +20,14 @@ use core::task::Poll;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Closed(());
 
-pub type WaitResult = Result<(), Closed>;
+pub type WaitResult<T> = Result<T, Closed>;
 
-pub(in crate::wait) const fn closed() -> Poll<WaitResult> {
+pub(in crate::wait) const fn closed<T>() -> Poll<WaitResult<T>> {
     Poll::Ready(Err(Closed::new()))
 }
 
-pub(in crate::wait) const fn notified() -> Poll<WaitResult> {
-    Poll::Ready(Ok(()))
+pub(in crate::wait) const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
+    Poll::Ready(Ok(data))
 }
 
 impl Closed {
