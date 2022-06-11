@@ -6,7 +6,8 @@ USAGE:
 
 FLAGS:
     -h, --help      Show this help text and exit.
-    -v, --verbose   Enable verbose output."
+    -v, --verbose   Enable verbose output.
+    -d, --dry-run   Do not change any files or commit a git tag."
 
 set -euo pipefail
 
@@ -42,6 +43,9 @@ confirm() {
     done
 }
 
+verbose=''
+dry_run=''
+
 for arg in "$@"
 do
     case "$arg" in
@@ -51,6 +55,9 @@ do
         ;;
     -v|--verbose)
         verbose=1
+        ;;
+    -d|--dry-run)
+        dry_run=1
         ;;
     -*)
         err "unknown flag $arg"
@@ -71,10 +78,9 @@ do
     esac
 done
 
-if [[ "${verbose+verbose}" ]]; then
+if [[ "$verbose" ]]; then
     set -x
 fi
-
 
 if [[ -z "${version+version}" ]]; then
     err "no version specified!"
@@ -104,7 +110,7 @@ else
     exit 1
 fi
 
-if ! [[ -x "$(command -v git-cloff)" ]]; then
+if ! [[ -x "$(command -v git-cliff)" ]]; then
     err "missing git-cliff executable"
     if confirm "       install it?"; then
         cargo install git-cliff
@@ -114,30 +120,53 @@ if ! [[ -x "$(command -v git-cloff)" ]]; then
     fi
 fi
 
+cargo_toml="${path}/Cargo.toml"
+changelog="${path}/CHANGELOG.md"
+
+files=("$cargo_toml" "$changelog")
+
+is_uncommitted=''
+for file in "${files[@]}"; do
+    if ! git diff-index --quiet HEAD -- "$file"; then
+        err "would overwrite uncommitted changes to $file!"
+        is_uncommitted=1
+    fi
+done
+
+if [[ "$is_uncommitted" ]]; then
+    exit 1
+fi
+
 status "Updating" "$crate version to $version"
 sed -i \
     "/\[package\]/,/\[.*dependencies\]/{s/^version = \".*\"/version = \"$version\"/}" \
-    "${path}/Cargo.toml"
+    "$cargo_toml"
 
 status "Updating" "changelog for $crate $version"
 
 git-cliff \
     --include-path "${path}/**" \
-    -o "${path}/CHANGELOG.md" \
+    -o "$changelog" \
      --config cliff.toml \
      --tag "$tag"
+
+staged="$(git diff-index --cached HEAD -- | rev | cut -d' ' -f 1 | rev)"
+if [[ "$staged" ]]; then
+    err "skipping commit, as it would include the following unrelated staged files:"
+    echo "$staged"
+    exit 1
+fi
 
 status "Ready" "to prepare release commit!"
 echo ""
 
-git add "${path}/Cargo.toml"
-git add "${path}/CHANGELOG.md"
+git add "${files[@]}"
 git diff --staged
 
 echo ""
 
 if confirm "commit and push?"; then
-    git commit -sS  -m "chore($crate): prepare to release $crate $version"
+    git commit -sS -m "chore($crate): prepare to release $crate $version"
     git push -u origin
 else
     echo "okay, exiting"
