@@ -7,7 +7,6 @@ use crate::{
         },
     },
     util,
-    wait::{self, WaitResult},
 };
 use cordyceps::{
     list::{self, List},
@@ -30,28 +29,54 @@ use pin_project::{pin_project, pinned_drop};
 #[cfg(test)]
 mod tests;
 
-/// A queue of [`Waker`]s implemented using an [intrusive doubly-linked
+/// An error indicating a failed wake
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum WaitError {
+    Closed,
+    AlreadyConsumed,
+    NeverAdded,
+}
+
+/// An indication of the result of a call to `wait()`
+// Note: We duplicate the WaitResult type as it currently only has "Closed"
+// as an error condition. We should merge these two on the next breaking
+// change.
+pub type WaitResult<T> = Result<T, WaitError>;
+
+const fn closed<T>() -> Poll<WaitResult<T>> {
+    Poll::Ready(Err(WaitError::Closed))
+}
+
+const fn consumed<T>() -> Poll<WaitResult<T>> {
+    Poll::Ready(Err(WaitError::AlreadyConsumed))
+}
+
+const fn never_added<T>() -> Poll<WaitResult<T>> {
+    Poll::Ready(Err(WaitError::NeverAdded))
+}
+
+const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
+    Poll::Ready(Ok(data))
+}
+
+/// A map of [`Waker`]s implemented using an [intrusive doubly-linked
 /// list][ilist].
 ///
 /// A `WaitMap` allows any number of tasks to [wait] asynchronously and be
-/// woken when some event occurs, either [individually][wake] in first-in,
-/// first-out order, or [all at once][wake_all]. This makes it a vital building
-/// block of runtime services (such as timers or I/O resources), where it may be
-/// used to wake a set of tasks when a timer completes or when a resource
-/// becomes available. It can be equally useful for implementing higher-level
-/// synchronization primitives: for example, a `WaitMap` plus an
-/// [`UnsafeCell`] is essentially an entire implementation of a fair
-/// asynchronous mutex. Finally, a `WaitMap` can be a useful synchronization
-/// primitive on its own: sometimes, you just need to have a bunch of tasks wait
-/// for something and then wake them all up.
+/// woken when a value with a certain key arrives. This can be used to
+/// implement structures like "async mailboxes", where an async function
+/// requests some data (such as a response) associated with a certain
+/// key (such as a message ID). When the data is received, the key can
+/// be used to provide the task with the desired data, as well as wake
+/// the task for further processing.
 ///
 /// # Examples
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
 ///
-/// ```skip
+/// ```
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitMap};
+/// use maitake::{scheduler::Scheduler, wait::map::{WaitMap, WakeOutcome}};
 ///
 /// const TASKS: usize = 10;
 ///
@@ -62,11 +87,12 @@ mod tests;
 /// let q = Arc::new(WaitMap::new());
 ///
 /// // Spawn some tasks that will wait on the queue.
-/// for _ in 0..TASKS {
+/// // We'll use the task index (0..10) as the key.
+/// for i in 0..TASKS {
 ///     let q = q.clone();
 ///     scheduler.spawn(async move {
-///         // Wait to be woken by the queue.
-///         q.wait().await.expect("queue is not closed");
+///         let val = q.wait(i).await.unwrap();
+///         assert_eq!(val, i + 100);
 ///     });
 /// }
 ///
@@ -77,66 +103,32 @@ mod tests;
 /// // to be woken by the queue.
 /// assert_eq!(tick.completed, 0, "no tasks have been woken");
 ///
-/// let mut completed = 0;
-/// for i in 1..=TASKS {
-///     // Wake the next task from the queue.
-///     q.wake();
+/// // We now wake each of the tasks, using the same key (0..10),
+/// // and provide them with a value that is their `key + 100`,
+/// // e.g. 100..110. Only the task that has been woken will be
+/// // notified.
+/// for i in 0..TASKS {
+///     let result = q.wake(&i, i + 100);
+///     assert!(matches!(result, WakeOutcome::Woke));
 ///
 ///     // Tick the scheduler.
 ///     let tick = scheduler.tick();
-///     
-///     // A single task should have completed on this tick.
-///     completed += tick.completed;
-///     assert_eq!(completed, i);
+///
+///     // Exactly one task should have completed
+///     assert_eq!(tick.completed, 1);
 /// }
 ///
-/// assert_eq!(completed, TASKS, "all tasks should have completed");
-/// ```
-///
-/// Waking all tasks using [`wake_all`][wake_all]:
-///
-/// ```skip
-/// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitMap};
-///
-/// const TASKS: usize = 10;
-///
-/// // In order to spawn tasks, we need a `Scheduler` instance.
-/// let scheduler = Scheduler::new();
-///
-/// // Construct a new `WaitMap`.
-/// let q = Arc::new(WaitMap::new());
-///
-/// // Spawn some tasks that will wait on the queue.
-/// for _ in 0..TASKS {
-///     let q = q.clone();
-///     scheduler.spawn(async move {
-///         // Wait to be woken by the queue.
-///         q.wait().await.expect("queue is not closed");
-///     });
-/// }
-///
-/// // Tick the scheduler once.
+/// // Tick the scheduler.
 /// let tick = scheduler.tick();
 ///
-/// // No tasks should complete on this tick, as they are all waiting
-/// // to be woken by the queue.
-/// assert_eq!(tick.completed, 0, "no tasks have been woken");
-///
-/// // Wake all tasks waiting for the queue.
-/// q.wake_all();
-///
-/// // Tick the scheduler again to run the woken tasks.
-/// let tick = scheduler.tick();
-///
-/// // All tasks have now completed, since they were woken by the
-/// // queue.
-/// assert_eq!(tick.completed, TASKS, "all tasks should have completed");
+/// // No additional tasks should be completed
+/// assert_eq!(tick.completed, 0);
+/// assert!(!tick.has_remaining);
 /// ```
 ///
 /// # Implementation Notes
 ///
-/// The *[intrusive]* aspect of this list is important, as it means that it does
+/// The *[intrusive]* aspect of this map is important, as it means that it does
 /// not allocate memory. Instead, nodes in the linked list are stored in the
 /// futures of tasks trying to wait for capacity. This means that it is not
 /// necessary to allocate any heap memory for each task waiting to be woken.
@@ -480,24 +472,36 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// woken by a call to [`wake`] with a matching `key`, or when the `WaitMap`
     /// is dropped.
     ///
+    /// NOTE: `key`s must be unique. If the given key already exists in the
+    /// `WaitMap`, this function will panic. See [`try_wait`] for a non-
+    /// panicking alternative.
+    ///
+    /// [`try_wait`]: Self::try_wait
     /// [`wake`]: Self::wake
-    ///
-    /// # ⚠️ Mycelium Proposition 65 Warning ⚠️
-    ///
-    /// This `Future` can expose you to behavior such as "Use After Frees" which
-    /// is known to the project of Mycelium to cause undefined behavior or other
-    /// harms when forgotten via `mem::forget()`.
     pub fn wait(&self, key: K) -> Wait<'_, K, V> {
         self.try_wait(key)
+            .map_err(drop)
             .expect("Keys should be unique in a `WaitMap`!")
     }
 
-    pub fn try_wait(&self, key: K) -> Result<Wait<'_, K, V>, ()> {
+    /// Attempt to wait to be woken up by this queue.
+    ///
+    /// This returns a [`Wait`] future that will complete when the task is
+    /// woken by a call to [`wake`] with a matching `key`, or when the `WaitMap`
+    /// is dropped.
+    ///
+    /// NOTE: `key`s must be unique. If the given key already exists in the
+    /// `WaitMap`, this function will return an error immediately. See [`try_wait`]
+    /// for a non-panicking alternative.
+    ///
+    /// [`try_wait`]: Self::try_wait
+    /// [`wake`]: Self::wake
+    pub fn try_wait(&self, key: K) -> Result<Wait<'_, K, V>, K> {
         // Check if key already exists
         let mut mg = self.queue.lock();
         let mut cursor = mg.cursor();
         if cursor.find(|n| n.key == key).is_some() {
-            return Err(());
+            return Err(key);
         }
         drop(mg);
 
@@ -662,7 +666,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                         },
                         // the queue is already `Waiting`
                         State::Waiting => break 'to_waiting,
-                        State::Closed => return wait::closed(),
+                        State::Closed => return closed(),
                     }
                 }
 
@@ -708,29 +712,25 @@ impl<K: PartialEq, V> Waiter<K, V> {
                                 retval.assume_init()
                             });
 
-                            Poll::Ready(Ok(val))
+                            notified(val)
                         }
                         Wakeup::Retreived => {
                             // TODO: Should I change the result type to also return an error
                             // for this case? Right now error can only be `Closed`
-                            unreachable!("Future should not be polled after completion!");
+                            consumed()
                         }
 
                         Wakeup::Closed => {
                             *this.state = WaitState::Completed;
-                            wait::closed()
+                            closed()
                         }
                         Wakeup::Empty => {
-                            // TODO: Should I change the result type to also return an error
-                            // for this case? Right now error can only be `Closed`
-                            unreachable!(
-                                "Waiter should never be polled before adding to the queue!"
-                            );
+                            never_added()
                         }
                     }
                 })
             }
-            WaitState::Completed => unreachable!("Waiter should never be polled after completion!"),
+            WaitState::Completed => consumed(),
         }
     }
 
