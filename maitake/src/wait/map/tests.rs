@@ -103,9 +103,20 @@ mod loom {
                     });
                 }
             });
+            let mut ct = 0;
+            let mut pass = false;
 
-            let result = q.wake(&123, 666);
-            assert!(matches!(result, WakeOutcome::Woke));
+            while ct < 100 {
+                let result = q.wake(&123, 666);
+                if matches!(result, WakeOutcome::Woke) {
+                    pass = true;
+                    break;
+                }
+                loom::thread::yield_now();
+                ct += 1;
+            }
+
+            assert!(pass);
             thread.join().unwrap();
         });
     }
@@ -155,26 +166,50 @@ mod loom {
         });
     }
 
-    //     #[test]
-    //     fn wake_all_concurrent() {
-    //         use alloc::sync::Arc;
+        #[test]
+        fn wake_two_concurrent() {
+            use alloc::sync::Arc;
 
-    //         loom::model(|| {
-    //             let q = Arc::new(WaitMap::new());
-    //             let wait1 = q.wait_owned();
-    //             let wait2 = q.wait_owned();
+            loom::model(|| {
+                let q = Arc::new(WaitMap::new());
+                let wait1 = q.wait_owned(123);
+                let wait2 = q.wait_owned(456);
 
-    //             let thread1 =
-    //                 thread::spawn(move || future::block_on(wait1).expect("wait1 must not fail"));
-    //             let thread2 =
-    //                 thread::spawn(move || future::block_on(wait2).expect("wait2 must not fail"));
+                let thread1 =
+                    thread::spawn(move || future::block_on(wait1).expect("wait1 must not fail"));
+                let thread2 =
+                    thread::spawn(move || future::block_on(wait2).expect("wait2 must not fail"));
 
-    //             q.wake_all();
+                let mut ct = 0;
 
-    //             thread1.join().unwrap();
-    //             thread2.join().unwrap();
-    //         });
-    //     }
+                let mut pass1 = false;
+                let mut pass2 = false;
+
+                while ct < 100 {
+                    if matches!(q.wake(&123, 321), WakeOutcome::Woke) {
+                        pass1 = true;
+                        break;
+                    }
+                    loom::thread::yield_now();
+                    ct += 1;
+                }
+
+                while ct < 100 {
+                    if matches!(q.wake(&456, 654), WakeOutcome::Woke) {
+                        pass2 = true;
+                        break;
+                    }
+                    loom::thread::yield_now();
+                    ct += 1;
+                }
+
+                assert!(pass1);
+                assert!(pass2);
+
+                thread1.join().unwrap();
+                thread2.join().unwrap();
+            });
+        }
 
     //     #[test]
     //     fn wake_close() {
