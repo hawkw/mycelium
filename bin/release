@@ -145,8 +145,8 @@ publish() {
     "${cargo_package[@]}"
     "${cargo_publish[@]}"
 
-    status "Tagging" "$TAG"
-    local git_tag=(git tag "$TAG" "&&" git push --tags)
+    status "Tagging" "$tag"
+    local git_tag=(git tag "$tag" "&&" git push --tags)
     if [[ "$dry_run" ]]; then
         echo "# " "${git_tag[@]}"
     else
@@ -165,10 +165,10 @@ do
         exit 0
         ;;
     -v|--verbose)
-        verbose=1
+        verbose="--verbose"
         ;;
     -d|--dry-run)
-        dry_run=1
+        dry_run="--dry-run"
         ;;
     -*)
         err "unknown flag $arg"
