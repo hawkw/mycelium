@@ -47,6 +47,7 @@ git = "https://github.com/tokio-rs/tracing"
 
 [dev-dependencies]
 futures-util = "0.3"
+futures = "0.3"
 
 [target.'cfg(not(loom))'.dev-dependencies]
 tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = ["ansi", "fmt"] }
