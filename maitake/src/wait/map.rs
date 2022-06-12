@@ -221,7 +221,7 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     /// added to the `WaitMap`, and is ready to receive data
     ///
     /// This is useful for ensuring that a receiver is ready before
-    /// sending a message that will illicit the expected response.
+    /// sending a message that will elicit the expected response.
     ///
     /// # Example
     ///
@@ -245,8 +245,9 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     ///     pin_mut!(wait);
     ///     wait.as_mut().enqueue().await.unwrap();
     ///
-    ///     // We now know the waiter has been enqueued, at this point we could now
-    ///     // send a message that will cause key == 0 to be returned, e.g:
+    ///     // We now know the waiter has been enqueued, at this point we could
+    ///     // send a message that will cause key == 0 to be returned, without
+    ///     // worrying about racing with the expected response, e.g:
     ///     //
     ///     // sender.send_with_id(0, SomeMessage).await?;
     ///     //
