@@ -82,7 +82,7 @@ impl StaticScheduler {
     #[inline]
     pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
     where
-        F: Future,
+        F: Future + 'static,
         STO: Storage<&'static Self, F>,
     {
         let tr = TaskRef::new_allocated::<&'static Self, F, STO>(task);
@@ -185,14 +185,14 @@ feature! {
         }
 
         #[inline]
-        pub fn spawn(&self, future: impl Future) {
+        pub fn spawn(&self, future: impl Future + 'static) {
             self.schedule(TaskRef::new(self.clone(), future));
         }
 
         #[inline]
         pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
         where
-            F: Future,
+            F: Future + 'static,
         {
             let tr = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
             self.schedule(tr);
@@ -216,7 +216,7 @@ feature! {
         }
 
         #[inline]
-        pub fn spawn(&'static self, future: impl Future) {
+        pub fn spawn(&'static self, future: impl Future + 'static) {
             self.schedule(TaskRef::new(self, future));
         }
     }

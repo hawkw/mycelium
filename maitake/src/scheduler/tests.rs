@@ -150,7 +150,7 @@ mod alloc {
         crate::util::trace_init();
 
         for i in 0..TASKS {
-            SCHEDULER.spawn(async {
+            SCHEDULER.spawn(async move {
                 Yield::new(i).await;
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             })
@@ -190,7 +190,7 @@ mod custom_storage {
         }
     }
 
-    impl<F: Future> MyBoxTask<&'static StaticScheduler, F> {
+    impl<F: Future + 'static> MyBoxTask<&'static StaticScheduler, F> {
         fn spawn(scheduler: &'static StaticScheduler, future: F) {
             let task = MyBoxTask(Box::new(Task::new(scheduler, future)));
             scheduler.spawn_allocated::<F, MyBoxStorage>(task)
@@ -260,7 +260,7 @@ mod custom_storage {
             }
         });
 
-        MyBoxTask::spawn(&SCHEDULER, async {
+        MyBoxTask::spawn(&SCHEDULER, async move {
             Yield::once().await;
             chan.notify();
         });
@@ -308,7 +308,7 @@ mod custom_storage {
         const TASKS: usize = 10;
 
         for i in 0..TASKS {
-            MyBoxTask::spawn(&SCHEDULER, async {
+            MyBoxTask::spawn(&SCHEDULER, async move {
                 Yield::new(i).await;
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             })
