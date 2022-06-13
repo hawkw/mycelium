@@ -33,9 +33,20 @@ mod tests;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum WaitError {
+    /// The [`WaitMap`] has already been [closed].
+    ///
+    /// [closed]: WaitMap::close
     Closed,
+
+    /// The received data has already been extracted
     AlreadyConsumed,
+
+    /// The [`Wait`] was never added to the [`WaitMap`]
     NeverAdded,
+
+    /// The [`WaitMap`] already had an item matching the given
+    /// key
+    Duplicate,
 }
 
 /// An indication of the result of a call to `wait()`
@@ -51,6 +62,10 @@ const fn consumed<T>() -> Poll<WaitResult<T>> {
 
 const fn never_added<T>() -> Poll<WaitResult<T>> {
     Poll::Ready(Err(WaitError::NeverAdded))
+}
+
+const fn duplicate<T>() -> Poll<WaitResult<T>> {
+    Poll::Ready(Err(WaitError::Duplicate))
 }
 
 const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
@@ -151,7 +166,6 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 /// [`Waker`]: core::task::Waker
 /// [wait]: WaitMap::wait
 /// [wake]: WaitMap::wake
-/// [wake_all]: WaitMap::wake_all
 /// [`UnsafeCell`]: core::cell::UnsafeCell
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
@@ -202,6 +216,56 @@ pub struct Wait<'a, K: PartialEq, V> {
     /// Entry in the wait queue linked list.
     #[pin]
     waiter: Waiter<K, V>,
+}
+
+impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
+    /// Returns a future that completes when the `Wait` item has been
+    /// added to the [`WaitMap`], and is ready to receive data
+    ///
+    /// This is useful for ensuring that a receiver is ready before
+    /// sending a message that will elicit the expected response.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use maitake::{scheduler::Scheduler, wait::map::{WaitMap, WakeOutcome}};
+    /// use futures_util::pin_mut;
+    ///
+    /// let scheduler = Scheduler::new();
+    /// let q = Arc::new(WaitMap::new());
+    ///
+    /// let q2 = q.clone();
+    /// scheduler.spawn(async move {
+    ///     let wait = q2.wait(0);
+    ///
+    ///     // At this point, we have created the future, but it has not yet
+    ///     // been added to the queue. We could immediately await 'wait',
+    ///     // but then we would be unable to progress further. We must
+    ///     // first pin the `wait` future, to ensure that it does not move
+    ///     // until it has been completed.
+    ///     pin_mut!(wait);
+    ///     wait.as_mut().enqueue().await.unwrap();
+    ///
+    ///     // We now know the waiter has been enqueued, at this point we could
+    ///     // send a message that will cause key == 0 to be returned, without
+    ///     // worrying about racing with the expected response, e.g:
+    ///     //
+    ///     // sender.send_with_id(0, SomeMessage).await?;
+    ///     //
+    ///     let val = wait.await.unwrap();
+    ///     assert_eq!(val, 10);
+    /// });
+    ///
+    /// assert!(matches!(q.wake(&0, 100), WakeOutcome::NoMatch(_)));
+    ///
+    /// let tick = scheduler.tick();
+    ///
+    /// assert!(matches!(q.wake(&0, 100), WakeOutcome::Woke));
+    /// ```
+    pub fn enqueue(self: Pin<&'wait mut Self>) -> EnqueueWait<'wait, 'map, K, V> {
+        EnqueueWait { wait: self }
+    }
 }
 
 /// A waiter node which may be linked into a wait queue.
@@ -298,10 +362,6 @@ impl<K: PartialEq, V> Debug for Node<K, V> {
 #[repr(u8)]
 enum WaitState {
     /// The waiter has not yet been enqueued.
-    ///
-    /// The number of times [`WaitMap::wake_all`] has been called is stored
-    /// when the node is created, in order to determine whether it was woken by
-    /// a stored wakeup when enqueueing.
     ///
     /// When in this state, the node is **not** part of the linked list, and
     /// can be dropped without removing it from the list.
@@ -478,42 +538,12 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// is dropped.
     ///
     /// **Note**: `key`s must be unique. If the given key already exists in the
-    /// `WaitMap`, this function will panic. See [`try_wait`] for a non-
-    /// panicking alternative.
-    ///
-    /// [`try_wait`]: Self::try_wait
-    /// [`wake`]: Self::wake
+    /// `WaitMap`, the future will resolve to an Error the first time it is polled
     pub fn wait(&self, key: K) -> Wait<'_, K, V> {
-        self.try_wait(key)
-            .map_err(drop)
-            .expect("Keys should be unique in a `WaitMap`!")
-    }
-
-    /// Attempt to wait to be woken up by this queue.
-    ///
-    /// This returns a [`Wait`] future that will complete when the task is
-    /// woken by a call to [`wake`] with a matching `key`, or when the `WaitMap`
-    /// is dropped.
-    ///
-    /// NOTE: `key`s must be unique. If the given key already exists in the
-    /// `WaitMap`, this function will return an error immediately. See [`try_wait`]
-    /// for a non-panicking alternative.
-    ///
-    /// [`try_wait`]: Self::try_wait
-    /// [`wake`]: Self::wake
-    pub fn try_wait(&self, key: K) -> Result<Wait<'_, K, V>, K> {
-        // Check if key already exists
-        let mut guard = self.queue.lock();
-        let mut cursor = guard.cursor();
-        if cursor.find(|n| n.key == key).is_some() {
-            return Err(key);
-        }
-        drop(guard);
-
-        Ok(Wait {
+        Wait {
             queue: self,
             waiter: self.waiter(key),
-        })
+        }
     }
 
     /// Returns a [`Waiter`] entry in this queue.
@@ -521,7 +551,6 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// This is factored out into a separate function because it's used by both
     /// [`WaitMap::wait`] and [`WaitMap::wait_owned`].
     fn waiter(&self, key: K) -> Waiter<K, V> {
-        // how many times has `wake_all` been called when this waiter is created?
         let state = WaitState::Start;
         Waiter {
             state,
@@ -607,6 +636,27 @@ pub enum WakeOutcome<V> {
 
 // === impl Waiter ===
 
+/// A future that ensures a [`Wait`] has been added to a [`WaitMap`].
+///
+/// See [`Wait::enqueue`] for more information and usage example.
+#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
+pub struct EnqueueWait<'a, 'b, K: PartialEq, V> {
+    wait: Pin<&'a mut Wait<'b, K, V>>,
+}
+
+impl<'a, 'b, K: PartialEq, V> Future for EnqueueWait<'a, 'b, K, V> {
+    type Output = WaitResult<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.wait.as_mut().project();
+        if let WaitState::Start = test_dbg!(&this.waiter.state) {
+            this.waiter.start_to_wait(this.queue, cx)
+        } else {
+            Poll::Ready(Ok(()))
+        }
+    }
+}
+
 impl<K: PartialEq, V> Waiter<K, V> {
     /// Wake the task that owns this `Waiter`.
     ///
@@ -652,48 +702,77 @@ impl<K: PartialEq, V> Waiter<K, V> {
         }
     }
 
+    /// Moves a `Wait` from the `Start` condition.
+    ///
+    /// Caller MUST ensure the `Wait` is in the start condition before calling.
+    fn start_to_wait(
+        mut self: Pin<&mut Self>,
+        queue: &WaitMap<K, V>,
+        cx: &mut Context<'_>,
+    ) -> Poll<WaitResult<()>> {
+        let mut this = self.as_mut().project();
+
+        debug_assert!(
+            matches!(this.state, WaitState::Start),
+            "start_to_wait should ONLY be called from the Start state!"
+        );
+
+        // Try to wait...
+        test_trace!("poll_wait: locking...");
+        let mut waiters = queue.queue.lock();
+        test_trace!("poll_wait: -> locked");
+        let mut queue_state = queue.load();
+
+        // transition the queue to the waiting state
+        'to_waiting: loop {
+            match test_dbg!(queue_state) {
+                // the queue is `Empty`, transition to `Waiting`
+                State::Empty => match queue.compare_exchange(queue_state, State::Waiting) {
+                    Ok(_) => break 'to_waiting,
+                    Err(actual) => queue_state = actual,
+                },
+                // the queue is already `Waiting`
+                State::Waiting => break 'to_waiting,
+                State::Closed => return closed(),
+            }
+        }
+
+        // Check if key already exists
+        //
+        // Note: It's okay not to re-update the state here, if we were empty
+        // this check will never trigger, if we are already waiting, we should
+        // still be waiting.
+        let mut cursor = waiters.cursor();
+        if cursor.find(|n| &n.key == this.key).is_some() {
+            return duplicate();
+        }
+
+        // enqueue the node
+        *this.state = WaitState::Waiting;
+        this.node.as_mut().with_mut(|node| {
+            unsafe {
+                // safety: we may mutate the node because we are
+                // holding the lock.
+                (*node).waker = Wakeup::Waiting(cx.waker().clone());
+            }
+        });
+        let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self)) };
+        waiters.push_front(ptr);
+
+        Poll::Ready(Ok(()))
+    }
+
     fn poll_wait(
         mut self: Pin<&mut Self>,
         queue: &WaitMap<K, V>,
         cx: &mut Context<'_>,
     ) -> Poll<WaitResult<V>> {
         test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
-        let mut this = self.as_mut().project();
+        let this = self.as_mut().project();
 
         match test_dbg!(&this.state) {
             WaitState::Start => {
-                // Try to wait...
-                test_trace!("poll_wait: locking...");
-                let mut waiters = queue.queue.lock();
-                test_trace!("poll_wait: -> locked");
-                let mut queue_state = queue.load();
-
-                // transition the queue to the waiting state
-                'to_waiting: loop {
-                    match test_dbg!(queue_state) {
-                        // the queue is `Empty`, transition to `Waiting`
-                        State::Empty => match queue.compare_exchange(queue_state, State::Waiting) {
-                            Ok(_) => break 'to_waiting,
-                            Err(actual) => queue_state = actual,
-                        },
-                        // the queue is already `Waiting`
-                        State::Waiting => break 'to_waiting,
-                        State::Closed => return closed(),
-                    }
-                }
-
-                // enqueue the node
-                *this.state = WaitState::Waiting;
-                this.node.as_mut().with_mut(|node| {
-                    unsafe {
-                        // safety: we may mutate the node because we are
-                        // holding the lock.
-                        (*node).waker = Wakeup::Waiting(cx.waker().clone());
-                    }
-                });
-                let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self)) };
-                waiters.push_front(ptr);
-
+                let _ = self.start_to_wait(queue, cx)?;
                 Poll::Pending
             }
             WaitState::Waiting => {
@@ -896,16 +975,18 @@ feature! {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
-        /// This returns a [`WaitOwned`] future that will complete when the task is
-        /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitMap` is
-        /// dropped.
-        ///
         /// This is identical to the [`wait`] method, except that it takes a
         /// [`Arc`] reference to the [`WaitMap`], allowing the returned future to
         /// live for the `'static` lifetime.
         ///
+        /// This returns a [`WaitOwned`] future that will complete when the task is
+        /// woken by a call to [`wake`] with a matching `key`, or when the `WaitMap`
+        /// is dropped.
+        ///
+        /// **Note**: `key`s must be unique. If the given key already exists in the
+        /// `WaitMap`, the future will resolve to an Error the first time it is polled
+        ///
         /// [`wake`]: Self::wake
-        /// [`wake_all`]: Self::wake_all
         /// [`wait`]: Self::wait
         pub fn wait_owned(self: &Arc<Self>, key: K) -> WaitOwned<K, V> {
             let waiter = self.waiter(key);

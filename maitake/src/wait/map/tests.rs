@@ -9,6 +9,119 @@ mod alloc {
     use futures::{future::poll_fn, pin_mut, select_biased, FutureExt};
 
     #[test]
+    fn enqueue() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+        static ENQUEUED: AtomicUsize = AtomicUsize::new(0);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitMap::new());
+
+        // Create a waiter, but do not tick the scheduler yet
+        let q2 = q.clone();
+        scheduler.spawn(async move {
+            let val = q2.wait(0).await.unwrap();
+            COMPLETED.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(val, 100);
+        });
+
+        // Attempt to wake - but waiter is not enqueued yet
+        assert!(matches!(q.wake(&0, 100), WakeOutcome::NoMatch(_)));
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(ENQUEUED.load(Ordering::Relaxed), 0);
+
+        // Create a second waiter - this one that first checks for enqueued
+        let q3 = q.clone();
+        scheduler.spawn(async move {
+            let wait = q3.wait(1);
+
+            pin_mut!(wait);
+            wait.as_mut().enqueue().await.unwrap();
+            ENQUEUED.fetch_add(1, Ordering::Relaxed);
+
+            let val = wait.await.unwrap();
+            COMPLETED.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(val, 101);
+        });
+
+        // Attempt to wake - but waiter is not enqueued yet
+        assert!(matches!(q.wake(&0, 100), WakeOutcome::NoMatch(_)));
+        assert!(matches!(q.wake(&1, 101), WakeOutcome::NoMatch(_)));
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(ENQUEUED.load(Ordering::Relaxed), 0);
+
+        // Tick once, we can see the second task moved into the enqueued state
+        let tick = scheduler.tick();
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(ENQUEUED.load(Ordering::Relaxed), 1);
+        assert!(!tick.has_remaining);
+
+        assert!(matches!(q.wake(&0, 100), WakeOutcome::Woke));
+        assert!(matches!(q.wake(&1, 101), WakeOutcome::Woke));
+
+        let tick = scheduler.tick();
+        assert_eq!(tick.completed, 2);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 2);
+        assert_eq!(ENQUEUED.load(Ordering::Relaxed), 1);
+        assert!(!tick.has_remaining);
+    }
+
+    #[test]
+    fn duplicate() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+        static ENQUEUED: AtomicUsize = AtomicUsize::new(0);
+        static ERRORED: AtomicUsize = AtomicUsize::new(0);
+
+        let scheduler = Scheduler::new();
+        let q = Arc::new(WaitMap::new());
+
+        // Create a waiter, but do not tick the scheduler yet
+        let q2 = q.clone();
+        scheduler.spawn(async move {
+            let wait = q2.wait(0);
+
+            pin_mut!(wait);
+            wait.as_mut().enqueue().await.unwrap();
+            ENQUEUED.fetch_add(1, Ordering::Relaxed);
+
+            let val = wait.await.unwrap();
+            COMPLETED.fetch_add(1, Ordering::Relaxed);
+            assert_eq!(val, 100);
+        });
+
+        // Create a waiter, but do not tick the scheduler yet
+        let q3 = q.clone();
+        scheduler.spawn(async move {
+            // Duplicate key!
+            let wait = q3.wait(0);
+
+            pin_mut!(wait);
+            let result = wait.as_mut().enqueue().await;
+            assert!(matches!(result, Err(WaitError::Duplicate)));
+            ERRORED.fetch_add(1, Ordering::Relaxed);
+        });
+
+        // Tick once, we can see the second task moved into the enqueued state
+        let tick = scheduler.tick();
+        assert_eq!(tick.completed, 1);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_eq!(ENQUEUED.load(Ordering::Relaxed), 1);
+        assert_eq!(ERRORED.load(Ordering::Relaxed), 1);
+        assert!(!tick.has_remaining);
+
+        assert!(matches!(q.wake(&0, 100), WakeOutcome::Woke));
+
+        let tick = scheduler.tick();
+        assert_eq!(tick.completed, 1);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
+        assert_eq!(ENQUEUED.load(Ordering::Relaxed), 1);
+        assert_eq!(ERRORED.load(Ordering::Relaxed), 1);
+        assert!(!tick.has_remaining);
+    }
+
+    #[test]
     fn close() {
         crate::util::trace_init();
         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
