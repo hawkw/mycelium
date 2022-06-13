@@ -541,7 +541,11 @@ feature! {
     use alloc::boxed::Box;
 
     impl TaskRef {
-        pub(crate) fn new<S: Schedule, F: Future>(scheduler: S, future: F) -> Self {
+        pub(crate) fn new<S, F>(scheduler: S, future: F) -> Self
+        where
+            S: Schedule,
+            F: Future + 'static
+        {
             let task = Box::new(Task::<S, F, BoxStorage>::new(scheduler, future));
             Self::new_allocated::<S, F, BoxStorage>(task)
         }
