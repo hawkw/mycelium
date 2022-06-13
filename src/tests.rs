@@ -130,7 +130,7 @@ mod myco_async {
             const TASKS: usize = 10;
 
             for i in 0..TASKS {
-                SCHEDULER.spawn(async {
+                SCHEDULER.spawn(async move {
                     Yield::new(i).await;
                     COMPLETED.fetch_add(1, Ordering::SeqCst);
                 })
