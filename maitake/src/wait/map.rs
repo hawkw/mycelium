@@ -33,16 +33,18 @@ mod tests;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum WaitError {
-    /// The WaitMap has already been closed
+    /// The [`WaitMap`] has already been [closed].
+    ///
+    /// [closed]: WaitMap::close
     Closed,
 
     /// The received data has already been extracted
     AlreadyConsumed,
 
-    /// The Wait was never added to the WaitMap
+    /// The [`Wait`] was never added to the [`WaitMap`]
     NeverAdded,
 
-    /// The WaitMap already had an item matching the given
+    /// The [`WaitMap`] already had an item matching the given
     /// key
     Duplicate,
 }
@@ -218,7 +220,7 @@ pub struct Wait<'a, K: PartialEq, V> {
 
 impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     /// Returns a future that completes when the `Wait` item has been
-    /// added to the `WaitMap`, and is ready to receive data
+    /// added to the [`WaitMap`], and is ready to receive data
     ///
     /// This is useful for ensuring that a receiver is ready before
     /// sending a message that will elicit the expected response.
@@ -634,7 +636,7 @@ pub enum WakeOutcome<V> {
 
 // === impl Waiter ===
 
-/// A future that ensures a [`Wait`] has been added to the [`WaitQueue`].
+/// A future that ensures a [`Wait`] has been added to a [`WaitMap`].
 ///
 /// See [`Wait::enqueue`] for more information and usage example.
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
