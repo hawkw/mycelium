@@ -4,10 +4,11 @@ use crate::{
 };
 use core::{
     future::Future,
-    ops,
+    ops::{Deref, DerefMut},
     pin::Pin,
     task::{Context, Poll},
 };
+use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
 
 pub struct Mutex<T> {
@@ -65,7 +66,7 @@ impl<T> Mutex<T> {
                 self.guard()
             }),
             Poll::Ready(Err(_)) => unsafe {
-                mycelium_util::unreachable_unchecked!("`Mutex` never calls `WaitQueue::close`")
+                unreachable_unchecked!("`Mutex` never calls `WaitQueue::close`")
             },
         }
     }
@@ -83,10 +84,17 @@ impl<T> Mutex<T> {
     }
 }
 
+impl<T: fmt::Debug> fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Mutex")
+            .field("data", &fmt::opt(&self.try_lock()).or_else("<locked>"))
+            .field("wait", &self.wait)
+            .finish()
+    }
+}
+
 unsafe impl<T> Send for Mutex<T> where T: Send {}
 unsafe impl<T> Sync for Mutex<T> where T: Send {}
-unsafe impl<T> Send for MutexGuard<'_, T> where T: Send {}
-unsafe impl<T> Sync for MutexGuard<'_, T> where T: Send + Sync {}
 
 // === impl Lock ===
 
@@ -99,7 +107,7 @@ impl<'a, T> Future for Lock<'a, T> {
         match this.wait.poll(cx) {
             Poll::Ready(Ok(())) => {}
             Poll::Ready(Err(_)) => unsafe {
-                mycelium_util::unreachable_unchecked!("`Mutex` never calls `WaitQueue::close`")
+                unreachable_unchecked!("`Mutex` never calls `WaitQueue::close`")
             },
             Poll::Pending => return Poll::Pending,
         }
@@ -114,9 +122,10 @@ impl<'a, T> Future for Lock<'a, T> {
 
 // === impl MutexGuard ===
 
-impl<'a, T> ops::Deref for MutexGuard<'a, T> {
+impl<'a, T> Deref for MutexGuard<'a, T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         unsafe {
             // safety: we are holding the lock
@@ -125,7 +134,8 @@ impl<'a, T> ops::Deref for MutexGuard<'a, T> {
     }
 }
 
-impl<'a, T> ops::DerefMut for MutexGuard<'a, T> {
+impl<'a, T> DerefMut for MutexGuard<'a, T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
             // safety: we are holding the lock
@@ -133,6 +143,16 @@ impl<'a, T> ops::DerefMut for MutexGuard<'a, T> {
         }
     }
 }
+
+impl<T: fmt::Debug> fmt::Debug for MutexGuard<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.deref().fmt(f)
+    }
+}
+
+unsafe impl<T> Send for MutexGuard<'_, T> where T: Send {}
+unsafe impl<T> Sync for MutexGuard<'_, T> where T: Send + Sync {}
 
 impl<'a, T> Drop for WakeOnDrop<'a, T> {
     fn drop(&mut self) {
