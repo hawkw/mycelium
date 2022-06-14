@@ -134,7 +134,7 @@ impl<'a, T> Deref for MutexGuard<'a, T> {
     }
 }
 
-impl<'a, T> DerefMut for MutexGuard<'a, T> {
+impl<T> DerefMut for MutexGuard<'_, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
@@ -157,5 +157,97 @@ unsafe impl<T> Sync for MutexGuard<'_, T> where T: Send + Sync {}
 impl<'a, T> Drop for WakeOnDrop<'a, T> {
     fn drop(&mut self) {
         self.0.wait.wake()
+    }
+}
+
+feature! {
+    #![feature = "alloc"]
+
+    use alloc::sync::Arc;
+
+    pub struct OwnedMutexGuard<T> {
+        /// /!\ WARNING: semi-load-bearing drop order /!\
+        ///
+        /// This struct's field ordering is important.
+        data: MutPtr<T>,
+        _wake: WakeArcOnDrop<T>,
+    }
+
+    impl<T> Mutex<T> {
+        pub async fn lock_owned(self: Arc<Self>) -> OwnedMutexGuard<T> {
+            self.wait.wait().await.unwrap();
+            unsafe {
+                // safety: we have just acquired the lock
+                self.owned_guard()
+            }
+        }
+
+        pub fn try_lock_owned(self: Arc<Self>) -> Result<OwnedMutexGuard<T>, Arc<Self>> {
+            match self.wait.try_wait() {
+                Poll::Pending => Err(self),
+                Poll::Ready(Ok(_)) => Ok(unsafe {
+                    // safety: we have just acquired the lock
+                    self.owned_guard()
+                }),
+                Poll::Ready(Err(_)) => unsafe {
+                    unreachable_unchecked!("`Mutex` never calls `WaitQueue::close`")
+                },
+            }
+        }
+
+        /// Constructs a new `OwnedMutexGuard` for this `Mutex`.
+        ///
+        /// # Safety
+        ///
+        /// This may only be called once a lock has been acquired.
+        unsafe fn owned_guard(self: Arc<Self>) -> OwnedMutexGuard<T> {
+            let data = self.data.get_mut();
+            OwnedMutexGuard {
+                _wake: WakeArcOnDrop(self),
+                data,
+            }
+        }
+    }
+
+    struct WakeArcOnDrop<T>(Arc<Mutex<T>>);
+
+    // === impl OwnedMutexGuard ===
+
+    impl<T> Deref for OwnedMutexGuard<T> {
+        type Target = T;
+
+        #[inline]
+        fn deref(&self) -> &Self::Target {
+            unsafe {
+                // safety: we are holding the lock
+                &*self.data.deref()
+            }
+        }
+    }
+
+    impl<T> DerefMut for OwnedMutexGuard<T> {
+        #[inline]
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            unsafe {
+                // safety: we are holding the lock
+                self.data.deref()
+            }
+        }
+    }
+
+    impl<T: fmt::Debug> fmt::Debug for OwnedMutexGuard<T> {
+        #[inline]
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.deref().fmt(f)
+        }
+    }
+
+    unsafe impl<T> Send for OwnedMutexGuard<T> where T: Send {}
+    unsafe impl<T> Sync for OwnedMutexGuard<T> where T: Send + Sync {}
+
+    impl<T> Drop for WakeArcOnDrop<T> {
+        fn drop(&mut self) {
+            self.0.wait.wake()
+        }
     }
 }
