@@ -56,7 +56,37 @@ impl<T> Mutex<T> {
             mutex: self,
         }
     }
+
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        match self.wait.try_wait() {
+            Poll::Pending => None,
+            Poll::Ready(Ok(_)) => Some(unsafe {
+                // safety: we have just acquired the lock
+                self.guard()
+            }),
+            Poll::Ready(Err(_)) => unsafe {
+                mycelium_util::unreachable_unchecked!("`Mutex` never calls `WaitQueue::close`")
+            },
+        }
+    }
+
+    /// Constructs a new `MutexGuard` for this `Mutex`.
+    ///
+    /// # Safety
+    ///
+    /// This may only be called once a lock has been acquired.
+    unsafe fn guard(&self) -> MutexGuard<'_, T> {
+        MutexGuard {
+            _wake: WakeOnDrop(self),
+            data: self.data.get_mut(),
+        }
+    }
 }
+
+unsafe impl<T> Send for Mutex<T> where T: Send {}
+unsafe impl<T> Sync for Mutex<T> where T: Send {}
+unsafe impl<T> Send for MutexGuard<'_, T> where T: Send {}
+unsafe impl<T> Sync for MutexGuard<'_, T> where T: Send + Sync {}
 
 // === impl Lock ===
 
@@ -74,11 +104,11 @@ impl<'a, T> Future for Lock<'a, T> {
             Poll::Pending => return Poll::Pending,
         }
 
-        let data = this.mutex.data.get_mut();
-        Poll::Ready(MutexGuard {
-            _wake: WakeOnDrop(this.mutex),
-            data,
-        })
+        let guard = unsafe {
+            // safety: we have just acquired the lock.
+            this.mutex.guard()
+        };
+        Poll::Ready(guard)
     }
 }
 

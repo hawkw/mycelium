@@ -489,6 +489,24 @@ impl WaitQueue {
         }
     }
 
+    pub(crate) fn try_wait(&self) -> Poll<WaitResult<()>> {
+        let mut state = self.load();
+        let initial_wake_alls = state.get(QueueState::WAKE_ALLS);
+        while state.get(QueueState::STATE) == State::Woken {
+            match self.compare_exchange(state, state.with_state(State::Empty)) {
+                Ok(_) => return Poll::Ready(Ok(())),
+                Err(actual) => state = actual,
+            }
+        }
+
+        match state.get(QueueState::STATE) {
+            State::Closed => wait::closed(),
+            _ if state.get(QueueState::WAKE_ALLS) > initial_wake_alls => Poll::Ready(Ok(())),
+            State::Empty | State::Waiting => Poll::Pending,
+            State::Woken => Poll::Ready(Ok(())),
+        }
+    }
+
     /// Returns a [`Waiter`] entry in this queue.
     ///
     /// This is factored out into a separate function because it's used by both
