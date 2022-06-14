@@ -337,23 +337,32 @@ enum Wakeup {
 // === impl WaitQueue ===
 
 impl WaitQueue {
-    /// Returns a new `WaitQueue`.
-    #[must_use]
-    #[cfg(not(loom))]
-    pub const fn new() -> Self {
-        Self {
-            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
-            queue: Mutex::new(List::new()),
+    loom_const_fn! {
+        /// Returns a new `WaitQueue`.
+        #[must_use]
+        pub fn new() -> Self {
+            Self::new_with_state(State::Empty)
         }
     }
 
-    /// Returns a new `WaitQueue`.
-    #[must_use]
-    #[cfg(loom)]
-    pub fn new() -> Self {
-        Self {
-            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
-            queue: Mutex::new(List::new()),
+    loom_const_fn! {
+        /// Returns a new `WaitQueue` with a single stored wakeup.
+        ///
+        /// The first call to [`wait`] on this queue will immediately succeed.
+        // TODO(eliza): should this be a public API?
+        #[must_use]
+        pub(crate) fn new_woken() -> Self {
+            Self::new_with_state(State::Woken)
+        }
+    }
+
+    loom_const_fn! {
+        #[must_use]
+        fn new_with_state(state: State) -> Self {
+            Self {
+                state: CachePadded::new(AtomicUsize::new(state.into_usize())),
+                queue: Mutex::new(List::new()),
+            }
         }
     }
 
