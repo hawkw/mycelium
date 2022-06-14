@@ -11,12 +11,12 @@ use core::{
 use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
 
-pub struct Mutex<T> {
+pub struct Mutex<T: ?Sized> {
     wait: WaitQueue,
     data: UnsafeCell<T>,
 }
 
-pub struct MutexGuard<'a, T> {
+pub struct MutexGuard<'a, T: ?Sized> {
     /// /!\ WARNING: semi-load-bearing drop order /!\
     ///
     /// This struct's field ordering is important.
@@ -25,7 +25,7 @@ pub struct MutexGuard<'a, T> {
 }
 
 #[pin_project]
-pub struct Lock<'a, T> {
+pub struct Lock<'a, T: ?Sized> {
     #[pin]
     wait: queue::Wait<'a>,
     mutex: &'a Mutex<T>,
@@ -33,7 +33,7 @@ pub struct Lock<'a, T> {
 
 /// This is used in order to ensure that the wakeup is performed only *after*
 /// the data ptr is dropped, in order to keep `loom` happy.
-struct WakeOnDrop<'a, T>(&'a Mutex<T>);
+struct WakeOnDrop<'a, T: ?Sized>(&'a Mutex<T>);
 
 // === impl Mutex ===
 
@@ -50,7 +50,9 @@ impl<T> Mutex<T> {
             }
         }
     }
+}
 
+impl<T: ?Sized> Mutex<T> {
     pub fn lock(&self) -> Lock<'_, T> {
         Lock {
             wait: self.wait.wait(),
@@ -84,7 +86,7 @@ impl<T> Mutex<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Mutex<T> {
+impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Mutex")
             .field("data", &fmt::opt(&self.try_lock()).or_else("<locked>"))
@@ -122,7 +124,7 @@ impl<'a, T> Future for Lock<'a, T> {
 
 // === impl MutexGuard ===
 
-impl<'a, T> Deref for MutexGuard<'a, T> {
+impl<'a, T: ?Sized> Deref for MutexGuard<'a, T> {
     type Target = T;
 
     #[inline]
@@ -134,7 +136,7 @@ impl<'a, T> Deref for MutexGuard<'a, T> {
     }
 }
 
-impl<T> DerefMut for MutexGuard<'_, T> {
+impl<T: ?Sized> DerefMut for MutexGuard<'_, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
@@ -144,17 +146,17 @@ impl<T> DerefMut for MutexGuard<'_, T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for MutexGuard<'_, T> {
+impl<T: ?Sized + fmt::Debug> fmt::Debug for MutexGuard<'_, T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.deref().fmt(f)
     }
 }
 
-unsafe impl<T> Send for MutexGuard<'_, T> where T: Send {}
-unsafe impl<T> Sync for MutexGuard<'_, T> where T: Send + Sync {}
+unsafe impl<T: ?Sized> Send for MutexGuard<'_, T> where T: Send {}
+unsafe impl<T: ?Sized> Sync for MutexGuard<'_, T> where T: Send + Sync {}
 
-impl<'a, T> Drop for WakeOnDrop<'a, T> {
+impl<'a, T: ?Sized> Drop for WakeOnDrop<'a, T> {
     fn drop(&mut self) {
         self.0.wait.wake()
     }
@@ -165,7 +167,7 @@ feature! {
 
     use alloc::sync::Arc;
 
-    pub struct OwnedMutexGuard<T> {
+    pub struct OwnedMutexGuard<T: ?Sized> {
         /// /!\ WARNING: semi-load-bearing drop order /!\
         ///
         /// This struct's field ordering is important.
@@ -173,7 +175,7 @@ feature! {
         _wake: WakeArcOnDrop<T>,
     }
 
-    impl<T> Mutex<T> {
+    impl<T: ?Sized> Mutex<T> {
         pub async fn lock_owned(self: Arc<Self>) -> OwnedMutexGuard<T> {
             self.wait.wait().await.unwrap();
             unsafe {
@@ -209,11 +211,11 @@ feature! {
         }
     }
 
-    struct WakeArcOnDrop<T>(Arc<Mutex<T>>);
+    struct WakeArcOnDrop<T: ?Sized>(Arc<Mutex<T>>);
 
     // === impl OwnedMutexGuard ===
 
-    impl<T> Deref for OwnedMutexGuard<T> {
+    impl<T: ?Sized> Deref for OwnedMutexGuard<T> {
         type Target = T;
 
         #[inline]
@@ -225,7 +227,7 @@ feature! {
         }
     }
 
-    impl<T> DerefMut for OwnedMutexGuard<T> {
+    impl<T: ?Sized> DerefMut for OwnedMutexGuard<T> {
         #[inline]
         fn deref_mut(&mut self) -> &mut Self::Target {
             unsafe {
@@ -235,17 +237,17 @@ feature! {
         }
     }
 
-    impl<T: fmt::Debug> fmt::Debug for OwnedMutexGuard<T> {
+    impl<T: ?Sized + fmt::Debug> fmt::Debug for OwnedMutexGuard<T> {
         #[inline]
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             self.deref().fmt(f)
         }
     }
 
-    unsafe impl<T> Send for OwnedMutexGuard<T> where T: Send {}
-    unsafe impl<T> Sync for OwnedMutexGuard<T> where T: Send + Sync {}
+    unsafe impl<T: ?Sized> Send for OwnedMutexGuard<T> where T: Send {}
+    unsafe impl<T: ?Sized> Sync for OwnedMutexGuard<T> where T: Send + Sync {}
 
-    impl<T> Drop for WakeArcOnDrop<T> {
+    impl<T: ?Sized> Drop for WakeArcOnDrop<T> {
         fn drop(&mut self) {
             self.0.wait.wake()
         }

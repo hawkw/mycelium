@@ -68,13 +68,15 @@ mod inner {
 
     pub(crate) mod cell {
         #[derive(Debug)]
-        pub(crate) struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
+        pub(crate) struct UnsafeCell<T: ?Sized>(core::cell::UnsafeCell<T>);
 
         impl<T> UnsafeCell<T> {
             pub const fn new(data: T) -> UnsafeCell<T> {
                 UnsafeCell(core::cell::UnsafeCell::new(data))
             }
+        }
 
+        impl<T: ?Sized> UnsafeCell<T> {
             #[inline(always)]
             pub fn with<F, R>(&self, f: F) -> R
             where

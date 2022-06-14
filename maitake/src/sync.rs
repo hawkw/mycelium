@@ -1,5 +1,6 @@
-mod mutex;
-pub use self::mutex::{Mutex, MutexGuard};
+pub mod mutex;
+#[doc(inline)]
+pub use self::mutex::{Mutex, MutexGuard, OwnedMutexGuard};
 
 #[cfg(test)]
 mod tests;
