@@ -1,4 +1,4 @@
-use crate::loom::{self, sync::Arc, thread, future};
+use crate::loom::{self, future, sync::Arc, thread};
 use crate::sync::Mutex;
 
 #[test]
@@ -26,7 +26,6 @@ fn basic_single_threaded() {
     });
 }
 
-
 #[test]
 fn basic_multi_threaded() {
     fn incr(lock: &Arc<Mutex<i32>>) -> thread::JoinHandle<()> {
@@ -38,7 +37,6 @@ fn basic_multi_threaded() {
             })
         })
     }
-
 
     loom::model(|| {
         let lock = Arc::new(Mutex::new(0));
