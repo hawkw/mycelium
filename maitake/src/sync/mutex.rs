@@ -203,7 +203,7 @@ impl<T: ?Sized> Mutex<T> {
     ///
     /// let n = mutex.try_lock()?;
     /// assert_eq!(*n, 1);
-    /// # Ok(())
+    /// # Some(())
     /// # }
     /// ```
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
@@ -361,16 +361,22 @@ feature! {
         /// # Examples
         ///
         /// ```
+        /// # // since we are targeting no-std, it makes more sense to use `alloc`
+        /// # // in these examples, rather than `std`...but i don't want to make
+        /// # // the tests actually `#![no_std]`...
+        /// # use std as alloc;
         /// use maitake::sync::Mutex;
-        /// use core::sync::Arc;
+        /// use alloc::sync::Arc;
         ///
+        /// # fn main() {
         /// async fn example() {
-        ///     let mutex = Mutex::new(1);
+        ///     let mutex = Arc::new(Mutex::new(1));
         ///
         ///     let mut guard = mutex.clone().lock_owned().await;
         ///     *guard = 2;
         ///     # drop(mutex);
         /// }
+        /// # }
         /// ```
         pub async fn lock_owned(self: Arc<Self>) -> OwnedMutexGuard<T> {
             self.wait.wait().await.unwrap();
@@ -403,17 +409,19 @@ feature! {
         /// # Examples
         ///
         /// ```
+        /// # // since we are targeting no-std, it makes more sense to use `alloc`
+        /// # // in these examples, rather than `std`...but i don't want to make
+        /// # // the tests actually `#![no_std]`...
+        /// # use std as alloc;
         /// use maitake::sync::Mutex;
-        /// use core::sync::Arc;
-        /// # async fn dox() -> Option<()> {
+        /// use alloc::sync::Arc;
         ///
-        /// let mutex = Mutex::new(1);
+        /// # fn main() {
+        /// let mutex = Arc::new(Mutex::new(1));
         ///
-        /// let n = mutex.clone().try_lock()?;
-        /// assert_eq!(*n, 1);
-        ///
-        /// # drop(mutex);
-        /// # Ok(())
+        /// if let Ok(guard) = mutex.clone().try_lock_owned() {
+        ///     assert_eq!(*guard, 1);
+        /// }
         /// # }
         /// ```
         pub fn try_lock_owned(self: Arc<Self>) -> Result<OwnedMutexGuard<T>, Arc<Self>> {
