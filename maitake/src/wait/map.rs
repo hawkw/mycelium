@@ -514,6 +514,8 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// This method is generally used when implementing higher-level
     /// synchronization primitives or resources: when an event makes a resource
     /// permanently unavailable, the queue can be closed.
+    ///
+    /// [`wait`]: Self::wait
     pub fn close(&self) {
         let state = self.state.fetch_or(State::Closed.into_usize(), SeqCst);
         let state = test_dbg!(State::from_bits(state));
@@ -539,6 +541,8 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     ///
     /// **Note**: `key`s must be unique. If the given key already exists in the
     /// `WaitMap`, the future will resolve to an Error the first time it is polled
+    ///
+    /// [`wake`]: Self::wake
     pub fn wait(&self, key: K) -> Wait<'_, K, V> {
         Wait {
             queue: self,
