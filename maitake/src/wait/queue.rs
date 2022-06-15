@@ -40,10 +40,10 @@ mod tests;
 /// used to wake a set of tasks when a timer completes or when a resource
 /// becomes available. It can be equally useful for implementing higher-level
 /// synchronization primitives: for example, a `WaitQueue` plus an
-/// [`UnsafeCell`] is essentially an entire implementation of a fair
-/// asynchronous mutex. Finally, a `WaitQueue` can be a useful synchronization
-/// primitive on its own: sometimes, you just need to have a bunch of tasks wait
-/// for something and then wake them all up.
+/// [`UnsafeCell`] is essentially [an entire implementation of a fair
+/// asynchronous mutex][mutex]. Finally, a `WaitQueue` can be a useful
+/// synchronization primitive on its own: sometimes, you just need to have a
+/// bunch of tasks wait for something and then wake them all up.
 ///
 /// # Examples
 ///
@@ -165,6 +165,7 @@ mod tests;
 /// [`UnsafeCell`]: core::cell::UnsafeCell
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
+/// [mutex]: crate::sync::Mutex
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
 pub struct WaitQueue {
