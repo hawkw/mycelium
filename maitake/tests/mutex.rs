@@ -10,11 +10,10 @@ fn try_lock() {
 
     let lock2 = mutex.try_lock();
     assert!(lock2.is_none());
-
     drop(lock1);
 
     let lock3 = mutex.try_lock();
-    assert!(lock3.is_none());
+    assert!(lock3.is_some());
 }
 
 #[test]
