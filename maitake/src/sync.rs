@@ -4,8 +4,11 @@
 //!
 //! - [`Mutex`]: a fairly queued, asynchronous mutual exclusion lock.
 pub mod mutex;
+#[cfg(feature = "alloc")]
 #[doc(inline)]
-pub use self::mutex::{Mutex, MutexGuard, OwnedMutexGuard};
+pub use self::mutex::OwnedMutexGuard;
+#[doc(inline)]
+pub use self::mutex::{Mutex, MutexGuard};
 
 #[cfg(test)]
 mod tests;
