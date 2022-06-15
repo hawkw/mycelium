@@ -1,8 +1,12 @@
 //! Waiter cells and queues to allow tasks to wait for notifications.
 //!
-//! This module implements two types of structure for waiting: a [`WaitCell`],
-//! which stores a *single* waiting task, and a [`WaitQueue`], which
-//! stores a queue of waiting tasks.
+//! This module implements three types of structure for waiting:
+//!
+//! - [`WaitCell`], which stores a *single* waiting task
+//! - [`WaitQueue`], a queue of waiting tasks, which are woken in first-in,
+//!   first-out order
+//! - [`WaitMap`], a set of waiting tasks associated with keys, in which a task
+//!   can be woken by its key
 pub(crate) mod cell;
 pub mod map;
 pub mod queue;
