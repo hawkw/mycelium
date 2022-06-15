@@ -73,6 +73,21 @@ macro_rules! feature {
     }
 }
 
+macro_rules! loom_const_fn {
+    (
+        $(#[$meta:meta])*
+        $vis:vis fn $name:ident($($arg:ident: $T:ty),*) -> $Ret:ty $body:block
+    ) => {
+        $(#[$meta])*
+        #[cfg(not(loom))]
+        $vis const fn $name($($arg: $T),*) -> $Ret $body
+
+        $(#[$meta])*
+        #[cfg(loom)]
+        $vis fn $name($($arg: $T),*) -> $Ret $body
+    }
+}
+
 /// Helper to construct a `NonNull<T>` from a raw pointer to `T`, with null
 /// checks elided in release mode.
 #[cfg(debug_assertions)]

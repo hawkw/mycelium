@@ -40,10 +40,10 @@ mod tests;
 /// used to wake a set of tasks when a timer completes or when a resource
 /// becomes available. It can be equally useful for implementing higher-level
 /// synchronization primitives: for example, a `WaitQueue` plus an
-/// [`UnsafeCell`] is essentially an entire implementation of a fair
-/// asynchronous mutex. Finally, a `WaitQueue` can be a useful synchronization
-/// primitive on its own: sometimes, you just need to have a bunch of tasks wait
-/// for something and then wake them all up.
+/// [`UnsafeCell`] is essentially [an entire implementation of a fair
+/// asynchronous mutex][mutex]. Finally, a `WaitQueue` can be a useful
+/// synchronization primitive on its own: sometimes, you just need to have a
+/// bunch of tasks wait for something and then wake them all up.
 ///
 /// # Examples
 ///
@@ -165,6 +165,7 @@ mod tests;
 /// [`UnsafeCell`]: core::cell::UnsafeCell
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
+/// [mutex]: crate::sync::Mutex
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
 pub struct WaitQueue {
@@ -337,23 +338,32 @@ enum Wakeup {
 // === impl WaitQueue ===
 
 impl WaitQueue {
-    /// Returns a new `WaitQueue`.
-    #[must_use]
-    #[cfg(not(loom))]
-    pub const fn new() -> Self {
-        Self {
-            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
-            queue: Mutex::new(List::new()),
+    loom_const_fn! {
+        /// Returns a new `WaitQueue`.
+        #[must_use]
+        pub fn new() -> Self {
+            Self::new_with_state(State::Empty)
         }
     }
 
-    /// Returns a new `WaitQueue`.
-    #[must_use]
-    #[cfg(loom)]
-    pub fn new() -> Self {
-        Self {
-            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
-            queue: Mutex::new(List::new()),
+    loom_const_fn! {
+        /// Returns a new `WaitQueue` with a single stored wakeup.
+        ///
+        /// The first call to [`wait`] on this queue will immediately succeed.
+        // TODO(eliza): should this be a public API?
+        #[must_use]
+        pub(crate) fn new_woken() -> Self {
+            Self::new_with_state(State::Woken)
+        }
+    }
+
+    loom_const_fn! {
+        #[must_use]
+        fn new_with_state(state: State) -> Self {
+            Self {
+                state: CachePadded::new(AtomicUsize::new(state.into_usize())),
+                queue: Mutex::new(List::new()),
+            }
         }
     }
 
@@ -477,6 +487,24 @@ impl WaitQueue {
         Wait {
             queue: self,
             waiter: self.waiter(),
+        }
+    }
+
+    pub(crate) fn try_wait(&self) -> Poll<WaitResult<()>> {
+        let mut state = self.load();
+        let initial_wake_alls = state.get(QueueState::WAKE_ALLS);
+        while state.get(QueueState::STATE) == State::Woken {
+            match self.compare_exchange(state, state.with_state(State::Empty)) {
+                Ok(_) => return Poll::Ready(Ok(())),
+                Err(actual) => state = actual,
+            }
+        }
+
+        match state.get(QueueState::STATE) {
+            State::Closed => wait::closed(),
+            _ if state.get(QueueState::WAKE_ALLS) > initial_wake_alls => Poll::Ready(Ok(())),
+            State::Empty | State::Waiting => Poll::Pending,
+            State::Woken => Poll::Ready(Ok(())),
         }
     }
 
