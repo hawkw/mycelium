@@ -60,8 +60,8 @@ use pin_project::pin_project;
 ///     `liballoc`][storage].
 ///
 /// [^3]: In fact, this mutex _cannot_ implement poisoning, as poisoning
-///     requires support for unwinding, and `maitake` assumes that panics are
-///     invariably fatal.
+///     requires support for unwinding, and [`maitake` assumes that panics are
+///     invariably fatal][no-unwinding].
 ///
 /// [mutex]: https://en.wikipedia.org/wiki/Mutual_exclusion
 /// [RAII guards]: MutexGuard
@@ -75,7 +75,9 @@ use pin_project::pin_project;
 /// [`futures_util::lock::Mutex`]: https://docs.rs/futures-util/latest/futures_util/lock/struct.Mutex.html
 /// [intrusive linked list]: crate::wait::WaitQueue#implementation-notes
 /// [poisoning]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html#poisoning
+// for some reason, intra-doc links don't work in footnotes?
 /// [storage]: ../task/trait.Storage.html
+/// [no-unwinding]: ../index.html#maitake-does-not-support-unwinding
 
 pub struct Mutex<T: ?Sized> {
     wait: WaitQueue,
