@@ -26,6 +26,7 @@ kit.
 [sponsor-url]: https://github.com/sponsors/hawkw
 [maitake-wiki]: https://en.wikipedia.org/wiki/Grifola_frondosa
 [97708]: https://github.com/rust-lang/rust/blob/c7b0452ece11bf714f7cf2003747231931504d59/src/test/ui/codegen/auxiliary/issue-97708-aux.rs
+
 ## what is it?
 
 This library is a collection of modular components for building a Rust
@@ -49,6 +50,81 @@ operating systems, but may be useful for other projects as well.
 [wait]: https://mycelium.elizas.website/maitake/wait/index.html
 [mycelium]: https://github.com/hawkw/mycelium
 [mnemOS]: https://mnemos.jamesmunns.com
+
+## usage considerations
+
+`maitake` is intended primarily for use in bare-metal projects, such as
+operating systems, operating system components, and embedded systems. These
+bare-metal systems typically do not use the Rust standard library, so `maitake`
+supports `#![no_std]` by default, and the use of [`liballoc`] is feature-flagged
+for systems where [`liballoc`] is unavailable.
+
+This intended use case has some important implications:
+
+#### `maitake` is *not* a complete asynchronous runtime
+
+This is in contrast to other async runtimes, like [`tokio`], [`async-std`], and
+[`glommio`], which provide everything a userspace application needs to run
+async tasks and perform asynchronous IO, with lower-level implementation
+details encapsulated behind the runtime's API. In the bare-metal systems
+`maitake` is intended for use in, however, it is often necessary to have more
+direct control over lower-level implementation details of the runtime.
+
+For example: in an asynchronous runtime, [tasks] must be stored in non-stack
+memory. Runtimes like [`tokio`] and [`async-std`] use the standard library's
+allocator and `Box` type to allocate tasks on the heap. In bare-metal systems,
+though, [`liballoc`]'s heap allocator may not be available. Such a system may
+have no ability to perform dynamic heap allocations, or may implement its own
+allocator which may not be compatible with `liballoc`.
+
+`maitake` is designed to still be usable in those cases &mdash; even a system
+which cannot dynamically allocate memory could use `maitake` in order to
+create and schedule a fixed set of tasks that are stored in `'static`s, essentially
+allocating tasks at compile-time. Therefore, `maitake` provides [an
+interface][Storage] for overriding the memory container in which tasks are
+stored. In order to provide such an interface, however, `maitake` must expose
+[the in-memory representation of spawned tasks][Task], which other runtimes
+typically do not make part of their public APIs.
+
+[`tokio`]: https://crates.io/crate/tokio
+[`async-std`]: https://crates.io/crate/async-std
+[`glommio`]: https://crates.io/crate/glommio
+[tasks]: https://mycelium.elizas.website/maitake/task/index.html
+[storage]: https://mycelium.elizas.website/maitake/task/index.html
+[Task]: https://mycelium.elizas.website/maitake/task/struct.task
+[Storage]: https://mycelium.elizas.website/maitake/task/trait.storage
+
+#### `maitake` does not support unwinding
+
+Rust supports multiple modes of handling [panics]: `panic="abort"` and
+`panic="unwind"`. When a program is compiled with `panic="unwind"`, panics are
+handled by [unwinding] the stack of the panicking thread. This allows the use of
+APIs like [`catch_unwind`], which allows panics to be handled without
+terminating the entire program. On the other hand, compiling with
+`panic="abort"` means that all panics immediately terminate the program.
+
+Bare-metal systems typically do not use stack unwinding. For programs which use
+the Rust standard library, support for unwinding is provided by `std`. However,
+in bare-metal, `#![no_std]` systems, it is necessary for the system to implement
+its own unwinding system. Therefore, *`maitake` does not support unwinding*.
+
+This is important to note, because supporting unwinding imposes additional
+[safety considerations][UnwindSafe]. In order to safely support unwinding, many
+parts of `maitake`, such as runtime internals and synchronization primitives,
+would have to take extra steps to ensure that they cannot be left in an invalid
+state during unwinding. Ensuring unwind-safety would require the use of standard
+library APIs that are not available without `std`, so `maitake` does not ensure
+unwind-safety.
+
+This means that `maitake` **should not be used** in programs compiled with
+`panic="unwind"`. Typically, no bare-metal program will fall into this category,
+but if you are using `maitake` in a project which uses `std`, it is necessary to
+explicitly disable unwinding in that project's `Cargo.toml`.
+
+[panics]: https://doc.rust-lang.org/stable/std/macro.panic.html
+[unwinding]: https://doc.rust-lang.org/nomicon/unwinding.html
+[`catch_unwind`]: https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
+[UnwindSafe]: https://doc.rust-lang.org/stable/std/panic/trait.UnwindSafe.html
 
 ## features
 
