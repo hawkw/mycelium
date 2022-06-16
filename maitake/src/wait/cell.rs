@@ -220,9 +220,24 @@ impl Future for Wait<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if !self.once {
-            self.once = true;
-            self.cell.poll_wait(cx.waker())
+            match self.cell.poll_wait(cx.waker()) {
+                Poll::Ready(Ok(())) => {
+                    // I guess the cell was busy, and it just kicked our waker.
+                    // Try again later, I guess.
+                    Poll::Pending
+                }
+                err @ Poll::Ready(_) => {
+                    // This was bad! We're done here.
+                    err
+                }
+                Poll::Pending => {
+                    // Yay, we pended! Set that sweet once flag
+                    self.once = true;
+                    Poll::Pending
+                }
+            }
         } else {
+            // We made it to "once", and got polled again, We must be ready!
             notified(())
         }
     }
