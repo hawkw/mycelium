@@ -292,8 +292,7 @@ impl fmt::Debug for State {
     }
 }
 
-#[cfg(feature = "alloc")]
-#[cfg(test)]
+#[cfg(all(feature = "alloc", not(loom), test))]
 mod test {
     use super::*;
     use crate::scheduler::Scheduler;
