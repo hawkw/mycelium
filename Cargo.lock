@@ -551,7 +551,6 @@ dependencies = [
  "loom",
  "mycelium-bitfield",
  "mycelium-util",
- "mycotest",
  "pin-project",
  "tracing 0.1.34",
  "tracing 0.2.0",

@@ -7,11 +7,13 @@ use crate::{
         },
     },
     util::tracing,
-    wait::{self, WaitResult},
+    wait::{self, notified, WaitResult},
 };
 use core::{
+    future::Future,
     ops,
-    task::{Poll, Waker},
+    pin::Pin,
+    task::{Context, Poll, Waker},
 };
 use mycelium_util::{fmt, sync::CachePadded};
 
@@ -34,6 +36,20 @@ pub struct WaitCell {
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 struct State(usize);
+
+/// Future returned from [`WaitCell::wait()`].
+///
+/// This future is fused, so once it has completed, any future calls to poll
+/// will immediately return [`Poll::Ready`].
+#[derive(Debug)]
+#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
+pub struct Wait<'a> {
+    /// The [`WaitQueue`] being waited on from.
+    cell: &'a WaitCell,
+
+    /// Whether we have already polled once
+    once: bool,
+}
 
 // === impl WaitCell ===
 
@@ -120,6 +136,14 @@ impl WaitCell {
         }
     }
 
+    /// Wait to be woken up by this cell.
+    pub fn wait(&self) -> Wait<'_> {
+        Wait {
+            cell: self,
+            once: false,
+        }
+    }
+
     pub fn notify(&self) -> bool {
         self.notify2(State::WAITING)
     }
@@ -189,6 +213,21 @@ impl fmt::Debug for WaitCell {
     }
 }
 
+// === impl Wait ===
+
+impl Future for Wait<'_> {
+    type Output = WaitResult<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if !self.once {
+            self.once = true;
+            self.cell.poll_wait(cx.waker())
+        } else {
+            notified(())
+        }
+    }
+}
+
 // === impl State ===
 
 impl State {
@@ -235,6 +274,37 @@ impl fmt::Debug for State {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "alloc")]
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::scheduler::Scheduler;
+    use alloc::sync::Arc;
+
+    #[test]
+    fn wait_smoke() {
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+        let sched = Scheduler::new();
+        let wait = Arc::new(WaitCell::new());
+
+        let wait2 = wait.clone();
+        sched.spawn(async move {
+            wait2.wait().await.unwrap();
+            COMPLETED.fetch_add(1, Ordering::Relaxed);
+        });
+
+        let tick = sched.tick();
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+
+        assert_eq!(wait.notify(), true);
+        let tick = sched.tick();
+        assert_eq!(tick.completed, 1);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
     }
 }
 
