@@ -21,9 +21,11 @@ macro_rules! feature {
 }
 
 pub mod list;
+pub mod mpsc_queue;
+pub mod transfer_stack;
+
 #[doc(inline)]
 pub use list::List;
-pub mod mpsc_queue;
 #[doc(inline)]
 pub use mpsc_queue::MpscQueue;
 
