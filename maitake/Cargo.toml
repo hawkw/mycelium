@@ -36,7 +36,6 @@ no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad"]
 [dependencies]
 mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }
-mycotest = { path = "../mycotest", default-features = false }
 cordyceps = { path = "../cordyceps" }
 pin-project = "1"
 
