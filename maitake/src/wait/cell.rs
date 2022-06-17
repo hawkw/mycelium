@@ -7,7 +7,6 @@ use crate::{
         },
     },
     util::tracing,
-    wait::{self, notified, WaitResult},
 };
 use core::{
     future::Future,
@@ -16,6 +15,26 @@ use core::{
     task::{Context, Poll, Waker},
 };
 use mycelium_util::{fmt, sync::CachePadded};
+
+/// An error indicating that a [`WaitCell`] or [`WaitQueue`] was closed while
+/// attempting register a waiter.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    Closed,
+    Busy,
+}
+
+pub const fn closed() -> Result<(), Error> {
+    Err(Error::Closed)
+}
+
+pub const fn registered() -> Result<(), Error> {
+    Ok(())
+}
+
+pub const fn busy() -> Result<(), Error> {
+    Err(Error::Busy)
+}
 
 /// An atomically registered [`Waker`].
 ///
@@ -48,7 +67,7 @@ pub struct Wait<'a> {
     cell: &'a WaitCell,
 
     /// Whether we have already polled once
-    once: bool,
+    registered: bool,
 }
 
 // === impl WaitCell ===
@@ -72,26 +91,24 @@ impl WaitCell {
 }
 
 impl WaitCell {
-    pub fn poll_wait(&self, waker: &Waker) -> Poll<WaitResult<()>> {
+    fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
         tracing::trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
         match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
             // someone else is notifying, so don't wait!
             Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
-                return wait::closed();
+                return closed();
             }
             Err(actual) if test_dbg!(actual.is(State::NOTIFYING)) => {
-                waker.wake_by_ref();
-                crate::loom::hint::spin_loop();
-                return wait::notified(());
+                return busy();
             }
 
             Err(actual) => {
                 debug_assert!(
                     actual == State::PARKING || actual == State::PARKING | State::NOTIFYING
                 );
-                return Poll::Pending;
+                return busy();
             }
             Ok(_) => {}
         }
@@ -104,8 +121,13 @@ impl WaitCell {
             }
         });
 
+        if let Some(prev_waker) = prev_waker {
+            test_trace!("Replaced an old waker in cell, waking");
+            prev_waker.wake();
+        }
+
         match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel)) {
-            Ok(_) => Poll::Pending,
+            Ok(_) => registered(),
             Err(actual) => {
                 test_trace!(state = ?actual, "was notified");
                 let waker = self.waker.with_mut(|waker| unsafe { (*waker).take() });
@@ -119,19 +141,13 @@ impl WaitCell {
                     "state changed unexpectedly while parking!"
                 );
 
-                if let Some(prev_waker) = prev_waker {
-                    prev_waker.wake();
-                }
-
                 if let Some(waker) = waker {
                     waker.wake();
                 }
 
-                if test_dbg!(state.is(State::CLOSED)) {
-                    wait::closed()
-                } else {
-                    wait::notified(())
-                }
+                // We just went to the closed state, so sorry new waker, shops
+                // closed
+                closed()
             }
         }
     }
@@ -140,7 +156,7 @@ impl WaitCell {
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             cell: self,
-            once: false,
+            registered: false,
         }
     }
 
@@ -216,29 +232,25 @@ impl fmt::Debug for WaitCell {
 // === impl Wait ===
 
 impl Future for Wait<'_> {
-    type Output = WaitResult<()>;
+    type Output = Result<(), Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if !self.once {
-            match self.cell.poll_wait(cx.waker()) {
-                Poll::Ready(Ok(())) => {
-                    // I guess the cell was busy, and it just kicked our waker.
-                    // Try again later, I guess.
+        if !self.registered {
+            match self.cell.register_wait(cx.waker()) {
+                Ok(_) => {
+                    self.registered = true;
                     Poll::Pending
                 }
-                err @ Poll::Ready(_) => {
-                    // This was bad! We're done here.
-                    err
-                }
-                Poll::Pending => {
-                    // Yay, we pended! Set that sweet once flag
-                    self.once = true;
+                Err(Error::Busy) => {
+                    // Cell was busy, all we can do is try again later
+                    cx.waker().wake_by_ref();
                     Poll::Pending
                 }
+                Err(Error::Closed) => Poll::Ready(Err(Error::Closed)),
             }
         } else {
             // We made it to "once", and got polled again, We must be ready!
-            notified(())
+            Poll::Ready(Ok(()))
         }
     }
 }
@@ -355,17 +367,14 @@ pub(crate) mod test_util {
                     None => return Poll::Ready(()),
                 };
 
-                let res = test_dbg!(this.task.poll_wait(cx.waker()));
+                let res = this.task.wait();
+                futures_util::pin_mut!(res);
 
                 if this.num_notify == this.num.load(Relaxed) {
                     return Poll::Ready(());
                 }
 
-                if res.is_ready() {
-                    return Poll::Ready(());
-                }
-
-                Poll::Pending
+                res.poll(cx).map(drop)
             })
             .await
         }

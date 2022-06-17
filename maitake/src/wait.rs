@@ -30,10 +30,6 @@ pub(in crate::wait) const fn closed<T>() -> Poll<WaitResult<T>> {
     Poll::Ready(Err(Closed::new()))
 }
 
-pub(in crate::wait) const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
-    Poll::Ready(Ok(data))
-}
-
 impl Closed {
     pub(in crate::wait) const fn new() -> Self {
         Self(())
