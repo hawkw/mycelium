@@ -40,6 +40,45 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         Some(curr)
     }
 
+    /// Moves the cursor position to the next element in the [`List`].
+    ///
+    /// If the cursor is pointing at the null element, this moves it to the first
+    /// element in the [`List`]. If it is pointing to the last element in the
+    /// list, then this will move it to the null element.
+    pub fn move_next(&mut self) {
+        match self.curr.take() {
+            // Advance the cursor to the current node's next element.
+            Some(curr) => unsafe {
+                self.curr = T::links(curr).as_ref().next();
+            },
+            // We have no current element --- move to the start of the list.
+            None => {
+                self.curr = self.list.head;
+            }
+        }
+    }
+
+    /// Moves the cursor to the previous element in the [`List`].
+    ///
+    /// If the cursor is pointing at the null element, this moves it to the last
+    /// element in the [`List`]. If it is pointing to the first element in the
+    /// list, then this will move it to the null element.
+    // XXX(eliza): i would have named this "move_back", personally, but
+    // `std::collections::LinkedList`'s cursor interface calls this
+    // "move_prev"...
+    pub fn move_prev(&mut self) {
+        match self.curr.take() {
+            // Advance the cursor to the current node's prev element.
+            Some(curr) => unsafe {
+                self.curr = T::links(curr).as_ref().prev();
+            },
+            // We have no current element --- move to the end of the list.
+            None => {
+                self.curr = self.list.tail;
+            }
+        }
+    }
+
     /// Find and remove the first element matching the provided `predicate`.
     ///
     /// This traverses the list from the cursor's current position and calls
