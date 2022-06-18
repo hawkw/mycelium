@@ -617,6 +617,19 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
+    /// Returns a [`Cursor`] s+tarting at the last element.
+    ///
+    /// The [`Cursor`] type can be used as a mutable [`Iterator`]. In addition,
+    /// however, it also permits modifying the *structure* of the list by
+    /// inserting or removing elements at the cursor's current position.
+    #[must_use]
+    pub fn cursor_back_mut(&mut self) -> Cursor<'_, T> {
+        Cursor {
+            curr: self.tail,
+            list: self,
+        }
+    }
+
     /// Returns an iterator over the items in this list, by reference.
     #[must_use]
     pub fn iter(&self) -> Iter<'_, T> {

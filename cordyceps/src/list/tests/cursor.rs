@@ -43,23 +43,21 @@ fn move_peek() {
     assert_eq!(val(cursor.peek_prev()), Some(1));
     // assert_eq!(cursor.index(), Some(1));
 
-    // TODO(eliza): we don't have a `cursor_back` yet...
-
-    // let mut cursor = m.cursor_back();
-    // assert_eq!(val(cursor.current()), Some(&6));
-    // assert_eq!(val(cursor.peek_next()), None);
-    // assert_eq!(val(cursor.peek_prev()), Some(&5));
+    let mut cursor = list.cursor_back_mut();
+    assert_eq!(val(cursor.current()), Some(6));
+    assert_eq!(val(cursor.peek_next()), None);
+    assert_eq!(val(cursor.peek_prev()), Some(5));
     // assert_eq!(cursor.index(), Some(5));
-    // cursor.move_next();
-    // assert_eq!(val(cursor.current()), None);
-    // assert_eq!(val(cursor.peek_next()), Some(&1));
-    // assert_eq!(val(cursor.peek_prev()), Some(&6));
+    cursor.move_next();
+    assert_eq!(val(cursor.current()), None);
+    assert_eq!(val(cursor.peek_next()), Some(1));
+    assert_eq!(val(cursor.peek_prev()), Some(6));
     // assert_eq!(cursor.index(), None);
-    // cursor.move_prev();
-    // cursor.move_prev();
-    // assert_eq!(val(cursor.current()), Some(&5));
-    // assert_eq!(val(cursor.peek_next()), Some(&6));
-    // assert_eq!(val(cursor.peek_prev()), Some(&4));
+    cursor.move_prev();
+    cursor.move_prev();
+    assert_eq!(val(cursor.current()), Some(5));
+    assert_eq!(val(cursor.peek_next()), Some(6));
+    assert_eq!(val(cursor.peek_prev()), Some(4));
     // assert_eq!(cursor.index(), Some(4));
 
     // let mut m: LinkedList<u32> = LinkedList::new();
