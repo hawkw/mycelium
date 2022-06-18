@@ -192,6 +192,8 @@ dependencies = [
  "pin-project",
  "proptest",
  "tracing 0.1.34",
+ "tracing 0.2.0",
+ "tracing-subscriber 0.3.0",
  "tracing-subscriber 0.3.11",
 ]
 
@@ -527,9 +529,9 @@ dependencies = [
 
 [[package]]
 name = "loom"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85eb735cf3c8ebac6cc3655c5da2f4a088b6a19133aa482471a21ba0eb5d83ab"
+checksum = "ff50ecb28bb86013e935fb6683ab1f6d3a20016f123c76fd4c27470076ac30f5"
 dependencies = [
  "cfg-if",
  "generator",

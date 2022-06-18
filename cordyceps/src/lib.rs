@@ -8,17 +8,8 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
-macro_rules! feature {
-    (
-        #![$meta:meta]
-        $($item:item)*
-    ) => {
-        $(
-            #[cfg($meta)]
-            $item
-        )*
-    }
-}
+#[macro_use]
+pub(crate) mod util;
 
 pub mod list;
 pub mod mpsc_queue;
@@ -30,7 +21,6 @@ pub use list::List;
 pub use mpsc_queue::MpscQueue;
 
 pub(crate) mod loom;
-pub(crate) mod util;
 
 use core::ptr::NonNull;
 

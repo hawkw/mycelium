@@ -1243,6 +1243,7 @@ unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 mod loom {
     use super::*;
     use crate::loom::{self, sync::Arc, thread};
+    use crate::util::tracing;
     use test_util::*;
 
     #[test]
