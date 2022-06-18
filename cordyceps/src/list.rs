@@ -625,10 +625,11 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
     pub fn cursor_back_mut(&mut self) -> Cursor<'_, T> {
+        let index = self.len().saturating_sub(1);
         Cursor {
             curr: self.tail,
             list: self,
-            index: self.len().saturating_sub(1),
+            index,
         }
     }
 
@@ -677,6 +678,71 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     {
         let cursor = self.cursor_front_mut();
         DrainFilter { cursor, pred }
+    }
+
+    /// Inserts the list segment represented by `splice_start` and `splice_end`
+    /// between `next` and `prev`.
+    ///
+    /// # Safety
+    ///
+    /// This method requires the following invariants be upheld:
+    ///
+    /// - `prev` and `next` are part of the same list.
+    /// - `prev` and `next` are not the same node.
+    /// - `splice_start` and `splice_end` are part of the same list, which is
+    ///   *not* the same list that `prev` and `next` are part of.
+    /// -`prev` is `next`'s `prev` node, and `next` is `prev`'s `prev` node.
+    /// - `splice_start` is ahead of `splice_end` in the list that they came from.
+    #[inline]
+    unsafe fn insert_nodes_between(
+        &mut self,
+        prev: Link<T>,
+        next: Link<T>,
+        splice_start: NonNull<T>,
+        splice_end: NonNull<T>,
+        spliced_length: usize,
+    ) {
+        debug_assert!(
+            (prev.is_none() && next.is_none()) || prev != next,
+            "cannot insert between a node and itself!\n    \
+            prev: {prev:?}\n   next: {next:?}",
+        );
+        // This method takes care not to create multiple mutable references to
+        // whole nodes at the same time, to maintain validity of aliasing
+        // pointers into `element`.
+
+        if let Some(prev) = prev {
+            let links = T::links(prev).as_mut();
+            debug_assert_eq!(links.next(), next);
+            links.set_next(Some(splice_start));
+        } else {
+            self.head = Some(splice_start);
+        }
+
+        if let Some(next) = next {
+            let links = T::links(next).as_mut();
+            debug_assert_eq!(links.prev(), prev);
+            links.set_prev(Some(splice_end));
+        } else {
+            self.tail = Some(splice_end);
+        }
+
+        let start_links = T::links(splice_start).as_mut();
+        let end_links = T::links(splice_end).as_mut();
+        debug_assert!(
+            splice_start == splice_end
+                || (start_links.next().is_some() && end_links.prev().is_some()),
+            "splice_start must be ahead of splice_end!\n   \
+            splice_start: {splice_start:?}\n    \
+            splice_end: {splice_end:?}\n  \
+            start_links: {start_links:?}\n   \
+            end_links: {end_links:?}",
+        );
+
+        start_links.set_prev(prev);
+        end_links.set_next(next);
+
+        self.len += spliced_length;
     }
 }
 
