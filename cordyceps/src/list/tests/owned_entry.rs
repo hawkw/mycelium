@@ -119,14 +119,14 @@ fn cursor_twice() {
 
     // iterate over the list...
     let mut i = 1;
-    for entry in list.cursor() {
+    for entry in list.cursor_front_mut() {
         assert_eq!(entry.val, i);
         i += 1;
     }
 
     // do it again; it should still work!
     let mut i = 1;
-    for entry in list.cursor() {
+    for entry in list.cursor_front_mut() {
         assert_eq!(entry.val, i);
         i += 1;
     }

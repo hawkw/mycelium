@@ -599,7 +599,18 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// however, it also permits modifying the *structure* of the list by
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
+    #[deprecated(since = "0.2.2", note = "renamed to `List::cursor_front_mut`")]
     pub fn cursor(&mut self) -> Cursor<'_, T> {
+        self.cursor_front_mut()
+    }
+
+    /// Returns a [`Cursor`] starting at the first element.
+    ///
+    /// The [`Cursor`] type can be used as a mutable [`Iterator`]. In addition,
+    /// however, it also permits modifying the *structure* of the list by
+    /// inserting or removing elements at the cursor's current position.
+    #[must_use]
+    pub fn cursor_front_mut(&mut self) -> Cursor<'_, T> {
         Cursor {
             curr: self.head,
             list: self,
@@ -649,7 +660,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     where
         F: FnMut(&T) -> bool,
     {
-        let cursor = self.cursor();
+        let cursor = self.cursor_front_mut();
         DrainFilter { cursor, pred }
     }
 }
