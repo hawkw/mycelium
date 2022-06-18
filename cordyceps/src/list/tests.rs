@@ -297,12 +297,12 @@ fn drain_filter() {
 
 //     let mut list = List::<Entry<'_>>::new();
 
-//     assert_eq!(0, list.cursor().count());
+//     assert_eq!(0, list.cursor_front_mut().count());
 
 //     list.push_front(a.as_ref());
 //     list.push_front(b.as_ref());
 
-//     let mut i = list.cursor();
+//     let mut i = list.cursor_front_mut();
 //     assert_eq!(7, i.next().unwrap().val);
 //     assert_eq!(5, i.next().unwrap().val);
 //     assert!(i.next().is_none());
