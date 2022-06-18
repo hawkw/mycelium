@@ -52,7 +52,7 @@ fn val(entry: Option<Pin<&Entry<'_>>>) -> Option<i32> {
     entry.map(|entry| entry.val)
 }
 
-fn collect_list(list: &mut List<Entry<'_>>) -> Vec<i32> {
+fn drain_list(list: &mut List<Entry<'_>>) -> Vec<i32> {
     let mut ret = vec![];
 
     while let Some(entry) = list.pop_back() {
@@ -62,9 +62,13 @@ fn collect_list(list: &mut List<Entry<'_>>) -> Vec<i32> {
     ret
 }
 
-fn push_all<'a>(list: &mut List<Entry<'a>>, entries: &[Pin<&'a Entry<'a>>]) {
-    for entry in entries.iter() {
-        list.push_front(*entry);
+fn collect_vals(list: &List<Entry<'_>>) -> Vec<i32> {
+    list.iter().map(|entry| entry.val).collect::<Vec<_>>()
+}
+
+fn push_all<'a>(list: &mut List<Entry<'a>>, entries: impl IntoIterator<Item = Pin<&'a Entry<'a>>>) {
+    for entry in entries.into_iter() {
+        list.push_front(entry);
     }
 }
 
@@ -119,7 +123,7 @@ fn push_and_drain() {
     list.push_front(c.as_ref());
     list.assert_valid();
 
-    let items: Vec<i32> = collect_list(&mut list);
+    let items: Vec<i32> = drain_list(&mut list);
     assert_eq!([5, 7, 31].to_vec(), items);
 
     list.assert_valid();
@@ -228,7 +232,7 @@ fn double_ended_iter() {
 
     let mut list = List::new();
 
-    push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
+    push_all(&mut list, vec![c.as_ref(), b.as_ref(), a.as_ref()]);
 
     let head_to_tail = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
     assert_eq!(&head_to_tail, &[1, 2, 3]);
@@ -250,7 +254,10 @@ fn double_ended_iter_empties() {
 
     let mut list = List::new();
 
-    push_all(&mut list, &[d.as_ref(), c.as_ref(), b.as_ref(), a.as_ref()]);
+    push_all(
+        &mut list,
+        vec![d.as_ref(), c.as_ref(), b.as_ref(), a.as_ref()],
+    );
 
     let mut iter = list.iter();
 
@@ -273,7 +280,10 @@ fn drain_filter() {
 
     let mut list = List::new();
 
-    push_all(&mut list, &[d.as_ref(), c.as_ref(), b.as_ref(), a.as_ref()]);
+    push_all(
+        &mut list,
+        vec![d.as_ref(), c.as_ref(), b.as_ref(), a.as_ref()],
+    );
 
     {
         // Create a scope so that the mutable borrow on the list is released

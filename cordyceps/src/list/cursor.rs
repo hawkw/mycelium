@@ -179,13 +179,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     /// element in the [`List`]. If the cursor is pointing to the last element
     /// in the [`List`], this returns `None`.
     pub fn peek_next(&self) -> Option<Pin<&T>> {
-        unsafe {
-            let next = match self.curr {
-                Some(curr) => T::links(curr).as_ref().next(),
-                None => self.list.head,
-            };
-            next.map(|next| self.pin_node(next))
-        }
+        self.next_link().map(|next| unsafe { self.pin_node(next) })
     }
 
     /// Borrows the previous element before the cursor's current position in the
@@ -198,13 +192,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     // `std::collections::LinkedList`'s cursor interface calls this
     // "move_prev"...
     pub fn peek_prev(&self) -> Option<Pin<&T>> {
-        unsafe {
-            let prev = match self.curr {
-                Some(curr) => T::links(curr).as_ref().prev(),
-                None => self.list.tail,
-            };
-            prev.map(|prev| self.pin_node(prev))
-        }
+        self.prev_link().map(|prev| unsafe { self.pin_node(prev) })
     }
 
     /// Mutably borrows the next element after the cursor's current position in
@@ -214,13 +202,8 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     /// element in the [`List`]. If the cursor is pointing to the last element
     /// in the [`List`], this returns `None`.
     pub fn peek_next_mut(&mut self) -> Option<Pin<&mut T>> {
-        unsafe {
-            let next = match self.curr {
-                Some(curr) => T::links(curr).as_mut().next(),
-                None => self.list.head,
-            };
-            next.map(|next| self.pin_node_mut(next))
-        }
+        self.next_link()
+            .map(|next| unsafe { self.pin_node_mut(next) })
     }
 
     /// Mutably borrows the previous element before the cursor's current
@@ -233,13 +216,45 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     // `std::collections::LinkedList`'s cursor interface calls this
     // "move_prev"...
     pub fn peek_prev_mut(&mut self) -> Option<Pin<&mut T>> {
+        self.prev_link()
+            .map(|prev| unsafe { self.pin_node_mut(prev) })
+    }
+
+    /// Inserts a new element into the [`List`] after the current one.
+    ///
+    /// If the cursor is pointing at the null element then the new element is
+    /// inserted at the front of the [`List`].
+    pub fn insert_after(&mut self, element: T::Handle) {
+        let node = T::into_ptr(element);
+        assert_ne!(self.curr, Some(node), "cannot insert a node after itself");
+        let next = self.next_link();
+
         unsafe {
-            let prev = match self.curr {
-                Some(curr) => T::links(curr).as_mut().prev(),
-                None => self.list.tail,
-            };
-            prev.map(|prev| self.pin_node_mut(prev))
+            self.list
+                .insert_nodes_between(self.curr, next, node, node, 1);
         }
+
+        if self.curr.is_none() {
+            // The null index has shifted.
+            self.index = self.list.len;
+        }
+    }
+
+    /// Inserts a new element into the [`List`] before the current one.
+    ///
+    /// If the cursor is pointing at the null element then the new element is
+    /// inserted at the front of the [`List`].
+    pub fn insert_before(&mut self, element: T::Handle) {
+        let node = T::into_ptr(element);
+        assert_ne!(self.curr, Some(node), "cannot insert a node before itself");
+        let prev = self.prev_link();
+
+        unsafe {
+            self.list
+                .insert_nodes_between(prev, self.curr, node, node, 1);
+        }
+
+        self.index += 1;
     }
 
     /// Returns the length of the [`List`] this cursor points to.
@@ -250,6 +265,22 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     /// Returns `true` if the [`List`] this cursor points to is empty
     pub fn is_empty(&self) -> bool {
         self.list.is_empty()
+    }
+
+    #[inline(always)]
+    fn next_link(&self) -> Link<T> {
+        match self.curr {
+            Some(curr) => unsafe { T::links(curr).as_ref().next() },
+            None => self.list.head,
+        }
+    }
+
+    #[inline(always)]
+    fn prev_link(&self) -> Link<T> {
+        match self.curr {
+            Some(curr) => unsafe { T::links(curr).as_ref().prev() },
+            None => self.list.tail,
+        }
     }
 
     /// # Safety
