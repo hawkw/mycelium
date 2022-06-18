@@ -66,9 +66,12 @@ fn collect_vals(list: &List<Entry<'_>>) -> Vec<i32> {
     list.iter().map(|entry| entry.val).collect::<Vec<_>>()
 }
 
-fn push_all<'a>(list: &mut List<Entry<'a>>, entries: impl IntoIterator<Item = Pin<&'a Entry<'a>>>) {
+fn push_all<'a>(
+    list: &mut List<Entry<'a>>,
+    entries: impl IntoIterator<Item = &'a Pin<Box<Entry<'a>>>>,
+) {
     for entry in entries.into_iter() {
-        list.push_front(entry);
+        list.push_back(entry.as_ref());
     }
 }
 
@@ -226,13 +229,11 @@ fn push_pop_push_pop() {
 
 #[test]
 fn double_ended_iter() {
-    let a = entry(1);
-    let b = entry(2);
-    let c = entry(3);
+    let entries = [entry(1), entry(2), entry(3)];
 
     let mut list = List::new();
 
-    push_all(&mut list, vec![c.as_ref(), b.as_ref(), a.as_ref()]);
+    push_all(&mut list, &entries);
 
     let head_to_tail = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
     assert_eq!(&head_to_tail, &[1, 2, 3]);
@@ -247,17 +248,11 @@ fn double_ended_iter() {
 /// > and do not cross: iteration is over when they meet in the middle.
 #[test]
 fn double_ended_iter_empties() {
-    let a = entry(1);
-    let b = entry(2);
-    let c = entry(3);
-    let d = entry(4);
+    let entries = [entry(1), entry(2), entry(3), entry(4)];
 
     let mut list = List::new();
 
-    push_all(
-        &mut list,
-        vec![d.as_ref(), c.as_ref(), b.as_ref(), a.as_ref()],
-    );
+    push_all(&mut list, &entries);
 
     let mut iter = list.iter();
 
@@ -273,17 +268,11 @@ fn double_ended_iter_empties() {
 
 #[test]
 fn drain_filter() {
-    let a = entry(1);
-    let b = entry(2);
-    let c = entry(3);
-    let d = entry(4);
+    let entries = [entry(1), entry(2), entry(3), entry(4)];
 
     let mut list = List::new();
 
-    push_all(
-        &mut list,
-        vec![d.as_ref(), c.as_ref(), b.as_ref(), a.as_ref()],
-    );
+    push_all(&mut list, &entries);
 
     {
         // Create a scope so that the mutable borrow on the list is released
