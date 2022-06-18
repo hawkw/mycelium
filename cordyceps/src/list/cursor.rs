@@ -61,6 +61,44 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         }
         unsafe { self.list.remove(item?) }
     }
+
+    /// Borrows the element that the cursor is currently pointing at.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the
+    /// null element.
+    pub fn current(&self) -> Option<Pin<&T>> {
+        let curr = self.curr?;
+        // NOTE(eliza): in this case, we don't *need* to pin the reference,
+        // because it's immutable and you can't move out of a shared
+        // reference in safe code. but...it makes the API more consistent
+        // with `front_mut` etc.
+        let pin = unsafe {
+            // safety: elements in the list must be pinned while they are in the
+            // list, so it is safe to construct a `pin` here provided that the
+            // `Linked` trait's invariants are upheld.
+            Pin::new_unchecked(curr.as_ref())
+        };
+        Some(pin)
+    }
+
+    /// Mutably borrows the element that the cursor is currently pointing at.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the
+    /// null element.
+    pub fn current_mut(&mut self) -> Option<Pin<&mut T>> {
+        let curr = self.curr?;
+        // NOTE(eliza): in this case, we don't *need* to pin the reference,
+        // because it's immutable and you can't move out of a shared
+        // reference in safe code. but...it makes the API more consistent
+        // with `front_mut` etc.
+        let pin = unsafe {
+            // safety: elements in the list must be pinned while they are in the
+            // list, so it is safe to construct a `pin` here provided that the
+            // `Linked` trait's invariants are upheld.
+            Pin::new_unchecked(curr.as_mut())
+        };
+        Some(pin)
+    }
 }
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
