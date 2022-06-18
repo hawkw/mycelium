@@ -1,6 +1,6 @@
 use super::{Link, Links, List};
 use crate::{util::FmtOption, Linked};
-use core::{fmt, pin::Pin};
+use core::{fmt, pin::Pin, ptr::NonNull};
 
 /// A cursor over a [`List`].
 ///
@@ -67,18 +67,11 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     /// This returns `None` if the cursor is currently pointing to the
     /// null element.
     pub fn current(&self) -> Option<Pin<&T>> {
-        let curr = self.curr?;
         // NOTE(eliza): in this case, we don't *need* to pin the reference,
         // because it's immutable and you can't move out of a shared
         // reference in safe code. but...it makes the API more consistent
         // with `front_mut` etc.
-        let pin = unsafe {
-            // safety: elements in the list must be pinned while they are in the
-            // list, so it is safe to construct a `pin` here provided that the
-            // `Linked` trait's invariants are upheld.
-            Pin::new_unchecked(curr.as_ref())
-        };
-        Some(pin)
+        self.curr.map(|node| unsafe { self.pin_node(node) })
     }
 
     /// Mutably borrows the element that the cursor is currently pointing at.
@@ -86,18 +79,97 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     /// This returns `None` if the cursor is currently pointing to the
     /// null element.
     pub fn current_mut(&mut self) -> Option<Pin<&mut T>> {
-        let curr = self.curr?;
-        // NOTE(eliza): in this case, we don't *need* to pin the reference,
-        // because it's immutable and you can't move out of a shared
-        // reference in safe code. but...it makes the API more consistent
-        // with `front_mut` etc.
-        let pin = unsafe {
-            // safety: elements in the list must be pinned while they are in the
-            // list, so it is safe to construct a `pin` here provided that the
-            // `Linked` trait's invariants are upheld.
-            Pin::new_unchecked(curr.as_mut())
-        };
-        Some(pin)
+        self.curr.map(|node| unsafe { self.pin_node_mut(node) })
+    }
+
+    /// Borrows the next element after the cursor's current position in the
+    /// list.
+    ///
+    /// If the cursor is pointing to the null element, this returns the first
+    /// element in the [`List`]. If the cursor is pointing to the last element
+    /// in the [`List`], this returns `None`.
+    pub fn peek_next(&self) -> Option<Pin<&T>> {
+        unsafe {
+            let next = match self.curr {
+                Some(curr) => T::links(curr).as_ref().next(),
+                None => self.list.head,
+            };
+            next.map(|next| self.pin_node(next))
+        }
+    }
+
+    /// Borrows the previous element before the cursor's current position in the
+    /// list.
+    ///
+    /// If the cursor is pointing to the null element, this returns the last
+    /// element in the [`List`]. If the cursor is pointing to the first element
+    /// in the [`List`], this returns `None`.
+    // XXX(eliza): i would have named this "move_back", personally, but
+    // `std::collections::LinkedList`'s cursor interface calls this
+    // "move_prev"...
+    pub fn peek_prev(&self) -> Option<Pin<&T>> {
+        unsafe {
+            let prev = match self.curr {
+                Some(curr) => T::links(curr).as_ref().prev(),
+                None => self.list.tail,
+            };
+            prev.map(|prev| self.pin_node(prev))
+        }
+    }
+
+    /// Mutably borrows the next element after the cursor's current position in
+    /// the list.
+    ///
+    /// If the cursor is pointing to the null element, this returns the first
+    /// element in the [`List`]. If the cursor is pointing to the last element
+    /// in the [`List`], this returns `None`.
+    pub fn peek_next_mut(&mut self) -> Option<Pin<&mut T>> {
+        unsafe {
+            let next = match self.curr {
+                Some(curr) => T::links(curr).as_mut().next(),
+                None => self.list.head,
+            };
+            next.map(|next| self.pin_node_mut(next))
+        }
+    }
+
+    /// Mutably borrows the previous element before the cursor's current
+    /// position in the  list.
+    ///
+    /// If the cursor is pointing to the null element, this returns the last
+    /// element in the [`List`]. If the cursor is pointing to the first element
+    /// in the [`List`], this returns `None`.
+    // XXX(eliza): i would have named this "move_back", personally, but
+    // `std::collections::LinkedList`'s cursor interface calls this
+    // "move_prev"...
+    pub fn peek_prev_mut(&mut self) -> Option<Pin<&mut T>> {
+        unsafe {
+            let prev = match self.curr {
+                Some(curr) => T::links(curr).as_mut().prev(),
+                None => self.list.tail,
+            };
+            prev.map(|prev| self.pin_node_mut(prev))
+        }
+    }
+
+    /// # Safety
+    ///
+    /// - `node` must point to an element currently in this list.
+    unsafe fn pin_node(&self, node: NonNull<T>) -> Pin<&T> {
+        // safety: elements in the list must be pinned while they are in the
+        // list, so it is safe to construct a `pin` here provided that the
+        // `Linked` trait's invariants are upheld.
+        Pin::new_unchecked(node.as_ref())
+    }
+
+    /// # Safety
+    ///
+    /// - `node` must point to an element currently in this list.
+    unsafe fn pin_node_mut(&mut self, node: NonNull<T>) -> Pin<&mut T> {
+        // safety: elements in the list must be pinned while they are in the
+        // list, so it is safe to construct a `pin` here provided that the
+        // `Linked` trait's invariants are upheld.
+        Pin::new_unchecked(node.as_mut())
     }
 }
 
