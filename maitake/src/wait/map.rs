@@ -612,7 +612,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
             return None;
         }
 
-        let mut cursor = queue.cursor();
+        let mut cursor = queue.cursor_front_mut();
         let opt_node = cursor.remove_first(|t| &t.key == key);
 
         // if we took the final waiter currently in the queue, transition to the
@@ -746,7 +746,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
         // Note: It's okay not to re-update the state here, if we were empty
         // this check will never trigger, if we are already waiting, we should
         // still be waiting.
-        let mut cursor = waiters.cursor();
+        let mut cursor = waiters.cursor_front_mut();
         if cursor.find(|n| &n.key == this.key).is_some() {
             return duplicate();
         }
