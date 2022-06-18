@@ -9,7 +9,6 @@ use core::{fmt, pin::Pin, ptr::NonNull};
 pub struct Cursor<'list, T: Linked<Links<T>> + ?Sized> {
     pub(super) list: &'list mut List<T>,
     pub(super) curr: Link<T>,
-    pub(super) len: usize,
 }
 
 // === impl Cursor ====
@@ -29,7 +28,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len, Some(self.len))
+        (self.list.len(), Some(self.list.len()))
     }
 }
 
@@ -79,26 +78,54 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         }
     }
 
+    /// Removes the current element from the [`List`] and returns the [`Handle`]
+    /// owning that element.
+    ///
+    /// If the cursor is currently pointing to an element, that element is
+    /// removed and returned, and the cursor is moved to point to the next
+    /// element in the [`List`].
+    ///
+    /// If the cursor is currently pointing to the null element, then no element
+    /// is removed and `None` is returned.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn remove_current(&mut self) -> Option<T::Handle> {
+        let node = self.curr?;
+        unsafe {
+            // before modifying `node`'s links, set the current element to the
+            // one after `node`.
+            self.curr = T::links(node).as_ref().next();
+            // safety: `List::remove` is unsafe to call, because the caller must
+            // guarantee that the removed node is part of *that* list. in this
+            // case, because the cursor can only access nodes from the list it
+            // points to, we know this is safe.
+            self.list.remove(node)
+        }
+    }
+
     /// Find and remove the first element matching the provided `predicate`.
     ///
     /// This traverses the list from the cursor's current position and calls
     /// `predicate` with each element in the list. If `predicate` returns
     /// `true` for a given element, that element is removed from the list and
-    /// returned, and the traversal ends. If the entire list is traversed
-    /// without finding a matching element, this returns `None`.
+    /// returned, and the traversal ends. If the traversal reaches the end of
+    /// the list without finding a match, then no element is returned.
+    ///
+    /// Note that if the cursor is not at the beginning of the list, then any
+    /// matching elements *before* the cursor's position will not be removed.
     ///
     /// This method may be called multiple times to remove more than one
     /// matching element.
     pub fn remove_first(&mut self, mut predicate: impl FnMut(&T) -> bool) -> Option<T::Handle> {
-        let mut item = None;
-        while let Some(node) = self.next_ptr() {
-            if predicate(unsafe { node.as_ref() }) {
-                item = Some(node);
-                self.len -= 1;
-                break;
-            }
+        while !predicate(unsafe { self.curr?.as_ref() }) {
+            // if the current element does not match, advance to the next node
+            // in the list.
+            self.move_next();
         }
-        unsafe { self.list.remove(item?) }
+
+        // if we have broken out of the loop without returning a `None`, remove
+        // the current element.
+        self.remove_current()
     }
 
     /// Borrows the element that the cursor is currently pointing at.
@@ -173,7 +200,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     }
 
     /// Mutably borrows the previous element before the cursor's current
-    /// position in the  list.
+    /// position in the list.
     ///
     /// If the cursor is pointing to the null element, this returns the last
     /// element in the [`List`]. If the cursor is pointing to the first element
@@ -191,6 +218,16 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         }
     }
 
+    /// Returns the length of the [`List`] this cursor points to.
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    /// Returns `true` if the [`List`] this cursor points to is empty
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
     /// # Safety
     ///
     /// - `node` must point to an element currently in this list.
@@ -204,7 +241,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     /// # Safety
     ///
     /// - `node` must point to an element currently in this list.
-    unsafe fn pin_node_mut(&mut self, node: NonNull<T>) -> Pin<&mut T> {
+    unsafe fn pin_node_mut(&mut self, mut node: NonNull<T>) -> Pin<&mut T> {
         // safety: elements in the list must be pinned while they are in the
         // list, so it is safe to construct a `pin` here provided that the
         // `Linked` trait's invariants are upheld.
@@ -217,7 +254,6 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
         f.debug_struct("Cursor")
             .field("curr", &FmtOption::new(&self.curr))
             .field("list", &self.list)
-            .field("len", &self.len)
             .finish()
     }
 }

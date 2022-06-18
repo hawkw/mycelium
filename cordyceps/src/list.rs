@@ -600,11 +600,9 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
     pub fn cursor(&mut self) -> Cursor<'_, T> {
-        let len = self.len();
         Cursor {
             curr: self.head,
             list: self,
-            len,
         }
     }
 
@@ -966,7 +964,7 @@ where
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.cursor.len))
+        (0, Some(self.cursor.len()))
     }
 }
 
