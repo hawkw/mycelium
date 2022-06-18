@@ -9,6 +9,7 @@ use core::{fmt, pin::Pin, ptr::NonNull};
 pub struct Cursor<'list, T: Linked<Links<T>> + ?Sized> {
     pub(super) list: &'list mut List<T>,
     pub(super) curr: Link<T>,
+    pub(super) index: usize,
 }
 
 // === impl Cursor ====
@@ -26,9 +27,16 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
         })
     }
 
+    /// A [`Cursor`] can never return an accurate `size_hint` --- its lower
+    /// bound is always 0 and its upper bound is always `None`.
+    ///
+    /// This is because the cursor may be moved around within the list through
+    /// methods outside of its `Iterator` implementation, and elements may be
+    /// added or removed using the cursor. This would make any `size_hint`s a
+    /// [`Cursor`] returns inaccurate.
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.list.len(), Some(self.list.len()))
+        (0, None)
     }
 }
 
@@ -36,7 +44,17 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     fn next_ptr(&mut self) -> Link<T> {
         let curr = self.curr.take()?;
         self.curr = unsafe { T::links(curr).as_ref().next() };
+        self.index += 1;
         Some(curr)
+    }
+
+    /// Returns the index of this cursor's position in the [`List`].
+    ///
+    /// This returns `None` if the cursor is currently pointing to the
+    /// null element.
+    pub fn index(&self) -> Option<usize> {
+        self.curr?;
+        Some(self.index)
     }
 
     /// Moves the cursor position to the next element in the [`List`].
@@ -49,10 +67,12 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
             // Advance the cursor to the current node's next element.
             Some(curr) => unsafe {
                 self.curr = T::links(curr).as_ref().next();
+                self.index += 1;
             },
             // We have no current element --- move to the start of the list.
             None => {
                 self.curr = self.list.head;
+                self.index = 0;
             }
         }
     }
@@ -70,10 +90,14 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
             // Advance the cursor to the current node's prev element.
             Some(curr) => unsafe {
                 self.curr = T::links(curr).as_ref().prev();
+                // this is saturating because the current node might be the 0th
+                // and we might have set `self.curr` to `None`.
+                self.index = self.index.saturating_sub(1);
             },
             // We have no current element --- move to the end of the list.
             None => {
                 self.curr = self.list.tail;
+                self.index = self.index.checked_sub(1).unwrap_or(self.list.len());
             }
         }
     }
@@ -254,6 +278,7 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
         f.debug_struct("Cursor")
             .field("curr", &FmtOption::new(&self.curr))
             .field("list", &self.list)
+            .field("index", &self.index)
             .finish()
     }
 }

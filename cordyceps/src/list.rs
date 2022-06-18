@@ -614,6 +614,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Cursor {
             curr: self.head,
             list: self,
+            index: 0,
         }
     }
 
@@ -627,6 +628,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Cursor {
             curr: self.tail,
             list: self,
+            index: self.len().saturating_sub(1),
         }
     }
 
