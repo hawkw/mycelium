@@ -26,7 +26,7 @@ fn move_peek() {
             one.as_ref(),
         ],
     );
-    let mut cursor = list.cursor();
+    let mut cursor = list.cursor_front_mut();
     assert_eq!(val(cursor.current()), Some(1));
     assert_eq!(val(cursor.peek_next()), Some(2));
     assert_eq!(val(cursor.peek_prev()), None);
