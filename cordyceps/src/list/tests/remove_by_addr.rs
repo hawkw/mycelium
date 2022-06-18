@@ -11,7 +11,7 @@ fn first() {
         // Remove first
         let mut list = List::new();
 
-        push_all(&mut list, vec![&a, &b, &c]);
+        push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
         list.assert_valid();
@@ -43,7 +43,7 @@ fn first() {
         // Remove first of two
         let mut list = List::new();
 
-        push_all(&mut list, vec![&a, &b]);
+        push_all(&mut list, &[b.as_ref(), a.as_ref()]);
 
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
@@ -59,7 +59,7 @@ fn first() {
         assert!(b.links.next().is_none());
         assert!(b.links.prev().is_none());
 
-        let items = drain_list(&mut list);
+        let items = collect_list(&mut list);
         assert_eq!([7].to_vec(), items);
     }
 }
@@ -75,7 +75,7 @@ fn middle() {
     unsafe {
         let mut list = List::new();
 
-        push_all(&mut list, vec![&a, &b, &c]);
+        push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
 
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
@@ -85,7 +85,7 @@ fn middle() {
         assert_ptr_eq!(c, b.links.next());
         assert_ptr_eq!(b, c.links.prev());
 
-        let items = drain_list(&mut list);
+        let items = collect_list(&mut list);
         assert_eq!([31, 7].to_vec(), items);
         list.assert_valid();
     }
@@ -93,7 +93,7 @@ fn middle() {
     unsafe {
         let mut list = List::new();
 
-        push_all(&mut list, vec![&a, &b, &c]);
+        push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
 
         assert!(list.remove(ptr(&b)).is_some());
         assert_clean!(b);
@@ -102,7 +102,7 @@ fn middle() {
         assert_ptr_eq!(c, a.links.next());
         assert_ptr_eq!(a, c.links.prev());
 
-        let items = drain_list(&mut list);
+        let items = collect_list(&mut list);
         assert_eq!([31, 5].to_vec(), items);
     }
 }
@@ -120,7 +120,7 @@ fn last_middle() {
         // Remove middle
         let mut list = List::new();
 
-        push_all(&mut list, vec![&a, &b, &c]);
+        push_all(&mut list, &[c.as_ref(), b.as_ref(), a.as_ref()]);
 
         assert!(list.remove(ptr(&c)).is_some());
         assert_clean!(c);
@@ -129,7 +129,7 @@ fn last_middle() {
         assert!(b.links.next().is_none());
         assert_ptr_eq!(b, list.tail);
 
-        let items = drain_list(&mut list);
+        let items = collect_list(&mut list);
         assert_eq!([7, 5].to_vec(), items);
     }
 }
@@ -145,7 +145,7 @@ fn last() {
         // Remove last item
         let mut list = List::new();
 
-        push_all(&mut list, Some(&a));
+        push_all(&mut list, &[a.as_ref()]);
 
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
@@ -153,7 +153,7 @@ fn last() {
 
         assert!(list.head.is_none());
         assert!(list.tail.is_none());
-        let items = drain_list(&mut list);
+        let items = collect_list(&mut list);
         assert!(items.is_empty());
     }
 
@@ -161,7 +161,7 @@ fn last() {
         // Remove last of two
         let mut list = List::new();
 
-        push_all(&mut list, vec![&a, &b]);
+        push_all(&mut list, &[b.as_ref(), a.as_ref()]);
 
         assert!(list.remove(ptr(&b)).is_some());
         assert_clean!(b);
@@ -173,7 +173,7 @@ fn last() {
         assert!(a.links.next().is_none());
         assert!(a.links.prev().is_none());
 
-        let items = drain_list(&mut list);
+        let items = collect_list(&mut list);
         assert_eq!([5].to_vec(), items);
     }
 }
