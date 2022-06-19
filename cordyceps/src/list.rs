@@ -6,7 +6,7 @@ use super::Linked;
 use crate::util::FmtOption;
 use core::{
     cell::UnsafeCell,
-    fmt,
+    fmt, iter,
     marker::PhantomPinned,
     mem,
     pin::Pin,
@@ -744,6 +744,20 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
         self.len += spliced_length;
     }
+}
+
+impl<T> iter::Extend<T::Handle> for List<T>
+where
+    T: Linked<Links<T>> + ?Sized,
+{
+    fn extend<I: IntoIterator<Item = T::Handle>>(&mut self, iter: I) {
+        for item in iter {
+            self.push_back(item);
+        }
+    }
+
+    // TODO(eliza): when `Extend::extend_one` becomes stable, implement that
+    // as well, so that we can just call `push_back` without looping.
 }
 
 unsafe impl<T: Linked<Links<T>> + ?Sized> Send for List<T> where T: Send {}
