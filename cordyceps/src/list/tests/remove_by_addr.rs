@@ -9,9 +9,10 @@ fn first() {
 
     unsafe {
         // Remove first
-        let mut list = List::new();
+        let mut list = [a.as_ref(), b.as_ref(), c.as_ref()]
+            .into_iter()
+            .collect::<List<_>>();
 
-        push_all(&mut list, vec![&a, &b, &c]);
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
         list.assert_valid();
@@ -41,9 +42,7 @@ fn first() {
 
     unsafe {
         // Remove first of two
-        let mut list = List::new();
-
-        push_all(&mut list, vec![&a, &b]);
+        let mut list = [a.as_ref(), b.as_ref()].into_iter().collect::<List<_>>();
 
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
@@ -73,9 +72,9 @@ fn middle() {
     let c = entry(31);
 
     unsafe {
-        let mut list = List::new();
-
-        push_all(&mut list, vec![&a, &b, &c]);
+        let mut list = [a.as_ref(), b.as_ref(), c.as_ref()]
+            .into_iter()
+            .collect::<List<_>>();
 
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
@@ -91,9 +90,9 @@ fn middle() {
     }
 
     unsafe {
-        let mut list = List::new();
-
-        push_all(&mut list, vec![&a, &b, &c]);
+        let mut list = [a.as_ref(), b.as_ref(), c.as_ref()]
+            .into_iter()
+            .collect::<List<_>>();
 
         assert!(list.remove(ptr(&b)).is_some());
         assert_clean!(b);
@@ -118,9 +117,9 @@ fn last_middle() {
     unsafe {
         // Remove last
         // Remove middle
-        let mut list = List::new();
-
-        push_all(&mut list, vec![&a, &b, &c]);
+        let mut list = [a.as_ref(), b.as_ref(), c.as_ref()]
+            .into_iter()
+            .collect::<List<_>>();
 
         assert!(list.remove(ptr(&c)).is_some());
         assert_clean!(c);
@@ -143,9 +142,7 @@ fn last() {
 
     unsafe {
         // Remove last item
-        let mut list = List::new();
-
-        push_all(&mut list, Some(&a));
+        let mut list = [a.as_ref()].into_iter().collect::<List<_>>();
 
         assert!(list.remove(ptr(&a)).is_some());
         assert_clean!(a);
@@ -159,9 +156,7 @@ fn last() {
 
     unsafe {
         // Remove last of two
-        let mut list = List::new();
-
-        push_all(&mut list, vec![&a, &b]);
+        let mut list = [a.as_ref(), b.as_ref()].into_iter().collect::<List<_>>();
 
         assert!(list.remove(ptr(&b)).is_some());
         assert_clean!(b);

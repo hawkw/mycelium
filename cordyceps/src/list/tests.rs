@@ -70,9 +70,15 @@ fn push_all<'a>(
     list: &mut List<Entry<'a>>,
     entries: impl IntoIterator<Item = &'a Pin<Box<Entry<'a>>>>,
 ) {
-    for entry in entries.into_iter() {
-        list.push_back(entry.as_ref());
-    }
+    list.extend(entries.into_iter().map(Pin::as_ref))
+}
+
+fn list_from_iter<'a>(
+    entries: impl IntoIterator<Item = &'a Pin<Box<Entry<'a>>>>,
+) -> List<Entry<'a>> {
+    let mut list = List::new();
+    push_all(&mut list, entries);
+    list
 }
 
 macro_rules! assert_clean {
@@ -230,10 +236,7 @@ fn push_pop_push_pop() {
 #[test]
 fn double_ended_iter() {
     let entries = [entry(1), entry(2), entry(3)];
-
-    let mut list = List::new();
-
-    push_all(&mut list, &entries);
+    let list = list_from_iter(&entries);
 
     let head_to_tail = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
     assert_eq!(&head_to_tail, &[1, 2, 3]);
@@ -250,9 +253,7 @@ fn double_ended_iter() {
 fn double_ended_iter_empties() {
     let entries = [entry(1), entry(2), entry(3), entry(4)];
 
-    let mut list = List::new();
-
-    push_all(&mut list, &entries);
+    let list = list_from_iter(&entries);
 
     let mut iter = list.iter();
 
@@ -269,10 +270,7 @@ fn double_ended_iter_empties() {
 #[test]
 fn drain_filter() {
     let entries = [entry(1), entry(2), entry(3), entry(4)];
-
-    let mut list = List::new();
-
-    push_all(&mut list, &entries);
+    let mut list = list_from_iter(&entries);
 
     {
         // Create a scope so that the mutable borrow on the list is released
