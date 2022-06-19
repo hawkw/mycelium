@@ -175,3 +175,85 @@ fn cursor_mut_insert() {
     //     &[200, 201, 202, 203, 1, 100, 101]
     // );
 }
+
+#[test]
+fn cursor_mut_split_after() {
+    let _trace = trace_init();
+    let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
+    let vals = [1, 2, 3, 4, 5];
+
+    // test all splits
+    for i in 0..vals.len() + 1 {
+        let _span = tracing::info_span!("split_after", i).entered();
+
+        let mut list = list_from_iter(&entries);
+        let mut cursor = list.cursor_front_mut();
+
+        for _ in 0..i {
+            cursor.move_next();
+        }
+
+        tracing::info!(?cursor);
+
+        // split off at this index
+        let split = cursor.split_after();
+        tracing::info!(?split, ?list);
+
+        assert_valid!(list);
+        assert_valid!(split);
+
+        let split_entries = split.iter().map(|entry| entry.val).collect::<Vec<_>>();
+        let list_entries = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
+        tracing::info!(?list_entries, ?split_entries);
+
+        if i < vals.len() {
+            assert_eq!(list_entries, vals[..i + 1], "list after split");
+            assert_eq!(split_entries, vals[i + 1..], "split");
+        } else {
+            // if we were at the end of the list, the split should contain
+            // everything.
+            assert_eq!(list_entries, &[], "list after split");
+            assert_eq!(split_entries, vals[..], "split");
+        }
+    }
+}
+
+#[test]
+fn cursor_mut_split_before() {
+    let _trace = trace_init();
+    let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
+    let vals = [1, 2, 3, 4, 5];
+
+    // test all splits
+    for i in 0..vals.len() + 1 {
+        let _span = tracing::info_span!("split_before", i).entered();
+        let mut list = list_from_iter(&entries);
+        let mut cursor = list.cursor_front_mut();
+        for _ in 0..i {
+            cursor.move_next();
+        }
+
+        tracing::info!(?cursor);
+
+        // split off at this index
+        let split = cursor.split_before();
+        tracing::info!(?split, ?list);
+
+        assert_valid!(list);
+        assert_valid!(split);
+
+        let split_entries = split.iter().map(|entry| entry.val).collect::<Vec<_>>();
+        let list_entries = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
+        tracing::info!(?list_entries, ?split_entries);
+
+        if i > 0 {
+            assert_eq!(list_entries, vals[i..], "list after split");
+            assert_eq!(split_entries, vals[..i], "split");
+        } else {
+            // if we were at the beginning of the list, the split should contain
+            // everything.
+            assert_eq!(list_entries, vals[..], "list after split");
+            assert_eq!(split_entries, &[], "split");
+        }
+    }
+}

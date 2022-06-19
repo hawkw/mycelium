@@ -1,6 +1,6 @@
 use super::{Link, Links, List};
 use crate::{util::FmtOption, Linked};
-use core::{fmt, pin::Pin, ptr::NonNull};
+use core::{fmt, mem, pin::Pin, ptr::NonNull};
 
 /// A cursor over a [`List`].
 ///
@@ -265,6 +265,48 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     /// Returns `true` if the [`List`] this cursor points to is empty
     pub fn is_empty(&self) -> bool {
         self.list.is_empty()
+    }
+
+    /// Splits the list into two after the current element. This will return a
+    /// new list consisting of everything after the cursor, with the original
+    /// list retaining everything before.
+    ///
+    /// If the cursor is pointing at the null element, then the entire contents
+    /// of the `List` are moved.
+    pub fn split_after(&mut self) -> List<T> {
+        let split_at = if self.index == self.list.len {
+            self.index = 0;
+            0
+        } else {
+            self.index + 1
+        };
+        unsafe {
+            // safety: we know we are splitting at a node that belongs to our list.
+            self.list.split_after_node(self.curr, split_at)
+        }
+    }
+
+    /// Splits the list into two before the current element. This will return a
+    /// new list consisting of everything before the cursor, with the original
+    /// list retaining everything after the cursor.
+    ///
+    /// If the cursor is pointing at the null element, then the entire contents
+    /// of the `List` are moved.
+    pub fn split_before(&mut self) -> List<T> {
+        let split_at = self.index;
+        self.index = 0;
+
+        let split = if split_at == self.list.len() {
+            // if we're at the end of the list, "before" is the whole thing.
+            List::new()
+        } else {
+            unsafe {
+                let node = self.curr.and_then(|curr| T::links(curr).as_mut().prev());
+                // safety: we know we are splitting at a node that belongs to our list.
+                self.list.split_after_node(node, split_at)
+            }
+        };
+        mem::replace(self.list, split)
     }
 
     #[inline(always)]
