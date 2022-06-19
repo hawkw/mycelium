@@ -87,6 +87,12 @@ macro_rules! assert_clean {
     }};
 }
 
+macro_rules! assert_valid {
+    ($e:ident) => {{
+        $e.assert_valid_named(concat!("[", stringify!($e), "]: "));
+    }};
+}
+
 macro_rules! assert_ptr_eq {
     ($a:expr, $b:expr) => {{
         // Deal with mapping a Pin<&mut T> -> Link<T>
@@ -126,16 +132,16 @@ fn push_and_drain() {
 
     list.push_front(a.as_ref());
     assert!(!list.is_empty());
-    list.assert_valid();
+    assert_valid!(list);
     list.push_front(b.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
     list.push_front(c.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     let items: Vec<i32> = drain_list(&mut list);
     assert_eq!([5, 7, 31].to_vec(), items);
 
-    list.assert_valid();
+    assert_valid!(list);
     assert!(list.is_empty());
 }
 
@@ -149,13 +155,13 @@ fn pop_front() {
     let mut list = List::<Entry>::new();
 
     list.push_front(a.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     list.push_front(b.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     list.push_front(c.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     let d = list.pop_front().unwrap();
     assert_eq!(9, d.val);
@@ -168,7 +174,7 @@ fn pop_front() {
 
     assert!(list.is_empty());
     assert!(list.pop_front().is_none());
-    list.assert_valid();
+    assert_valid!(list);
 }
 
 #[test]
@@ -181,13 +187,13 @@ fn push_back() {
     let mut list = List::<Entry>::new();
 
     list.push_back(a.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     list.push_back(b.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     list.push_back(c.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     let d = list.pop_back().unwrap();
     assert_eq!(9, d.val);
@@ -201,7 +207,7 @@ fn push_back() {
     assert!(list.is_empty());
     assert!(list.pop_back().is_none());
 
-    list.assert_valid();
+    assert_valid!(list);
 }
 
 #[test]
@@ -214,23 +220,23 @@ fn push_pop_push_pop() {
     let mut list = List::<Entry>::new();
 
     list.push_front(a.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     let entry = list.pop_back().unwrap();
     assert_eq!(5, entry.val);
     assert!(list.is_empty());
-    list.assert_valid();
+    assert_valid!(list);
 
     list.push_front(b.as_ref());
-    list.assert_valid();
+    assert_valid!(list);
 
     let entry = list.pop_back().unwrap();
     assert_eq!(7, entry.val);
-    list.assert_valid();
+    assert_valid!(list);
 
     assert!(list.is_empty());
     assert!(list.pop_back().is_none());
-    list.assert_valid();
+    assert_valid!(list);
 }
 
 #[test]
@@ -406,6 +412,112 @@ mod append {
         assert_eq!(b.len(), 1);
         assert_eq!(val(b.pop_front()), Some(3));
         b.assert_valid();
+    }
+}
+
+mod split_off {
+    use super::*;
+
+    #[test]
+    fn single_node() {
+        let entry = entry(1);
+
+        let mut list = List::<Entry<'_>>::new();
+        list.push_back(entry.as_ref());
+
+        let mut split = list.split_off(0);
+        assert_eq!(list.len(), 0);
+        assert_eq!(split.len(), 1);
+        assert_valid!(list);
+        assert_valid!(split);
+
+        assert_eq!(val(split.pop_front()), Some(1));
+        assert_eq!(split.len(), 0);
+    }
+
+    #[test]
+    fn middle() {
+        let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
+
+        let mut list = list_from_iter(&entries);
+        let mut split = list.split_off(2);
+
+        assert_eq!(list.len(), 2);
+        assert_eq!(split.len(), 3);
+        assert_valid!(list);
+        assert_valid!(split);
+
+        for n in 1..3 {
+            assert_eq!(val(list.pop_front()), Some(n));
+        }
+        for n in 3..6 {
+            assert_eq!(val(split.pop_front()), Some(n));
+        }
+    }
+
+    #[test]
+    fn one_node() {
+        let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
+
+        let mut list = list_from_iter(&entries);
+        let mut split = list.split_off(4);
+
+        assert_eq!(list.len(), 4);
+        assert_eq!(split.len(), 1);
+        assert_valid!(list);
+        assert_valid!(split);
+
+        for n in 1..5 {
+            assert_eq!(val(list.pop_front()), Some(n));
+        }
+        for n in 5..6 {
+            assert_eq!(val(split.pop_front()), Some(n));
+        }
+    }
+
+    #[test]
+    fn last_index() {
+        let one = entry(1);
+
+        let mut list = List::<Entry<'_>>::new();
+        list.push_back(one.as_ref());
+
+        let mut split = list.split_off(1);
+        assert_eq!(list.len(), 1);
+        assert_eq!(split.len(), 0);
+
+        assert_valid!(list);
+        assert_valid!(split);
+
+        assert_eq!(val(list.pop_front()), Some(1));
+        assert_eq!(val(split.pop_front()), None);
+    }
+
+    #[test]
+    fn all_splits() {
+        let _trace = trace_init();
+        let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
+        let vals = [1, 2, 3, 4, 5];
+        let mut list = list_from_iter(&entries);
+
+        // test all splits
+        for i in 0..1 + list.len() {
+            tracing::info!(at = i, "test split");
+
+            // split off at this index
+            let mut split = list.split_off(i);
+            tracing::info!(?split, ?list);
+            assert_valid!(list);
+            assert_valid!(split);
+
+            let split_entries = split.iter().map(|entry| entry.val).collect::<Vec<_>>();
+            assert_eq!(split_entries, vals[i..]);
+
+            // and put them back together
+            list.extend(split.drain_filter(|_| true));
+            let list_entries = list.iter().map(|entry| entry.val).collect::<Vec<_>>();
+            assert_eq!(list_entries, vals[..])
+        }
     }
 }
 
