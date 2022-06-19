@@ -874,16 +874,18 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         // the head of the new list is the split node's `next` node (which is
         // replaced with `None`)
         let head = unsafe { T::links(split_node).as_mut().set_next(None) };
-        if let Some(head) = head {
+        let tail = if let Some(head) = head {
             // since `head` is now the head of its own list, it has no `prev`
             // link any more.
             let _prev = unsafe { T::links(head).as_mut().set_prev(None) };
             debug_assert_eq!(_prev, Some(split_node));
-        }
 
-        // the tail of the new list is this list's old tail, if the split list
-        // is not empty.
-        let tail = self.tail.replace(split_node);
+            // the tail of the new list is this list's old tail, if the split list
+            // is not empty.
+            self.tail.replace(split_node)
+        } else {
+            None
+        };
 
         let split = Self {
             head,
