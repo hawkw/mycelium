@@ -305,6 +305,110 @@ fn drain_filter() {
 //     assert!(i.next().is_none());
 // }
 
+// Based (loosely) on the tests for `std::collections::LinkedList::append`:
+// https://github.com/rust-lang/rust/blob/67404f7200c13deec255ffe1146e1d2c9d0d3028/library/alloc/src/collections/linked_list/tests.rs#L101-L156
+mod append {
+    use super::*;
+
+    #[test]
+    fn empty_to_empty() {
+        let mut a = List::<Entry<'_>>::new();
+        let mut b = List::new();
+        a.append(&mut b);
+
+        a.assert_valid();
+        b.assert_valid();
+
+        assert_eq!(a.len(), 0);
+        assert_eq!(b.len(), 0);
+    }
+
+    #[test]
+    fn nonempty_to_empty() {
+        let entry = entry(1);
+
+        let mut a = List::<Entry<'_>>::new();
+        let mut b = List::new();
+        b.push_back(entry.as_ref());
+
+        a.append(&mut b);
+
+        a.assert_valid();
+        b.assert_valid();
+
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 0);
+
+        assert_eq!(val(a.pop_back()), Some(1));
+        assert_eq!(a.len(), 0);
+        assert_eq!(b.len(), 0);
+        a.assert_valid();
+    }
+
+    #[test]
+    fn empty_to_nonempty() {
+        let entry = entry(1);
+
+        let mut a = List::<Entry<'_>>::new();
+        let mut b = List::new();
+        a.push_back(entry.as_ref());
+
+        a.append(&mut b);
+
+        a.assert_valid();
+        b.assert_valid();
+
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 0);
+
+        assert_eq!(val(a.pop_back()), Some(1));
+        assert_eq!(a.len(), 0);
+        assert_eq!(b.len(), 0);
+        a.assert_valid();
+    }
+
+    #[test]
+    fn nonempty_to_nonempty() {
+        let a_entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
+        let b_entries = [
+            entry(9),
+            entry(8),
+            entry(1),
+            entry(2),
+            entry(3),
+            entry(4),
+            entry(5),
+        ];
+        let three = entry(3);
+
+        let mut a = list_from_iter(&a_entries);
+        let mut b = list_from_iter(&b_entries);
+
+        a.append(&mut b);
+
+        a.assert_valid();
+        b.assert_valid();
+        assert_eq!(a.len(), a_entries.len() + b_entries.len());
+        assert_eq!(b.len(), 0);
+
+        let expected = a_entries
+            .iter()
+            .map(|entry| entry.val)
+            .chain(b_entries.iter().map(|entry| entry.val));
+        for item in expected {
+            assert_eq!(val(a.pop_front()), Some(item));
+        }
+
+        // make sure `b` wasn't broken by being messed with...
+
+        b.push_back(three.as_ref());
+        b.assert_valid();
+        assert_eq!(b.len(), 1);
+        assert_eq!(val(b.pop_front()), Some(3));
+        b.assert_valid();
+    }
+}
+
 #[derive(Debug)]
 enum Op {
     PushFront,

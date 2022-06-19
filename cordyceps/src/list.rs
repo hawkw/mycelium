@@ -292,6 +292,39 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
+    /// Moves all elements from `other` to the end of the list.
+    ///
+    /// This reuses all the nodes from `other` and moves them into `self`. After
+    /// this operation, `other` becomes empty.
+    ///
+    /// This operation should compute in *O*(1) time and *O*(1) memory.
+    pub fn append(&mut self, other: &mut Self) {
+        let tail = match self.tail {
+            // if this list is empty, simply replace it with `other`
+            None => {
+                debug_assert!(self.is_empty());
+                mem::swap(self, other);
+                return;
+            }
+            Some(tail) => tail,
+        };
+
+        // if `other` is empty, do nothing.
+        if let Some(head) = other.head.take() {
+            // attach the other list's head node to this list's tail node.
+            unsafe {
+                T::links(tail).as_mut().set_next(Some(head));
+                T::links(head).as_mut().set_prev(Some(tail));
+            }
+
+            // this list's tail node is now the other list's tail node.
+            self.tail = other.tail.take();
+            // this list's length increases by the other list's length, which
+            // becomes 0.
+            self.len += mem::replace(&mut other.len, 0);
+        }
+    }
+
     /// Returns `true` if this list is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
