@@ -325,6 +325,79 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
+    /// Attempts to split the list into two at the given index (inclusive).
+    ///
+    /// Returns everything after the given index (including the node at that
+    /// index), or `None` if the index is greater than the list's [`length`].
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(List<T>)` with a new list containing every element after
+    ///   `at`, if `at` <= `self.len()`
+    /// - [`None`] if `at > self.len()`
+    pub fn try_split_off(&mut self, at: usize) -> Option<Self> {
+        let len = self.len();
+        // what is the index of the last node that should be left in this list?
+        let split_idx = match at {
+            // trying to split at the 0th index. we can just return the whole
+            // list, leaving `self` empty.
+            at if at == 0 => return Some(mem::replace(self, Self::new())),
+            // trying to split at the last index. the new list will be empty.
+            at if at == len => return Some(Self::new()),
+            // we cannot split at an index that is greater than the length of
+            // this list.
+            at if at > len => return None,
+            // otherwise, the last node in this list will be `at - 1`.
+            at => at - 1,
+        };
+
+        let mut iter = self.iter();
+
+        // advance to the node at `split_idx`, starting either from the head or
+        // tail of the list.
+        let dist_from_tail = len - 1 - split_idx;
+        let split_node = if split_idx <= dist_from_tail {
+            // advance from the head of the list.
+            for _ in 0..split_idx {
+                iter.next();
+            }
+            iter.curr
+        } else {
+            // advance from the tail of the list.
+            for _ in 0..dist_from_tail {
+                iter.next_back();
+            }
+            iter.curr_back
+        };
+
+        Some(unsafe { self.split_after_node(split_node, at) })
+    }
+
+    /// Split the list into two at the given index (inclusive).
+    ///
+    /// Returns everything after the given index (including the node at that
+    /// index).
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// # Panics
+    ///
+    /// If `at > self.len()`.
+    #[track_caller]
+    #[must_use]
+    pub fn split_off(&mut self, at: usize) -> Self {
+        match self.try_split_off(at) {
+            Some(new_list) => new_list,
+            None => panic!(
+                "Cannot split off at a nonexistent index (the index was {} but the len was {})",
+                at,
+                self.len()
+            ),
+        }
+    }
+
     /// Returns `true` if this list is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
@@ -354,17 +427,24 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     }
 
     /// Asserts as many of the linked list's invariants as possible.
+    #[track_caller]
     pub fn assert_valid(&self) {
+        self.assert_valid_named("")
+    }
+
+    /// Asserts as many of the linked list's invariants as possible.
+    #[track_caller]
+    pub(crate) fn assert_valid_named(&self, name: &str) {
         let head = match self.head {
             Some(head) => head,
             None => {
                 assert!(
                     self.tail.is_none(),
-                    "if the linked list's head is null, the tail must also be null"
+                    "{name}if the linked list's head is null, the tail must also be null"
                 );
                 assert_eq!(
                     self.len, 0,
-                    "if a linked list's head is null, its length must be 0"
+                    "{name}if a linked list's head is null, its length must be 0"
                 );
                 return;
             }
@@ -372,12 +452,15 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
         assert_ne!(
             self.len, 0,
-            "if a linked list's head is not null, its length must be greater than 0"
+            "{name}if a linked list's head is not null, its length must be greater than 0"
         );
 
-        let tail = self
-            .tail
-            .expect("if the linked list has a head, it must also have a tail");
+        assert_ne!(
+            self.tail, None,
+            "{name}if the linked list has a head, it must also have a tail"
+        );
+        let tail = self.tail.unwrap();
+
         let head_links = unsafe { T::links(head) };
         let tail_links = unsafe { T::links(tail) };
         let head_links = unsafe { head_links.as_ref() };
@@ -385,17 +468,17 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         if head == tail {
             assert_eq!(
                 head_links, tail_links,
-                "if the head and tail nodes are the same, their links must be the same"
+                "{name}if the head and tail nodes are the same, their links must be the same"
             );
             assert_eq!(
                 head_links.next(),
                 None,
-                "if the linked list has only one node, it must not be linked"
+                "{name}if the linked list has only one node, it must not be linked"
             );
             assert_eq!(
                 head_links.prev(),
                 None,
-                "if the linked list has only one node, it must not be linked"
+                "{name}if the linked list has only one node, it must not be linked"
             );
             return;
         }
@@ -410,7 +493,10 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             actual_len += 1;
         }
 
-        assert_eq!(self.len, actual_len);
+        assert_eq!(
+            self.len, actual_len,
+            "{name}linked list's actual length did not match its `len` variable"
+        );
     }
 
     /// Appends an item to the head of the list.
@@ -776,6 +862,41 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         end_links.set_next(next);
 
         self.len += spliced_length;
+    }
+
+    #[inline]
+    unsafe fn split_after_node(&mut self, split_node: Link<T>, idx: usize) -> Self {
+        let split_node = match split_node {
+            Some(node) => node,
+            None => return mem::replace(self, Self::new()),
+        };
+
+        // the head of the new list is the split node's `next` node (which is
+        // replaced with `None`)
+        let head = unsafe { T::links(split_node).as_mut().set_next(None) };
+        if let Some(head) = head {
+            // since `head` is now the head of its own list, it has no `prev`
+            // link any more.
+            let _prev = unsafe { T::links(head).as_mut().set_prev(None) };
+            debug_assert_eq!(_prev, Some(split_node));
+        }
+
+        // the tail of the new list is this list's old tail, if the split list
+        // is not empty.
+        let tail = self.tail.replace(split_node);
+
+        let split = Self {
+            head,
+            tail,
+            len: self.len - idx,
+        };
+
+        // update this list's length (note that this occurs after constructing
+        // the new list, because we use this list's length to determine the new
+        // list's length).
+        self.len = idx;
+
+        split
     }
 }
 
