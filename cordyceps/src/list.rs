@@ -812,6 +812,7 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
         f.debug_struct("List")
             .field("head", &FmtOption::new(&self.head))
             .field("tail", &FmtOption::new(&self.tail))
+            .field("len", &self.len())
             .finish()
     }
 }
