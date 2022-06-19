@@ -8,9 +8,8 @@ fn move_peek() {
     let _ = super::trace_init();
 
     let entries = [entry(1), entry(2), entry(3), entry(4), entry(5), entry(6)];
+    let mut list = list_from_iter(&entries);
 
-    let mut list = List::new();
-    push_all(&mut list, &entries);
     let mut cursor = list.cursor_front_mut();
     assert_eq!(val(cursor.current()), Some(1));
     assert_eq!(val(cursor.peek_next()), Some(2));
@@ -111,8 +110,7 @@ fn cursor_mut_insert() {
     let nine = entry(9);
     let ten = entry(10);
 
-    let mut list = List::<Entry<'_>>::new();
-    push_all(&mut list, &entries);
+    let mut list = list_from_iter(&entries);
 
     let mut cursor = list.cursor_front_mut();
     cursor.insert_before(seven.as_ref());
