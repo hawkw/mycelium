@@ -760,6 +760,17 @@ where
     // as well, so that we can just call `push_back` without looping.
 }
 
+impl<T> iter::FromIterator<T::Handle> for List<T>
+where
+    T: Linked<Links<T>> + ?Sized,
+{
+    fn from_iter<I: IntoIterator<Item = T::Handle>>(iter: I) -> Self {
+        let mut list = Self::new();
+        list.extend(iter);
+        list
+    }
+}
+
 unsafe impl<T: Linked<Links<T>> + ?Sized> Send for List<T> where T: Send {}
 unsafe impl<T: Linked<Links<T>> + ?Sized> Sync for List<T> where T: Sync {}
 
