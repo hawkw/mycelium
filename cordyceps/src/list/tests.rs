@@ -322,8 +322,8 @@ mod append {
         let mut b = List::new();
         a.append(&mut b);
 
-        a.assert_valid();
-        b.assert_valid();
+        assert_valid!(a);
+        assert_valid!(b);
 
         assert_eq!(a.len(), 0);
         assert_eq!(b.len(), 0);
@@ -339,16 +339,14 @@ mod append {
 
         a.append(&mut b);
 
-        a.assert_valid();
-        b.assert_valid();
+        assert_valid!(a);
+        assert_valid!(b);
 
         assert_eq!(a.len(), 1);
         assert_eq!(b.len(), 0);
 
-        assert_eq!(val(a.pop_back()), Some(1));
-        assert_eq!(a.len(), 0);
-        assert_eq!(b.len(), 0);
-        a.assert_valid();
+        assert_eq!(val(a.front()), Some(1));
+        assert_eq!(val(a.back()), Some(1));
     }
 
     #[test]
@@ -361,16 +359,14 @@ mod append {
 
         a.append(&mut b);
 
-        a.assert_valid();
-        b.assert_valid();
+        assert_valid!(a);
+        assert_valid!(b);
 
         assert_eq!(a.len(), 1);
         assert_eq!(b.len(), 0);
 
-        assert_eq!(val(a.pop_back()), Some(1));
-        assert_eq!(a.len(), 0);
-        assert_eq!(b.len(), 0);
-        a.assert_valid();
+        assert_eq!(val(a.front()), Some(1));
+        assert_eq!(val(a.back()), Some(1));
     }
 
     #[test]
@@ -392,8 +388,9 @@ mod append {
 
         a.append(&mut b);
 
-        a.assert_valid();
-        b.assert_valid();
+        assert_valid!(a);
+        assert_valid!(b);
+
         assert_eq!(a.len(), a_entries.len() + b_entries.len());
         assert_eq!(b.len(), 0);
 
@@ -406,12 +403,12 @@ mod append {
         }
 
         // make sure `b` wasn't broken by being messed with...
-
         b.push_back(three.as_ref());
-        b.assert_valid();
+        assert_valid!(b);
         assert_eq!(b.len(), 1);
-        assert_eq!(val(b.pop_front()), Some(3));
-        b.assert_valid();
+        assert_eq!(val(b.front()), Some(3));
+        assert_eq!(val(b.back()), Some(3));
+        assert_valid!(b);
     }
 }
 
@@ -425,14 +422,16 @@ mod split_off {
         let mut list = List::<Entry<'_>>::new();
         list.push_back(entry.as_ref());
 
-        let mut split = list.split_off(0);
+        let split = list.split_off(0);
         assert_eq!(list.len(), 0);
         assert_eq!(split.len(), 1);
         assert_valid!(list);
         assert_valid!(split);
 
-        assert_eq!(val(split.pop_front()), Some(1));
-        assert_eq!(split.len(), 0);
+        assert_eq!(val(split.front()), Some(1));
+        assert_eq!(val(split.back()), Some(1));
+        assert_eq!(val(list.front()), None);
+        assert_eq!(val(list.back()), None);
     }
 
     #[test]
@@ -482,15 +481,17 @@ mod split_off {
         let mut list = List::<Entry<'_>>::new();
         list.push_back(one.as_ref());
 
-        let mut split = list.split_off(1);
+        let split = list.split_off(1);
         assert_eq!(list.len(), 1);
         assert_eq!(split.len(), 0);
 
         assert_valid!(list);
         assert_valid!(split);
 
-        assert_eq!(val(list.pop_front()), Some(1));
-        assert_eq!(val(split.pop_front()), None);
+        assert_eq!(val(list.front()), Some(1));
+        assert_eq!(val(list.back()), Some(1));
+        assert_eq!(val(split.front()), None);
+        assert_eq!(val(split.back()), None);
     }
 
     #[test]
