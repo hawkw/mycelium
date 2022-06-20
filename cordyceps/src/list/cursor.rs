@@ -309,6 +309,54 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         mem::replace(self.list, split)
     }
 
+    /// Inserts all elements from `spliced` after the cursor's current position.
+    ///
+    /// If the cursor is pointing at the null element, then the contents of
+    /// `spliced` are inserted at the beginning of the `List` the cursor points to.
+    pub fn splice_after(&mut self, mut spliced: List<T>) {
+        let (splice_head, splice_tail, splice_len) = match spliced.take_all() {
+            Some(spliced) => spliced,
+            // the spliced list is empty, do nothing.
+            None => return,
+        };
+
+        let next = self.next_link();
+        unsafe {
+            // safety: we know `curr` and `next` came from the same list that we
+            // are calling `insert_nodes_between` from, because they came from
+            // this cursor, which points at `self.list`.
+            self.list
+                .insert_nodes_between(self.curr, next, splice_head, splice_tail, splice_len);
+        }
+
+        if self.curr.is_none() {
+            self.index = self.list.len();
+        }
+    }
+
+    /// Inserts all elements from `spliced` before the cursor's current position.
+    ///
+    /// If the cursor is pointing at the null element, then the contents of
+    /// `spliced` are inserted at the end of the `List` the cursor points to.
+    pub fn splice_before(&mut self, mut spliced: List<T>) {
+        let (splice_head, splice_tail, splice_len) = match spliced.take_all() {
+            Some(spliced) => spliced,
+            // the spliced list is empty, do nothing.
+            None => return,
+        };
+
+        let prev = self.prev_link();
+        unsafe {
+            // safety: we know `curr` and `prev` came from the same list that we
+            // are calling `insert_nodes_between` from, because they came from
+            // this cursor, which points at `self.list`.
+            self.list
+                .insert_nodes_between(prev, self.curr, splice_head, splice_tail, splice_len);
+        }
+
+        self.index += splice_len;
+    }
+
     #[inline(always)]
     fn next_link(&self) -> Link<T> {
         match self.curr {

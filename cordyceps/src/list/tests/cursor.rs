@@ -139,41 +139,45 @@ fn cursor_mut_insert() {
     assert_eq!(val(cursor.remove_current()), Some(10));
     list.assert_valid();
     assert_eq!(collect_vals(&list), &[1, 8, 2, 3, 4, 5, 6]);
+}
 
-    // let mut cursor = m.cursor_front_mut();
-    // let mut p: LinkedList<u32> = LinkedList::new();
-    // p.extend(&[100, 101, 102, 103]);
-    // let mut q: LinkedList<u32> = LinkedList::new();
-    // q.extend(&[200, 201, 202, 203]);
-    // cursor.splice_after(p);
-    // cursor.splice_before(q);
-    // check_links(&m);
-    // assert_eq!(
-    //     m.iter().cloned().collect::<Vec<_>>(),
-    //     &[200, 201, 202, 203, 1, 100, 101, 102, 103, 8, 2, 3, 4, 5, 6]
-    // );
-    // let mut cursor = m.cursor_front_mut();
-    // cursor.move_prev();
+#[test]
+fn cursor_mut_splice() {
+    let entries_a = [entry(1), entry(2), entry(3), entry(4), entry(5), entry(6)];
+    let entries_b = [entry(100), entry(101), entry(102), entry(103)];
+    let entries_c = [entry(200), entry(201), entry(202), entry(203)];
+
+    let mut a = list_from_iter(&entries_a);
+    let b = list_from_iter(&entries_b);
+    let c = list_from_iter(&entries_c);
+
+    let mut cursor = a.cursor_front_mut();
+    cursor.splice_after(b);
+    cursor.splice_before(c);
+
+    assert_valid!(a);
+    assert_eq!(
+        collect_vals(&a),
+        &[200, 201, 202, 203, 1, 100, 101, 102, 103, 2, 3, 4, 5, 6]
+    );
+    let mut cursor = a.cursor_front_mut();
+    cursor.move_prev();
     // let tmp = cursor.split_before();
-    // assert_eq!(m.into_iter().collect::<Vec<_>>(), &[]);
-    // m = tmp;
-    // let mut cursor = m.cursor_front_mut();
-    // cursor.move_next();
-    // cursor.move_next();
-    // cursor.move_next();
-    // cursor.move_next();
-    // cursor.move_next();
-    // cursor.move_next();
-    // let tmp = cursor.split_after();
-    // assert_eq!(
-    //     tmp.into_iter().collect::<Vec<_>>(),
-    //     &[102, 103, 8, 2, 3, 4, 5, 6]
-    // );
-    // check_links(&m);
-    // assert_eq!(
-    //     m.iter().cloned().collect::<Vec<_>>(),
-    //     &[200, 201, 202, 203, 1, 100, 101]
-    // );
+    // assert_eq!(collect_vals(&a), &[]);
+    // a = tmp;
+    let mut cursor = a.cursor_front_mut();
+    cursor.move_next();
+    cursor.move_next();
+    cursor.move_next();
+    cursor.move_next();
+    cursor.move_next();
+    cursor.move_next();
+
+    let tmp = cursor.split_after();
+    assert_eq!(collect_vals(&tmp), &[102, 103, 2, 3, 4, 5, 6]);
+    assert_eq!(collect_vals(&a), &[200, 201, 202, 203, 1, 100, 101]);
+    assert_valid!(tmp);
+    assert_valid!(a);
 }
 
 #[test]
