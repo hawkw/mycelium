@@ -296,17 +296,39 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
         let split_at = self.index;
         self.index = 0;
 
-        let split = if split_at == self.list.len() {
-            // if we're at the end of the list, "before" is the whole thing.
-            List::new()
-        } else {
-            unsafe {
-                let node = self.curr.and_then(|curr| T::links(curr).as_mut().prev());
-                // safety: we know we are splitting at a node that belongs to our list.
-                self.list.split_after_node(node, split_at)
-            }
+        let split_node = match self.curr {
+            Some(node) => node,
+            // the split portion is the entire list. just return it.
+            None => return mem::replace(self.list, List::new()),
         };
-        mem::replace(self.list, split)
+
+        // the tail of the new list is the split node's `prev` node (which is
+        // replaced with `None`), as the split node is the new head of this list.
+        let tail = unsafe { T::links(split_node).as_mut().set_prev(None) };
+        let head = if let Some(tail) = tail {
+            // since `tail` is now the head of its own list, it has no `next`
+            // link any more.
+            let _next = unsafe { T::links(tail).as_mut().set_next(None) };
+            debug_assert_eq!(_next, Some(split_node));
+
+            // this list's head is now the split node.
+            self.list.head.replace(split_node)
+        } else {
+            None
+        };
+
+        let split = List {
+            head,
+            tail,
+            len: split_at,
+        };
+
+        // update this list's length (note that this occurs after constructing
+        // the new list, because we use this list's length to determine the new
+        // list's length).
+        self.list.len -= split_at;
+
+        split
     }
 
     /// Inserts all elements from `spliced` after the cursor's current position.
