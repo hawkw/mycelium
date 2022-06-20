@@ -310,18 +310,18 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         };
 
         // if `other` is empty, do nothing.
-        if let Some(head) = other.head.take() {
+        if let Some((other_head, other_tail, other_len)) = other.take_all() {
             // attach the other list's head node to this list's tail node.
             unsafe {
-                T::links(tail).as_mut().set_next(Some(head));
-                T::links(head).as_mut().set_prev(Some(tail));
+                T::links(tail).as_mut().set_next(Some(other_head));
+                T::links(other_head).as_mut().set_prev(Some(tail));
             }
 
             // this list's tail node is now the other list's tail node.
-            self.tail = other.tail.take();
+            self.tail = Some(other_tail);
             // this list's length increases by the other list's length, which
             // becomes 0.
-            self.len += mem::replace(&mut other.len, 0);
+            self.len += other_len;
         }
     }
 
@@ -899,6 +899,25 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         self.len = idx;
 
         split
+    }
+
+    /// Empties this list, returning its head, tail, and length if it is
+    /// non-empty. If the list is empty, this returns `None`.
+    #[inline]
+    fn take_all(&mut self) -> Option<(NonNull<T>, NonNull<T>, usize)> {
+        let head = self.head.take()?;
+        let tail = self.tail.take();
+        debug_assert!(
+            tail.is_some(),
+            "if a list's `head` is `Some`, its tail must also be `Some`"
+        );
+        let tail = tail?;
+        let len = mem::replace(&mut self.len, 0);
+        debug_assert_ne!(
+            len, 0,
+            "if a list is non-empty, its `len` must be greater than 0"
+        );
+        Some((head, tail, len))
     }
 }
 
