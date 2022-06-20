@@ -162,9 +162,9 @@ fn cursor_mut_splice() {
     );
     let mut cursor = a.cursor_front_mut();
     cursor.move_prev();
-    // let tmp = cursor.split_before();
-    // assert_eq!(collect_vals(&a), &[]);
-    // a = tmp;
+    let tmp = cursor.split_before();
+    assert_eq!(collect_vals(&a), &[]);
+    a = tmp;
     let mut cursor = a.cursor_front_mut();
     cursor.move_next();
     cursor.move_next();
