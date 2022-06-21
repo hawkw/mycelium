@@ -18,7 +18,9 @@ use core::{
 mod tests;
 
 mod cursor;
+#[allow(deprecated)]
 pub use self::cursor::Cursor;
+pub use self::cursor::CursorMut;
 
 /// An [intrusive] doubly-linked list.
 ///
@@ -263,7 +265,7 @@ where
     F: FnMut(&T) -> bool,
     T: Linked<Links<T>> + ?Sized,
 {
-    cursor: Cursor<'list, T>,
+    cursor: CursorMut<'list, T>,
     pred: F,
 }
 
@@ -712,40 +714,40 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Some(T::from_ptr(item))
     }
 
-    /// Returns a [`Cursor`] over the items in this list.
+    /// Returns a [`CursorMut`] over the items in this list.
     ///
-    /// The [`Cursor`] type can be used as a mutable [`Iterator`]. In addition,
+    /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
     /// however, it also permits modifying the *structure* of the list by
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
     #[deprecated(since = "0.2.2", note = "renamed to `List::cursor_front_mut`")]
-    pub fn cursor(&mut self) -> Cursor<'_, T> {
+    pub fn cursor(&mut self) -> CursorMut<'_, T> {
         self.cursor_front_mut()
     }
 
-    /// Returns a [`Cursor`] starting at the first element.
+    /// Returns a [`CursorMut`] starting at the first element.
     ///
-    /// The [`Cursor`] type can be used as a mutable [`Iterator`]. In addition,
+    /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
     /// however, it also permits modifying the *structure* of the list by
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
-    pub fn cursor_front_mut(&mut self) -> Cursor<'_, T> {
-        Cursor {
+    pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
+        CursorMut {
             curr: self.head,
             list: self,
             index: 0,
         }
     }
 
-    /// Returns a [`Cursor`] s+tarting at the last element.
+    /// Returns a [`CursorMut`] s+tarting at the last element.
     ///
-    /// The [`Cursor`] type can be used as a mutable [`Iterator`]. In addition,
+    /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
     /// however, it also permits modifying the *structure* of the list by
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
-    pub fn cursor_back_mut(&mut self) -> Cursor<'_, T> {
+    pub fn cursor_back_mut(&mut self) -> CursorMut<'_, T> {
         let index = self.len().saturating_sub(1);
-        Cursor {
+        CursorMut {
             curr: self.tail,
             list: self,
             index,
