@@ -94,11 +94,14 @@ publish() {
     "${cargo_publish[@]}"
 
     status "Tagging" "$tag"
-    local git_tag=(git tag "$tag" "&&" git push --tags)
+    local git_tag=(git tag "$tag")
+    local git_push_tags=(git push --tags)
     if [[ "$dry_run" ]]; then
         echo "# " "${git_tag[@]}"
+        echo "# " "${git_push_tags[@]}"
     else
         "${git_tag[@]}"
+        "${git_push_tags[@]}"
     fi
 }
 
