@@ -2,24 +2,40 @@ use super::{Link, Links, List};
 use crate::{util::FmtOption, Linked};
 use core::{fmt, mem, pin::Pin, ptr::NonNull};
 
-/// A cursor over a [`List`].
+/// A cursor over a [`List`] with editing operations.
 ///
-/// This is similar to a mutable iterator (and implements the [`Iterator`]
-/// trait), but it also permits modification to the list itself.
+/// A `CursorMut` is like a mutable [`Iterator`] (and it [implements the
+/// `Iterator` trait](#impl-Iterator)), except that it can freely seek
+/// back and forth, and can  safely mutate the list during iteration. This is
+/// because the lifetime of its yielded references is tied to its own lifetime,
+/// instead of that of the underlying underlying list. This means cursors cannot
+/// yield multiple elements at once.
+///
+/// Cursors always rest between two elements in the list, and index in a
+/// logically circular way &mdash; once a cursor has advanced past the end of
+/// the list, advancing it again will "wrap around" to the first element, and
+/// seeking past the first element will wrap the cursor around to the end.
+///
+/// To accommodate this, there is a null non-element that yields `None` between
+/// the head and tail of the list. This indicates that the cursor has reached
+/// an end of the list.
+///
+/// This type implements the same interface as the
+/// [`alloc::collections::linked_list::CursorMut`] type, and should behave
+/// similarly.
 pub struct CursorMut<'list, T: Linked<Links<T>> + ?Sized> {
     pub(super) list: &'list mut List<T>,
     pub(super) curr: Link<T>,
     pub(super) index: usize,
 }
 
-/// A cursor over a [`List`].
-///
-/// This is similar to a mutable iterator (and implements the [`Iterator`]
-/// trait), but it also permits modification to the list itself.
+/// A cursor over a [`List`], with editing operations.
 ///
 /// # Deprecated
 ///
 /// This is a deprecated alias for [`CursorMut`].
+///
+/// See the [`CursorMut`] documentation for details.
 #[deprecated(since = "0.2.2", note = "renamed to `CursorMut`")]
 pub type Cursor<'list, T> = CursorMut<'list, T>;
 
