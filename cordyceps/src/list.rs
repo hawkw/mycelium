@@ -330,7 +330,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Attempts to split the list into two at the given index (inclusive).
     ///
     /// Returns everything after the given index (including the node at that
-    /// index), or `None` if the index is greater than the list's [`length`].
+    /// index), or `None` if the index is greater than the list's [length].
     ///
     /// This operation should compute in *O*(*n*) time.
     ///
@@ -339,6 +339,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// - [`Some`]`(List<T>)` with a new list containing every element after
     ///   `at`, if `at` <= `self.len()`
     /// - [`None`] if `at > self.len()`
+    ///
+    /// [length]: Self::len
     pub fn try_split_off(&mut self, at: usize) -> Option<Self> {
         let len = self.len();
         // what is the index of the last node that should be left in this list?
