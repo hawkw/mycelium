@@ -175,7 +175,7 @@ path=$(crate_path "$crate")
 cargo_toml="${path}/Cargo.toml"
 changelog="${path}/CHANGELOG.md"
 
-files=("$cargo_toml" "$changelog")
+files=("$cargo_toml" "$changelog" "Cargo.lock")
 
 is_uncommitted=''
 for file in "${files[@]}"; do
