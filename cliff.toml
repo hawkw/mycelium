@@ -49,13 +49,14 @@ footer = """
 [git]
 conventional_commits = true
 commit_parsers = [
+    { body = ".*[dD]eprecate.*", group = "Deprecated" },
     { message = "^feat", group = "Added"},
     { message = "^fix", group = "Fixed"},
     { message = "^doc", group = "Documented"},
     { message = "^perf", group = "Performance"},
     { message = "^chore", skip = true },
     { message = "^test", skip = true },
-    { message = "prepare to release", skip = true }
+    { message = "prepare to release", skip = true },
 ]
 filter_commits = false
 # regex for preprocessing the commit messages
