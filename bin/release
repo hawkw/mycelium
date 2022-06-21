@@ -107,7 +107,7 @@ update_changelog() {
     . "$bindir"/update-changelog
     changelog_status="$?"
 
-    if ! "$changelog_status"; then
+    if [[ $changelog_status -ne 0 ]]; then
         err "failed to update changelog"
         exit "$changelog_status"
     fi
