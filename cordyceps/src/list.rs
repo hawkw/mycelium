@@ -384,7 +384,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Returns everything after the given index (including the node at that
     /// index).
     ///
-    /// This operation should compute in *O*(*n*) time.
+    /// This operation should compute in *O*(1) time and *O*(1) memory.
     ///
     /// # Panics
     ///
@@ -504,6 +504,15 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     }
 
     /// Appends an item to the head of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This takes a [`Handle`] that owns the appended `item`. While the element
+    /// is in the list, it is owned by the list, and will be dropped when the
+    /// list is dropped. If the element is removed or otherwise unlinked from
+    /// the list, ownership is assigned back to the [`Handle`].
+    ///
+    /// [`Handle`]: crate::Linked::Handle
     pub fn push_front(&mut self, item: T::Handle) {
         let ptr = T::into_ptr(item);
         // tracing::trace!(?self, ?ptr, "push_front");
@@ -528,7 +537,16 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         // tracing::trace!(?self, "push_front: pushed");
     }
 
-    /// Appends an item to the tail of the list
+    /// Appends an item to the tail of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This takes a [`Handle`] that owns the appended `item`. While the element
+    /// is in the list, it is owned by the list, and will be dropped when the
+    /// list is dropped. If the element is removed or otherwise unlinked from
+    /// the list, ownership is assigned back to the [`Handle`].
+    ///
+    /// [`Handle`]: crate::Linked::Handle
     pub fn push_back(&mut self, item: T::Handle) {
         let ptr = T::into_ptr(item);
         assert_ne!(self.tail, Some(ptr));
@@ -548,7 +566,14 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         self.len += 1;
     }
 
-    /// Remove an item from the head of the list
+    /// Remove an item from the head of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
     pub fn pop_front(&mut self) -> Option<T::Handle> {
         let head = self.head?;
         self.len -= 1;
@@ -652,6 +677,13 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     }
 
     /// Removes an item from the tail of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
         self.len -= 1;
@@ -679,6 +711,11 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     }
 
     /// Remove an arbitrary node from the list.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
     ///
     /// # Safety
     ///
