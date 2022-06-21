@@ -503,6 +503,95 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         );
     }
 
+    /// Removes an item from the tail of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn pop_back(&mut self) -> Option<T::Handle> {
+        let tail = self.tail?;
+        self.len -= 1;
+
+        unsafe {
+            let mut tail_links = T::links(tail);
+            // tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
+            self.tail = tail_links.as_ref().prev();
+            debug_assert_eq!(
+                tail_links.as_ref().next(),
+                None,
+                "the tail node must not have a next link"
+            );
+
+            if let Some(prev) = tail_links.as_mut().prev() {
+                T::links(prev).as_mut().set_next(None);
+            } else {
+                self.head = None;
+            }
+
+            tail_links.as_mut().unlink();
+            // tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
+            Some(T::from_ptr(tail))
+        }
+    }
+
+    /// Remove an item from the head of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn pop_front(&mut self) -> Option<T::Handle> {
+        let head = self.head?;
+        self.len -= 1;
+
+        unsafe {
+            let mut head_links = T::links(head);
+            self.head = head_links.as_ref().next();
+            if let Some(next) = head_links.as_mut().next() {
+                T::links(next).as_mut().set_prev(None);
+            } else {
+                self.tail = None;
+            }
+
+            head_links.as_mut().unlink();
+            Some(T::from_ptr(head))
+        }
+    }
+
+    /// Appends an item to the tail of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This takes a [`Handle`] that owns the appended `item`. While the element
+    /// is in the list, it is owned by the list, and will be dropped when the
+    /// list is dropped. If the element is removed or otherwise unlinked from
+    /// the list, ownership is assigned back to the [`Handle`].
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn push_back(&mut self, item: T::Handle) {
+        let ptr = T::into_ptr(item);
+        assert_ne!(self.tail, Some(ptr));
+        unsafe {
+            T::links(ptr).as_mut().set_next(None);
+            T::links(ptr).as_mut().set_prev(self.tail);
+            if let Some(tail) = self.tail {
+                T::links(tail).as_mut().set_next(Some(ptr));
+            }
+        }
+
+        self.tail = Some(ptr);
+        if self.head.is_none() {
+            self.head = Some(ptr);
+        }
+
+        self.len += 1;
+    }
+
     /// Appends an item to the head of the list.
     ///
     /// This operation should compute in *O*(*n*) time.
@@ -535,61 +624,6 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
         self.len += 1;
         // tracing::trace!(?self, "push_front: pushed");
-    }
-
-    /// Appends an item to the tail of the list.
-    ///
-    /// This operation should compute in *O*(*n*) time.
-    ///
-    /// This takes a [`Handle`] that owns the appended `item`. While the element
-    /// is in the list, it is owned by the list, and will be dropped when the
-    /// list is dropped. If the element is removed or otherwise unlinked from
-    /// the list, ownership is assigned back to the [`Handle`].
-    ///
-    /// [`Handle`]: crate::Linked::Handle
-    pub fn push_back(&mut self, item: T::Handle) {
-        let ptr = T::into_ptr(item);
-        assert_ne!(self.tail, Some(ptr));
-        unsafe {
-            T::links(ptr).as_mut().set_next(None);
-            T::links(ptr).as_mut().set_prev(self.tail);
-            if let Some(tail) = self.tail {
-                T::links(tail).as_mut().set_next(Some(ptr));
-            }
-        }
-
-        self.tail = Some(ptr);
-        if self.head.is_none() {
-            self.head = Some(ptr);
-        }
-
-        self.len += 1;
-    }
-
-    /// Remove an item from the head of the list.
-    ///
-    /// This operation should compute in *O*(*n*) time.
-    ///
-    /// This returns a [`Handle`] that owns the popped element. Dropping the
-    /// [`Handle`] will drop the element.
-    ///
-    /// [`Handle`]: crate::Linked::Handle
-    pub fn pop_front(&mut self) -> Option<T::Handle> {
-        let head = self.head?;
-        self.len -= 1;
-
-        unsafe {
-            let mut head_links = T::links(head);
-            self.head = head_links.as_ref().next();
-            if let Some(next) = head_links.as_mut().next() {
-                T::links(next).as_mut().set_prev(None);
-            } else {
-                self.tail = None;
-            }
-
-            head_links.as_mut().unlink();
-            Some(T::from_ptr(head))
-        }
     }
 
     /// Returns a reference to the first element in the list, or `None`
@@ -674,40 +708,6 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             Pin::new_unchecked(node.as_mut())
         };
         Some(pin)
-    }
-
-    /// Removes an item from the tail of the list.
-    ///
-    /// This operation should compute in *O*(*n*) time.
-    ///
-    /// This returns a [`Handle`] that owns the popped element. Dropping the
-    /// [`Handle`] will drop the element.
-    ///
-    /// [`Handle`]: crate::Linked::Handle
-    pub fn pop_back(&mut self) -> Option<T::Handle> {
-        let tail = self.tail?;
-        self.len -= 1;
-
-        unsafe {
-            let mut tail_links = T::links(tail);
-            // tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
-            self.tail = tail_links.as_ref().prev();
-            debug_assert_eq!(
-                tail_links.as_ref().next(),
-                None,
-                "the tail node must not have a next link"
-            );
-
-            if let Some(prev) = tail_links.as_mut().prev() {
-                T::links(prev).as_mut().set_next(None);
-            } else {
-                self.head = None;
-            }
-
-            tail_links.as_mut().unlink();
-            // tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
-            Some(T::from_ptr(tail))
-        }
     }
 
     /// Remove an arbitrary node from the list.
