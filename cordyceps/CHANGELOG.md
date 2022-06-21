@@ -1,6 +1,11 @@
-## cordyceps-v0.2.1 - (2022-06-09)
+# Changelog
 
-[e3fe8f8](https://github.com/hawkw/mycelium/e3fe8f84212fa5c4ac5865d36a3cad9267c98c7c)...[dc2e638](https://github.com/hawkw/mycelium/dc2e638e056e183ac6eedfa7b821393f5447ba45)
+All notable changes to this project will be documented in this file.
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## cordyceps-v0.2.1 - (2022-06-9)
+
+[e3fe8f8](https://github.com/hawkw/mycelium/e3fe8f84212fa5c4ac5865d36a3cad9267c98c7c)...[7cdb821](https://github.com/hawkw/mycelium/7cdb82146fdddfa564d0ba78536da0b7579a63e0)
 
 
 ### Added
