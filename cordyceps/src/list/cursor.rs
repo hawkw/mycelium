@@ -6,15 +6,26 @@ use core::{fmt, mem, pin::Pin, ptr::NonNull};
 ///
 /// This is similar to a mutable iterator (and implements the [`Iterator`]
 /// trait), but it also permits modification to the list itself.
-pub struct Cursor<'list, T: Linked<Links<T>> + ?Sized> {
+pub struct CursorMut<'list, T: Linked<Links<T>> + ?Sized> {
     pub(super) list: &'list mut List<T>,
     pub(super) curr: Link<T>,
     pub(super) index: usize,
 }
 
-// === impl Cursor ====
+/// A cursor over a [`List`].
+///
+/// This is similar to a mutable iterator (and implements the [`Iterator`]
+/// trait), but it also permits modification to the list itself.
+///
+/// # Deprecated
+///
+/// This is a deprecated alias for [`CursorMut`].
+#[deprecated(since = "0.2.2", note = "renamed to `CursorMut`")]
+pub type Cursor<'list, T> = CursorMut<'list, T>;
 
-impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
+// === impl CursorMut ====
+
+impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for CursorMut<'a, T> {
     type Item = &'a mut T;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_ptr().map(|mut ptr| unsafe {
@@ -27,20 +38,20 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
         })
     }
 
-    /// A [`Cursor`] can never return an accurate `size_hint` --- its lower
+    /// A [`CursorMut`] can never return an accurate `size_hint` --- its lower
     /// bound is always 0 and its upper bound is always `None`.
     ///
     /// This is because the cursor may be moved around within the list through
     /// methods outside of its `Iterator` implementation, and elements may be
     /// added or removed using the cursor. This would make any `size_hint`s a
-    /// [`Cursor`] returns inaccurate.
+    /// [`CursorMut`] returns inaccurate.
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
     }
 }
 
-impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
+impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
     fn next_ptr(&mut self) -> Link<T> {
         let curr = self.curr.take()?;
         self.curr = unsafe { T::links(curr).as_ref().next() };
@@ -416,9 +427,9 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
     }
 }
 
-impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for CursorMut<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Cursor")
+        f.debug_struct("CursorMut")
             .field("curr", &FmtOption::new(&self.curr))
             .field("list", &self.list)
             .field("index", &self.index)
