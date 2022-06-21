@@ -175,7 +175,7 @@ path=$(crate_path "$crate")
 cargo_toml="${path}/Cargo.toml"
 changelog="${path}/CHANGELOG.md"
 
-files=("$cargo_toml" "$changelog" "Cargo.lock")
+files=("$cargo_toml" "$changelog")
 
 is_uncommitted=''
 for file in "${files[@]}"; do
@@ -215,7 +215,6 @@ echo ""
 
 if confirm "commit and push?"; then
     git_commit=(git commit -sS -m "chore($crate): prepare to release $crate $version")
-    git_push=(git push -u origin)
 
     if [[ "$dry_run" ]]; then
 
@@ -224,10 +223,10 @@ if confirm "commit and push?"; then
         echo "# " "${git_push[@]}"
     else
         "${git_commit[@]}"
-        "${git_push[@]}"
     fi
 else
     echo "okay, exiting"
+    exit 1
 fi
 
 if confirm "publish the crate?"; then
@@ -236,4 +235,18 @@ if confirm "publish the crate?"; then
     publish
 else
     echo "okay, exiting"
+    exit 1
+fi
+
+git add "Cargo.lock"
+git_push=(git push -u origin)
+git_amend=(git commit --amend --reuse-message HEAD)
+if [[ "$dry_run" ]]; then
+    echo ""
+    echo "# git add Cargo.lock"
+    echo "# " "${git_amend[@]}"
+    echo "# " "${git_push[@]}"
+else
+    "${git_amend[@]}"
+    "${git_push[@]}"
 fi
