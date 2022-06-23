@@ -18,8 +18,6 @@ use core::{
 mod tests;
 
 mod cursor;
-#[allow(deprecated)]
-pub use self::cursor::Cursor;
 pub use self::cursor::CursorMut;
 
 /// An [intrusive] doubly-linked list.
