@@ -34,8 +34,9 @@ pub struct CursorMut<'list, T: Linked<Links<T>> + ?Sized> {
 impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for CursorMut<'list, T> {
     type Item = Pin<&'list mut T>;
     fn next(&mut self) -> Option<Self::Item> {
+        let node = self.curr?;
         self.move_next();
-        self.curr.map(|node| unsafe { Self::pin_node_mut(node) })
+        unsafe { Some(Self::pin_node_mut(node)) }
     }
 
     /// A [`CursorMut`] can never return an accurate `size_hint` --- its lower
