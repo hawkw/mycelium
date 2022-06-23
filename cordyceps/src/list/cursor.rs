@@ -29,16 +29,6 @@ pub struct CursorMut<'list, T: Linked<Links<T>> + ?Sized> {
     pub(super) index: usize,
 }
 
-/// A cursor over a [`List`], with editing operations.
-///
-/// # Deprecated
-///
-/// This is a deprecated alias for [`CursorMut`].
-///
-/// See the [`CursorMut`] documentation for details.
-#[deprecated(since = "0.2.2", note = "renamed to `CursorMut`")]
-pub type Cursor<'list, T> = CursorMut<'list, T>;
-
 // === impl CursorMut ====
 
 impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for CursorMut<'list, T> {
