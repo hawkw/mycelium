@@ -751,17 +751,6 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Some(T::from_ptr(item))
     }
 
-    /// Returns a [`CursorMut`] over the items in this list.
-    ///
-    /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
-    /// however, it also permits modifying the *structure* of the list by
-    /// inserting or removing elements at the cursor's current position.
-    #[must_use]
-    #[deprecated(since = "0.2.2", note = "renamed to `List::cursor_front_mut`")]
-    pub fn cursor(&mut self) -> CursorMut<'_, T> {
-        self.cursor_front_mut()
-    }
-
     /// Returns a [`CursorMut`] starting at the first element.
     ///
     /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
