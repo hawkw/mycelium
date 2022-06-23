@@ -31,17 +31,12 @@ pub struct CursorMut<'list, T: Linked<Links<T>> + ?Sized> {
 
 // === impl CursorMut ====
 
-impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for CursorMut<'a, T> {
-    type Item = &'a mut T;
+impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for CursorMut<'list, T> {
+    type Item = Pin<&'list mut T>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_ptr().map(|mut ptr| unsafe {
-            // safety: it is safe for us to mutate `curr`, because the cursor
-            // mutably borrows the `List`, ensuring that the list will not be dropped
-            // while the iterator exists. the returned item will not outlive the
-            // cursor, and no one else can mutate it, as we have exclusive
-            // access to the list..
-            ptr.as_mut()
-        })
+        let node = self.curr?;
+        self.move_next();
+        unsafe { Some(Self::pin_node_mut(node)) }
     }
 
     /// A [`CursorMut`] can never return an accurate `size_hint` --- its lower
@@ -57,14 +52,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for CursorMut<'a, T> {
     }
 }
 
-impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
-    fn next_ptr(&mut self) -> Link<T> {
-        let curr = self.curr.take()?;
-        self.curr = unsafe { T::links(curr).as_ref().next() };
-        self.index += 1;
-        Some(curr)
-    }
-
+impl<'list, T: Linked<Links<T>> + ?Sized> CursorMut<'list, T> {
     /// Returns the index of this cursor's position in the [`List`].
     ///
     /// This returns `None` if the cursor is currently pointing to the
@@ -178,7 +166,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
         // because it's immutable and you can't move out of a shared
         // reference in safe code. but...it makes the API more consistent
         // with `front_mut` etc.
-        self.curr.map(|node| unsafe { self.pin_node(node) })
+        self.curr.map(|node| unsafe { Self::pin_node(node) })
     }
 
     /// Mutably borrows the element that the cursor is currently pointing at.
@@ -186,7 +174,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
     /// This returns `None` if the cursor is currently pointing to the
     /// null element.
     pub fn current_mut(&mut self) -> Option<Pin<&mut T>> {
-        self.curr.map(|node| unsafe { self.pin_node_mut(node) })
+        self.curr.map(|node| unsafe { Self::pin_node_mut(node) })
     }
 
     /// Borrows the next element after the cursor's current position in the
@@ -196,7 +184,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
     /// element in the [`List`]. If the cursor is pointing to the last element
     /// in the [`List`], this returns `None`.
     pub fn peek_next(&self) -> Option<Pin<&T>> {
-        self.next_link().map(|next| unsafe { self.pin_node(next) })
+        self.next_link().map(|next| unsafe { Self::pin_node(next) })
     }
 
     /// Borrows the previous element before the cursor's current position in the
@@ -209,7 +197,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
     // `std::collections::LinkedList`'s cursor interface calls this
     // "move_prev"...
     pub fn peek_prev(&self) -> Option<Pin<&T>> {
-        self.prev_link().map(|prev| unsafe { self.pin_node(prev) })
+        self.prev_link().map(|prev| unsafe { Self::pin_node(prev) })
     }
 
     /// Mutably borrows the next element after the cursor's current position in
@@ -220,7 +208,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
     /// in the [`List`], this returns `None`.
     pub fn peek_next_mut(&mut self) -> Option<Pin<&mut T>> {
         self.next_link()
-            .map(|next| unsafe { self.pin_node_mut(next) })
+            .map(|next| unsafe { Self::pin_node_mut(next) })
     }
 
     /// Mutably borrows the previous element before the cursor's current
@@ -234,7 +222,7 @@ impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
     // "move_prev"...
     pub fn peek_prev_mut(&mut self) -> Option<Pin<&mut T>> {
         self.prev_link()
-            .map(|prev| unsafe { self.pin_node_mut(prev) })
+            .map(|prev| unsafe { Self::pin_node_mut(prev) })
     }
 
     /// Inserts a new element into the [`List`] after the current one.
@@ -415,20 +403,32 @@ impl<'a, T: Linked<Links<T>> + ?Sized> CursorMut<'a, T> {
     /// # Safety
     ///
     /// - `node` must point to an element currently in this list.
-    unsafe fn pin_node(&self, node: NonNull<T>) -> Pin<&T> {
+    unsafe fn pin_node(node: NonNull<T>) -> Pin<&'list T> {
         // safety: elements in the list must be pinned while they are in the
         // list, so it is safe to construct a `pin` here provided that the
         // `Linked` trait's invariants are upheld.
+        //
+        // the lifetime of the returned reference inside the `Pin` is the
+        // lifetime of the `CursorMut`'s borrow on the list, so the node ref
+        // cannot outlive its referent, provided that `node` actually came from
+        // this list (and it would be a violation of this function's safety
+        // invariants if it did not).
         Pin::new_unchecked(node.as_ref())
     }
 
     /// # Safety
     ///
     /// - `node` must point to an element currently in this list.
-    unsafe fn pin_node_mut(&mut self, mut node: NonNull<T>) -> Pin<&mut T> {
+    unsafe fn pin_node_mut(mut node: NonNull<T>) -> Pin<&'list mut T> {
         // safety: elements in the list must be pinned while they are in the
         // list, so it is safe to construct a `pin` here provided that the
         // `Linked` trait's invariants are upheld.
+        //
+        // the lifetime of the returned reference inside the `Pin` is the
+        // lifetime of the `CursorMut`'s borrow on the list, so the node ref
+        // cannot outlive its referent, provided that `node` actually came from
+        // this list (and it would be a violation of this function's safety
+        // invariants if it did not).
         Pin::new_unchecked(node.as_mut())
     }
 }
