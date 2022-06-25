@@ -18,7 +18,7 @@ use core::{
 mod tests;
 
 mod cursor;
-pub use self::cursor::CursorMut;
+pub use self::cursor::{Cursor, CursorMut};
 
 /// An [intrusive] doubly-linked list.
 ///
@@ -758,11 +758,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
     pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
-        CursorMut {
-            curr: self.head,
-            list: self,
-            index: 0,
-        }
+        CursorMut::new(self, self.head, 0)
     }
 
     /// Returns a [`CursorMut`] s+tarting at the last element.
@@ -773,11 +769,28 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     #[must_use]
     pub fn cursor_back_mut(&mut self) -> CursorMut<'_, T> {
         let index = self.len().saturating_sub(1);
-        CursorMut {
-            curr: self.tail,
-            list: self,
-            index,
-        }
+        CursorMut::new(self, self.tail, index)
+    }
+
+    /// Returns a [`Cursor`] starting at the first element.
+    ///
+    /// The [`Cursor`] type can be used as [`Iterator`] over this list. In
+    /// addition, it may be seeked back and forth to an arbitrary position in
+    /// the list.
+    #[must_use]
+    pub fn cursor_front(&self) -> Cursor<'_, T> {
+        Cursor::new(self, self.head, 0)
+    }
+
+    /// Returns a [`CursorMut`] s+tarting at the last element.
+    ///
+    /// The [`Cursor`] type can be used as [`Iterator`] over this list. In
+    /// addition, it may be seeked back and forth to an arbitrary position in
+    /// the list.
+    #[must_use]
+    pub fn cursor_back(&self) -> Cursor<'_, T> {
+        let index = self.len().saturating_sub(1);
+        Cursor::new(self, self.tail, index)
     }
 
     /// Returns an iterator over the items in this list, by reference.
