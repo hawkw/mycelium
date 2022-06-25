@@ -1,0 +1,3 @@
+[profile.loom]
+# loom tests might take a long time; don't have `nextest` print "slow" messages.
+slow-timeout = "10m"
