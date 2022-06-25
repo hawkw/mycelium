@@ -27,7 +27,6 @@ env:
   # don't emit giant backtraces in the CI logs.
   RUST_BACKTRACE: short
   # loom config
-  LOOM_MAX_PREEMPTIONS: 2
   LOOM_LOG: "mycelium=trace,cordyceps=trace,maitake=trace,debug"
 
 jobs:
@@ -180,19 +179,26 @@ jobs:
   ### cordyceps ###
 
   # run loom tests
-  cordyceps_loom:
+  cordyceps_loom: &loom
     needs: changed_paths
     if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).cordyceps.should_skip
     runs-on: ubuntu-latest
+    env:
+      crate: "cordyceps"
     name: Loom tests (cordyceps)
     steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: cargo test --profile loom --lib -p cordyceps -- --nocapture --test-threads=1
+      run: >-
+        ./bin/loom -p $crate
+          --failure-output immediate-final
+          --no-fail-fast
       env:
-        RUSTFLAGS: "--cfg loom"
+        crate: cordyceps
 
   # run miri tests
   cordyceps_miri:
@@ -222,36 +228,22 @@ jobs:
     - name: run tests
       # don't run doctests with `no-default-features`, as some of them
       # require liballoc.
-      run: cargo test -p maitake --no-default-features --tests --lib 
+      run: cargo test -p maitake --no-default-features --tests --lib
 
   # run loom tests
   maitake_loom:
-    needs: changed_paths
+    <<: *loom
     if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).maitake.should_skip
-    runs-on: ubuntu-latest
     name: Loom tests (maitake)
-    steps:
-    - name: install rust toolchain
-      run: rustup show
-    - uses: actions/checkout@v2
-    - name: run loom tests
-      run: cargo test --profile loom --lib -p maitake
-      env:
-        RUSTFLAGS: "--cfg loom"
+    env:
+      crate: "maitake"
 
   ### mycelium-util ###
 
   # run loom tests
   util_loom:
-    needs: changed_paths
-    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).util.should_skip
-    runs-on: ubuntu-latest
+    <<: *loom
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).mycelium-util.should_skip
     name: Loom tests (mycelium-util)
-    steps:
-    - name: install rust toolchain
-      run: rustup show
-    - uses: actions/checkout@v2
-    - name: run loom tests
-      run: cargo test --profile loom --lib -p mycelium-util
-      env:
-        RUSTFLAGS: "--cfg loom"
+    env:
+      crate: "mycelium-util"
