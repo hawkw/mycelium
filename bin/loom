@@ -33,7 +33,7 @@ elif ! cargo --list | grep -q "nextest"; then
 fi
 
 export RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}"
-export LOOM_LOG="${LOOM_LOG:-debug}"
+export LOOM_LOG="${LOOM_LOG:-mycelium=trace,maitake=trace,cordyceps=trace,debug}"
 export LOOM_LOCATION=true
 export LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-3}"
 
