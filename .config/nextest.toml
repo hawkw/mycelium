@@ -14,3 +14,12 @@ failure-output = "immediate-final"
 # Do not cancel the test run on the first failure.
 fail-fast = false
 retries = 2
+
+[profile.loom-ci]
+# loom tests might take a long time; don't have `nextest` print "slow" messages.
+slow-timeout = { period = "10m" }
+# Print out output for failing tests as soon as they fail, and also at the end
+# of the run (for easy scrollability).
+failure-output = "immediate-final"
+# Do not cancel the test run on the first failure.
+fail-fast = false
