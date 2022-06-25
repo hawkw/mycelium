@@ -179,12 +179,10 @@ jobs:
   ### cordyceps ###
 
   # run loom tests
-  cordyceps_loom: &loom
+  cordyceps_loom:
     needs: changed_paths
     if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).cordyceps.should_skip
     runs-on: ubuntu-latest
-    env:
-      crate: "cordyceps"
     name: Loom tests (cordyceps)
     steps:
     - name: install rust toolchain
@@ -194,11 +192,9 @@ jobs:
       uses: taiki-e/install-action@nextest
     - name: run loom tests
       run: >-
-        ./bin/loom -p $crate
+        ./bin/loom -p cordyceps
           --failure-output immediate-final
           --no-fail-fast
-      env:
-        crate: cordyceps
 
   # run miri tests
   cordyceps_miri:
@@ -232,18 +228,38 @@ jobs:
 
   # run loom tests
   maitake_loom:
-    <<: *loom
+    needs: changed_paths
     if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).maitake.should_skip
+    runs-on: ubuntu-latest
     name: Loom tests (maitake)
-    env:
-      crate: "maitake"
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: >-
+        ./bin/loom -p maitake
+          --failure-output immediate-final
+          --no-fail-fast
 
   ### mycelium-util ###
 
   # run loom tests
   util_loom:
-    <<: *loom
-    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).mycelium-util.should_skip
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).util.should_skip
+    runs-on: ubuntu-latest
     name: Loom tests (mycelium-util)
-    env:
-      crate: "mycelium-util"
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: >-
+        ./bin/loom -p mycelium-util
+          --failure-output immediate-final
+          --no-fail-fast
