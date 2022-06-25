@@ -114,15 +114,15 @@ jobs:
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: cargo nextest run
-      run: >-
-        cargo nextest run
-          --workspace
-          --all-features
+      run: |
+        cargo nextest run \
+          --workspace \
+          --all-features \
           --profile ci
     - name: cargo test --doc
-      run: >-
-        cargo test --doc
-          --workspace
+      run: |
+        cargo test --doc \
+          --workspace \
           --all-features
 
   # build a bootable image for the `x86_64-mycelium` target.
@@ -199,9 +199,9 @@ jobs:
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: >-
-        ./bin/loom -p cordyceps
-          --failure-output immediate-final
+      run: |
+        ./bin/loom -p cordyceps \
+          --failure-output immediate-final \
           --no-fail-fast
 
   # run miri tests
@@ -247,9 +247,9 @@ jobs:
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: >-
-        ./bin/loom -p maitake
-          --failure-output immediate-final
+      run: |
+        ./bin/loom -p maitake \
+          --failure-output immediate-final \
           --no-fail-fast
 
   ### mycelium-util ###
@@ -267,7 +267,7 @@ jobs:
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: >-
-        ./bin/loom -p mycelium-util
-          --failure-output immediate-final
+      run: |
+        ./bin/loom -p mycelium-util \
+          --failure-output immediate-final \
           --no-fail-fast
