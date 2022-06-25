@@ -11,14 +11,15 @@ rootdir=$( cd "$bindir"/.. && pwd )
 
 cd "$rootdir"
 
-nextest_profile="loom"
+# assume `cargo nextest` is present
+testcmd=(cargo nextest run --cargo-profile loom)
+
 if [[ "${GITHUB_ACTION:-}" ]]; then
     status "Detected" "GitHub Actions; using loom-ci profile"
-    nextest_profile="loom-ci"
+    testcmd+=(--profile "loom-ci")
+else
+    testcmd+=(--profile "loom")
 fi
-
-# assume `cargo nextest` is present
-testcmd=(cargo nextest run --cargo-profile loom --profile "${nextest_profile}")
 
 if [[ "${LOOM_NO_NEXTEST:-}" ]]; then
     testcmd=(cargo test --profile loom)
