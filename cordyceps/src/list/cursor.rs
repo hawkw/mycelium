@@ -426,6 +426,22 @@ impl<'list, T: Linked<Links<T>> + ?Sized> CursorMut<'list, T> {
 
         self.core.index += splice_len;
     }
+
+    /// Returns a read-only cursor pointing to the current element.
+    ///
+    /// The lifetime of the returned [`Cursor`] is bound to that of the
+    /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
+    /// `CursorMut` is frozen for the lifetime of the [`Cursor`].
+    #[must_use]
+    pub fn as_cursor(&self) -> Cursor<'_, T> {
+        Cursor {
+            core: CursorCore {
+                list: self.core.list,
+                curr: self.core.curr,
+                index: self.core.index,
+            },
+        }
+    }
 }
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for CursorMut<'_, T> {
