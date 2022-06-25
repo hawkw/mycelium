@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run loom tests.
 
 set -euo pipefail
 
@@ -13,7 +14,9 @@ cd "$rootdir"
 # assume `cargo nextest` is present
 testcmd=(cargo nextest run --cargo-profile loom --profile loom)
 
-if ! cargo --list | grep -q "nextest"; then
+if [[ "${LOOM_NO_NEXTEST:-}" ]]; then
+    testcmd=(cargo test --profile loom)
+elif ! cargo --list | grep -q "nextest"; then
     err "missing cargo-nextest executable"
     if confirm "      install it?"; then
         cargo install cargo-nextest
@@ -26,7 +29,14 @@ fi
 status "Running" "loom tests"
 set -x
 
-RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}" \
-LOOM_LOG="${LOOM_LOG:-debug}" \
-LOOM_LOCATION=true \
-    "${testcmd[@]}" --lib "$@"
+export RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}"
+export LOOM_LOG="${LOOM_LOG:-debug}"
+export LOOM_LOCATION=true
+export LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-3}"
+
+if [[ "${LOOM_CHECKPOINT_FILE:-}" ]]; then
+    export LOOM_CHECKPOINT_FILE="${LOOM_CHECKPOINT_FILE:-}"
+    export LOOM_CHECKPOINT_INTERVAL="${LOOM_CHECKPOINT_INTERVAL:-100}"
+fi
+
+"${testcmd[@]}" --lib "$@"
