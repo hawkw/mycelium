@@ -1,11 +1,68 @@
 #!/usr/bin/env bash
+# Run loom tests.
 
-set -x
+set -euo pipefail
 
-RUSTFLAGS="--cfg loom ${RUSTFLAGS}" \
-LOOM_LOG="${LOOM_LOG:-debug}" \
-LOOM_LOCATION=true \
-cargo test \
-    --profile loom \
-    --lib \
-    "$@"
+bindir=$( cd "${BASH_SOURCE[0]%/*}" && pwd )
+rootdir=$( cd "$bindir"/.. && pwd )
+
+# shellcheck source=_util.sh
+. "$bindir"/_util.sh
+
+cd "$rootdir"
+
+# assume `cargo nextest` is present
+testcmd=(cargo nextest run --cargo-profile loom)
+
+if [[ "${GITHUB_ACTION:-}" ]]; then
+    status "Detected" "GitHub Actions; using loom-ci profile"
+    testcmd+=(--profile "loom-ci")
+else
+    testcmd+=(--profile "loom")
+fi
+
+if [[ "${LOOM_NO_NEXTEST:-}" ]]; then
+    testcmd=(cargo test --profile loom)
+elif ! cargo --list | grep -q "nextest"; then
+    err "missing cargo-nextest executable"
+    if confirm "      install it?"; then
+        cargo install cargo-nextest
+    else
+        echo "okay, using cargo test"
+        testcmd=(cargo test --profile loom)
+    fi
+fi
+
+export RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}"
+export LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}"
+export LOOM_LOG="${LOOM_LOG:-mycelium=trace,maitake=trace,cordyceps=trace,debug}"
+
+# if logging is enabled, also enable location tracking.
+if [[ "${LOOM_LOG}" != "off" ]]; then
+    export LOOM_LOCATION=true
+    status "Enabled" "logging, LOOM_LOG=${LOOM_LOG}"
+else
+    status "Disabled" "logging and location tracking"
+fi
+
+status "Configured" "loom, LOOM_MAX_PREEMPTIONS=${LOOM_MAX_PREEMPTIONS}"
+
+if [[ "${LOOM_CHECKPOINT_FILE:-}" ]]; then
+    export LOOM_CHECKPOINT_FILE="${LOOM_CHECKPOINT_FILE:-}"
+    export LOOM_CHECKPOINT_INTERVAL="${LOOM_CHECKPOINT_INTERVAL:-100}"
+    status "Saving" "checkpoints to ${LOOM_CHECKPOINT_FILE} every ${LOOM_CHECKPOINT_INTERVAL} iterations"
+fi
+
+# if the loom tests fail, we still want to be able to print the checkpoint
+# location before exiting.
+set +e
+
+# run loom tests
+"${testcmd[@]}" --lib "$@"
+status="$?"
+
+if [[ "${LOOM_CHECKPOINT_FILE:-}" ]]; then
+    status "Checkpoints" "saved to ${LOOM_CHECKPOINT_FILE}"
+fi
+
+exit "$status"
