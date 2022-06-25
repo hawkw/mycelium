@@ -33,11 +33,18 @@ elif ! cargo --list | grep -q "nextest"; then
 fi
 
 export RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}"
-export LOOM_LOG="${LOOM_LOG:-mycelium=trace,maitake=trace,cordyceps=trace,debug}"
-export LOOM_LOCATION=true
 export LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-3}"
+export LOOM_LOG="${LOOM_LOG:-mycelium=trace,maitake=trace,cordyceps=trace,debug}"
 
-status "Running" "loom tests, LOOM_LOG=${LOOM_LOG}, LOOM_LOCATION=${LOOM_LOCATION}, LOOM_MAX_PREEMPTIONS=${LOOM_MAX_PREEMPTIONS}"
+# if logging is enabled, also enable location tracking.
+if [[ "${LOOM_LOG}" != "off" ]]; then
+    export LOOM_LOCATION=true
+    status "Enabled" "logging, LOOM_LOG=${LOOM_LOG}"
+else
+    status "Disabled" "logging and location tracking"
+fi
+
+status "Configured" "loom, LOOM_MAX_PREEMPTIONS=${LOOM_MAX_PREEMPTIONS}"
 
 if [[ "${LOOM_CHECKPOINT_FILE:-}" ]]; then
     export LOOM_CHECKPOINT_FILE="${LOOM_CHECKPOINT_FILE:-}"
