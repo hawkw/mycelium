@@ -3,9 +3,29 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## cordyceps-v0.3.0 - (2022-06-25)
+
+[f956111](https://github.com/hawkw/mycelium/f9561111fceead952261355594fa46e9027ca8dd)...[2a7ce9c](https://github.com/hawkw/mycelium/2a7ce9cc2fcda1808f327253092a5e8309aa882a)
+
+### <a id = "cordyceps-v0.3.0-breaking"></a>Breaking Changes
+- **Remove deprecated `Cursor` type alias ([#239](https://github.com/hawkw/mycelium/issues/239))** ([b4fcb16](b4fcb160214b2d44b5c740e4eb3c666fcd8dec3d))<br />This removes the `Cursor` type from `cordyceps::list`.
+- **Remove deprecated `List::cursor` method ([#239](https://github.com/hawkw/mycelium/issues/239))** ([2e35a4b](2e35a4b82d5b5faa2ebfcefdf8a94885b32c3a99))<br />This removes the `List::cursor` method from `cordyceps::List`.
+- **Pin `CursorMut` iterator `Item`s ([#240](https://github.com/hawkw/mycelium/issues/240))** ([5ee31ce](5ee31cee2312639800f27358e2ea1b41481d185e))<br />This changes the type signature of the `Iterator` impl for
+
+### Added
+
+- [**breaking**](#cordyceps-v0.3.0-breaking) Remove deprecated `Cursor` type alias ([#239](https://github.com/hawkw/mycelium/issues/239)) ([b4fcb16](https://github.com/hawkw/mycelium/b4fcb160214b2d44b5c740e4eb3c666fcd8dec3d))
+- [**breaking**](#cordyceps-v0.3.0-breaking) Remove deprecated `List::cursor` method ([#239](https://github.com/hawkw/mycelium/issues/239)) ([2e35a4b](https://github.com/hawkw/mycelium/2e35a4b82d5b5faa2ebfcefdf8a94885b32c3a99))
+- Add immutable `list::Cursor` type ([#241](https://github.com/hawkw/mycelium/issues/241)) ([5af5d48](https://github.com/hawkw/mycelium/5af5d488e431c004d7496237aac39fb0572eb137))
+- Add `CursorMut::as_cursor` ([#244](https://github.com/hawkw/mycelium/issues/244)) ([2a7ce9c](https://github.com/hawkw/mycelium/2a7ce9cc2fcda1808f327253092a5e8309aa882a))
+
+### Fixed
+
+- [**breaking**](#cordyceps-v0.3.0-breaking) Pin `CursorMut` iterator `Item`s ([#240](https://github.com/hawkw/mycelium/issues/240)) ([5ee31ce](https://github.com/hawkw/mycelium/5ee31cee2312639800f27358e2ea1b41481d185e))
+
 ## cordyceps-v0.2.2 - (2022-06-21)
 
-[7cdb821](https://github.com/hawkw/mycelium/7cdb82146fdddfa564d0ba78536da0b7579a63e0)...[7504b88](https://github.com/hawkw/mycelium/7504b88ecd97683f1e22132b2822aabcee487d1a)
+[7cdb821](https://github.com/hawkw/mycelium/7cdb82146fdddfa564d0ba78536da0b7579a63e0)...[f956111](https://github.com/hawkw/mycelium/f9561111fceead952261355594fa46e9027ca8dd)
 
 
 ### Added
