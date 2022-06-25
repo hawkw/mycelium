@@ -26,17 +26,29 @@ elif ! cargo --list | grep -q "nextest"; then
     fi
 fi
 
-status "Running" "loom tests"
-set -x
-
 export RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}"
 export LOOM_LOG="${LOOM_LOG:-debug}"
 export LOOM_LOCATION=true
 export LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-3}"
 
+status "Running" "loom tests, LOOM_LOG=${LOOM_LOG}, LOOM_LOCATION=${LOOM_LOCATION}, LOOM_MAX_PREEMPTIONS=${LOOM_MAX_PREEMPTIONS}"
+
 if [[ "${LOOM_CHECKPOINT_FILE:-}" ]]; then
     export LOOM_CHECKPOINT_FILE="${LOOM_CHECKPOINT_FILE:-}"
     export LOOM_CHECKPOINT_INTERVAL="${LOOM_CHECKPOINT_INTERVAL:-100}"
+    status "Saving" "checkpoints to ${LOOM_CHECKPOINT_FILE} every ${LOOM_CHECKPOINT_INTERVAL} iterations"
 fi
 
+# if the loom tests fail, we still want to be able to print the checkpoint
+# location before exiting.
+set +e
+
+# run loom tests
 "${testcmd[@]}" --lib "$@"
+status="$?"
+
+if [[ "${LOOM_CHECKPOINT_FILE:-}" ]]; then
+    status "Checkpoints" "saved to ${LOOM_CHECKPOINT_FILE}"
+fi
+
+exit "$status"
