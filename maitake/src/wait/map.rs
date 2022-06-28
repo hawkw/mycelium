@@ -626,6 +626,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
 }
 
 /// The result of an attempted wake operation
+#[derive(Debug)]
 pub enum WakeOutcome<V> {
     /// The `Waiter` was successfully woken, and the data was provided.
     Woke,

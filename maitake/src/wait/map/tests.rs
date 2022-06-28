@@ -477,4 +477,25 @@ mod loom {
             thread2.join().unwrap();
         });
     }
+
+    #[test]
+    fn wake_and_drop() {
+        use futures::FutureExt;
+        loom::model(|| {
+            // use `Arc`s as the value type to ensure their destructors are run.
+            let q = Arc::new(WaitMap::<usize, Arc<()>>::new());
+
+            let thread = thread::spawn({
+                let q = q.clone();
+                move || {
+                    dbg!(q.wait(1).now_or_never());
+                }
+            });
+
+            thread::yield_now();
+            dbg!(q.wake(&1, Arc::new(())));
+
+            thread.join().unwrap();
+        });
+    }
 }
