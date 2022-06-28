@@ -16,7 +16,7 @@ use core::{
     fmt::Debug,
     future::Future,
     marker::PhantomPinned,
-    mem::{self, MaybeUninit},
+    mem,
     pin::Pin,
     ptr::NonNull,
     task::{Context, Poll, Waker},
@@ -270,7 +270,7 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
 
 /// A waiter node which may be linked into a wait queue.
 #[repr(C)]
-#[pin_project(PinnedDrop)]
+#[pin_project]
 struct Waiter<K: PartialEq, V> {
     /// The intrusive linked list node.
     ///
@@ -283,10 +283,6 @@ struct Waiter<K: PartialEq, V> {
     state: WaitState,
 
     key: K,
-
-    // TODO(AJM): This could likely be added to `WaitState::DataReceived`
-    // at some point in the future.
-    val: UnsafeCell<MaybeUninit<V>>,
 }
 
 impl<K: PartialEq, V> Debug for Waiter<K, V> {
@@ -300,36 +296,6 @@ impl<K: PartialEq, V> Debug for Waiter<K, V> {
     }
 }
 
-#[pinned_drop]
-impl<K: PartialEq, V> PinnedDrop for Waiter<K, V> {
-    fn drop(self: Pin<&mut Self>) {
-        // SAFETY: If we are being dropped, then we have already been removed
-        // from the map via Waiter::release(), OR we never entered the map at
-        // all. This means we now have exclusive access to the node, and
-        // no lock is required.
-        self.node.with_mut(|node| unsafe {
-            let nr = &mut *node;
-            match nr.waker {
-                Wakeup::Empty | Wakeup::Retreived | Wakeup::Closed => {
-                    // We either have no data, or it's already gone. Nothing to do here.
-                }
-                Wakeup::Waiting(_) => {
-                    // TODO: If the Waiter is being dropped - then it's probably pretty
-                    // certain that the task it comes from doesn't really care anymore.
-                    // I see no need to wake it, so this is also a no-op
-                }
-                Wakeup::DataReceived => {
-                    // Oh what a shame! The data arrived, but no one ever came to pick
-                    // it up. Let's make sure it gets properly dropped.
-                    self.val.with_mut(|val| {
-                        core::ptr::drop_in_place((*val).as_mut_ptr());
-                    });
-                }
-            }
-        });
-    }
-}
-
 #[repr(C)]
 struct Node<K: PartialEq, V> {
     /// Intrusive linked list pointers.
@@ -340,8 +306,9 @@ struct Node<K: PartialEq, V> {
     /// impl to be sound.
     links: list::Links<Waiter<K, V>>,
 
-    /// The node's waker
-    waker: Wakeup,
+    /// The node's waker, if it has yet to be woken, or the data assigned to the
+    /// node, if it has been woken.
+    waker: Wakeup<V>,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
@@ -408,8 +375,8 @@ enum State {
     Closed = 0b11,
 }
 
-#[derive(Clone, Debug)]
-enum Wakeup {
+#[derive(Clone)]
+enum Wakeup<V> {
     /// The Waiter has been created, but no wake has occurred. This should
     /// be the ONLY state while in `WaitState::Start`
     Empty,
@@ -422,7 +389,10 @@ enum Wakeup {
     /// The Waiter has received data, and is waiting for the woken task
     /// to notice, and take the data by polling+completing the future.
     /// This corresponds to `WaitState::Completed`.
-    DataReceived,
+    ///
+    /// This state stores the received value; taking the value out of the waiter
+    /// advances the state to `Retrieved`.
+    DataReceived(V),
 
     /// The waiter has received data, and already given it away, and has
     /// no more data to give. This corresponds to `WaitState::Completed`.
@@ -491,13 +461,8 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         // the lock, so we need to acquire a new snapshot.
         state = self.load();
 
-        if let Some(mut node) = self.node_match_locked(key, &mut *queue, state) {
-            let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived);
-            // SAFETY: We are holding the lock (as `queue`), so it is safe to
-            // mutate the node
-            unsafe {
-                node.as_mut().val.with_mut(|v| (*v).write(val));
-            }
+        if let Some(node) = self.node_match_locked(key, &mut *queue, state) {
+            let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived(val));
             drop(queue);
             waker.wake();
             WakeOutcome::Woke
@@ -564,7 +529,6 @@ impl<K: PartialEq, V> WaitMap<K, V> {
                 _pin: PhantomPinned,
             }),
             key,
-            val: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
 
@@ -626,6 +590,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
 }
 
 /// The result of an attempted wake operation
+#[derive(Debug)]
 pub enum WakeOutcome<V> {
     /// The `Waiter` was successfully woken, and the data was provided.
     Woke,
@@ -674,7 +639,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
     /// and currently, there is no way to ensure that...
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
-    fn wake(this: NonNull<Self>, list: &mut List<Self>, wakeup: Wakeup) -> Waker {
+    fn wake(this: NonNull<Self>, list: &mut List<Self>, wakeup: Wakeup<V>) -> Waker {
         Waiter::with_node(this, list, |node| {
             let waker = test_dbg!(mem::replace(&mut node.waker, wakeup));
             match waker {
@@ -785,38 +750,40 @@ impl<K: PartialEq, V> Waiter<K, V> {
                     // safety: we may mutate the node because we are
                     // holding the lock.
                     let node = &mut *node;
-                    match node.waker {
+                    let result;
+                    node.waker = match mem::replace(&mut node.waker, Wakeup::Empty) {
                         // We already had a waker, but are now getting another one.
                         // Store the new one, droping the old one
-                        Wakeup::Waiting(ref mut waker) => {
+                        Wakeup::Waiting(waker) => {
+                            result = Poll::Pending;
                             if !waker.will_wake(cx.waker()) {
-                                *waker = cx.waker().clone();
+                                Wakeup::Waiting(cx.waker().clone())
+                            } else {
+                                Wakeup::Waiting(waker)
                             }
-                            Poll::Pending
                         }
                         // We have received the data, take the data out of the
                         // future, and provide it to the poller
-                        Wakeup::DataReceived => {
-                            *this.state = WaitState::Completed;
-                            node.waker = Wakeup::Retreived;
-
-                            let val = this.val.with_mut(|v| {
-                                let mut retval = MaybeUninit::<V>::uninit();
-                                (*v).as_mut_ptr()
-                                    .copy_to_nonoverlapping(retval.as_mut_ptr(), 1);
-                                retval.assume_init()
-                            });
-
-                            notified(val)
+                        Wakeup::DataReceived(val) => {
+                            result = notified(val);
+                            Wakeup::Retreived
                         }
-                        Wakeup::Retreived => consumed(),
+                        Wakeup::Retreived => {
+                            result = consumed();
+                            Wakeup::Retreived
+                        }
 
                         Wakeup::Closed => {
                             *this.state = WaitState::Completed;
-                            closed()
+                            result = closed();
+                            Wakeup::Closed
                         }
-                        Wakeup::Empty => never_added(),
-                    }
+                        Wakeup::Empty => {
+                            result = never_added();
+                            Wakeup::Closed
+                        }
+                    };
+                    result
                 })
             }
             WaitState::Completed => consumed(),
@@ -1013,6 +980,18 @@ feature! {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
             this.waiter.release(&*this.queue);
+        }
+    }
+}
+
+impl<V> fmt::Debug for Wakeup<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("Wakeup::Empty"),
+            Self::Waiting(waker) => f.debug_tuple("Wakeup::Waiting").field(waker).finish(),
+            Self::DataReceived(_) => f.write_str("Wakeup::DataReceived(..)"),
+            Self::Retreived => f.write_str("Wakeup::Retrieved"),
+            Self::Closed => f.write_str("Wakeup::Closed"),
         }
     }
 }
