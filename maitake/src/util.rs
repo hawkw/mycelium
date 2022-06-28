@@ -1,5 +1,8 @@
 use core::ptr::NonNull;
 
+mod wakeset;
+pub(crate) use self::wakeset::WakeSet;
+
 macro_rules! fmt_bits {
     ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
         $(

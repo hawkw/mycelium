@@ -495,13 +495,25 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         }
 
         let mut queue = self.queue.lock();
-
-        // TODO(eliza): wake outside the lock using an array, a la
-        // https://github.com/tokio-rs/tokio/blob/4941fbf7c43566a8f491c64af5a4cd627c99e5a6/tokio/src/sync/batch_semaphore.rs#L277-L303
+        let mut wakeset = WakeSet::new();
         while let Some(node) = queue.pop_back() {
             let waker = Waiter::wake(node, &mut queue, Wakeup::Closed);
-            waker.wake()
+            if wakeset.add_waker(waker) {
+                // there's still room in the wake set, just keep adding to it.
+                continue;
+            }
+
+            // wake set is full, drop the lock and wake everyone!
+            drop(queue);
+            wakeset.wake_all();
+
+            // reacquire the lock and continue waking
+            queue = self.queue.lock();
         }
+
+        // drop the lock and wake the final batch of waiters in the `WakeSet`.
+        drop(queue);
+        wakeset.wake_all();
     }
 
     /// Wait to be woken up by this queue.
