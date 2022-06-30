@@ -441,7 +441,7 @@ where
 
         // Find the relative offset of `block` from the base of the heap.
         let rel_offset = block.as_ptr() as usize - base;
-        let buddy_offset = rel_offset ^ size;
+        let buddy_offset = rel_offset ^ (1 << order);
         let buddy = (base + buddy_offset) as *mut Free;
         tracing::trace!(
             block.rel_offset = fmt::hex(rel_offset),
@@ -468,7 +468,13 @@ where
         //
         // `is_maybe_free` returns a *hint* --- if it returns `false`, we know
         // the block is in use, so we don't have to remove it from the free list.
-        if unsafe { buddy.as_ref().is_maybe_free() } {
+        let block = unsafe { buddy.as_ref() };
+        if block.is_maybe_free() {
+            tracing::trace!(
+                buddy.block = ?block,
+                buddy.addr = ?buddy, "trying to remove buddy..."
+            );
+            debug_assert_eq!(block.size(), size, "buddy block did not have correct size");
             // Okay, now try to remove the buddy from its free list. If it's not
             // free, this will return `None`.
             return free_list.remove(buddy);
@@ -702,9 +708,15 @@ impl Free {
             self,
             self.magic
         );
+        debug_assert!(
+            !self.links.is_linked(),
+            "tried to split a block while it was on a free list!"
+        );
 
         let new_meta = self.meta.split_back(size)?;
         debug_assert_ne!(new_meta, self.meta);
+        debug_assert_eq!(new_meta.size(), size);
+        debug_assert_eq!(self.meta.size(), size);
         tracing::trace!(?new_meta, ?self.meta, "split meta");
 
         let new_free = unsafe { Self::new(new_meta, offset) };
