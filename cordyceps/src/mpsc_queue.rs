@@ -559,7 +559,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// [`Handle`]: crate::Linked::Handle
     pub fn enqueue(&self, element: T::Handle) {
         let ptr = T::into_ptr(element);
-
+        debug!(item.addr = ?ptr, "MpscQueue::enqueue");
         debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
         self.enqueue_inner(ptr)
@@ -726,12 +726,14 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
             if !next.is_null() {
                 *tail = next;
+                debug!(?self, item.addr = ?tail_node, "MpscQueue::try_dequeue_unchecked: dequeued");
                 return Ok(T::from_ptr(tail_node));
             }
 
             let head = self.head.load(Acquire);
 
             if tail_node.as_ptr() != head {
+                debug!(?self, "MpscQueue::try_dequeue_unchecked: inconsistent");
                 return Err(TryDequeueError::Inconsistent);
             }
 
@@ -739,12 +741,14 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
             next = links(tail_node).next.load(Acquire);
             if next.is_null() {
+                debug!(item.addr = ?tail_node, ?self, "MpscQueue::try_dequeue_unchecked: empty");
                 return Err(TryDequeueError::Empty);
             }
 
             *tail = next;
 
             debug_assert!(!links(tail_node).is_stub());
+            debug!(?self, item.addr = ?tail_node, "MpscQueue::try_dequeue_unchecked: dequeued");
             Ok(T::from_ptr(tail_node))
         })
     }
@@ -1346,12 +1350,15 @@ mod loom {
 #[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
+    use crate::util::trace_init;
     use test_util::*;
 
     use std::{ops::Deref, println, sync::Arc, thread};
 
     #[test]
     fn dequeue_empty() {
+        let _trace = trace_init();
+
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
         assert_eq!(q.dequeue(), None)
@@ -1359,6 +1366,8 @@ mod tests {
 
     #[test]
     fn try_dequeue_empty() {
+        let _trace = trace_init();
+
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
         assert_eq!(q.try_dequeue(), Err(TryDequeueError::Empty))
@@ -1366,6 +1375,8 @@ mod tests {
 
     #[test]
     fn try_dequeue_busy() {
+        let _trace = trace_init();
+
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
 
@@ -1388,6 +1399,8 @@ mod tests {
 
     #[test]
     fn enqueue_dequeue() {
+        let _trace = trace_init();
+
         let stub = entry(666);
         let e = entry(1);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
@@ -1398,6 +1411,8 @@ mod tests {
 
     #[test]
     fn basically_works() {
+        let _trace = trace_init();
+
         let stub = entry(666);
         let q = MpscQueue::<Entry>::new_with_stub(stub);
 
@@ -1407,6 +1422,8 @@ mod tests {
 
     #[test]
     fn basically_works_all_const() {
+        let _trace = trace_init();
+
         static STUB_ENTRY: Entry = const_stub_entry(666);
         static MPSC: MpscQueue<Entry> =
             unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
@@ -1415,6 +1432,8 @@ mod tests {
 
     #[test]
     fn basically_works_mixed_const() {
+        let _trace = trace_init();
+
         static STUB_ENTRY: Entry = const_stub_entry(666);
         let q = unsafe { MpscQueue::<Entry>::new_with_static_stub(&STUB_ENTRY) };
 
@@ -1435,10 +1454,13 @@ mod tests {
         let threads: Vec<_> = (0..THREADS)
             .map(|thread| {
                 let q = q.clone();
+                let trace = tracing::Dispatch::default();
                 thread::spawn(move || {
+                    let _trace = tracing::dispatcher::set_default(&trace);
+                    let _span = tracing::info_span!("tx", thread).entered();
                     for i in 0..MSGS {
-                        q.enqueue(entry(i));
-                        println!("thread {}; msg {}/{}", thread, i, MSGS);
+                        q.enqueue(entry(i + (thread * 10)));
+                        tracing::info!("enqueue msg {}/{}", i, MSGS);
                     }
                 })
             })
@@ -1449,13 +1471,13 @@ mod tests {
             match q.try_dequeue() {
                 Ok(msg) => {
                     i += 1;
-                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
+                    tracing::info!(?msg, "recv msg {}/{}", i, THREADS * MSGS);
                 }
                 Err(TryDequeueError::Busy) => {
                     panic!("the queue should never be busy, as there is only one consumer")
                 }
-                Err(e) => {
-                    println!("recv error {:?}", e);
+                Err(error) => {
+                    tracing::error!(?error, "recv error");
                     thread::yield_now();
                 }
             }

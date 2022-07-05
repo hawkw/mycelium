@@ -1,4 +1,5 @@
 use super::*;
+use crate::util::trace_init;
 use std::{boxed::Box, pin::Pin, ptr::NonNull, vec, vec::Vec};
 
 #[derive(Debug)]
@@ -107,16 +108,6 @@ mod remove_by_addr;
 #[test]
 fn const_new() {
     const _: List<Entry> = List::new();
-}
-
-fn trace_init() -> tracing::dispatcher::DefaultGuard {
-    use tracing_subscriber::prelude::*;
-    tracing_subscriber::fmt()
-        .with_test_writer()
-        .with_max_level(tracing::Level::TRACE)
-        .with_target(false)
-        .with_timer(())
-        .set_default()
 }
 
 #[test]
@@ -241,6 +232,8 @@ fn push_pop_push_pop() {
 
 #[test]
 fn double_ended_iter() {
+    let _trace = trace_init();
+
     let entries = [entry(1), entry(2), entry(3)];
     let list = list_from_iter(&entries);
 
@@ -257,6 +250,7 @@ fn double_ended_iter() {
 /// > and do not cross: iteration is over when they meet in the middle.
 #[test]
 fn double_ended_iter_empties() {
+    let _trace = trace_init();
     let entries = [entry(1), entry(2), entry(3), entry(4)];
 
     let list = list_from_iter(&entries);
@@ -275,6 +269,8 @@ fn double_ended_iter_empties() {
 
 #[test]
 fn drain_filter() {
+    let _trace = trace_init();
+
     let entries = [entry(1), entry(2), entry(3), entry(4)];
     let mut list = list_from_iter(&entries);
 
@@ -318,6 +314,8 @@ mod append {
 
     #[test]
     fn empty_to_empty() {
+        let _trace = trace_init();
+
         let mut a = List::<Entry<'_>>::new();
         let mut b = List::new();
         a.append(&mut b);
@@ -331,6 +329,8 @@ mod append {
 
     #[test]
     fn nonempty_to_empty() {
+        let _trace = trace_init();
+
         let entry = entry(1);
 
         let mut a = List::<Entry<'_>>::new();
@@ -351,6 +351,8 @@ mod append {
 
     #[test]
     fn empty_to_nonempty() {
+        let _trace = trace_init();
+
         let entry = entry(1);
 
         let mut a = List::<Entry<'_>>::new();
@@ -371,6 +373,8 @@ mod append {
 
     #[test]
     fn nonempty_to_nonempty() {
+        let _trace = trace_init();
+
         let a_entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
         let b_entries = [
             entry(9),
@@ -417,6 +421,8 @@ mod split_off {
 
     #[test]
     fn single_node() {
+        let _trace = trace_init();
+
         let entry = entry(1);
 
         let mut list = List::<Entry<'_>>::new();
@@ -436,6 +442,8 @@ mod split_off {
 
     #[test]
     fn middle() {
+        let _trace = trace_init();
+
         let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
 
         let mut list = list_from_iter(&entries);
@@ -456,6 +464,8 @@ mod split_off {
 
     #[test]
     fn one_node() {
+        let _trace = trace_init();
+
         let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
 
         let mut list = list_from_iter(&entries);
@@ -476,6 +486,8 @@ mod split_off {
 
     #[test]
     fn last_index() {
+        let _trace = trace_init();
+
         let one = entry(1);
 
         let mut list = List::<Entry<'_>>::new();
@@ -496,6 +508,8 @@ mod split_off {
 
     #[test]
     fn all_splits() {
+        let _trace = trace_init();
+
         let _trace = trace_init();
         let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
         let vals = [1, 2, 3, 4, 5];

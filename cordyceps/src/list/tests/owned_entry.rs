@@ -137,6 +137,8 @@ fn cursor_twice() {
 
 #[test]
 fn double_ended_iter_mut() {
+    let _trace = trace_init();
+
     let a = owned_entry(1);
     let b = owned_entry(2);
     let c = owned_entry(3);
@@ -165,6 +167,8 @@ fn double_ended_iter_mut() {
 /// > and do not cross: iteration is over when they meet in the middle.
 #[test]
 fn double_ended_iter_mut_empties() {
+    let _trace = trace_init();
+
     let a = owned_entry(1);
     let b = owned_entry(2);
     let c = owned_entry(3);
@@ -191,6 +195,8 @@ fn double_ended_iter_mut_empties() {
 
 #[test]
 fn drain_filter() {
+    let _trace = trace_init();
+
     let mut list = List::new();
     list.push_back(owned_entry(1));
     list.push_back(owned_entry(2));

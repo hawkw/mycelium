@@ -23,6 +23,9 @@ std = ["alloc"]
 # See the documentation of `CachePadded` for more details.
 no-cache-pad = []
 
+[dependencies]
+tracing = { version = "0.1", default-features = false, optional = true }
+
 [dev-dependencies]
 proptest = "1"
 tracing = { version = "0.1" }

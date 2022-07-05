@@ -4,6 +4,41 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+#[cfg(any(test, feature = "tracing"))]
+macro_rules! trace {
+    ($($args:tt)+) => {
+        tracing::trace!($($args)+);
+    };
+}
+
+#[cfg(not(any(test, feature = "tracing")))]
+macro_rules! trace {
+    ($($args:tt)+) => {};
+}
+
+#[cfg(any(test, feature = "tracing"))]
+macro_rules! debug {
+    ($($args:tt)+) => {
+        tracing::debug!($($args)+);
+    };
+}
+
+#[cfg(not(any(test, feature = "tracing")))]
+macro_rules! debug {
+    ($($args:tt)+) => {};
+}
+
+#[cfg(test)]
+pub(crate) fn trace_init() -> tracing::dispatcher::DefaultGuard {
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::TRACE)
+        .with_target(false)
+        .with_timer(())
+        .set_default()
+}
+
 /// An exponential backoff for spin loops
 #[derive(Debug, Clone)]
 pub(crate) struct Backoff {

@@ -515,7 +515,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
         unsafe {
             let mut tail_links = T::links(tail);
-            // tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
+            debug!(?self, tail.addr = ?tail, tail.links = ?tail_links, "List::pop_back");
             self.tail = tail_links.as_ref().prev();
             debug_assert_eq!(
                 tail_links.as_ref().next(),
@@ -530,7 +530,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             }
 
             tail_links.as_mut().unlink();
-            // tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
+            trace!(?self, tail.links = ?tail_links, "List::pop_back: done");
             Some(T::from_ptr(tail))
         }
     }
@@ -573,12 +573,15 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// [`Handle`]: crate::Linked::Handle
     pub fn push_back(&mut self, item: T::Handle) {
         let ptr = T::into_ptr(item);
+        debug!(?self, item.addr = ?ptr, "List::push_back");
         assert_ne!(self.tail, Some(ptr));
         unsafe {
             T::links(ptr).as_mut().set_next(None);
             T::links(ptr).as_mut().set_prev(self.tail);
             if let Some(tail) = self.tail {
-                T::links(tail).as_mut().set_next(Some(ptr));
+                let tail_links = T::links(tail).as_mut();
+                tail_links.set_next(Some(ptr));
+                trace!(tail.links = ?tail_links, "List::push_back: set tail next ptr");
             }
         }
 
@@ -588,6 +591,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
 
         self.len += 1;
+        trace!(?self, "List::push_back: done");
     }
 
     /// Appends an item to the head of the list.
@@ -602,15 +606,15 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// [`Handle`]: crate::Linked::Handle
     pub fn push_front(&mut self, item: T::Handle) {
         let ptr = T::into_ptr(item);
-        // tracing::trace!(?self, ?ptr, "push_front");
+        debug!(?self, item.addr = ?ptr, "List::push_front");
         assert_ne!(self.head, Some(ptr));
         unsafe {
             T::links(ptr).as_mut().set_next(self.head);
             T::links(ptr).as_mut().set_prev(None);
-            // tracing::trace!(?links);
             if let Some(head) = self.head {
-                T::links(head).as_mut().set_prev(Some(ptr));
-                // tracing::trace!(head.links = ?T::links(head).as_ref(), "set head prev ptr",);
+                let head_links = T::links(head).as_mut();
+                head_links.set_prev(Some(ptr));
+                trace!(head.links = ?head_links, "List::push_front: set head prev ptr");
             }
         }
 
@@ -621,7 +625,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
 
         self.len += 1;
-        // tracing::trace!(?self, "push_front: pushed");
+        trace!(?self, "List::push_front: done");
     }
 
     /// Returns a reference to the first element in the list, or `None`
@@ -722,32 +726,40 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
         let mut links = T::links(item);
         let links = links.as_mut();
-        // tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
+        debug!(?self, item.addr = ?item, item.links = ?links, "List::remove");
         let prev = links.set_prev(None);
         let next = links.set_next(None);
 
         if let Some(prev) = prev {
             T::links(prev).as_mut().set_next(next);
         } else if self.head != Some(item) {
-            // tracing::trace!(?self.head, "item is not head, but has no prev; return None");
+            trace!(?self.head, "List::remove: item is not head, but has no prev; return None");
             return None;
         } else {
-            debug_assert_ne!(Some(item), next, "node must not be linked to itself");
+            debug_assert_ne!(
+                Some(item),
+                next,
+                "List::remove: node must not be linked to itself"
+            );
             self.head = next;
         }
 
         if let Some(next) = next {
             T::links(next).as_mut().set_prev(prev);
         } else if self.tail != Some(item) {
-            // tracing::trace!(?self.tail, "item is not tail, but has no prev; return None");
+            trace!(?self.tail, "List::remove: item is not tail, but has no prev; return None");
             return None;
         } else {
-            debug_assert_ne!(Some(item), prev, "node must not be linked to itself");
+            debug_assert_ne!(
+                Some(item),
+                prev,
+                "List::remove: node must not be linked to itself"
+            );
             self.tail = prev;
         }
 
         self.len -= 1;
-        // tracing::trace!(?self, item.addr = ?item, "remove: done");
+        trace!(?self, item.addr = ?item, "List::remove: done");
         Some(T::from_ptr(item))
     }
 

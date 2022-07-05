@@ -21,6 +21,9 @@ macro_rules! feature {
     }
 }
 
+#[macro_use]
+pub(crate) mod util;
+
 pub mod list;
 #[doc(inline)]
 pub use list::List;
@@ -29,7 +32,6 @@ pub mod mpsc_queue;
 pub use mpsc_queue::MpscQueue;
 
 pub(crate) mod loom;
-pub(crate) mod util;
 
 use core::ptr::NonNull;
 

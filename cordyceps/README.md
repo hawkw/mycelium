@@ -81,9 +81,10 @@ The following features are available (this list is incomplete; you can help by [
 
 | Feature | Default | Explanation |
 | :---    | :---    | :---        |
-| `no-cache-pad` | `false` | Inhibits cache padding for the `CachePadded` struct used for many linked list pointers. When this feature is NOT enabled, the size will be determined based on target platform. |
+| `no-cache-pad` | `false`  | Inhibits cache padding for the `CachePadded` struct used for many linked list pointers. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `alloc`        | `false`  | Enables [`liballoc`] dependency and features that depend on `liballoc`. |
 | `std`          | `false`  | Enables [`libstd`] dependency and features that depend on the Rust standard library. Implies `alloc`. |
+| `tracing`      | `false`  | Enables [`tracing`] diagnostics. Note that `tracing` 0.1 requires `liballoc`. |
 
 [Mycelium]: https://github.com/hawkw/mycelium
 [intrusive]: https://www.boost.org/doc/libs/1_45_0/doc/html/intrusive/intrusive_vs_nontrusive.html
@@ -93,3 +94,4 @@ The following features are available (this list is incomplete; you can help by [
 [`Linked`]: https://docs.rs/cordyceps/latest/cordyceps/trait.Linked.html
 [`liballoc`]: https://doc.rust-lang.org/alloc/
 [`libstd`]: https://doc.rust-lang.org/std/
+[`tracing`]: https://crates.io/crates/tracing

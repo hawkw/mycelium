@@ -131,6 +131,8 @@ fn as_cursor_move_peek_back() {
 /// https://github.com/rust-lang/rust/blob/ec21d7ea3ca8e96863f175fbd4a6bfee79529d6c/library/alloc/src/collections/linked_list/tests.rs#L657-L714
 #[test]
 fn cursor_mut_insert() {
+    let _trace = super::trace_init();
+
     let entries = [entry(1), entry(2), entry(3), entry(4), entry(5), entry(6)];
     let seven = entry(7);
     let eight = entry(8);
@@ -170,6 +172,8 @@ fn cursor_mut_insert() {
 
 #[test]
 fn cursor_mut_splice() {
+    let _trace = super::trace_init();
+
     let entries_a = [entry(1), entry(2), entry(3), entry(4), entry(5), entry(6)];
     let entries_b = [entry(100), entry(101), entry(102), entry(103)];
     let entries_c = [entry(200), entry(201), entry(202), entry(203)];
@@ -209,6 +213,8 @@ fn cursor_mut_splice() {
 
 #[test]
 fn cursor_mut_split_after() {
+    let _trace = super::trace_init();
+
     let _trace = trace_init();
     let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
     let vals = [1, 2, 3, 4, 5];
@@ -251,7 +257,8 @@ fn cursor_mut_split_after() {
 
 #[test]
 fn cursor_mut_split_before() {
-    let _trace = trace_init();
+    let _trace = super::trace_init();
+
     let entries = [entry(1), entry(2), entry(3), entry(4), entry(5)];
     let vals = [1, 2, 3, 4, 5];
 
