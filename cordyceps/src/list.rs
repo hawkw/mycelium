@@ -720,12 +720,16 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// The caller *must* ensure that the removed node is an element of this
     /// linked list, and not any other linked list.
     pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
-        debug_assert_ne!(
-            self.len, 0,
-            "tried to remove an item from an entry list! item: {item:p}, list: {self:?}"
-        );
         let mut links = T::links(item);
         let links = links.as_mut();
+
+        debug_assert!(
+            !self.is_empty() || !links.is_linked(),
+            "tried to remove an item from an empty list, but the item is linked!\n\
+            is the item linked to a different list?\n  \
+            item: {item:p}\n links: {links:?}\n  list: {self:?}\n"
+        );
+
         // tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
         let prev = links.set_prev(None);
         let next = links.set_next(None);
