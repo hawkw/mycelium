@@ -584,7 +584,7 @@ fn run_fuzz(ops: Vec<Op>) {
 
     for (i, op) in ops.iter().enumerate() {
         let _span = tracing::info_span!("op", ?i, ?op).entered();
-        tracing::info!(?op);
+        tracing::info!(?reference);
         match op {
             Op::PushFront => {
                 reference.push_front(i as i32);
