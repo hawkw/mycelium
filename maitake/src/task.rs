@@ -22,7 +22,7 @@ use crate::{
     loom::cell::UnsafeCell,
     scheduler::Schedule,
     task::state::{OrDrop, ScheduleAction, StateCell},
-    util::{non_null, tracing},
+    util::non_null,
 };
 
 use core::{
@@ -172,7 +172,7 @@ struct Vtable {
 
 macro_rules! trace_task {
     ($ptr:expr, $f:ty, $method:literal) => {
-        tracing::trace!(
+        trace!(
             ptr = ?$ptr,
             output = %type_name::<<$f>::Output>(),
             concat!("Task::", $method),
@@ -387,7 +387,7 @@ impl TaskRef {
         STO: Storage<S, F>,
     {
         let ptr = STO::into_raw(task).cast::<Header>();
-        tracing::trace!(
+        trace!(
             ?ptr,
             "Task<..., Output = {}>::new",
             type_name::<F::Output>()
