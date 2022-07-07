@@ -21,7 +21,7 @@ use mycelium_util::sync::{
 };
 
 #[derive(Debug)]
-pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
+pub struct Alloc<const FREE_LISTS: usize> {
     /// Minimum allocateable page size in bytes.
     ///
     /// Free blocks on `free_lists[0]` are one page of this size each. For each
@@ -41,7 +41,7 @@ pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Array of free lists by "order". The order of an block is the number
     /// of times the minimum page size must be doubled to reach that block's
     /// size.
-    free_lists: L,
+    free_lists: [spin::Mutex<List<Free>>; FREE_LISTS],
 }
 
 type Result<T> = core::result::Result<T, AllocErr>;
@@ -54,53 +54,10 @@ pub struct Free {
 
 // ==== impl Alloc ===
 
-impl Alloc {
+impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
     #[cfg(not(loom))]
-    pub const fn new_default(min_size: usize) -> Self {
-        Self::new(
-            min_size,
-            // haha this is cool and fun
-            [
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-            ],
-        )
-    }
-}
-
-impl<L> Alloc<L> {
-    #[cfg(not(loom))]
-    pub const fn new(mut min_size: usize, free_lists: L) -> Self {
+    pub const fn new(mut min_size: usize) -> Self {
+        const ONE_FREE_LIST: spin::Mutex<List<Free>> = spin::Mutex::new(List::new());
         // ensure we don't split memory into regions too small to fit the free
         // block header in them.
         let free_block_size = mem::size_of::<Free>();
@@ -117,7 +74,7 @@ impl<L> Alloc<L> {
             vm_offset: AtomicUsize::new(0),
             min_size_log2: mycelium_util::math::usize_const_log2_ceil(min_size),
             heap_size: AtomicUsize::new(0),
-            free_lists,
+            free_lists: [ONE_FREE_LIST; FREE_LISTS],
         }
     }
 
@@ -212,10 +169,7 @@ impl<L> Alloc<L> {
     }
 }
 
-impl<L> Alloc<L>
-where
-    L: AsRef<[spin::Mutex<List<Free>>]>,
-{
+impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
     pub fn dump_free_lists(&self) {
         for (order, list) in self.free_lists.as_ref().iter().enumerate() {
             let _span =
@@ -441,7 +395,7 @@ where
 
         // Find the relative offset of `block` from the base of the heap.
         let rel_offset = block.as_ptr() as usize - base;
-        let buddy_offset = rel_offset ^ size;
+        let buddy_offset = rel_offset ^ (1 << order);
         let buddy = (base + buddy_offset) as *mut Free;
         tracing::trace!(
             block.rel_offset = fmt::hex(rel_offset),
@@ -468,7 +422,13 @@ where
         //
         // `is_maybe_free` returns a *hint* --- if it returns `false`, we know
         // the block is in use, so we don't have to remove it from the free list.
-        if unsafe { buddy.as_ref().is_maybe_free() } {
+        let block = unsafe { buddy.as_ref() };
+        if block.is_maybe_free() {
+            tracing::trace!(
+                buddy.block = ?block,
+                buddy.addr = ?buddy, "trying to remove buddy..."
+            );
+            debug_assert_eq!(block.size(), size, "buddy block did not have correct size");
             // Okay, now try to remove the buddy from its free list. If it's not
             // free, this will return `None`.
             return free_list.remove(buddy);
@@ -503,9 +463,8 @@ where
     }
 }
 
-unsafe impl<S, L> page::Alloc<S> for Alloc<L>
+unsafe impl<S, const FREE_LISTS: usize> page::Alloc<S> for Alloc<FREE_LISTS>
 where
-    L: AsRef<[spin::Mutex<List<Free>>]>,
     S: Size + fmt::Display,
 {
     /// Allocate a range of at least `len` pages.
@@ -622,7 +581,7 @@ where
     }
 }
 
-unsafe impl GlobalAlloc for Alloc {
+unsafe impl<const FREE_LISTS: usize> GlobalAlloc for Alloc<FREE_LISTS> {
     #[tracing::instrument(level = "trace", skip(self))]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         self.alloc_inner(layout)
@@ -702,9 +661,15 @@ impl Free {
             self,
             self.magic
         );
+        debug_assert!(
+            !self.links.is_linked(),
+            "tried to split a block while it was on a free list!"
+        );
 
         let new_meta = self.meta.split_back(size)?;
         debug_assert_ne!(new_meta, self.meta);
+        debug_assert_eq!(new_meta.size(), size);
+        debug_assert_eq!(self.meta.size(), size);
         tracing::trace!(?new_meta, ?self.meta, "split meta");
 
         let new_free = unsafe { Self::new(new_meta, offset) };
