@@ -6,7 +6,7 @@ use super::Linked;
 use crate::util::FmtOption;
 use core::{
     cell::UnsafeCell,
-    fmt,
+    fmt, iter,
     marker::PhantomPinned,
     mem,
     pin::Pin,
@@ -16,6 +16,9 @@ use core::{
 #[cfg(test)]
 #[cfg(not(loom))]
 mod tests;
+
+mod cursor;
+pub use self::cursor::{Cursor, CursorMut};
 
 /// An [intrusive] doubly-linked list.
 ///
@@ -222,16 +225,6 @@ pub struct Links<T: ?Sized> {
     inner: UnsafeCell<LinksInner<T>>,
 }
 
-/// A cursor over a [`List`].
-///
-/// This is similar to a mutable iterator (and implements the [`Iterator`]
-/// trait), but it also permits modification to the list itself.
-pub struct Cursor<'list, T: Linked<Links<T>> + ?Sized> {
-    list: &'list mut List<T>,
-    curr: Link<T>,
-    len: usize,
-}
-
 /// Iterates over the items in a [`List`] by reference.
 pub struct Iter<'list, T: Linked<Links<T>> + ?Sized> {
     _list: &'list List<T>,
@@ -270,7 +263,7 @@ where
     F: FnMut(&T) -> bool,
     T: Linked<Links<T>> + ?Sized,
 {
-    cursor: Cursor<'list, T>,
+    cursor: CursorMut<'list, T>,
     pred: F,
 }
 
@@ -296,6 +289,114 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             head: None,
             tail: None,
             len: 0,
+        }
+    }
+
+    /// Moves all elements from `other` to the end of the list.
+    ///
+    /// This reuses all the nodes from `other` and moves them into `self`. After
+    /// this operation, `other` becomes empty.
+    ///
+    /// This operation should compute in *O*(1) time and *O*(1) memory.
+    pub fn append(&mut self, other: &mut Self) {
+        let tail = match self.tail {
+            // if this list is empty, simply replace it with `other`
+            None => {
+                debug_assert!(self.is_empty());
+                mem::swap(self, other);
+                return;
+            }
+            Some(tail) => tail,
+        };
+
+        // if `other` is empty, do nothing.
+        if let Some((other_head, other_tail, other_len)) = other.take_all() {
+            // attach the other list's head node to this list's tail node.
+            unsafe {
+                T::links(tail).as_mut().set_next(Some(other_head));
+                T::links(other_head).as_mut().set_prev(Some(tail));
+            }
+
+            // this list's tail node is now the other list's tail node.
+            self.tail = Some(other_tail);
+            // this list's length increases by the other list's length, which
+            // becomes 0.
+            self.len += other_len;
+        }
+    }
+
+    /// Attempts to split the list into two at the given index (inclusive).
+    ///
+    /// Returns everything after the given index (including the node at that
+    /// index), or `None` if the index is greater than the list's [length].
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(List<T>)` with a new list containing every element after
+    ///   `at`, if `at` <= `self.len()`
+    /// - [`None`] if `at > self.len()`
+    ///
+    /// [length]: Self::len
+    pub fn try_split_off(&mut self, at: usize) -> Option<Self> {
+        let len = self.len();
+        // what is the index of the last node that should be left in this list?
+        let split_idx = match at {
+            // trying to split at the 0th index. we can just return the whole
+            // list, leaving `self` empty.
+            at if at == 0 => return Some(mem::replace(self, Self::new())),
+            // trying to split at the last index. the new list will be empty.
+            at if at == len => return Some(Self::new()),
+            // we cannot split at an index that is greater than the length of
+            // this list.
+            at if at > len => return None,
+            // otherwise, the last node in this list will be `at - 1`.
+            at => at - 1,
+        };
+
+        let mut iter = self.iter();
+
+        // advance to the node at `split_idx`, starting either from the head or
+        // tail of the list.
+        let dist_from_tail = len - 1 - split_idx;
+        let split_node = if split_idx <= dist_from_tail {
+            // advance from the head of the list.
+            for _ in 0..split_idx {
+                iter.next();
+            }
+            iter.curr
+        } else {
+            // advance from the tail of the list.
+            for _ in 0..dist_from_tail {
+                iter.next_back();
+            }
+            iter.curr_back
+        };
+
+        Some(unsafe { self.split_after_node(split_node, at) })
+    }
+
+    /// Split the list into two at the given index (inclusive).
+    ///
+    /// Returns everything after the given index (including the node at that
+    /// index).
+    ///
+    /// This operation should compute in *O*(1) time and *O*(1) memory.
+    ///
+    /// # Panics
+    ///
+    /// If `at > self.len()`.
+    #[track_caller]
+    #[must_use]
+    pub fn split_off(&mut self, at: usize) -> Self {
+        match self.try_split_off(at) {
+            Some(new_list) => new_list,
+            None => panic!(
+                "Cannot split off at a nonexistent index (the index was {} but the len was {})",
+                at,
+                self.len()
+            ),
         }
     }
 
@@ -328,17 +429,24 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     }
 
     /// Asserts as many of the linked list's invariants as possible.
+    #[track_caller]
     pub fn assert_valid(&self) {
+        self.assert_valid_named("")
+    }
+
+    /// Asserts as many of the linked list's invariants as possible.
+    #[track_caller]
+    pub(crate) fn assert_valid_named(&self, name: &str) {
         let head = match self.head {
             Some(head) => head,
             None => {
                 assert!(
                     self.tail.is_none(),
-                    "if the linked list's head is null, the tail must also be null"
+                    "{name}if the linked list's head is null, the tail must also be null"
                 );
                 assert_eq!(
                     self.len, 0,
-                    "if a linked list's head is null, its length must be 0"
+                    "{name}if a linked list's head is null, its length must be 0"
                 );
                 return;
             }
@@ -346,12 +454,15 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
         assert_ne!(
             self.len, 0,
-            "if a linked list's head is not null, its length must be greater than 0"
+            "{name}if a linked list's head is not null, its length must be greater than 0"
         );
 
-        let tail = self
-            .tail
-            .expect("if the linked list has a head, it must also have a tail");
+        assert_ne!(
+            self.tail, None,
+            "{name}if the linked list has a head, it must also have a tail"
+        );
+        let tail = self.tail.unwrap();
+
         let head_links = unsafe { T::links(head) };
         let tail_links = unsafe { T::links(tail) };
         let head_links = unsafe { head_links.as_ref() };
@@ -359,17 +470,17 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         if head == tail {
             assert_eq!(
                 head_links, tail_links,
-                "if the head and tail nodes are the same, their links must be the same"
+                "{name}if the head and tail nodes are the same, their links must be the same"
             );
             assert_eq!(
                 head_links.next(),
                 None,
-                "if the linked list has only one node, it must not be linked"
+                "{name}if the linked list has only one node, it must not be linked"
             );
             assert_eq!(
                 head_links.prev(),
                 None,
-                "if the linked list has only one node, it must not be linked"
+                "{name}if the linked list has only one node, it must not be linked"
             );
             return;
         }
@@ -384,10 +495,111 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
             actual_len += 1;
         }
 
-        assert_eq!(self.len, actual_len);
+        assert_eq!(
+            self.len, actual_len,
+            "{name}linked list's actual length did not match its `len` variable"
+        );
+    }
+
+    /// Removes an item from the tail of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn pop_back(&mut self) -> Option<T::Handle> {
+        let tail = self.tail?;
+        self.len -= 1;
+
+        unsafe {
+            let mut tail_links = T::links(tail);
+            // tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
+            self.tail = tail_links.as_ref().prev();
+            debug_assert_eq!(
+                tail_links.as_ref().next(),
+                None,
+                "the tail node must not have a next link"
+            );
+
+            if let Some(prev) = tail_links.as_mut().prev() {
+                T::links(prev).as_mut().set_next(None);
+            } else {
+                self.head = None;
+            }
+
+            tail_links.as_mut().unlink();
+            // tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
+            Some(T::from_ptr(tail))
+        }
+    }
+
+    /// Remove an item from the head of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn pop_front(&mut self) -> Option<T::Handle> {
+        let head = self.head?;
+        self.len -= 1;
+
+        unsafe {
+            let mut head_links = T::links(head);
+            self.head = head_links.as_ref().next();
+            if let Some(next) = head_links.as_mut().next() {
+                T::links(next).as_mut().set_prev(None);
+            } else {
+                self.tail = None;
+            }
+
+            head_links.as_mut().unlink();
+            Some(T::from_ptr(head))
+        }
+    }
+
+    /// Appends an item to the tail of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This takes a [`Handle`] that owns the appended `item`. While the element
+    /// is in the list, it is owned by the list, and will be dropped when the
+    /// list is dropped. If the element is removed or otherwise unlinked from
+    /// the list, ownership is assigned back to the [`Handle`].
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn push_back(&mut self, item: T::Handle) {
+        let ptr = T::into_ptr(item);
+        assert_ne!(self.tail, Some(ptr));
+        unsafe {
+            T::links(ptr).as_mut().set_next(None);
+            T::links(ptr).as_mut().set_prev(self.tail);
+            if let Some(tail) = self.tail {
+                T::links(tail).as_mut().set_next(Some(ptr));
+            }
+        }
+
+        self.tail = Some(ptr);
+        if self.head.is_none() {
+            self.head = Some(ptr);
+        }
+
+        self.len += 1;
     }
 
     /// Appends an item to the head of the list.
+    ///
+    /// This operation should compute in *O*(*n*) time.
+    ///
+    /// This takes a [`Handle`] that owns the appended `item`. While the element
+    /// is in the list, it is owned by the list, and will be dropped when the
+    /// list is dropped. If the element is removed or otherwise unlinked from
+    /// the list, ownership is assigned back to the [`Handle`].
+    ///
+    /// [`Handle`]: crate::Linked::Handle
     pub fn push_front(&mut self, item: T::Handle) {
         let ptr = T::into_ptr(item);
         // tracing::trace!(?self, ?ptr, "push_front");
@@ -410,45 +622,6 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
         self.len += 1;
         // tracing::trace!(?self, "push_front: pushed");
-    }
-
-    /// Appends an item to the tail of the list
-    pub fn push_back(&mut self, item: T::Handle) {
-        let ptr = T::into_ptr(item);
-        assert_ne!(self.tail, Some(ptr));
-        unsafe {
-            T::links(ptr).as_mut().set_next(None);
-            T::links(ptr).as_mut().set_prev(self.tail);
-            if let Some(tail) = self.tail {
-                T::links(tail).as_mut().set_next(Some(ptr));
-            }
-        }
-
-        self.tail = Some(ptr);
-        if self.head.is_none() {
-            self.head = Some(ptr);
-        }
-
-        self.len += 1;
-    }
-
-    /// Remove an item from the head of the list
-    pub fn pop_front(&mut self) -> Option<T::Handle> {
-        let head = self.head?;
-        self.len -= 1;
-
-        unsafe {
-            let mut head_links = T::links(head);
-            self.head = head_links.as_ref().next();
-            if let Some(next) = head_links.as_mut().next() {
-                T::links(next).as_mut().set_prev(None);
-            } else {
-                self.tail = None;
-            }
-
-            head_links.as_mut().unlink();
-            Some(T::from_ptr(head))
-        }
     }
 
     /// Returns a reference to the first element in the list, or `None`
@@ -535,34 +708,12 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Some(pin)
     }
 
-    /// Removes an item from the tail of the list.
-    pub fn pop_back(&mut self) -> Option<T::Handle> {
-        let tail = self.tail?;
-        self.len -= 1;
-
-        unsafe {
-            let mut tail_links = T::links(tail);
-            // tracing::trace!(?self, tail.addr = ?tail, tail.links = ?tail_links, "pop_back");
-            self.tail = tail_links.as_ref().prev();
-            debug_assert_eq!(
-                tail_links.as_ref().next(),
-                None,
-                "the tail node must not have a next link"
-            );
-
-            if let Some(prev) = tail_links.as_mut().prev() {
-                T::links(prev).as_mut().set_next(None);
-            } else {
-                self.head = None;
-            }
-
-            tail_links.as_mut().unlink();
-            // tracing::trace!(?self, tail.links = ?tail_links, "pop_back: popped");
-            Some(T::from_ptr(tail))
-        }
-    }
-
     /// Remove an arbitrary node from the list.
+    ///
+    /// This returns a [`Handle`] that owns the popped element. Dropping the
+    /// [`Handle`] will drop the element.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
     ///
     /// # Safety
     ///
@@ -571,6 +722,14 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
         let mut links = T::links(item);
         let links = links.as_mut();
+
+        debug_assert!(
+            !self.is_empty() || !links.is_linked(),
+            "tried to remove an item from an empty list, but the item is linked!\n\
+            is the item linked to a different list?\n  \
+            item: {item:p}\n links: {links:?}\n  list: {self:?}\n"
+        );
+
         // tracing::trace!(?self, item.addr = ?item, item.links = ?links, "remove");
         let prev = links.set_prev(None);
         let next = links.set_next(None);
@@ -600,19 +759,46 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Some(T::from_ptr(item))
     }
 
-    /// Returns a [`Cursor`] over the items in this list.
+    /// Returns a [`CursorMut`] starting at the first element.
     ///
-    /// The [`Cursor`] type can be used as a mutable [`Iterator`]. In addition,
+    /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
     /// however, it also permits modifying the *structure* of the list by
     /// inserting or removing elements at the cursor's current position.
     #[must_use]
-    pub fn cursor(&mut self) -> Cursor<'_, T> {
-        let len = self.len();
-        Cursor {
-            curr: self.head,
-            list: self,
-            len,
-        }
+    pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
+        CursorMut::new(self, self.head, 0)
+    }
+
+    /// Returns a [`CursorMut`] s+tarting at the last element.
+    ///
+    /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
+    /// however, it also permits modifying the *structure* of the list by
+    /// inserting or removing elements at the cursor's current position.
+    #[must_use]
+    pub fn cursor_back_mut(&mut self) -> CursorMut<'_, T> {
+        let index = self.len().saturating_sub(1);
+        CursorMut::new(self, self.tail, index)
+    }
+
+    /// Returns a [`Cursor`] starting at the first element.
+    ///
+    /// The [`Cursor`] type can be used as [`Iterator`] over this list. In
+    /// addition, it may be seeked back and forth to an arbitrary position in
+    /// the list.
+    #[must_use]
+    pub fn cursor_front(&self) -> Cursor<'_, T> {
+        Cursor::new(self, self.head, 0)
+    }
+
+    /// Returns a [`CursorMut`] s+tarting at the last element.
+    ///
+    /// The [`Cursor`] type can be used as [`Iterator`] over this list. In
+    /// addition, it may be seeked back and forth to an arbitrary position in
+    /// the list.
+    #[must_use]
+    pub fn cursor_back(&self) -> Cursor<'_, T> {
+        let index = self.len().saturating_sub(1);
+        Cursor::new(self, self.tail, index)
     }
 
     /// Returns an iterator over the items in this list, by reference.
@@ -658,8 +844,154 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     where
         F: FnMut(&T) -> bool,
     {
-        let cursor = self.cursor();
+        let cursor = self.cursor_front_mut();
         DrainFilter { cursor, pred }
+    }
+
+    /// Inserts the list segment represented by `splice_start` and `splice_end`
+    /// between `next` and `prev`.
+    ///
+    /// # Safety
+    ///
+    /// This method requires the following invariants be upheld:
+    ///
+    /// - `prev` and `next` are part of the same list.
+    /// - `prev` and `next` are not the same node.
+    /// - `splice_start` and `splice_end` are part of the same list, which is
+    ///   *not* the same list that `prev` and `next` are part of.
+    /// -`prev` is `next`'s `prev` node, and `next` is `prev`'s `prev` node.
+    /// - `splice_start` is ahead of `splice_end` in the list that they came from.
+    #[inline]
+    unsafe fn insert_nodes_between(
+        &mut self,
+        prev: Link<T>,
+        next: Link<T>,
+        splice_start: NonNull<T>,
+        splice_end: NonNull<T>,
+        spliced_length: usize,
+    ) {
+        debug_assert!(
+            (prev.is_none() && next.is_none()) || prev != next,
+            "cannot insert between a node and itself!\n    \
+            prev: {prev:?}\n   next: {next:?}",
+        );
+        // This method takes care not to create multiple mutable references to
+        // whole nodes at the same time, to maintain validity of aliasing
+        // pointers into `element`.
+
+        if let Some(prev) = prev {
+            let links = T::links(prev).as_mut();
+            debug_assert_eq!(links.next(), next);
+            links.set_next(Some(splice_start));
+        } else {
+            self.head = Some(splice_start);
+        }
+
+        if let Some(next) = next {
+            let links = T::links(next).as_mut();
+            debug_assert_eq!(links.prev(), prev);
+            links.set_prev(Some(splice_end));
+        } else {
+            self.tail = Some(splice_end);
+        }
+
+        let start_links = T::links(splice_start).as_mut();
+        let end_links = T::links(splice_end).as_mut();
+        debug_assert!(
+            splice_start == splice_end
+                || (start_links.next().is_some() && end_links.prev().is_some()),
+            "splice_start must be ahead of splice_end!\n   \
+            splice_start: {splice_start:?}\n    \
+            splice_end: {splice_end:?}\n  \
+            start_links: {start_links:?}\n   \
+            end_links: {end_links:?}",
+        );
+
+        start_links.set_prev(prev);
+        end_links.set_next(next);
+
+        self.len += spliced_length;
+    }
+
+    #[inline]
+    unsafe fn split_after_node(&mut self, split_node: Link<T>, idx: usize) -> Self {
+        let split_node = match split_node {
+            Some(node) => node,
+            None => return mem::replace(self, Self::new()),
+        };
+
+        // the head of the new list is the split node's `next` node (which is
+        // replaced with `None`)
+        let head = unsafe { T::links(split_node).as_mut().set_next(None) };
+        let tail = if let Some(head) = head {
+            // since `head` is now the head of its own list, it has no `prev`
+            // link any more.
+            let _prev = unsafe { T::links(head).as_mut().set_prev(None) };
+            debug_assert_eq!(_prev, Some(split_node));
+
+            // the tail of the new list is this list's old tail, if the split list
+            // is not empty.
+            self.tail.replace(split_node)
+        } else {
+            None
+        };
+
+        let split = Self {
+            head,
+            tail,
+            len: self.len - idx,
+        };
+
+        // update this list's length (note that this occurs after constructing
+        // the new list, because we use this list's length to determine the new
+        // list's length).
+        self.len = idx;
+
+        split
+    }
+
+    /// Empties this list, returning its head, tail, and length if it is
+    /// non-empty. If the list is empty, this returns `None`.
+    #[inline]
+    fn take_all(&mut self) -> Option<(NonNull<T>, NonNull<T>, usize)> {
+        let head = self.head.take()?;
+        let tail = self.tail.take();
+        debug_assert!(
+            tail.is_some(),
+            "if a list's `head` is `Some`, its tail must also be `Some`"
+        );
+        let tail = tail?;
+        let len = mem::replace(&mut self.len, 0);
+        debug_assert_ne!(
+            len, 0,
+            "if a list is non-empty, its `len` must be greater than 0"
+        );
+        Some((head, tail, len))
+    }
+}
+
+impl<T> iter::Extend<T::Handle> for List<T>
+where
+    T: Linked<Links<T>> + ?Sized,
+{
+    fn extend<I: IntoIterator<Item = T::Handle>>(&mut self, iter: I) {
+        for item in iter {
+            self.push_back(item);
+        }
+    }
+
+    // TODO(eliza): when `Extend::extend_one` becomes stable, implement that
+    // as well, so that we can just call `push_back` without looping.
+}
+
+impl<T> iter::FromIterator<T::Handle> for List<T>
+where
+    T: Linked<Links<T>> + ?Sized,
+{
+    fn from_iter<I: IntoIterator<Item = T::Handle>>(iter: I) -> Self {
+        let mut list = Self::new();
+        list.extend(iter);
+        list
     }
 }
 
@@ -671,6 +1003,7 @@ impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
         f.debug_struct("List")
             .field("head", &FmtOption::new(&self.head))
             .field("tail", &FmtOption::new(&self.tail))
+            .field("len", &self.len())
             .finish()
     }
 }
@@ -836,67 +1169,6 @@ unsafe impl<T: Send> Send for Links<T> {}
 /// [`List`] upholds its own invariants, `Links` should not make a type `!Sync`.
 unsafe impl<T: Sync> Sync for Links<T> {}
 
-// === impl Cursor ====
-
-impl<'a, T: Linked<Links<T>> + ?Sized> Iterator for Cursor<'a, T> {
-    type Item = &'a mut T;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_ptr().map(|mut ptr| unsafe {
-            // safety: it is safe for us to mutate `curr`, because the cursor
-            // mutably borrows the `List`, ensuring that the list will not be dropped
-            // while the iterator exists. the returned item will not outlive the
-            // cursor, and no one else can mutate it, as we have exclusive
-            // access to the list..
-            ptr.as_mut()
-        })
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len, Some(self.len))
-    }
-}
-
-impl<'a, T: Linked<Links<T>> + ?Sized> Cursor<'a, T> {
-    fn next_ptr(&mut self) -> Link<T> {
-        let curr = self.curr.take()?;
-        self.curr = unsafe { T::links(curr).as_ref().next() };
-        Some(curr)
-    }
-
-    /// Find and remove the first element matching the provided `predicate`.
-    ///
-    /// This traverses the list from the cursor's current position and calls
-    /// `predicate` with each element in the list. If `predicate` returns
-    /// `true` for a given element, that element is removed from the list and
-    /// returned, and the traversal ends. If the entire list is traversed
-    /// without finding a matching element, this returns `None`.
-    ///
-    /// This method may be called multiple times to remove more than one
-    /// matching element.
-    pub fn remove_first(&mut self, mut predicate: impl FnMut(&T) -> bool) -> Option<T::Handle> {
-        let mut item = None;
-        while let Some(node) = self.next_ptr() {
-            if predicate(unsafe { node.as_ref() }) {
-                item = Some(node);
-                self.len -= 1;
-                break;
-            }
-        }
-        unsafe { self.list.remove(item?) }
-    }
-}
-
-impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Cursor")
-            .field("curr", &FmtOption::new(&self.curr))
-            .field("list", &self.list)
-            .field("len", &self.len)
-            .finish()
-    }
-}
-
 // === impl Iter ====
 
 impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'list, T> {
@@ -1034,7 +1306,7 @@ where
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.cursor.len))
+        (0, Some(self.cursor.len()))
     }
 }
 

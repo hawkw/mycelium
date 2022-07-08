@@ -11,37 +11,13 @@ FLAGS:
 
 set -euo pipefail
 
-cd "$(dirname "$0")"/..
+bindir=$( cd "${BASH_SOURCE[0]%/*}" && pwd )
+rootdir=$( cd "$bindir"/.. && pwd )
 
-err() {
-    echo -e "\e[31m\e[1merror:\e[0m" "$@" 1>&2;
-}
+# shellcheck source=_util.sh
+. "$bindir"/_util.sh
 
-note() {
-    echo -e "\e[31m\e[1mnote:\e[0m" "$@" 1>&2;
-}
-
-status() {
-    local width=12
-    printf "\e[32m\e[1m%${width}s\e[0m %s\n" "$1" "$2"
-}
-
-confirm() {
-    while read -r -p "$1 [Y/n] " input
-    do
-        case "$input" in
-            [yY][eE][sS]|[yY])
-                return 0
-                ;;
-            [nN][oO]|[nN])
-                return 1
-                ;;
-            *)
-                err "invalid input $input"
-                ;;
-        esac
-    done
-}
+cd "$rootdir"
 
 verify() {
     status "Verifying" "if $crate v$version can be released"
@@ -99,34 +75,6 @@ update_version() {
     fi
 }
 
-update_changelog() {
-    if ! [[ -x "$(command -v git-cliff)" ]]; then
-        err "missing git-cliff executable"
-        if confirm "       install it?"; then
-            cargo install git-cliff
-        else
-            echo "okay, exiting"
-            exit 0
-        fi
-    fi
-
-    status "Updating" "changelog for $crate $version"
-
-    local git_cliff=(
-        git-cliff
-        --include-path "${path}/**"
-        --output "$changelog"
-        --config cliff.toml
-        --tag "$tag"
-    )
-
-    if [[ "$verbose" ]]; then
-        git_cliff+=("$verbose")
-    fi
-
-    "${git_cliff[@]}"
-}
-
 publish() {
     status "Publishing" "$crate v$version"
     cd "$path"
@@ -146,13 +94,28 @@ publish() {
     "${cargo_publish[@]}"
 
     status "Tagging" "$tag"
-    local git_tag=(git tag "$tag" "&&" git push --tags)
+    local git_tag=(git tag "$tag")
+    local git_push_tags=(git push --tags)
     if [[ "$dry_run" ]]; then
         echo "# " "${git_tag[@]}"
+        echo "# " "${git_push_tags[@]}"
     else
         "${git_tag[@]}"
+        "${git_push_tags[@]}"
     fi
 }
+
+update_changelog() {
+    # shellcheck source=update-changelog
+    . "$bindir"/update-changelog
+    changelog_status="$?"
+
+    if [[ $changelog_status -ne 0 ]]; then
+        err "failed to update changelog"
+        exit "$changelog_status"
+    fi
+}
+
 
 verbose=''
 dry_run=''
@@ -210,16 +173,7 @@ if [[ "${errexit+errexit}" ]]; then
     exit 1
 fi
 
-mycoprefix='mycelium-';
-if [[ -d $crate ]]; then
-    path="$crate"
-elif [[ -d "${crate#"$mycoprefix"}" ]]; then
-    path="${crate#"$mycoprefix"}"
-else
-    err "unknown crate $crate"
-    echo "$usage"
-    exit 1
-fi
+path=$(crate_path "$crate")
 
 cargo_toml="${path}/Cargo.toml"
 changelog="${path}/CHANGELOG.md"
@@ -264,7 +218,6 @@ echo ""
 
 if confirm "commit and push?"; then
     git_commit=(git commit -sS -m "chore($crate): prepare to release $crate $version")
-    git_push=(git push -u origin)
 
     if [[ "$dry_run" ]]; then
 
@@ -273,10 +226,10 @@ if confirm "commit and push?"; then
         echo "# " "${git_push[@]}"
     else
         "${git_commit[@]}"
-        "${git_push[@]}"
     fi
 else
     echo "okay, exiting"
+    exit 1
 fi
 
 if confirm "publish the crate?"; then
@@ -285,4 +238,18 @@ if confirm "publish the crate?"; then
     publish
 else
     echo "okay, exiting"
+    exit 1
+fi
+
+git add "Cargo.lock"
+git_push=(git push -u origin)
+git_amend=(git commit --amend --reuse-message HEAD)
+if [[ "$dry_run" ]]; then
+    echo ""
+    echo "# git add Cargo.lock"
+    echo "# " "${git_amend[@]}"
+    echo "# " "${git_push[@]}"
+else
+    "${git_amend[@]}"
+    "${git_push[@]}"
 fi

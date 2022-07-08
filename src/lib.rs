@@ -19,7 +19,7 @@ use mycelium_alloc::buddy;
 mod tests;
 
 #[cfg_attr(target_os = "none", global_allocator)]
-static ALLOC: buddy::Alloc = buddy::Alloc::new_default(32);
+static ALLOC: buddy::Alloc<32> = buddy::Alloc::new(32);
 
 pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();

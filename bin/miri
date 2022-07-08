@@ -2,10 +2,36 @@
 #
 # Runs `miri` tests
 set -euo pipefail
-set -x
 
 cd "$(dirname "$0")"/..
 
-MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-tag-raw-pointers ${MIRIFLAGS:-}" \
-    PROPTEST_CASES="${PROPTEST_CASES:-10}" \
-    cargo miri test --lib "${@}"
+# configure flags
+
+# additional miri flags
+add_miriflags=(
+    # enable stacked borrows and strict provenance checks.
+    # Note: this also implies `-Zmiri-tag-raw-pointers`
+    "-Zmiri-strict-provenance"
+
+    # disable miri's host isolation, because running `proptest` tests in miri
+    # requires randomness.
+    "-Zmiri-disable-isolation"
+)
+
+# additional flags passed to rustc
+add_rustflags=(
+    # enable layout randomization to help catch incorrect layout-dependent casts
+    # etc.
+    "-Zrandomize-layout"
+)
+
+# show the user the env vars we're setting for miri
+set -x
+
+# set env vars
+export PROPTEST_CASES="${PROPTEST_CASES:-10}"
+export RUSTFLAGS="${add_rustflags[*]} ${RUSTFLAGS:-}"
+export MIRIFLAGS="${add_miriflags[*]} ${MIRIFLAGS:-}"
+
+# actually run miri
+cargo miri test --lib "${@}"

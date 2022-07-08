@@ -27,7 +27,6 @@ env:
   # don't emit giant backtraces in the CI logs.
   RUST_BACKTRACE: short
   # loom config
-  LOOM_MAX_PREEMPTIONS: 2
   LOOM_LOG: "mycelium=trace,cordyceps=trace,maitake=trace,debug"
 
 jobs:
@@ -112,11 +111,19 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - name: run host tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test
-        args: --all --all-features
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: cargo nextest run
+      run: |
+        cargo nextest run \
+          --workspace \
+          --all-features \
+          --profile ci
+    - name: cargo test --doc
+      run: |
+        cargo test --doc \
+          --workspace \
+          --all-features
 
   # build a bootable image for the `x86_64-mycelium` target.
   build-x64:
@@ -189,10 +196,13 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: cargo test --profile loom --lib -p cordyceps -- --nocapture --test-threads=1
-      env:
-        RUSTFLAGS: "--cfg loom"
+      run: |
+        ./bin/loom -p cordyceps \
+          --failure-output immediate-final \
+          --no-fail-fast
 
   # run miri tests
   cordyceps_miri:
@@ -222,7 +232,7 @@ jobs:
     - name: run tests
       # don't run doctests with `no-default-features`, as some of them
       # require liballoc.
-      run: cargo test -p maitake --no-default-features --tests --lib 
+      run: cargo test -p maitake --no-default-features --tests --lib
 
   # run loom tests
   maitake_loom:
@@ -234,10 +244,13 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: cargo test --profile loom --lib -p maitake
-      env:
-        RUSTFLAGS: "--cfg loom"
+      run: |
+        ./bin/loom -p maitake \
+          --failure-output immediate-final \
+          --no-fail-fast
 
   ### mycelium-util ###
 
@@ -251,7 +264,10 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: cargo test --profile loom --lib -p mycelium-util
-      env:
-        RUSTFLAGS: "--cfg loom"
+      run: |
+        ./bin/loom -p mycelium-util \
+          --failure-output immediate-final \
+          --no-fail-fast
