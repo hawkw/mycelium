@@ -298,7 +298,7 @@ pub(crate) mod test_util {
 
     impl Drop for Chan {
         fn drop(&mut self) {
-            debug!(chan = ?fmt::alt(&self), "drop")
+            debug!(chan = ?fmt::alt(&self), "drop");
         }
     }
 }

@@ -95,6 +95,8 @@ pub struct Task<S, F: Future, STO> {
     /// [`Output`]: core::future::Future::Output
     inner: UnsafeCell<Cell<F>>,
 
+    span: crate::trace::Span,
+
     /// The [`Storage`] type associated with this struct
     ///
     /// In order to be agnostic over container types (e.g. [`Box`], or
@@ -170,12 +172,35 @@ struct Vtable {
 
 // === impl Task ===
 
-macro_rules! trace_task {
-    ($ptr:expr, $f:ty, $method:literal) => {
+macro_rules! trace_waker_op {
+    ($ptr:expr, $f:ty, $method: ident) => {
+        trace_waker_op!($ptr, $f, $method, op: $method)
+    };
+    ($ptr:expr, $f:ty, $method: ident, op: $op:ident) => {
+
+        #[cfg(any(feature = "tracing-01", loom))]
+        tracing_01::trace!(
+            target: "runtime::waker",
+            {
+                task.id = (*$ptr).span.tracing_01_id(),
+                task.addr = ?$ptr,
+                task.output = %type_name::<<$f>::Output>(),
+                op = concat!("waker.", stringify!($op)),
+            },
+            concat!("Task::", stringify!($method)),
+        );
+
+
+        #[cfg(not(any(feature = "tracing-01", loom)))]
         trace!(
-            ptr = ?$ptr,
-            output = %type_name::<<$f>::Output>(),
-            concat!("Task::", $method),
+            target: "runtime::waker",
+            {
+                task.addr = ?$ptr,
+                task.output = %type_name::<<$f>::Output>(),
+                op = concat!("waker.", stringify!($op)),
+            },
+            concat!("Task::", stringify!($method)),
+
         );
     };
 }
@@ -214,6 +239,7 @@ where
             scheduler,
             inner: UnsafeCell::new(Cell::Future(future)),
             storage: PhantomData,
+            span: crate::trace::Span::none(),
         }
     }
 
@@ -227,23 +253,25 @@ where
     }
 
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
-        trace_task!(ptr, F, "clone_waker");
         let this = ptr as *const Self;
+        trace_waker_op!(this, F, clone_waker, op: clone);
         (*this).state().clone_ref();
         Self::raw_waker(this)
     }
 
     unsafe fn drop_waker(ptr: *const ()) {
-        trace_task!(ptr, F, "drop_waker");
+        let ptr = ptr as *const Self;
+        trace_waker_op!(ptr, F, drop_waker, op: drop);
 
-        let this = ptr as *const Self as *mut _;
+        let this = ptr as *mut _;
         Self::drop_ref(non_null(this))
     }
 
     unsafe fn wake_by_val(ptr: *const ()) {
-        trace_task!(ptr, F, "wake_by_val");
+        let ptr = ptr as *const Self;
+        trace_waker_op!(ptr, F, wake_by_val, op: wake);
 
-        let this = non_null(ptr as *mut ()).cast::<Self>();
+        let this = non_null(ptr as *mut Self);
         match test_dbg!(this.as_ref().state().wake_by_val()) {
             OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(ScheduleAction::Enqueue) => {
@@ -263,7 +291,8 @@ where
     }
 
     unsafe fn wake_by_ref(ptr: *const ()) {
-        trace_task!(ptr, F, "wake_by_ref");
+        let ptr = ptr as *const Self;
+        trace_waker_op!(ptr, F, wake_by_ref);
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
         if this.as_ref().state().wake_by_ref() == ScheduleAction::Enqueue {
@@ -278,7 +307,11 @@ where
 
     #[inline]
     unsafe fn drop_ref(this: NonNull<Self>) {
-        trace_task!(this, F, "drop_ref");
+        trace!(
+            task.addr = ?this,
+            task.output = %type_name::<<F>::Output>(),
+            "Task::drop_ref"
+        );
         if !this.as_ref().state().drop_ref() {
             return;
         }
@@ -287,7 +320,11 @@ where
     }
 
     unsafe fn poll(ptr: TaskRef) -> Poll<()> {
-        trace_task!(ptr, F, "poll");
+        trace!(
+            task.addr = ?ptr,
+            task.output = %type_name::<<F>::Output>(),
+            "Task::poll"
+        );
         let mut this = ptr.0.cast::<Self>();
         test_trace!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
@@ -324,12 +361,19 @@ where
     }
 
     unsafe fn deallocate(ptr: NonNull<Header>) {
-        trace_task!(ptr, F, "deallocate");
+        trace!(
+            task.addr = ?ptr,
+            task.output = %type_name::<<F>::Output>(),
+            "Task::deallocate"
+        );
         let this = ptr.cast::<Self>();
         drop(STO::from_raw(this));
     }
 
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {
+        #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
+        let _span = self.span.enter();
+
         self.inner.with_mut(|cell| {
             let cell = unsafe { &mut *cell };
             let poll = match cell {
@@ -380,13 +424,33 @@ where
 // === impl TaskRef ===
 
 impl TaskRef {
+    #[track_caller]
     pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> Self
     where
         S: Schedule,
         F: Future,
         STO: Storage<S, F>,
     {
-        let ptr = STO::into_raw(task).cast::<Header>();
+        #[allow(unused_mut)]
+        let mut ptr = STO::into_raw(task);
+
+        // attach the task span, if tracing is enabled.
+        #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
+        unsafe {
+            let loc = core::panic::Location::caller();
+            ptr.as_mut().span = trace_span!(
+                "runtime.spawn",
+                kind = %"task",
+                task.addr = ?ptr,
+                task.output = %type_name::<F::Output>(),
+                task.storage = %type_name::<STO>(),
+                loc.file = loc.file(),
+                loc.line = loc.line(),
+                loc.col = loc.column(),
+            );
+        };
+
+        let ptr = ptr.cast::<Header>();
         trace!(
             ?ptr,
             "Task<..., Output = {}>::new",
@@ -541,6 +605,8 @@ feature! {
     use alloc::boxed::Box;
 
     impl TaskRef {
+
+        #[track_caller]
         pub(crate) fn new<S, F>(scheduler: S, future: F) -> Self
         where
             S: Schedule,

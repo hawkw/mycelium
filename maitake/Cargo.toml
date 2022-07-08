@@ -54,6 +54,7 @@ optional = true
 [dev-dependencies]
 futures-util = "0.3"
 futures = "0.3"
+console-subscriber = "0.1.6"
 
 [target.'cfg(not(loom))'.dev-dependencies]
 tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = ["ansi", "fmt"] }
@@ -67,3 +68,7 @@ tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", fe
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name = "tokio-console"
+required-features = ["tracing-01"]

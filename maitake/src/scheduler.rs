@@ -77,6 +77,7 @@ impl StaticScheduler {
     ///
     /// [`Storage`]: crate::task::Storage
     #[inline]
+    #[track_caller]
     pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
     where
         F: Future + 'static,
@@ -181,11 +182,13 @@ feature! {
         }
 
         #[inline]
+        #[track_caller]
         pub fn spawn(&self, future: impl Future + 'static) {
             self.schedule(TaskRef::new(self.clone(), future));
         }
 
         #[inline]
+        #[track_caller]
         pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
         where
             F: Future + 'static,
@@ -212,6 +215,7 @@ feature! {
         }
 
         #[inline]
+        #[track_caller]
         pub fn spawn(&'static self, future: impl Future + 'static) {
             self.schedule(TaskRef::new(self, future));
         }
