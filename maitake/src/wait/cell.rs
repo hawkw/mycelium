@@ -233,6 +233,12 @@ impl fmt::Debug for WaitCell {
     }
 }
 
+impl Drop for WaitCell {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 // === impl Wait ===
 
 impl Future for Wait<'_> {
@@ -240,7 +246,7 @@ impl Future for Wait<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.registered {
-            // We made it to "once", and got polled again, We must be ready!
+            // We made it to "once", and got polled again, we must be ready!
             return Poll::Ready(Ok(()));
         }
 
@@ -314,7 +320,7 @@ impl fmt::Debug for State {
 }
 
 #[cfg(all(feature = "alloc", not(loom), test))]
-mod test {
+mod tests {
     use super::*;
     use crate::scheduler::Scheduler;
     use alloc::sync::Arc;
@@ -410,7 +416,6 @@ pub(crate) mod test_util {
 mod loom {
     use super::*;
     use crate::loom::{future, sync::Arc, thread};
-    use futures::{select_biased, FutureExt};
 
     #[test]
     fn basic() {
@@ -432,7 +437,7 @@ mod loom {
             });
 
             info!("waiting");
-            future::block_on(wait.wait());
+            let _ = future::block_on(wait.wait());
             info!("wait'd");
         });
     }

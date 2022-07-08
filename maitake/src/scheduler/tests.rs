@@ -380,12 +380,7 @@ mod loom {
         })
     }
 
-    // TODO(AJM): At the moment, `WaitCell` cannot be guaranteed to complete in a reasonable
-    // amount of time when multiple threads are involved, and may deadlock in some loom tests.
-    //
-    // Ignore this test until there is some sort of "timeout" possibility
     #[test]
-    #[ignore]
     fn notify_external() {
         loom::model(|| {
             let scheduler = Scheduler::new();
