@@ -112,7 +112,7 @@ impl Core {
         };
 
         for task in self.run_queue.consume() {
-            in_debug_span!("poll", ?task);
+            let _span = debug_span!("poll", ?task).entered();
             let poll = task.poll();
             if poll.is_ready() {
                 tick.completed += 1;
