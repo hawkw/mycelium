@@ -132,10 +132,13 @@ The following features are available (this list is incomplete; you can help by [
 
 [expanding it]: https://github.com/hawkw/mycelium/edit/main/maitake/README.md
 
-| Feature | Default | Explanation |
-| :---    | :---    | :---        |
-| `alloc` | `true`  | Enables [`liballoc`] dependency |
+| Feature        | Default | Explanation |
+| :---           | :---    | :---        |
+| `alloc`        | `true`  | Enables [`liballoc`] dependency |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
+| `tracing-01`   | `false`  | Enables support for v0.1.x of [`tracing`] (the current release version). Requires `liballoc`.|
+| `tracing-02`   | `false`  | Enables support for the upcoming v0.2 of [`tracing`] (via a Git dependency). |
 
 [`liballoc`]: https://doc.rust-lang.org/alloc/
 [`CachePadded`]: https://mycelium.elizas.website/mycelium_util/sync/struct.cachepadded
+[`tracing`]: https://crates.io/crates/tracing

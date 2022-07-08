@@ -6,7 +6,6 @@ use crate::{
             Ordering::{self, *},
         },
     },
-    util::tracing,
 };
 use core::{
     future::Future,
@@ -92,7 +91,7 @@ impl WaitCell {
 
 impl WaitCell {
     pub fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
-        tracing::trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
+        trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
         match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
@@ -171,7 +170,7 @@ impl WaitCell {
     }
 
     fn notify2(&self, close: State) -> bool {
-        tracing::trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
+        trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
         let bits = State::NOTIFYING | close;
         if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
             // we have the lock!
@@ -180,7 +179,7 @@ impl WaitCell {
             test_dbg!(self.fetch_and(!State::NOTIFYING, AcqRel));
 
             if let Some(waker) = test_dbg!(waker) {
-                tracing::trace!(wait_cell = ?fmt::ptr(self), ?close, ?waker, "notified");
+                trace!(wait_cell = ?fmt::ptr(self), ?close, ?waker, "notified");
                 waker.wake();
                 return true;
             }
@@ -394,7 +393,7 @@ pub(crate) mod test_util {
 
     impl Drop for Chan {
         fn drop(&mut self) {
-            tracing::debug!(chan = ?fmt::alt(self), "drop")
+            debug!(chan = ?fmt::alt(&self), "drop")
         }
     }
 }
@@ -404,7 +403,6 @@ mod loom {
     use super::*;
     use crate::loom::{future, sync::Arc, thread};
     use futures::{select_biased, FutureExt};
-    use tracing::info;
 
     #[test]
     fn basic() {
