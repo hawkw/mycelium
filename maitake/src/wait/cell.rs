@@ -1,18 +1,42 @@
-use crate::{
-    loom::{
-        cell::UnsafeCell,
-        sync::atomic::{
-            AtomicUsize,
-            Ordering::{self, *},
-        },
+use crate::loom::{
+    cell::UnsafeCell,
+    sync::atomic::{
+        AtomicUsize,
+        Ordering::{self, *},
     },
-    wait::{self, WaitResult},
 };
 use core::{
+    future::Future,
     ops,
-    task::{Poll, Waker},
+    pin::Pin,
+    task::{Context, Poll, Waker},
 };
 use mycelium_util::{fmt, sync::CachePadded};
+
+/// An error indicating that a [`WaitCell`] was closed or busy while
+/// attempting register a waiter.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    Closed,
+    Notifying,
+    Parking,
+}
+
+const fn closed() -> Result<(), Error> {
+    Err(Error::Closed)
+}
+
+const fn parking() -> Result<(), Error> {
+    Err(Error::Parking)
+}
+
+const fn registered() -> Result<(), Error> {
+    Ok(())
+}
+
+const fn notifying() -> Result<(), Error> {
+    Err(Error::Notifying)
+}
 
 /// An atomically registered [`Waker`].
 ///
@@ -33,6 +57,20 @@ pub struct WaitCell {
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 struct State(usize);
+
+/// Future returned from [`WaitCell::wait()`].
+///
+/// This future is fused, so once it has completed, any future calls to poll
+/// will immediately return [`Poll::Ready`].
+#[derive(Debug)]
+#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
+pub struct Wait<'a> {
+    /// The [`WaitQueue`] being waited on from.
+    cell: &'a WaitCell,
+
+    /// Whether we have already polled once
+    registered: bool,
+}
 
 // === impl WaitCell ===
 
@@ -55,26 +93,24 @@ impl WaitCell {
 }
 
 impl WaitCell {
-    pub fn poll_wait(&self, waker: &Waker) -> Poll<WaitResult<()>> {
+    pub fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
         match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
             // someone else is notifying, so don't wait!
             Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
-                return wait::closed();
+                return closed();
             }
             Err(actual) if test_dbg!(actual.is(State::NOTIFYING)) => {
-                waker.wake_by_ref();
-                crate::loom::hint::spin_loop();
-                return wait::notified(());
+                return notifying();
             }
 
             Err(actual) => {
                 debug_assert!(
                     actual == State::PARKING || actual == State::PARKING | State::NOTIFYING
                 );
-                return Poll::Pending;
+                return parking();
             }
             Ok(_) => {}
         }
@@ -87,8 +123,13 @@ impl WaitCell {
             }
         });
 
+        if let Some(prev_waker) = prev_waker {
+            test_trace!("Replaced an old waker in cell, waking");
+            prev_waker.wake();
+        }
+
         match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel)) {
-            Ok(_) => Poll::Pending,
+            Ok(_) => registered(),
             Err(actual) => {
                 test_trace!(state = ?actual, "was notified");
                 let waker = self.waker.with_mut(|waker| unsafe { (*waker).take() });
@@ -102,24 +143,28 @@ impl WaitCell {
                     "state changed unexpectedly while parking!"
                 );
 
-                if let Some(prev_waker) = prev_waker {
-                    prev_waker.wake();
-                }
-
                 if let Some(waker) = waker {
                     waker.wake();
                 }
 
-                if test_dbg!(state.is(State::CLOSED)) {
-                    wait::closed()
-                } else {
-                    wait::notified(())
-                }
+                // We just went to the closed state, so sorry new waker, shops
+                // closed
+                closed()
             }
         }
     }
 
-    pub fn notify(&self) -> bool {
+    /// Wait to be woken up by this cell.
+    ///
+    /// Note: The waiter is not registered until AFTER the first time the waiter is polled
+    pub fn wait(&self) -> Wait<'_> {
+        Wait {
+            cell: self,
+            registered: false,
+        }
+    }
+
+    pub fn wake(&self) -> bool {
         self.notify2(State::WAITING)
     }
 
@@ -188,6 +233,43 @@ impl fmt::Debug for WaitCell {
     }
 }
 
+impl Drop for WaitCell {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+// === impl Wait ===
+
+impl Future for Wait<'_> {
+    type Output = Result<(), super::Closed>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.registered {
+            // We made it to "once", and got polled again, we must be ready!
+            return Poll::Ready(Ok(()));
+        }
+
+        match test_dbg!(self.cell.register_wait(cx.waker())) {
+            Ok(_) => {
+                self.registered = true;
+                Poll::Pending
+            }
+            Err(Error::Parking) => {
+                // Cell was busy parking some other task, all we can do is try again later
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+            Err(Error::Notifying) => {
+                // Cell is waking another task RIGHT NOW, so let's ride that high all the
+                // way to the READY state.
+                Poll::Ready(Ok(()))
+            }
+            Err(Error::Closed) => super::closed(),
+        }
+    }
+}
+
 // === impl State ===
 
 impl State {
@@ -237,8 +319,37 @@ impl fmt::Debug for State {
     }
 }
 
+#[cfg(all(feature = "alloc", not(loom), test))]
+mod tests {
+    use super::*;
+    use crate::scheduler::Scheduler;
+    use alloc::sync::Arc;
+
+    #[test]
+    fn wait_smoke() {
+        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+        let sched = Scheduler::new();
+        let wait = Arc::new(WaitCell::new());
+
+        let wait2 = wait.clone();
+        sched.spawn(async move {
+            wait2.wait().await.unwrap();
+            COMPLETED.fetch_add(1, Ordering::Relaxed);
+        });
+
+        let tick = sched.tick();
+        assert_eq!(tick.completed, 0);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+
+        assert_eq!(wait.wake(), true);
+        let tick = sched.tick();
+        assert_eq!(tick.completed, 1);
+        assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
+    }
+}
+
 #[cfg(test)]
-#[allow(dead_code)]
 pub(crate) mod test_util {
     use super::*;
 
@@ -270,26 +381,24 @@ pub(crate) mod test_util {
                     None => return Poll::Ready(()),
                 };
 
-                let res = test_dbg!(this.task.poll_wait(cx.waker()));
+                let res = this.task.wait();
+                futures_util::pin_mut!(res);
 
                 if this.num_notify == this.num.load(Relaxed) {
                     return Poll::Ready(());
                 }
 
-                if res.is_ready() {
-                    return Poll::Ready(());
-                }
-
-                Poll::Pending
+                res.poll(cx).map(drop)
             })
             .await
         }
 
-        pub(crate) fn notify(&self) {
+        pub(crate) fn wake(&self) {
             self.num.fetch_add(1, Relaxed);
-            self.task.notify();
+            self.task.wake();
         }
 
+        #[allow(dead_code)]
         pub(crate) fn close(&self) {
             self.num.fetch_add(1, Relaxed);
             self.task.close();
@@ -306,45 +415,30 @@ pub(crate) mod test_util {
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
-    use crate::loom::{future, thread};
-
-    const NUM_NOTIFY: usize = 2;
+    use crate::loom::{future, sync::Arc, thread};
 
     #[test]
-    fn basic_latch() {
+    fn basic() {
         crate::loom::model(|| {
-            let chan = test_util::Chan::new(NUM_NOTIFY);
+            let wait = Arc::new(WaitCell::new());
 
-            for _ in 0..NUM_NOTIFY {
-                let chan = chan.clone();
+            let waker = wait.clone();
+            let closer = wait.clone();
 
-                thread::spawn(move || chan.notify());
-            }
-
-            future::block_on(chan.wait());
-        });
-    }
-
-    #[test]
-    fn close() {
-        crate::loom::model(|| {
-            let chan = test_util::Chan::new(NUM_NOTIFY);
-
-            thread::spawn({
-                let chan = chan.clone();
-                move || {
-                    chan.notify();
-                }
+            thread::spawn(move || {
+                info!("waking");
+                waker.wake();
+                info!("woken");
+            });
+            thread::spawn(move || {
+                info!("closing");
+                closer.close();
+                info!("closed");
             });
 
-            thread::spawn({
-                let chan = chan.clone();
-                move || {
-                    chan.close();
-                }
-            });
-
-            future::block_on(chan.wait());
+            info!("waiting");
+            let _ = future::block_on(wait.wait());
+            info!("wait'd");
         });
     }
 }
