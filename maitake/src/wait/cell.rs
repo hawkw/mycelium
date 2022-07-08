@@ -1,10 +1,8 @@
-use crate::{
-    loom::{
-        cell::UnsafeCell,
-        sync::atomic::{
-            AtomicUsize,
-            Ordering::{self, *},
-        },
+use crate::loom::{
+    cell::UnsafeCell,
+    sync::atomic::{
+        AtomicUsize,
+        Ordering::{self, *},
     },
 };
 use core::{
