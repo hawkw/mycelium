@@ -402,9 +402,9 @@ pub(crate) mod test_util {
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
-    use crate::loom::{future, thread, sync::Arc};
-    use tracing::info;
+    use crate::loom::{future, sync::Arc, thread};
     use futures::{select_biased, FutureExt};
+    use tracing::info;
 
     #[test]
     fn basic() {
