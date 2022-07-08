@@ -45,6 +45,14 @@ macro_rules! debug {
     };
 }
 
+#[allow(unused_macros)]
+macro_rules! info {
+    ($($arg:tt)+) => {
+        event!(Level::INFO, $($arg)+)
+    };
+}
+
+#[allow(unused_macros)]
 macro_rules! in_trace_span {
     ($($arg:tt)+) => {
         in_span!(Level::TRACE, $($arg)+)
