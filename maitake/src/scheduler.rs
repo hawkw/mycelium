@@ -1,7 +1,4 @@
-use crate::{
-    task::{self, Header, Storage, TaskRef},
-    util::tracing,
-};
+use crate::task::{self, Header, Storage, TaskRef};
 use core::{future::Future, pin::Pin};
 
 use cordyceps::mpsc_queue::MpscQueue;
@@ -115,15 +112,14 @@ impl Core {
         };
 
         for task in self.run_queue.consume() {
-            let span = tracing::debug_span!("poll", ?task);
-            let _enter = span.enter();
+            in_debug_span!("poll", ?task);
             let poll = task.poll();
             if poll.is_ready() {
                 tick.completed += 1;
             }
             tick.polled += 1;
 
-            tracing::debug!(parent: span.id(), poll = ?poll, tick.polled, tick.completed);
+            debug!(poll = ?poll, tick.polled, tick.completed);
             if tick.polled == n {
                 return tick;
             }

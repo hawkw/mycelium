@@ -180,7 +180,7 @@ checksum = "b6eee477a4a8a72f4addd4de416eb56d54bc307b284d6601bafdee1f4ea462d1"
 dependencies = [
  "once_cell",
  "owo-colors 1.3.0",
- "tracing-core 0.1.26",
+ "tracing-core 0.1.28",
  "tracing-error 0.1.2",
 ]
 
@@ -191,7 +191,7 @@ dependencies = [
  "loom",
  "pin-project",
  "proptest",
- "tracing 0.1.34",
+ "tracing 0.1.35",
  "tracing-subscriber 0.3.11",
 ]
 
@@ -456,7 +456,7 @@ dependencies = [
  "locate-cargo-manifest",
  "mycotest",
  "owo-colors 2.1.0",
- "tracing 0.1.34",
+ "tracing 0.1.35",
  "tracing-error 0.2.0",
  "tracing-subscriber 0.3.11",
  "wait-timeout",
@@ -537,7 +537,7 @@ dependencies = [
  "scoped-tls",
  "serde",
  "serde_json",
- "tracing 0.1.34",
+ "tracing 0.1.35",
  "tracing-subscriber 0.3.11",
 ]
 
@@ -552,7 +552,7 @@ dependencies = [
  "mycelium-bitfield",
  "mycelium-util",
  "pin-project",
- "tracing 0.1.34",
+ "tracing 0.1.35",
  "tracing 0.2.0",
  "tracing-subscriber 0.3.0",
  "tracing-subscriber 0.3.11",
@@ -660,7 +660,7 @@ name = "mycotest"
 version = "0.1.0"
 dependencies = [
  "mycelium-trace",
- "tracing 0.1.34",
+ "tracing 0.1.35",
 ]
 
 [[package]]
@@ -704,9 +704,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.10.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87f3e037eac156d1775da914196f0f37741a274155e34a0b7e427c35d2a2ecb9"
+checksum = "18a6dbe30758c9f83eb00cbea4ac95966305f5a7772f3f42ebfc7fc7eddbd8e1"
 
 [[package]]
 name = "os_str_bytes"
@@ -1076,14 +1076,14 @@ dependencies = [
 
 [[package]]
 name = "tracing"
-version = "0.1.34"
+version = "0.1.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0ecdcb44a79f0fe9844f0c4f33a342cbcbb5117de8001e6ba0dc2351327d09"
+checksum = "a400e31aa60b9d44a52a8ee0343b5b18566b03a8321e0d321f695cf56e940160"
 dependencies = [
  "cfg-if",
  "pin-project-lite",
  "tracing-attributes 0.1.21",
- "tracing-core 0.1.26",
+ "tracing-core 0.1.28",
 ]
 
 [[package]]
@@ -1121,11 +1121,11 @@ dependencies = [
 
 [[package]]
 name = "tracing-core"
-version = "0.1.26"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f54c8ca710e81886d498c2fd3331b56c93aa248d49de2222ad2742247c60072f"
+checksum = "7b7358be39f2f274f322d2aaed611acc57f382e8eb1e5b48cb9ae30933495ce7"
 dependencies = [
- "lazy_static",
+ "once_cell",
  "valuable",
 ]
 
@@ -1143,7 +1143,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
 dependencies = [
- "tracing 0.1.34",
+ "tracing 0.1.35",
  "tracing-subscriber 0.2.25",
 ]
 
@@ -1153,7 +1153,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
 dependencies = [
- "tracing 0.1.34",
+ "tracing 0.1.35",
  "tracing-subscriber 0.3.11",
 ]
 
@@ -1165,7 +1165,7 @@ checksum = "78ddad33d2d10b1ed7eb9d1f518a5674713876e97e5bb9b7345a7984fbb4f922"
 dependencies = [
  "lazy_static",
  "log",
- "tracing-core 0.1.26",
+ "tracing-core 0.1.28",
 ]
 
 [[package]]
@@ -1186,7 +1186,7 @@ checksum = "0e0d2eaa99c3c2e41547cfa109e910a68ea03823cccad4a0525dcbc9b01e8c71"
 dependencies = [
  "sharded-slab",
  "thread_local",
- "tracing-core 0.1.26",
+ "tracing-core 0.1.28",
 ]
 
 [[package]]
@@ -1215,8 +1215,8 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "tracing 0.1.34",
- "tracing-core 0.1.26",
+ "tracing 0.1.35",
+ "tracing-core 0.1.28",
  "tracing-log 0.1.3",
 ]
 

@@ -1,10 +1,61 @@
 use core::ptr::NonNull;
 
-#[cfg(not(all(test, loom)))]
-pub(crate) use tracing_02 as tracing;
+macro_rules! event {
+    ($level:expr, $($arg:tt)+) => {
+        {
+            #[cfg(any(feature = "tracing-01", loom))]
+            {
+                use tracing_01::Level;
+                tracing_01::event!($level, $($arg)+)
+            }
 
-#[cfg(all(test, loom))]
-pub(crate) use tracing_01 as tracing;
+            #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
+            {
+                use tracing_02::Level;
+                tracing_02::event!($level, $($arg)+)
+            }
+        }
+    };
+}
+
+macro_rules! in_span {
+    ($level:expr, $($arg:tt)+) => {
+        #[cfg(any(feature = "tracing-01", loom))]
+        let _span_01 = {
+            use tracing_01::Level;
+            tracing_01::span!($level, $($arg)+).entered()
+        };
+        #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
+        let _span_02 = {
+            use tracing_02::Level;
+            tracing_02::span!($level,  $($arg)+).entered()
+        };
+    };
+}
+
+macro_rules! trace {
+    ($($arg:tt)+) => {
+        event!(Level::TRACE, $($arg)+)
+    };
+}
+
+macro_rules! debug {
+    ($($arg:tt)+) => {
+        event!(Level::DEBUG, $($arg)+)
+    };
+}
+
+macro_rules! in_trace_span {
+    ($($arg:tt)+) => {
+        in_span!(Level::TRACE, $($arg)+)
+    };
+}
+
+macro_rules! in_debug_span {
+    ($($arg:tt)+) => {
+        in_span!(Level::DEBUG, $($arg)+)
+    };
+}
 
 #[cfg(not(test))]
 macro_rules! test_dbg {
@@ -18,7 +69,7 @@ macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
             e => {
-                crate::util::tracing::debug!(
+                debug!(
                     location = %core::panic::Location::caller(),
                     "{} = {:?}",
                     stringify!($e),
@@ -38,7 +89,7 @@ macro_rules! test_trace {
 #[cfg(test)]
 macro_rules! test_trace {
     ($($args:tt)+) => {
-        crate::util::tracing::debug!(
+        debug!(
             location = %core::panic::Location::caller(),
             $($args)+
         );
