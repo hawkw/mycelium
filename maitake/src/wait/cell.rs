@@ -34,8 +34,8 @@ const fn registered() -> Result<(), Error> {
     Ok(())
 }
 
-const fn busy() -> Result<(), Error> {
-    Err(Error::Busy)
+const fn notifying() -> Result<(), Error> {
+    Err(Error::Notifying)
 }
 
 /// An atomically registered [`Waker`].
