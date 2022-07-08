@@ -16,7 +16,7 @@ use core::{
 };
 use mycelium_util::{fmt, sync::CachePadded};
 
-/// An error indicating that a [`WaitCell`] or [`WaitQueue`] was closed while
+/// An error indicating that a [`WaitCell`] was closed or busy while
 /// attempting register a waiter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Error {
@@ -24,15 +24,15 @@ pub enum Error {
     Busy,
 }
 
-pub const fn closed() -> Result<(), Error> {
+const fn closed() -> Result<(), Error> {
     Err(Error::Closed)
 }
 
-pub const fn registered() -> Result<(), Error> {
+const fn registered() -> Result<(), Error> {
     Ok(())
 }
 
-pub const fn busy() -> Result<(), Error> {
+const fn busy() -> Result<(), Error> {
     Err(Error::Busy)
 }
 
@@ -91,7 +91,7 @@ impl WaitCell {
 }
 
 impl WaitCell {
-    fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
+    pub fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
         tracing::trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
@@ -153,6 +153,8 @@ impl WaitCell {
     }
 
     /// Wait to be woken up by this cell.
+    ///
+    /// Note: The waiter is not registered until AFTER the first time the waiter is polled
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             cell: self,
@@ -160,7 +162,7 @@ impl WaitCell {
         }
     }
 
-    pub fn notify(&self) -> bool {
+    pub fn wake(&self) -> bool {
         self.notify2(State::WAITING)
     }
 
@@ -232,25 +234,25 @@ impl fmt::Debug for WaitCell {
 // === impl Wait ===
 
 impl Future for Wait<'_> {
-    type Output = Result<(), Error>;
+    type Output = Result<(), super::Closed>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if !self.registered {
-            match self.cell.register_wait(cx.waker()) {
-                Ok(_) => {
-                    self.registered = true;
-                    Poll::Pending
-                }
-                Err(Error::Busy) => {
-                    // Cell was busy, all we can do is try again later
-                    cx.waker().wake_by_ref();
-                    Poll::Pending
-                }
-                Err(Error::Closed) => Poll::Ready(Err(Error::Closed)),
-            }
-        } else {
+        if self.registered {
             // We made it to "once", and got polled again, We must be ready!
-            Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
+        }
+
+        match test_dbg!(self.cell.register_wait(cx.waker())) {
+            Ok(_) => {
+                self.registered = true;
+                Poll::Pending
+            }
+            Err(Error::Busy) => {
+                // Cell was busy, all we can do is try again later
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+            Err(Error::Closed) => super::closed(),
         }
     }
 }
@@ -327,7 +329,7 @@ mod test {
         assert_eq!(tick.completed, 0);
         assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
 
-        assert_eq!(wait.notify(), true);
+        assert_eq!(wait.wake(), true);
         let tick = sched.tick();
         assert_eq!(tick.completed, 1);
         assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
@@ -335,7 +337,6 @@ mod test {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 pub(crate) mod test_util {
     use super::*;
 
@@ -379,11 +380,12 @@ pub(crate) mod test_util {
             .await
         }
 
-        pub(crate) fn notify(&self) {
+        pub(crate) fn wake(&self) {
             self.num.fetch_add(1, Relaxed);
-            self.task.notify();
+            self.task.wake();
         }
 
+        #[allow(dead_code)]
         pub(crate) fn close(&self) {
             self.num.fetch_add(1, Relaxed);
             self.task.close();
@@ -400,45 +402,64 @@ pub(crate) mod test_util {
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
-    use crate::loom::{future, thread};
-
-    const NUM_NOTIFY: usize = 2;
-
-    #[test]
-    fn basic_latch() {
-        crate::loom::model(|| {
-            let chan = test_util::Chan::new(NUM_NOTIFY);
-
-            for _ in 0..NUM_NOTIFY {
-                let chan = chan.clone();
-
-                thread::spawn(move || chan.notify());
-            }
-
-            future::block_on(chan.wait());
-        });
-    }
+    use crate::loom::{future, thread, sync::Arc};
+    use tracing::info;
+    use futures::{select_biased, FutureExt};
 
     #[test]
-    fn close() {
+    fn basic() {
         crate::loom::model(|| {
-            let chan = test_util::Chan::new(NUM_NOTIFY);
+            let wake = Arc::new(WaitCell::new());
 
-            thread::spawn({
-                let chan = chan.clone();
-                move || {
-                    chan.notify();
-                }
+            let waiter = wake.clone();
+            let closer = wake.clone();
+
+            thread::spawn(move || {
+                info!("waking");
+                waiter.wake();
+                info!("woke'd");
+            });
+            thread::spawn(move || {
+                info!("closing");
+                closer.close();
+                info!("closed");
             });
 
-            thread::spawn({
-                let chan = chan.clone();
-                move || {
-                    chan.close();
+            info!("waiting");
+            let _ = future::block_on(async move {
+                // Unfortunately, SOMETIMES loom just wants to preempt the 'waker' task
+                // JUST as it gains access to the lock, but BEFORE actually waking the pending task,
+                // never yielding back to the waker task, which then just essentially leaves it stuck
+                // in the NOTIFYING state.
+                //
+                // This happens in the `notify2` function, AFTER the `fetch_or` call, and BEFORE
+                // the `fetch_and` call.
+                //
+                // This never allows the waker to complete and free the wait lock. This means that the waiter
+                // can never check to see if the waiting is complete, because it hasn't been notified!
+                //
+                // For this reason, we limit the number of poll attempts to 10, because otherwise
+                // the loom test will deadlock.
+                //
+                // In the future, if we have a variant of the `wait()` function that DOESN'T retry
+                // forever, e.g. with some max, or no retries-on-busy ever, we can likely replace this
+                // hack with that approach instead.
+                //
+                // Sorry, Eliza.
+                // -James
+                let mut wait = wake.wait().fuse();
+
+                // Use select_biased with a ready future to wake the waiter up to 10 times,
+                // before we bail and move on with our lives
+                for _ in 0..10 {
+                    let mut ready = futures::future::ready(());
+                    select_biased! {
+                        _ = wait => break,
+                        _ = ready => {},
+                    };
                 }
             });
-
-            future::block_on(chan.wait());
+            info!("wait'd");
         });
     }
 }

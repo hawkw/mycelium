@@ -105,7 +105,7 @@ mod alloc {
 
         SCHEDULER.spawn(async move {
             Yield::once().await;
-            chan.notify();
+            chan.wake();
         });
 
         dbg!(SCHEDULER.tick());
@@ -130,7 +130,7 @@ mod alloc {
         });
 
         std::thread::spawn(move || {
-            chan.notify();
+            chan.wake();
         });
 
         while dbg!(SCHEDULER.tick().completed) < 1 {
@@ -262,7 +262,7 @@ mod custom_storage {
 
         MyBoxTask::spawn(&SCHEDULER, async move {
             Yield::once().await;
-            chan.notify();
+            chan.wake();
         });
 
         dbg!(SCHEDULER.tick());
@@ -288,7 +288,7 @@ mod custom_storage {
         });
 
         std::thread::spawn(move || {
-            chan.notify();
+            chan.wake();
         });
 
         while dbg!(SCHEDULER.tick().completed) < 1 {
@@ -397,7 +397,7 @@ mod loom {
             });
 
             thread::spawn(move || {
-                chan.notify();
+                chan.wake();
             });
 
             while scheduler.tick().completed < 1 {
@@ -426,7 +426,7 @@ mod loom {
 
             scheduler.spawn(async move {
                 Yield::once().await;
-                chan.notify();
+                chan.wake();
             });
 
             test_dbg!(scheduler.tick());
