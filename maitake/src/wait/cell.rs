@@ -18,11 +18,16 @@ use mycelium_util::{fmt, sync::CachePadded};
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     Closed,
-    Busy,
+    Notifying,
+    Parking,
 }
 
 const fn closed() -> Result<(), Error> {
     Err(Error::Closed)
+}
+
+const fn parking() -> Result<(), Error> {
+    Err(Error::Parking)
 }
 
 const fn registered() -> Result<(), Error> {
@@ -98,14 +103,14 @@ impl WaitCell {
                 return closed();
             }
             Err(actual) if test_dbg!(actual.is(State::NOTIFYING)) => {
-                return busy();
+                return notifying();
             }
 
             Err(actual) => {
                 debug_assert!(
                     actual == State::PARKING || actual == State::PARKING | State::NOTIFYING
                 );
-                return busy();
+                return parking();
             }
             Ok(_) => {}
         }
@@ -244,10 +249,15 @@ impl Future for Wait<'_> {
                 self.registered = true;
                 Poll::Pending
             }
-            Err(Error::Busy) => {
-                // Cell was busy, all we can do is try again later
+            Err(Error::Parking) => {
+                // Cell was busy parking some other task, all we can do is try again later
                 cx.waker().wake_by_ref();
                 Poll::Pending
+            }
+            Err(Error::Notifying) => {
+                // Cell is waking another task RIGHT NOW, so let's ride that high all the
+                // way to the READY state.
+                Poll::Ready(Ok(()))
             }
             Err(Error::Closed) => super::closed(),
         }
@@ -405,15 +415,15 @@ mod loom {
     #[test]
     fn basic() {
         crate::loom::model(|| {
-            let wake = Arc::new(WaitCell::new());
+            let wait = Arc::new(WaitCell::new());
 
-            let waiter = wake.clone();
-            let closer = wake.clone();
+            let waker = wait.clone();
+            let closer = wait.clone();
 
             thread::spawn(move || {
                 info!("waking");
-                waiter.wake();
-                info!("woke'd");
+                waker.wake();
+                info!("woken");
             });
             thread::spawn(move || {
                 info!("closing");
@@ -422,39 +432,7 @@ mod loom {
             });
 
             info!("waiting");
-            let _ = future::block_on(async move {
-                // Unfortunately, SOMETIMES loom just wants to preempt the 'waker' task
-                // JUST as it gains access to the lock, but BEFORE actually waking the pending task,
-                // never yielding back to the waker task, which then just essentially leaves it stuck
-                // in the NOTIFYING state.
-                //
-                // This happens in the `notify2` function, AFTER the `fetch_or` call, and BEFORE
-                // the `fetch_and` call.
-                //
-                // This never allows the waker to complete and free the wait lock. This means that the waiter
-                // can never check to see if the waiting is complete, because it hasn't been notified!
-                //
-                // For this reason, we limit the number of poll attempts to 10, because otherwise
-                // the loom test will deadlock.
-                //
-                // In the future, if we have a variant of the `wait()` function that DOESN'T retry
-                // forever, e.g. with some max, or no retries-on-busy ever, we can likely replace this
-                // hack with that approach instead.
-                //
-                // Sorry, Eliza.
-                // -James
-                let mut wait = wake.wait().fuse();
-
-                // Use select_biased with a ready future to wake the waiter up to 10 times,
-                // before we bail and move on with our lives
-                for _ in 0..10 {
-                    let mut ready = futures::future::ready(());
-                    select_biased! {
-                        _ = wait => break,
-                        _ = ready => {},
-                    };
-                }
-            });
+            future::block_on(wait.wait());
             info!("wait'd");
         });
     }
