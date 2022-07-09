@@ -46,6 +46,20 @@ macro_rules! debug {
     };
 }
 
+macro_rules! info {
+    ($($arg:tt)+) => {
+        #[cfg(any(feature = "tracing-01", loom))]
+        {
+            tracing_01::info!($($arg)+)
+        }
+
+        #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
+        {
+            tracing_02::info!($($arg)+)
+        }
+    };
+}
+
 macro_rules! trace_span {
     ($($arg:tt)+) => {
         span!(Level::TRACE, $($arg)+)
