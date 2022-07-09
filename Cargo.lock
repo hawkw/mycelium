@@ -1630,7 +1630,7 @@ dependencies = [
 [[package]]
 name = "tracing"
 version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#e0642d949891546a3bb7e47080365ee7274f05cd"
+source = "git+https://github.com/tokio-rs/tracing#2aa0cb010d8a7fa0de610413b5acd4557a00dd34"
 dependencies = [
  "cfg-if",
  "log",
@@ -1653,7 +1653,7 @@ dependencies = [
 [[package]]
 name = "tracing-attributes"
 version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#e0642d949891546a3bb7e47080365ee7274f05cd"
+source = "git+https://github.com/tokio-rs/tracing#2aa0cb010d8a7fa0de610413b5acd4557a00dd34"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1673,9 +1673,9 @@ dependencies = [
 [[package]]
 name = "tracing-core"
 version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#e0642d949891546a3bb7e47080365ee7274f05cd"
+source = "git+https://github.com/tokio-rs/tracing#2aa0cb010d8a7fa0de610413b5acd4557a00dd34"
 dependencies = [
- "lazy_static",
+ "once_cell",
 ]
 
 [[package]]
@@ -1722,10 +1722,10 @@ dependencies = [
 [[package]]
 name = "tracing-log"
 version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#e0642d949891546a3bb7e47080365ee7274f05cd"
+source = "git+https://github.com/tokio-rs/tracing#2aa0cb010d8a7fa0de610413b5acd4557a00dd34"
 dependencies = [
- "lazy_static",
  "log",
+ "once_cell",
  "tracing-core 0.2.0",
 ]
 
@@ -1743,7 +1743,7 @@ dependencies = [
 [[package]]
 name = "tracing-subscriber"
 version = "0.3.0"
-source = "git+https://github.com/tokio-rs/tracing#e0642d949891546a3bb7e47080365ee7274f05cd"
+source = "git+https://github.com/tokio-rs/tracing#2aa0cb010d8a7fa0de610413b5acd4557a00dd34"
 dependencies = [
  "ansi_term",
  "sharded-slab",

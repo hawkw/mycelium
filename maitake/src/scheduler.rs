@@ -23,6 +23,15 @@ pub struct Tick {
 
 pub trait Schedule: Sized + Clone {
     fn schedule(&self, task: TaskRef);
+
+    /// Returns a new [task `Builder`] for configuring tasks prior to spawning
+    /// them on this scheduler.
+    ///
+    /// [task `Builder`]: task::Builder
+    #[must_use]
+    fn build_task<'a>(&self) -> task::Builder<'a, Self> {
+        task::Builder::new(self.clone())
+    }
 }
 
 /// A stub [`Task`],
@@ -85,6 +94,15 @@ impl StaticScheduler {
     {
         let tr = TaskRef::new_allocated::<&'static Self, F, STO>(task);
         self.schedule(tr);
+    }
+
+    /// Returns a new [task `Builder`] for configuring tasks prior to spawning
+    /// them on this scheduler.
+    ///
+    /// [task `Builder`]: task::Builder
+    #[must_use]
+    pub fn build_task<'a>(&'static self) -> task::Builder<'a, &'static Self> {
+        task::Builder::new(self)
     }
 
     pub fn tick(&'static self) -> Tick {
@@ -179,6 +197,50 @@ feature! {
 
         pub fn new() -> Self {
             Self::default()
+        }
+
+        /// Returns a new [task `Builder`][`Builder`] for configuring tasks prior to spawning
+        /// them on this scheduler.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use maitake::scheduler::Scheduler;
+        ///
+        /// let scheduler = Scheduler::new();
+        /// scheduler.build_task().named("hello world").spawn(async {
+        ///     // ...
+        /// });
+        ///
+        /// scheduler.tick();
+        /// ```
+        ///
+        /// Multiple tasks can be spawned using the same [`Builder`]:
+        ///
+        /// ```
+        /// use maitake::scheduler::Scheduler;
+        ///
+        /// let scheduler = Scheduler::new();
+        /// let builder = scheduler
+        ///     .build_task()
+        ///     .kind("my_cool_task");
+        ///
+        /// builder.spawn(async {
+        ///     // ...
+        /// });
+        ///
+        /// builder.spawn(async {
+        ///     // ...
+        /// });
+        ///
+        /// scheduler.tick();
+        /// ```
+        ///
+        /// [`Builder`]: task::Builder
+        #[must_use]
+        #[inline]
+        pub fn build_task<'a>(&self) -> task::Builder<'a, Self> {
+            task::Builder::new(self.clone())
         }
 
         #[inline]
