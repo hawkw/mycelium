@@ -208,7 +208,7 @@ feature! {
         /// use maitake::scheduler::Scheduler;
         ///
         /// let scheduler = Scheduler::new();
-        /// scheduler.build_task().named("hello world").spawn(async {
+        /// scheduler.build_task().name("hello world").spawn(async {
         ///     // ...
         /// });
         ///
