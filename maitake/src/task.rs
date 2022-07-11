@@ -20,7 +20,7 @@ mod tests;
 
 use crate::{
     loom::cell::UnsafeCell,
-    scheduler::Schedule,
+    scheduler::sealed::Schedule,
     task::state::{OrDrop, ScheduleAction, StateCell},
     util::non_null,
 };

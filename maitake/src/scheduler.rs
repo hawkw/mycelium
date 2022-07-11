@@ -21,8 +21,13 @@ pub struct Tick {
     pub has_remaining: bool,
 }
 
-pub trait Schedule: Sized + Clone {
-    fn schedule(&self, task: TaskRef);
+use sealed::Schedule as _;
+pub(crate) mod sealed {
+    use crate::task::TaskRef;
+
+    pub trait Schedule: Sized + Clone {
+        fn schedule(&self, task: TaskRef);
+    }
 }
 
 /// A stub [`Task`],
@@ -133,7 +138,7 @@ impl Core {
     }
 }
 
-impl Schedule for &'static StaticScheduler {
+impl sealed::Schedule for &'static StaticScheduler {
     fn schedule(&self, task: TaskRef) {
         // self.woken.store(true, Ordering::Release);
         self.0.run_queue.enqueue(task);
@@ -143,7 +148,7 @@ impl Schedule for &'static StaticScheduler {
 #[derive(Copy, Clone, Debug)]
 struct Stub;
 
-impl Schedule for Stub {
+impl sealed::Schedule for Stub {
     fn schedule(&self, _: TaskRef) {
         unimplemented!("stub task should never be woken!")
     }
@@ -202,7 +207,7 @@ feature! {
         }
     }
 
-    impl Schedule for Scheduler {
+    impl sealed::Schedule for Scheduler {
         fn schedule(&self, task: TaskRef) {
             // self.0.woken.store(true, Ordering::Release);
             self.0.run_queue.enqueue(task);
