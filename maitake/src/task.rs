@@ -7,11 +7,13 @@
 //! reference a task once it is spawned (the [`TaskRef`] type).
 //!
 //! [scheduler]: crate::scheduler
+pub use self::builder::Builder;
 #[cfg(feature = "alloc")]
 pub use self::storage::BoxStorage;
 pub use self::storage::Storage;
 pub use core::task::{Context, Poll, Waker};
 
+mod builder;
 mod state;
 mod storage;
 
@@ -35,6 +37,7 @@ use core::{
     task::{RawWaker, RawWakerVTable},
 };
 
+use self::builder::Settings;
 use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::fmt;
 
@@ -424,8 +427,20 @@ where
 // === impl TaskRef ===
 
 impl TaskRef {
+    const NO_BUILDER: &'static Settings<'static> = &Settings::new();
+
     #[track_caller]
     pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> Self
+    where
+        S: Schedule,
+        F: Future,
+        STO: Storage<S, F>,
+    {
+        Self::build_allocated::<S, F, STO>(Self::NO_BUILDER, task)
+    }
+
+    #[track_caller]
+    pub(crate) fn build_allocated<S, F, STO>(builder: &Settings<'_>, task: STO::StoredTask) -> Self
     where
         S: Schedule,
         F: Future,
@@ -436,11 +451,17 @@ impl TaskRef {
 
         // attach the task span, if tracing is enabled.
         #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
-        unsafe {
-            let loc = core::panic::Location::caller();
-            ptr.as_mut().span = trace_span!(
+        {
+            let loc = builder
+                .location
+                .as_ref()
+                .unwrap_or_else(|| &*core::panic::Location::caller());
+            let span = trace_span!(
                 "runtime.spawn",
-                kind = %"task",
+                kind = %builder.kind,
+                // XXX(eliza): would be nice to not use emptystring here but
+                // `tracing` 0.2 is missing `Option` value support :(
+                task.name = builder.name.unwrap_or(""),
                 task.addr = ?ptr,
                 task.output = %type_name::<F::Output>(),
                 task.storage = %type_name::<STO>(),
@@ -448,14 +469,22 @@ impl TaskRef {
                 loc.line = loc.line(),
                 loc.col = loc.column(),
             );
-        };
+            unsafe {
+                ptr.as_mut().span = span;
+            };
+        }
 
         let ptr = ptr.cast::<Header>();
         trace!(
-            ?ptr,
+            task.name = builder.name.unwrap_or(""),
+            task.addr = ?ptr,
+            task.kind = %builder.kind,
             "Task<..., Output = {}>::new",
             type_name::<F::Output>()
         );
+
+        #[cfg(not(any(feature = "tracing-01", feature = "tracing-02", test)))]
+        let _ = builder;
         Self(ptr)
     }
 
@@ -613,7 +642,7 @@ feature! {
             F: Future + 'static
         {
             let task = Box::new(Task::<S, F, BoxStorage>::new(scheduler, future));
-            Self::new_allocated::<S, F, BoxStorage>(task)
+            Self::build_allocated::<S, F, BoxStorage>(Self::NO_BUILDER, task)
         }
     }
 
