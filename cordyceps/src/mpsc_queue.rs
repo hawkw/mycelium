@@ -560,6 +560,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub fn enqueue(&self, element: T::Handle) {
         let ptr = T::into_ptr(element);
 
+        #[cfg(debug_assertions)]
         debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
         self.enqueue_inner(ptr)
@@ -716,6 +717,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             let mut next = links(tail_node).next.load(Acquire);
 
             if tail_node == self.stub {
+                #[cfg(debug_assertions)]
                 debug_assert!(links(tail_node).is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
@@ -744,7 +746,9 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
             *tail = next;
 
+            #[cfg(debug_assertions)]
             debug_assert!(!links(tail_node).is_stub());
+
             Ok(T::from_ptr(tail_node))
         })
     }
@@ -825,9 +829,11 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 // here, that would cause a double free!
                 if node != self.stub {
                     // Convert the pointer to the owning handle and drop it.
+                    #[cfg(debug_assertions)]
                     debug_assert!(!links.is_stub());
                     drop(T::from_ptr(node));
                 } else {
+                    #[cfg(debug_assertions)]
                     debug_assert!(links.is_stub());
                 }
 

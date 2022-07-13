@@ -562,12 +562,14 @@ impl Header {
 
     unsafe fn deallocate(this: NonNull<Self>) {
         #[cfg(debug_assertions)]
-        let refs = this
-            .as_ref()
-            .state
-            .load(core::sync::atomic::Ordering::Acquire)
-            .ref_count();
-        debug_assert_eq!(refs, 0, "tried to deallocate a task with references!");
+        {
+            let refs = this
+                .as_ref()
+                .state
+                .load(core::sync::atomic::Ordering::Acquire)
+                .ref_count();
+            debug_assert_eq!(refs, 0, "tried to deallocate a task with references!");
+        }
 
         let deallocate = this.as_ref().vtable.deallocate;
         deallocate(this)

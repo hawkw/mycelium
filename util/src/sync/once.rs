@@ -182,8 +182,8 @@ impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
             INITIALIZED => d.field("value", self.get()).finish(),
             INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
             UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
-            state => unsafe {
-                unreachable_unchecked!("unexpected state value {}, this is a bug!", state)
+            _state => unsafe {
+                unreachable_unchecked!("unexpected state value {}, this is a bug!", _state)
             },
         }
     }
@@ -283,11 +283,11 @@ where
                     );
                 }
             }
-            Err(state) => unsafe {
+            Err(_state) => unsafe {
                 unreachable_unchecked!(
                     "Lazy<{}>: unexpected state {}!. This is a bug!",
                     any::type_name::<T>(),
-                    state
+                    _state
                 )
             },
         };
@@ -326,8 +326,8 @@ where
             INITIALIZED => d.field("value", self.get_if_present().unwrap()).finish(),
             INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
             UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
-            state => unsafe {
-                unreachable_unchecked!("unexpected state value {}, this is a bug!", state)
+            _state => unsafe {
+                unreachable_unchecked!("unexpected state value {}, this is a bug!", _state)
             },
         }
     }
@@ -355,7 +355,7 @@ impl<T> fmt::Debug for TryInitError<T> {
                     UNINITIALIZED => "UNINITIALIZED",
                     INITIALIZING => "INITIALIZING",
                     INITIALIZED => unsafe { unreachable_unchecked!("an error should not be returned when InitOnce is in the initialized state, this is a bug!") },
-                    state => unsafe { unreachable_unchecked!("unexpected state value {}, this is a bug!", state) },
+                    _state => unsafe { unreachable_unchecked!("unexpected state value {}, this is a bug!", _state) },
                 }),
             )
             .finish()

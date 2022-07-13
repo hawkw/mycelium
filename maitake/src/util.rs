@@ -62,7 +62,7 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 /// This is the release mode version.
 #[cfg(not(debug_assertions))]
 #[inline(always)]
-unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
+pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
     NonNull::new_unchecked(ptr)
 }
 
