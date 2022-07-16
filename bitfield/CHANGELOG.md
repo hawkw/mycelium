@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## mycelium-bitfield-v0.1.1 - (2022-07-16)
+
+[af8ad54](https://github.com/hawkw/mycelium/af8ad548baaa27ad6a5689ebf35164108ceeb181)...[aaa6137](https://github.com/hawkw/mycelium/aaa6137dc58616e8ffabe918ac00d348852073a2)
+
+
+### Documented
+
+- Fix broken links in README ([aaa6137](https://github.com/hawkw/mycelium/aaa6137dc58616e8ffabe918ac00d348852073a2))
+
 ## mycelium-bitfield-v0.1.0 - (2022-07-16)
 
 
