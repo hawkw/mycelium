@@ -14,29 +14,15 @@
 /// `T` is the integer type that represents the bitfield (one of `u8`, `u16`,
 /// `u32`, `u64`, or `usize`):
 ///
-/// - `fn new() -> Self`: returns a new instance of the bitfield type with all
-///   bits zeroed.
-/// - `fn from_bits(bits: T) -> Self`: converts a `T` into an instance of the bitfield type.
-/// - `fn with<U>(self, packer: Self::Packer<U>, value: U) -> Self`: given one of this type's
-///   generated packing specs for a `U`-typed value and a `U`-typed value,
-///   returns a new instance of `Self` with the bit representation of `value`
-///   packed into the range represented by `packer`.
-/// - `fn set<U>(&mut self, packer: Self::Packer<U>, value: U) -> &mut Self`: similar
-///   to `with`, except `self` is mutated in place, rather than returning a new
-///   instance of `Self`.
-/// - `fn get<U>(&self, packer: Self::Packer<U>) -> U`: given one of this type's
-///   generated packing specs for a `U`-typed value, unpacks the bit range
-///   represented by that value as a `U` and returns it.
-///
-///   This method panics if the requested bit range does not contain a valid bit
-///   pattern for a `U`-typed value, as determined by `U`'s implementation of
-///   the [`FromBits`] trait.
-/// - `fn try_get<U>(&self, packer: Self::Packer<U>) -> Result<U, <U as
-///   FromBits>::Error>`: like `get`, but returns a `Result` instead of panicking.
-/// - `fn assert_valid()`: asserts that the generated bitfield type is valid.
-///   This is primarily intended to be used in tests; the macro cannot generate
-///   tests for a bitfield type on its own, so a test that simply calls
-///   `assert_valid` can be added to check the bitfield type's validity.
+/// | Function | Description |
+/// |:--|:--|
+/// | `fn new() -> Self` | Returns a new instance of the bitfield type with all bits zeroed. |
+/// | `fn from_bits(bits: T) -> Self` | Converts a `T` into an instance of the bitfield type. |
+/// | `fn with<U>(self, packer: Self::Packer<U>, value: U) -> Self` | Given one of this type's generated packing specs for a `U`-typed value, and a `U`-typed value, returns a new instance of `Self` with the bit representation of `value` packed into the range represented by `packer`. |
+/// | `fn set<U>(&mut self, packer: Self::Packer<U>, value: U) -> &mut Self` | Similar to `with`, except `self` is mutated in place, rather than returning a new  instance of `Self`. |
+/// | `fn get<U>(&self, packer: Self::Packer<U>) -> U` | Given one of this type's generated packing specs for a `U`-typed value, unpacks the bit range represented by that value as a `U` and returns it. This method panics if the requested bit range does not contain a valid bit pattern for a `U`-typed value, as determined by `U`'s implementation of the [`FromBits`] trait. |
+/// | `fn try_get<U>(&self, packer: Self::Packer<U>) -> Result<U, <U as FromBits>::Error>` | Like `get`, but returns a `Result` instead of panicking. |
+/// | `fn assert_valid()` | Asserts that the generated bitfield type is valid. This is primarily intended to be used in tests; the macro cannot generate tests for a bitfield type on its own, so a test that simply calls `assert_valid` can be added to check the bitfield type's validity. |
 ///
 /// The visibility of these methods depends on the visibility of the bitfield
 /// struct --- if the struct is defined as `pub(crate) struct MyBitfield<u16> {
@@ -51,19 +37,15 @@
 /// publicly visible.
 ///
 /// In addition to the inherent methods discussed above, the following trait
-/// implementations are generated:
+/// implementations are always generated:
 ///
-/// - [`core::fmt::Debug`]: the `Debug` implementation prints the bitfield as a
-///       "struct", with a "field" for each packing spec in the bitfield. If any
-///       of the bitfield's packing specs pack typed values, that type's
-///       [`fmt::Debug`] implementation is used rather than printing the value
-///       as an integer.
-/// - [`core::fmt::Binary`]: prints the raw bits of this bitfield as a binary number
-/// - [`core::fmt::Display`]: pretty-prints the bitfield in a very nice-looking
-///       multi-line format which I'm rather proud of. See
-///       [here](#example-display-output) for examples of this format.
-/// - [`Copy`]
-/// - [`Clone`]
+/// | Trait | Description |
+/// |:--|:--|
+/// | [`fmt::Debug`] | The `Debug` implementation prints the bitfield as a "struct", with a "field" for each packing spec in the bitfield. If any of the bitfield's packing specs pack typed values, that type's [`fmt::Debug`] implementation is used rather than printing the value as an integer. |
+/// | [`fmt::Binary`] | Prints the raw bits of this bitfield as a binary number. |
+/// | [`fmt::Display`] | Pretty-prints the bitfield in a very nice-looking multi-line format which I'm rather proud of. See [here](#example-display-output) for examples of this format. |
+/// | [`Copy`] | Behaves identically as the [`Copy`] implementation for the underlying integer type. |
+/// | [`Clone`] | Behaves identically as the [`Clone`] implementation for the underlying integer type. |
 ///
 /// Additional traits may be derived for the bitfield type, such as
 /// [`PartialEq`], [`Eq`], and [`Default`]. These traits are not automatically
