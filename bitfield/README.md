@@ -56,7 +56,7 @@ comparable crates that I'm currently aware of are the [`modular-bitfield`] and
   generating a structured type representing a set of bitflags.
 
   The critical difference between [`bitflags`]' [`bitflags!`][bitflags-macro]
-  macro and [`mycelium-bitfield`]'s [`bitfield!`] macro is that the [`bitflags`]
+  macro and `mycelium-bitfield`'s [`bitfield!`] macro is that the [`bitflags`]
   crate only implements bit*flags*, not bit*fields*. It is not possible to
   define multi-bit structured ranges using [`bitflags`]; only single-bit flags
   can be set and unset.
@@ -286,6 +286,7 @@ implementing [`FromBits`] for user-defined types.
     https://docs.rs/mycelium-bitfield/latest/mycelium_bitfield/macro.bitfield.html
 [`modular-bitfield`]: https://crates.io/crates/modular-bitfield
 [`bitflags`]: https://crates.io/crates/bitflags
+[bitflags-macro]: https://docs.rs/bitflags/latest/bitflags/macro.bitflags.html
 [`FromBits`]:
     https://docs.rs/mycelium-bitfield/latest/mycelium_bitfield/trait.FromBits.html
 [mbf-validation]:
