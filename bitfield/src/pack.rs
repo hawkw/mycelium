@@ -1,3 +1,135 @@
+//! Packing spec types.
+//!
+//! This module provides a set of types to make packing bit ranges easier. These
+//! utilities can be used in `const fn`.
+//!
+//! The bit packing utilities consist of a type that defines a specification for
+//! a bit range to pack into, and a wrapper type for an unsigned integer
+//! defining methods to pack bit ranges into it. Packing specs are defined for
+//! [`u64`],  [`u32`], [`u16`], and [`u8`], as [`Pack64`], [`Pack32`],
+//! [`Pack16`], and [`Pack8`], respectively.
+//!
+//! Note that the bit packing utilities are generic using macros, rather than
+//! using generics and traits, because they are intended to be usable in
+//! const-eval, and trait methods cannot be `const fn`.
+//!
+//! # Examples
+//!
+//! Sorry there are no examples on the individual types, I didn't want to figure
+//! out how to write doctests inside the macro :)
+//!
+//! Packing into the least-significant _n_ bits:
+//! ```
+//! use mycelium_bitfield::Pack32;
+//!
+//! const LEAST_SIGNIFICANT_8: Pack32 = Pack32::least_significant(8);
+//!
+//! // the number we're going to pack bits into.
+//! let base = 0xface_0000;
+//!
+//! // pack 0xed into the least significant 8 bits
+//! let val = LEAST_SIGNIFICANT_8.pack(0xed, base);
+//!
+//! assert_eq!(val, 0xface_00ed);
+//! ```
+//!
+//! Packing specs can be defined in relation to each other.
+//!
+//! ```
+//! use mycelium_bitfield::Pack64;
+//!
+//! const LOW: Pack64 = Pack64::least_significant(12);
+//! const MID: Pack64 = LOW.next(8);
+//! const HIGH: Pack64 = MID.next(4);
+//!
+//! let base = 0xfeed000000;
+//!
+//! // note that we don't need to pack the values in order.
+//! let val = HIGH.pack(0xC, base);
+//! let val = LOW.pack(0xfee, val);
+//! let val = MID.pack(0x0f, val);
+//!
+//! assert_eq!(val, 0xfeedc0ffee); // i want c0ffee
+//! ```
+//!
+//! The same example can be written a little bit more neatly using methods:
+//!
+//! ```
+//! # use mycelium_bitfield::Pack64;
+//! const LOW: Pack64 = Pack64::least_significant(12);
+//! const MID: Pack64 = LOW.next(8);
+//! const HIGH: Pack64 = MID.next(4);
+//!
+//! // Wrap a value to pack it using method calls.
+//! let coffee = Pack64::pack_in(0)
+//!     .pack(0xfee, &LOW)
+//!     .pack(0xC, &HIGH)
+//!     .pack(0x0f, &MID)
+//!     .bits();
+//!
+//! assert_eq!(coffee, 0xc0ffee); // i still want c0ffee
+//! ```
+//!
+//! Packing specs can be used to extract values from their packed
+//! representation:
+//!
+//! ```
+//! # use mycelium_bitfield::Pack64;
+//! # const LOW: Pack64 = Pack64::least_significant(12);
+//! # const MID: Pack64 = LOW.next(8);
+//! # const HIGH: Pack64 = MID.next(4);
+//! # let coffee = Pack64::pack_in(0)
+//! #     .pack(0xfee, &LOW)
+//! #     .pack(0xC, &HIGH)
+//! #     .pack(0x0f, &MID)
+//! #     .bits();
+//! #
+//! assert_eq!(LOW.unpack_bits(coffee), 0xfee);
+//! assert_eq!(MID.unpack_bits(coffee), 0x0f);
+//! assert_eq!(HIGH.unpack_bits(coffee), 0xc);
+//! ```
+//!
+//! Any previously set bit patterns in the packed range will be overwritten, but
+//! existing values outside of a packing spec's range are preserved:
+//!
+//! ```
+//! # use mycelium_bitfield::Pack64;
+//! # const LOW: Pack64 = Pack64::least_significant(12);
+//! # const MID: Pack64 = LOW.next(8);
+//! # const HIGH: Pack64 = MID.next(4);
+//! // this is not coffee
+//! let not_coffee = 0xc0ff0f;
+//!
+//! let coffee = LOW.pack(0xfee, not_coffee);
+//!
+//! // now it's coffee
+//! assert_eq!(coffee, 0xc0ffee);
+//! ```
+//!
+//! We can also define packing specs for arbitrary bit ranges, in addition to
+//! defining them in relation to each other.
+//!
+//! ```
+//! use mycelium_bitfield::Pack64;
+//!
+//! // pack a 12-bit value starting at the ninth bit
+//! let low = Pack64::from_range(9..=21);
+//!
+//! // pack another value into the next 12 bits following `LOW`.
+//! let mid = low.next(12);
+//!
+//! // pack a third value starting at bit 33 to the end of the `u64`.
+//! let high = Pack64::from_range(33..);
+//!
+//! let val = Pack64::pack_in(0)
+//!     .pack(0xc0f, &mid)
+//!     .pack(0xfee, &low)
+//!     .pack(0xfeed, &high)
+//!     .bits();
+//!
+//! assert_eq!(val, 0xfeedc0ffee00); // starting to detect a bit of a theme here...
+//! ```
+//!
 use super::FromBits;
 use core::{
     any::type_name,
@@ -15,6 +147,8 @@ macro_rules! make_packers {
                 stringify!($Bits),
                 "`] values."
             )]
+            #[doc = ""]
+            #[doc = "See the [module-level documentation](crate::pack) for details on using packing specs."]
             pub struct $Pack<T = $Bits, F = ()> {
                 mask: $Bits,
                 shift: u32,
@@ -28,9 +162,20 @@ macro_rules! make_packers {
                 stringify!($Pack),
                 "`]."
             )]
+            #[doc = ""]
+            #[doc = "See the [module-level documentation](crate::pack) for details on using packing specs."]
             #[derive(Copy, Clone, PartialEq, Eq)]
             pub struct $Packing($Bits);
 
+            #[doc = concat!(
+                "A pair of [",
+                stringify!($Pack),
+                "]s, allowing a bit range to be unpacked from one offset in a [",
+                stringify!($Bits),
+                "] value, and packed into a different offset in a different value."
+            )]
+            #[doc = ""]
+            #[doc = "See the [module-level documentation](crate::pack) for details on using packing specs."]
             pub struct $Pair<T = $Bits> {
                 src: $Pack<T>,
                 dst: $Pack<T>,
@@ -215,6 +360,8 @@ macro_rules! make_packers {
                     base
                 }
 
+                /// Returns a new packer for packing a `T2`-typed value in the
+                /// next [`T2::BITS`](crate::FromBits::BITS) bits after `self`.
                 pub const fn then<T2>(&self) -> $Pack<T2, F>
                 where
                     T2: FromBits<$Bits>
@@ -328,11 +475,59 @@ macro_rules! make_packers {
                     self.assert_valid_inner(&"")
                 }
 
-                /// Returns the position
+
+                /// Assert all of a set of packing specs are valid for packing
+                /// and unpacking values into the same bitfield.
+                ///
+                /// This asserts that each individual packing spec is valid (by
+                /// calling [`assert_valid`](Self::assert_valid) on that spec),
+                /// and asserts that no two packing specs in `specs` overlap
+                /// (indicating that they can safely represent a single
+                /// bitfield's subranges).
+                ///
+                /// This function takes a slice of `(&str, Self)` tuples, with
+                /// the `&str`s providing a name for each packing spec. This name
+                /// is used to refer to that packing spec in panic messages.
+                #[track_caller]
+                pub fn assert_all_valid(specs: &[(&str, Self)]) {
+                    for (name, spec) in specs {
+                        spec.assert_valid_inner(&format_args!(" ({name})"));
+                        for (other_name, other_spec) in specs {
+                            // Don't test if this spec overlaps with itself ---
+                            // they obviously overlap.
+                            if name == other_name {
+                                continue;
+                            }
+                            if spec.raw_mask() & other_spec.raw_mask() > 0 {
+                                let maxlen = core::cmp::max(name.len(), other_name.len());
+                                panic!(
+                                    "mask for {name} overlaps with {other_name}\n\
+                                    {name:>width$} = {this_mask:#b}\n\
+                                    {other_name:>width$} = {that_mask:#b}",
+                                    name = name,
+                                    other_name = other_name,
+                                    this_mask = spec.raw_mask(),
+                                    that_mask = other_spec.raw_mask(),
+                                    width = maxlen + 2,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                /// Returns the index of the least-significant bit of this
+                /// packing spec (i.e. the bit position of the start of the
+                /// packed range).
                 pub const fn least_significant_index(&self) -> u32 {
                     self.shift
                 }
 
+                /// Returns the index of the most-significant bit of this
+                /// packing spec (i.e. the bit position of the end of the
+                /// packed range).
+                ///
+                /// This will always be greater than the value returned by
+                /// [`least_significant_index`](Self::least_significant_index).
                 pub const fn most_significant_index(&self) -> u32 {
                     Self::SIZE_BITS - self.mask.leading_zeros()
                 }
@@ -375,33 +570,6 @@ macro_rules! make_packers {
                         self.most_significant_index() - self.least_significant_index(), self.bits(),
                         self, cx
                     )
-                }
-
-                #[track_caller]
-                pub fn assert_all_valid(specs: &[(&str, Self)]) {
-                    for (name, spec) in specs {
-                        spec.assert_valid_inner(&format_args!(" ({name})"));
-                        for (other_name, other_spec) in specs {
-                            // Don't test if this spec overlaps with itself ---
-                            // they obviously overlap.
-                            if name == other_name {
-                                continue;
-                            }
-                            if spec.raw_mask() & other_spec.raw_mask() > 0 {
-                                let maxlen = core::cmp::max(name.len(), other_name.len());
-                                panic!(
-                                    "mask for {name} overlaps with {other_name}\n\
-                                    {name:>width$} = {this_mask:#b}\n\
-                                    {other_name:>width$} = {that_mask:#b}",
-                                    name = name,
-                                    other_name = other_name,
-                                    this_mask = spec.raw_mask(),
-                                    that_mask = other_spec.raw_mask(),
-                                    width = maxlen + 2,
-                                );
-                            }
-                        }
-                    }
                 }
             }
 
