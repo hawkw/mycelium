@@ -7,6 +7,14 @@ authors = [
 ]
 license = "MIT"
 rust-version = "1.61.0"
+readme = "README.md"
+
+repository = "https://github.com/hawkw/mycelium"
+documentation = "https://docs.rs/mycelium-bitfield"
+homepage = "https://mycelium.elizas.website"
+description = "Structured bitfields, courtesy of Mycelium."
+categories = ["data-structures", "encoding", "parsing", "no-std"]
+keywords = ["bitfield", "bit", "bits", "bitfields", "bitflags"]
 
 [dev-dependencies]
 proptest = "1"
