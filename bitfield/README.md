@@ -31,6 +31,10 @@ generating bitfield types automatically using the packing types. These
 components are modular: it's possible to use the packing spec types to
 hand-write all of the code that the `bitfield!` macro would generate.
 
+This crate was originally implemented for usage in the [Mycelium operating
+system][Mycelium], although it is usable in other projects and does not depend
+on any Mycelium-specific libraries.
+
 ## comparison with other crates
 
 There are several other crates implementing bitfields or bitfield-related
@@ -147,7 +151,7 @@ declaratively. The macro will generate code that uses the `pack` module's
 packing spec APIs to represent a bitfield type.
 
 For example:
-```rust 
+```rust
 mycelium_bitfield::bitfield! {
     /// Bitfield types can have doc comments.
     #[derive(Eq, PartialEq)] // ...and attributes
