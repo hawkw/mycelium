@@ -23,6 +23,11 @@ mycelium_bitfield::bitfield! {
         /// [`Poll::Ready`]: core::task::Poll::Ready
         pub(crate) const COMPLETED: bool;
 
+        /// If set, this task has a [`JoinHandle`] awaiting its completion.
+        ///
+        /// If the `JoinHandle` is dropped, this flag is unset.
+        pub(crate) const HAS_JOIN_HANDLE: bool;
+
         /// The number of currently live references to this task.
         ///
         /// When this is 0, the task may be deallocated.
@@ -41,6 +46,19 @@ pub(super) enum ScheduleAction {
     Enqueue,
 
     /// The task does not need to be enqueued.
+    None,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum PollAction {
+    /// The task should be enqueued.
+    Enqueue,
+
+    /// The task's join waker should be woken.
+    WakeJoinWaiter,
+
+    /// The task does not need to be enqueued, and the join waker does not need
+    /// to be woken.
     None,
 }
 
@@ -109,27 +127,40 @@ impl StateCell {
         })
     }
 
-    pub(super) fn end_poll(&self, completed: bool) -> WakeAction {
+    pub(super) fn end_poll(&self, completed: bool) -> OrDrop<PollAction> {
         self.transition(|state| {
             // Cannot end a poll if a task is not being polled!
             debug_assert!(state.get(State::POLLING));
             debug_assert!(!state.get(State::COMPLETED));
-            let next_state = state
+            let mut next_state = state
                 .with(State::POLLING, false)
                 .with(State::COMPLETED, completed);
 
             // Was the task woken during the poll?
             if !test_dbg!(completed) && test_dbg!(state.get(State::WOKEN)) {
                 *state = test_dbg!(next_state);
-                return OrDrop::Action(ScheduleAction::Enqueue);
+                return OrDrop::Action(PollAction::Enqueue);
             }
+
+            let had_join_waiter = if test_dbg!(completed) {
+                // unset the join handle flag, as we are waking the join handle
+                // now.
+                next_state = next_state.with(State::HAS_JOIN_HANDLE, false);
+                test_dbg!(state.get(State::HAS_JOIN_HANDLE))
+            } else {
+                false
+            };
 
             *state = next_state;
 
             if next_state.ref_count() == 0 {
+                debug_assert!(!had_join_waiter, "a task's ref count went to zero, but the `HAS_JOIN_HANDLE` bit was set! state: {state:?}");
                 OrDrop::Drop
+            } else if had_join_waiter {
+
+                OrDrop::Action(PollAction::WakeJoinWaiter)
             } else {
-                OrDrop::Action(ScheduleAction::None)
+                OrDrop::Action(PollAction::None)
             }
         })
     }
@@ -235,6 +266,17 @@ impl StateCell {
 
         atomic::fence(Acquire);
         true
+    }
+
+    #[inline]
+    pub(super) fn drop_join_handle(&self) {
+        const MASK: usize = !State::HAS_JOIN_HANDLE.raw_mask();
+        let _prev = self.0.fetch_and(MASK, Release);
+        debug_assert!(
+            State(_prev).get(State::HAS_JOIN_HANDLE),
+            "tried to drop a join handle when the task did not have a join handle!\nstate: {:#?}",
+            State(_prev),
+        )
     }
 
     pub(super) fn load(&self, order: Ordering) -> State {

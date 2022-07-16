@@ -14,6 +14,7 @@ pub use self::storage::Storage;
 pub use core::task::{Context, Poll, Waker};
 
 mod builder;
+mod join_handle;
 mod state;
 mod storage;
 
@@ -23,8 +24,9 @@ mod tests;
 use crate::{
     loom::cell::UnsafeCell,
     scheduler::Schedule,
-    task::state::{OrDrop, ScheduleAction, StateCell},
+    task::state::{OrDrop, PollAction, ScheduleAction, StateCell},
     util::non_null,
+    wait::WaitCell,
 };
 
 use core::{
@@ -98,7 +100,11 @@ pub struct Task<S, F: Future, STO> {
     /// [`Output`]: core::future::Future::Output
     inner: UnsafeCell<Cell<F>>,
 
+    /// The task's `tracing` span, if `tracing` is enabled.
     span: crate::trace::Span,
+
+    /// The [`Waker`] of the [`JoinHandle`] for this task, if one exists.
+    join_waker: WaitCell,
 
     /// The [`Storage`] type associated with this struct
     ///
@@ -241,8 +247,9 @@ where
             },
             scheduler,
             inner: UnsafeCell::new(Cell::Future(future)),
-            storage: PhantomData,
+            join_waker: WaitCell::new(),
             span: crate::trace::Span::none(),
+            storage: PhantomData,
         }
     }
 
@@ -356,8 +363,11 @@ where
         // post-poll state transition
         match test_dbg!(state.end_poll(poll.is_ready())) {
             OrDrop::Drop => drop(STO::from_raw(this)),
-            OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(ptr),
-            OrDrop::Action(ScheduleAction::None) => {}
+            OrDrop::Action(PollAction::Enqueue) => Self::schedule(ptr),
+            OrDrop::Action(PollAction::WakeJoinWaiter) => {
+                this.as_ref().join_waker.wake();
+            }
+            OrDrop::Action(PollAction::None) => {}
         }
 
         poll
@@ -491,6 +501,10 @@ impl TaskRef {
     pub(crate) fn poll(self) -> Poll<()> {
         let poll_fn = self.header().vtable.poll;
         unsafe { poll_fn(self) }
+    }
+
+    fn poll_join(&self, cx: &mut Context<'_>) -> Poll<Result<(), join_handle::JoinError>> {
+        todo!("eliza: do this part")
     }
 
     #[inline]
