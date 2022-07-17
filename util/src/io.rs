@@ -31,6 +31,23 @@ use alloc::{string::String, vec::Vec};
 // FIXME(eliza): calculate based on arch?
 const DEFAULT_BUF_SIZE: usize = 256;
 
+/// The `Read` trait allows for reading bytes from a source.
+///
+/// Implementors of the `Read` trait are called 'readers'.
+///
+/// Readers are defined by one required method, [`read()`]. Each call to [`read()`]
+/// will attempt to pull bytes from this source into a provided buffer. A
+/// number of other methods are implemented in terms of [`read()`], giving
+/// implementors a number of ways to read bytes while only needing to implement
+/// a single method.
+///
+/// This is essentially a vendored version of the [`std::io::Read`] trait from
+/// the Rust standard library, modified to work without `std`. See the
+/// module-level docs for [`mycelium_util::io`] for more information on how
+/// `mycelium_util`'s `io` module differs from `std`'s.
+///
+/// [`read()`]: Self::read
+/// [`mycelium_util::io`]: crate::io
 pub trait Read {
     /// Pull some bytes from this source into the specified buffer, returning
     /// how many bytes were read.
@@ -291,6 +308,27 @@ pub trait Read {
     }
 }
 
+/// A trait for objects which are byte-oriented sinks.
+///
+/// Implementors of the `Write` trait are sometimes called 'writers'.
+///
+/// Writers are defined by two required methods, [`write`] and [`flush`]:
+///
+/// * The [`write`] method will attempt to write some data into the object,
+///   returning how many bytes were successfully written.
+///
+/// * The [`flush`] method is useful for adapters and explicit buffers
+///   themselves for ensuring that all buffered data has been pushed out to the
+///   'true sink'.
+///
+/// This is essentially a vendored version of the [`std::io::Write`] trait from
+/// the Rust standard library, modified to work without `std`. See the
+/// module-level docs for [`mycelium_util::io`] for more information on how
+/// `mycelium_util`'s `io` module differs from `std`'s.
+///
+/// [`write`]: Write::write
+/// [`flush`]: Write::flush
+/// [`mycelium_util::io`]: crate::io
 pub trait Write {
     /// Write a buffer into this writer, returning how many bytes were written.
     ///
