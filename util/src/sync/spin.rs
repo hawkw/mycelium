@@ -1,3 +1,7 @@
+//! Spinning-based synchronization primitives.
+//!
+//! The synchronization primitives in this module wait by spinning in a busy
+//! loop, making them usable  in bare-metal environments.
 use super::atomic::{AtomicBool, Ordering::*};
 use crate::cell::{MutPtr, UnsafeCell};
 use core::{
@@ -5,35 +9,69 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-/// A simple spinlock ensuring mutual exclusion.
+/// A spinlock-based mutual exclusion lock for protecting shared data
+///
+/// This mutex will spin with an exponential backoff while waiting for the lock
+/// to become available. Each mutex has a type parameter which represents
+/// the data that it is protecting. The data can only be accessed through the
+/// RAII guards returned from [`lock`] and [`try_lock`], which guarantees that
+/// the data is only ever accessed when the mutex is locked.
+///
+/// # Fairness
+///
+/// This is *not* a fair mutex.
 #[derive(Debug)]
 pub struct Mutex<T> {
     locked: AtomicBool,
     data: UnsafeCell<T>,
 }
 
+/// An RAII implementation of a "scoped lock" of a mutex. When this structure is
+/// dropped (falls out of scope), the lock will be unlocked.
+///
+/// The data protected by the mutex can be accessed through this guard via its
+/// [`Deref`] and [`DerefMut`] implementations.
+///
+/// This structure is created by the [`lock`] and [`try_lock`] methods on
+/// [`Mutex`].
+///
+/// [`lock`]: Mutex::lock
+/// [`try_lock`]: Mutex::try_lock
 pub struct MutexGuard<'a, T> {
     ptr: MutPtr<T>,
     locked: &'a AtomicBool,
 }
 
 impl<T> Mutex<T> {
-    #[cfg(not(loom))]
-    pub const fn new(data: T) -> Self {
-        Self {
-            locked: AtomicBool::new(false),
-            data: UnsafeCell::new(data),
+    loom_const_fn! {
+        /// Returns a new `Mutex` protecting the provided `data`.
+        ///
+        /// The returned `Mutex` is in an unlocked state, ready for use.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use mycelium_util::sync::spin::Mutex;
+        ///
+        /// let mutex = Mutex::new(0);
+        /// ```
+        #[must_use]
+        pub fn new(data: T) -> Self {
+            Self {
+                locked: AtomicBool::new(false),
+                data: UnsafeCell::new(data),
+            }
         }
     }
 
-    #[cfg(loom)]
-    pub fn new(data: T) -> Self {
-        Self {
-            locked: AtomicBool::new(false),
-            data: UnsafeCell::new(data),
-        }
-    }
-
+    /// Attempts to acquire this lock without spinning
+    ///
+    /// If the lock could not be acquired at this time, then [`None`] is returned.
+    /// Otherwise, an RAII guard is returned. The lock will be unlocked when the
+    /// guard is dropped.
+    ///
+    /// This function will never spin.
+    #[must_use]
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         if self
             .locked
@@ -49,6 +87,12 @@ impl<T> Mutex<T> {
         }
     }
 
+    /// Acquires a mutex, spinning until it is locked.
+    ///
+    /// This function will spin until the mutex is available to lock. Upon
+    /// returning, the thread is the only thread with the lock
+    /// held. An RAII guard is returned to allow scoped unlock of the lock. When
+    /// the guard goes out of scope, the mutex will be unlocked.
     pub fn lock(&self) -> MutexGuard<'_, T> {
         let mut boff = super::Backoff::default();
         while self
