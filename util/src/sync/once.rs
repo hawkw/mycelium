@@ -1,3 +1,12 @@
+//! Cells storing a value which must be initialized prior to use.
+//!
+//! This module provides:
+//!
+//! - [`InitOnce`]: a cell storing a [`MaybeUninit`] value which must be
+//!       manually initialized prior to use.
+//! - [`Lazy`]: an [`InitOnce`] cell coupled with an initializer function. The
+//!       [`Lazy`] cell ensures the initializer is called to initialize the
+//!       value the first time it is accessed.
 use crate::sync::{
     atomic::{AtomicU8, Ordering},
     spin::Backoff,
@@ -36,6 +45,10 @@ pub struct Lazy<T, F = fn() -> T> {
     initializer: F,
 }
 
+/// Errors returned by [`InitOnce::try_init`].
+///
+/// This contains the value that the caller was attempting to use to initialize
+/// the cell.
 pub struct TryInitError<T> {
     value: T,
     actual: u8,
@@ -48,6 +61,8 @@ const INITIALIZED: u8 = 2;
 // === impl InitOnce ===
 
 impl<T> InitOnce<T> {
+    /// Returns a new `InitOnce` in the uninitialized state.
+    #[must_use]
     pub const fn uninitialized() -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
@@ -86,7 +101,8 @@ impl<T> InitOnce<T> {
     /// initialized.
     ///
     /// # Panics
-    /// If the cell has already been initialized..
+    ///
+    /// If the cell has already been initialized.
     #[track_caller]
     pub fn init(&self, value: T) {
         self.try_init(value).unwrap()
@@ -94,8 +110,9 @@ impl<T> InitOnce<T> {
 
     /// Borrow the contents of this `InitOnce` cell, if it has been
     /// initialized. Otherwise, if the cell has not yet been initialized, this
-    /// returns `None`.
+    /// returns [`None`].
     #[inline]
+    #[must_use]
     pub fn try_get(&self) -> Option<&T> {
         if self.state.load(Ordering::Acquire) != INITIALIZED {
             return None;
@@ -110,9 +127,11 @@ impl<T> InitOnce<T> {
     /// been initialized.
     ///
     /// # Panics
+    ///
     /// If the cell has not yet been initialized.
     #[track_caller]
     #[inline]
+    #[must_use]
     fn get(&self) -> &T {
         if self.state.load(Ordering::Acquire) != INITIALIZED {
             panic!("InitOnce<{}> not yet initialized!", any::type_name::<T>());
@@ -129,6 +148,7 @@ impl<T> InitOnce<T> {
     /// If the cell has been initialized, this returns the current value.
     /// Otherwise, it calls the closure, puts the returned value from the
     /// closure in the cell, and borrows the current value.
+    #[must_use]
     pub fn get_or_else(&self, f: impl FnOnce() -> T) -> &T {
         if let Some(val) = self.try_get() {
             return val;
@@ -156,6 +176,8 @@ impl<T> InitOnce<T> {
     /// your code.
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, track_caller)]
+    #[inline]
+    #[must_use]
     pub unsafe fn get_unchecked(&self) -> &T {
         debug_assert_eq!(
             INITIALIZED,
@@ -198,6 +220,9 @@ unsafe impl<T: Sync> Sync for InitOnce<T> {}
 // === impl Lazy ===
 
 impl<T, F> Lazy<T, F> {
+    /// Returns a new `Lazy` cell, initialized with the provided `initializer`
+    /// function.
+    #[must_use]
     pub const fn new(initializer: F) -> Self {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
@@ -209,6 +234,7 @@ impl<T, F> Lazy<T, F> {
     /// Returns the value of the lazy cell, if it has already been initialized.
     /// Otherwise, returns `None`.
     #[inline]
+    #[must_use]
     pub fn get_if_present(&self) -> Option<&T> {
         if self.state.load(Ordering::Acquire) == INITIALIZED {
             let value = unsafe {
@@ -226,7 +252,9 @@ impl<T, F> Lazy<T, F>
 where
     F: Fn() -> T,
 {
-    /// Borrow the value, initializing it if it has not yet been initialized.
+    /// Borrow the value, or initialize it if it has not yet been initialized.
+    #[inline]
+    #[must_use]
     pub fn get(&self) -> &T {
         self.init();
         unsafe {
@@ -235,7 +263,9 @@ where
         }
     }
 
-    /// Borrow the value mutably, initializing it if it has not yet been initialized.
+    /// Borrow the value mutably, or initialize it if it has not yet been initialized.
+    #[inline]
+    #[must_use]
     pub fn get_mut(&mut self) -> &mut T {
         self.init();
         unsafe {
@@ -342,6 +372,8 @@ unsafe impl<T: Sync, F: Sync> Sync for Lazy<T, F> {}
 // === impl TryInitError ===
 
 impl<T> TryInitError<T> {
+    /// Returns the value that the caller attempted to initialize the cell with
+    #[must_use]
     pub fn into_inner(self) -> T {
         self.value
     }
