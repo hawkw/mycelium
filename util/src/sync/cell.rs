@@ -1,4 +1,14 @@
+//! A variant of [`core::cell::UnsafeCell`] specialized for use in
+//! implementations of synchronization primitives.
+//!
+//! When the `cfg(loom)` flag is enabled, the [`UnsafeCell`] type in this module
+//! is a re-export of [`loom`]'s [checked `UnsafeCell` type][loom-unsafecell].
+//!
+//! [`loom`]: crates.io/crates/loom
+//! [loom-unsafecell]: https://docs.rs/loom/latest/loom/cell/struct.UnsafeCell.html
+
 pub use self::unsafe_cell::*;
+
 #[cfg(loom)]
 mod unsafe_cell {
     pub use loom::cell::{ConstPtr, MutPtr, UnsafeCell};
