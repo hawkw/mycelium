@@ -1,15 +1,18 @@
-#![cfg_attr(docsrs, doc = include_str!("../README.md"))]
+#![doc = include_str!("../README.md")]
 #![cfg_attr(target_os = "none", no_std)]
-#![allow(unused_unsafe)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
+#![allow(unused_unsafe)]
+#![warn(missing_docs, rustdoc::broken_intra_doc_links)]
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
+#[macro_use]
+mod macros;
 
 pub mod cell;
 pub mod error;
 pub mod fmt;
 pub mod io;
-mod macros;
 pub mod math;
 pub mod sync;
 
