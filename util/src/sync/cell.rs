@@ -46,6 +46,9 @@ mod unsafe_cell {
     /// start and end of the access to the underlying cell.
     ///
     /// [Loom]: https:://crates.io/crates/loom
+    /// [`loom::cell::UnsafeCell`]: https://docs.rs/loom/latest/loom/cell/struct.UnsafeCell.html
+    /// [`with`]: Self::with
+    /// [`with_mut`]: Self::with_mut
     #[derive(Debug)]
     pub struct UnsafeCell<T> {
         data: cell::UnsafeCell<T>,
@@ -94,6 +97,7 @@ mod unsafe_cell {
     ///
     /// [`*const T`]: https://doc.rust-lang.org/stable/std/primitive.pointer.html
     /// [here]: #correct-usage
+    /// [Loom]: https:://crates.io/crates/loom
     #[derive(Debug)]
     #[repr(transparent)]
     pub struct ConstPtr<T: ?Sized>(*const T);
@@ -140,6 +144,7 @@ mod unsafe_cell {
     ///
     /// [`*mut T`]: https://doc.rust-lang.org/stable/std/primitive.pointer.html
     /// [here]: #correct-usage
+    /// [Loom]: https:://crates.io/crates/loom
     #[derive(Debug)]
     #[repr(transparent)]
     pub struct MutPtr<T: ?Sized>(*mut T);
@@ -180,7 +185,7 @@ mod unsafe_cell {
         }
 
         /// Get an immutable pointer to the wrapped value.
-        pub fn with_unchecked<F, R>(&self, f: F) -> R
+        pub(crate) fn with_unchecked<F, R>(&self, f: F) -> R
         where
             F: FnOnce(*const T) -> R,
         {
@@ -188,20 +193,59 @@ mod unsafe_cell {
         }
 
         /// Get a mutable pointer to the wrapped value.
-        pub fn with_mut_unchecked<F, R>(&self, f: F) -> R
+        pub(crate) fn with_mut_unchecked<F, R>(&self, f: F) -> R
         where
             F: FnOnce(*mut T) -> R,
         {
             f(self.data.get())
         }
 
+        /// Get an immutable pointer to the wrapped value.
+        ///
+        /// This function returns a [`ConstPtr`] guard, which is analogous to a
+        /// `*const T`, but tracked by Loom when the `cfg(loom)` cfg flag is
+        /// enabled. As long as the returned `ConstPtr` exists, Loom will
+        /// consider the cell to be accessed immutably.
+        ///
+        /// This means that any mutable accesses (e.g. calls to [`with_mut`] or
+        /// [`get_mut`]) while the returned guard is live will result in a panic.
+        ///
+        /// # Panics
+        ///
+        /// This function will panic if the access is not valid under the Rust memory
+        /// model, if `cfg(loom)` is enabled.
+        ///
+        /// [`with_mut`]: UnsafeCell::with_mut
+        /// [`get_mut`]: UnsafeCell::get_mut
         #[inline(always)]
-        pub(crate) fn get(&self) -> ConstPtr<T> {
+        #[must_use]
+        pub fn get(&self) -> ConstPtr<T> {
             ConstPtr(self.data.get())
         }
 
+        /// Get a mutable pointer to the wrapped value.
+        ///
+        /// This function returns a [`MutPtr`] guard, which is analogous to a
+        /// `*mut T`, but tracked by Loom when the `cfg(loom)` cfg flag is
+        /// enabled. As long as the returned `MutPtr`  exists, Loom will
+        /// consider the cell to be accessed mutably.
+        ///
+        /// This means that any concurrent mutable or immutable accesses (e.g. calls
+        /// to [`with`], [`with_mut`], [`get`], or [`get_mut`]) while the returned
+        /// guard is live will result in a panic.
+        ///
+        /// # Panics
+        ///
+        /// This function will panic if the access is not valid under the Rust memory
+        /// model, if `cfg(loom)` is enabled.
+        ///
+        /// [`with`]: UnsafeCell::with
+        /// [`with_mut`]: UnsafeCell::with_mut
+        /// [`get`]: UnsafeCell::get
+        /// [`get_mut`]: UnsafeCell::get_mut
         #[inline(always)]
-        pub(crate) fn get_mut(&self) -> MutPtr<T> {
+        #[must_use]
+        pub fn get_mut(&self) -> MutPtr<T> {
             MutPtr(self.data.get())
         }
     }
@@ -274,7 +318,6 @@ mod unsafe_cell {
         /// // accessed! this is BAD NEWS --- if the cell was being accessed concurrently,
         /// // loom would have failed to detect the error!
         /// unsafe { (*ptr) = 2 }
-        /// # })
         /// ```
         ///
         /// More subtly, if a *new* pointer is constructed from the original
@@ -383,7 +426,7 @@ mod unsafe_cell {
         ///
         #[inline(always)]
         #[must_use]
-        pub(crate) unsafe fn deref(&self) -> &T {
+        pub unsafe fn deref(&self) -> &T {
             &*self.0
         }
 

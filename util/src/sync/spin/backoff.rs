@@ -20,9 +20,9 @@ impl Backoff {
     pub const DEFAULT_MAX_EXPONENT: u8 = 8;
 
     /// Returns a new exponential backoff with the maximum exponent set to
-    /// [`DEFAULT_MAX_EXPONENT`].
+    /// [`Self::DEFAULT_MAX_EXPONENT`].
     #[must_use]
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             exp: 0,
             max: Self::DEFAULT_MAX_EXPONENT,
