@@ -1,3 +1,7 @@
+use crate::sync::{
+    atomic::{AtomicU8, Ordering},
+    spin::Backoff,
+};
 use crate::unreachable_unchecked;
 use core::{
     any,
@@ -5,7 +9,6 @@ use core::{
     fmt,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
-    sync::atomic::{AtomicU8, Ordering},
 };
 
 /// A cell which may be initialized a single time after it is created.
@@ -260,7 +263,7 @@ where
             }
             Err(INITIALIZING) => {
                 // Wait for the cell to be initialized
-                let mut backoff = super::Backoff::new();
+                let mut backoff = Backoff::new();
                 while self.state.load(Ordering::Acquire) != INITIALIZED {
                     backoff.spin();
                 }
