@@ -14,7 +14,7 @@ where
     fmt: F,
 }
 
-/// Wraps a type implementing [`fmt::Write`] so that every newline written to
+/// Wraps a type implementing [`core::fmt::Write`] so that every newline written to
 /// that writer is indented a given amount.
 #[derive(Debug)]
 pub struct WithIndent<'writer, W> {
@@ -22,7 +22,7 @@ pub struct WithIndent<'writer, W> {
     indent: usize,
 }
 
-/// Extension trait adding additional methods to types implementing [`fmt::Write`].
+/// Extension trait adding additional methods to types implementing [`core::fmt::Write`].
 pub trait WriteExt: Write {
     /// Wraps `self` in a [`WithIndent`] writer that indents every new line
     /// that's written to it by `indent` spaces.
@@ -41,11 +41,15 @@ pub trait WriteExt: Write {
 
 /// A utility to assist with formatting [`Option`] values.
 ///
-/// This wraps a reference to an [`Option`] value, and implements
-/// [`fmt::Display`] and [`fmt::Debug`] by formatting the `Option`'s contents if
-/// it is [`Some`]. If the `Option` is [`None`], the formatting trait
-/// implementations emit no text by default, or a string provided using the
-/// [`or_else`](Self::or_else) method.
+/// This wraps a reference to an [`Option`] value, and implements formatting
+/// traits by formatting the `Option`'s contents if it is [`Some`]. If the
+/// `Option` is [`None`], the formatting trait implementations emit no text by
+/// default, or a string provided using the [`or_else`](Self::or_else) method.
+///
+/// A `FmtOption` will implement the [`core::fmt::Display`],
+/// [`core::fmt::Debug`], [`core::fmt::Binary`], [`core::fmt::UpperHex`],
+/// [`core::fmt::LowerHex`], and [`core::fmt::Pointer`] formatting traits, if
+/// the inner type implements the corresponding trait.
 ///
 /// The [`fmt::opt`](opt) method can be used as shorthand to borrow an `Option`
 /// as a `FmtOption`.
@@ -225,7 +229,7 @@ pub fn alt<T: Debug>(value: T) -> DebugValue<FormatWith<T>> {
 /// assert_eq!(display, "");
 /// ```
 ///
-/// The [`or_else`](Self::or_else) method can be used to customize the text that
+/// The [`or_else`](FmtOption::or_else) method can be used to customize the text that
 /// is emitted when the value is [`None`]:
 ///
 /// ```
