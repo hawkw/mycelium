@@ -19,6 +19,14 @@ use core::{
 /// # Fairness
 ///
 /// This is *not* a fair mutex.
+///
+/// # Loom-specific behavior
+///
+/// When `cfg(loom)` is enabled, this mutex will use Loom's simulated atomics,
+/// checked `UnsafeCell`, and simulated spin loop hints.
+///
+/// [`lock`]: Mutex::lock
+/// [`try_lock`]: Mutex::try_lock
 #[derive(Debug)]
 pub struct Mutex<T> {
     locked: AtomicBool,
