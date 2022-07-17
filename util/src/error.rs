@@ -1,3 +1,7 @@
+/// An [`Error`] trait based on [`std::error::Error`].
+///
+/// This is a modified version of [`std::error::Error`] that doesn't require the
+/// Rust standard library.
 use core::{any::TypeId, fmt};
 
 /// `Error` is a trait representing the basic expectations for error values,
