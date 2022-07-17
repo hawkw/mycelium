@@ -9,7 +9,6 @@ extern crate alloc;
 #[macro_use]
 mod macros;
 
-pub mod cell;
 pub mod error;
 pub mod fmt;
 pub mod io;

@@ -1,9 +1,7 @@
-use crate::{
+use crate::sync::{
+    atomic::{AtomicBool, Ordering::*},
     cell::{MutPtr, UnsafeCell},
-    sync::{
-        atomic::{AtomicBool, Ordering::*},
-        spin::Backoff,
-    },
+    spin::Backoff,
 };
 use core::{
     fmt,
