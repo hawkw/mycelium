@@ -339,3 +339,43 @@ impl<T: Display> Display for FmtOption<'_, T> {
         }
     }
 }
+
+impl<T: Binary> Binary for FmtOption<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
+    }
+}
+
+impl<T: UpperHex> UpperHex for FmtOption<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
+    }
+}
+
+impl<T: LowerHex> LowerHex for FmtOption<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
+    }
+}
+
+impl<T: Pointer> Pointer for FmtOption<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self.opt {
+            Some(val) => val.fmt(f),
+            None => f.write_str(self.or_else),
+        }
+    }
+}
