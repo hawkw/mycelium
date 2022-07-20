@@ -738,7 +738,14 @@ unsafe impl Linked<list::Links<Self>> for Free {
 
     #[inline]
     unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
-        ptr::NonNull::from(&ptr.as_ref().links)
+        // Safety: using `ptr::addr_of_mut!` avoids creating a temporary
+        // reference, which stacked borrows dislikes.
+        let links = ptr::addr_of_mut!((*ptr.as_ptr()).links);
+        // Safety: it's fine to use `new_unchecked` here; if the pointer that we
+        // offset to the `links` field is not null (which it shouldn't be, as we
+        // received it as a `NonNull`), the offset pointer should therefore also
+        // not be null.
+        ptr::NonNull::new_unchecked(links)
     }
 }
 
