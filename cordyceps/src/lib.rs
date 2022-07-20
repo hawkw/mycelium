@@ -90,13 +90,13 @@ use core::ptr::NonNull;
 ///
 /// unsafe impl Linked<list::Links<Self>> for Entry {
 ///     # type Handle = NonNull<Self>;
-///     # unsafe fn into_ptr(r: Self::Handle) -> NonNull<Self> { r }
+///     # fn into_ptr(r: Self::Handle) -> NonNull<Self> { r }
 ///     # unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle { ptr }
 ///     // ...
 ///
-///     unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
+///     unsafe fn links(mut target: NonNull<Self>) -> NonNull<list::Links<Self>> {
 ///         // Borrow the target's `links` field.
-///         let links = target.as_mut().links;
+///         let links = &mut target.as_mut().links;
 ///         // Convert that reference into a pointer.
 ///         NonNull::from(links)
 ///     }
@@ -121,7 +121,7 @@ use core::ptr::NonNull;
 ///
 /// unsafe impl Linked<list::Links<Self>> for Entry {
 ///     # type Handle = NonNull<Self>;
-///     # unsafe fn into_ptr(r: Self::Handle) -> NonNull<Self> { r }
+///     # fn into_ptr(r: Self::Handle) -> NonNull<Self> { r }
 ///     # unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle { ptr }
 ///     // ...
 ///
@@ -165,12 +165,12 @@ use core::ptr::NonNull;
 ///
 /// unsafe impl Linked<list::Links<Self>> for Entry {
 ///     # type Handle = NonNull<Self>;
-///     # unsafe fn into_ptr(r: Self::Handle) -> NonNull<Self> { r }
+///     # fn into_ptr(r: Self::Handle) -> NonNull<Self> { r }
 ///     # unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle { ptr }
 ///     // ...
 ///
 ///     unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
-///         // safety: this performs a layout-dependent cast! it is only sound
+///         // Safety: this performs a layout-dependent cast! it is only sound
 ///         // if the `Entry` type has a `#[repr(C)]` attribute!
 ///         target.cast::<list::Links<Self>>()
 ///     }

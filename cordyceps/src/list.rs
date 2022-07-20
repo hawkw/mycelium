@@ -87,6 +87,10 @@ pub use self::cursor::{Cursor, CursorMut};
 ///         // Using `ptr::addr_of_mut!` permits us to avoid creating a temporary
 ///         // reference without using layout-dependent casts.
 ///         let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+///
+///         // `NonNull::new_unchecked` is safe to use here, because the pointer that
+///         // we offset was not null, implying that the pointer produced by offsetting
+///         // it will also not be null.
 ///         NonNull::new_unchecked(links)
 ///     }
 /// }

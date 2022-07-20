@@ -76,7 +76,7 @@ use core::{
 ///         // some random `NonNull<Entry>`, this would not be the case, and
 ///         // this could be constructing an erroneous `Pin` from a referent
 ///         // that may not be pinned!
-///         Pin::new_unchecked(Box::from_raw(target.as_ptr()))
+///         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
 ///     }
 ///
 ///     /// Access an element's `Links`.
@@ -84,6 +84,10 @@ use core::{
 ///         // Using `ptr::addr_of_mut!` permits us to avoid creating a temporary
 ///         // reference without using layout-dependent casts.
 ///         let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+///
+///         // `NonNull::new_unchecked` is safe to use here, because the pointer that
+///         // we offset was not null, implying that the pointer produced by offsetting
+///         // it will also not be null.
 ///         NonNull::new_unchecked(links)
 ///     }
 /// }
