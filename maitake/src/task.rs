@@ -33,7 +33,7 @@ use core::{
     marker::PhantomData,
     mem,
     pin::Pin,
-    ptr::NonNull,
+    ptr::{self, NonNull},
     task::{RawWaker, RawWakerVTable},
 };
 
@@ -582,6 +582,7 @@ impl Header {
 unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
     type Handle = TaskRef;
 
+    #[inline]
     fn into_ptr(task: Self::Handle) -> NonNull<Self> {
         let ptr = task.0;
         // converting a `TaskRef` into a pointer to enqueue it assigns ownership
@@ -599,6 +600,7 @@ unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
     /// - It is valid to construct a `Handle` from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
+    #[inline]
     unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle {
         TaskRef(ptr)
     }
@@ -611,8 +613,17 @@ unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
     /// - It is valid to construct a `Handle` from a`raw pointer
     /// - The pointer points to a valid instance of `Self` (e.g. it does not
     ///   dangle).
-    unsafe fn links(ptr: NonNull<Self>) -> NonNull<mpsc_queue::Links<Self>> {
-        ptr.cast()
+    #[inline]
+    unsafe fn links(target: NonNull<Self>) -> NonNull<mpsc_queue::Links<Self>> {
+        let target = target.as_ptr();
+        // Safety: using `ptr::addr_of_mut!` avoids creating a temporary
+        // reference, which stacked borrows dislikes.
+        let links = ptr::addr_of_mut!((*target).run_queue);
+        // Safety: it's fine to use `new_unchecked` here; if the pointer that we
+        // offset to the `links` field is not null (which it shouldn't be, as we
+        // received it as a `NonNull`), the offset pointer should therefore also
+        // not be null.
+        NonNull::new_unchecked(links)
     }
 }
 
