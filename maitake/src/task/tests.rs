@@ -53,3 +53,38 @@ mod loom {
         });
     }
 }
+
+#[cfg(all(not(loom), feature = "alloc"))]
+mod alloc {
+    use crate::{scheduler::Schedule, task::*};
+    use alloc::boxed::Box;
+    use core::ptr;
+
+    #[derive(Copy, Clone, Debug)]
+    struct NopSchedule;
+
+    impl Schedule for NopSchedule {
+        fn schedule(&self, task: TaskRef) {
+            unimplemented!("nop scheduler tried to schedule task {:?}", task);
+        }
+    }
+
+    /// This test ensures that layout-dependent casts in the `Task` struct's
+    /// vtable methods are valid.
+    #[test]
+    fn task_is_valid_for_casts() {
+        let task = Box::new(Task::<_, _, BoxStorage>::new(NopSchedule, async {
+            unimplemented!("this task should never be polled")
+        }));
+
+        let task_ptr = Box::into_raw(task);
+        let header_ptr = unsafe { ptr::addr_of!((*task_ptr).header) };
+        assert_eq!(
+            task_ptr as *const (), header_ptr as *const (),
+            "header pointer and task allocation pointer must have the same address!"
+        );
+
+        // clean up after ourselves by ensuring the box is deallocated
+        unsafe { drop(Box::from_raw(task_ptr)) }
+    }
+}
