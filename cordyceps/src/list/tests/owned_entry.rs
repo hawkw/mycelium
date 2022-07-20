@@ -3,7 +3,6 @@ use super::*;
 /// An entry type whose ownership is assigned to the list directly.
 #[derive(Debug)]
 #[pin_project::pin_project]
-#[repr(C)]
 struct OwnedEntry {
     #[pin]
     links: Links<OwnedEntry>,
@@ -31,9 +30,12 @@ unsafe impl Linked<Links<Self>> for OwnedEntry {
     }
 
     unsafe fn links(target: NonNull<Self>) -> NonNull<Links<Self>> {
-        // Safety: this is safe because the `links` are the first field of
-        // `Entry`, and `Entry` is `repr(C)`.
-        target.cast()
+        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+        // Safety: it's fine to use `new_unchecked` here; if the pointer that we
+        // offset to the `links` field is not null (which it shouldn't be, as we
+        // received it as a `NonNull`), the offset pointer should therefore also
+        // not be null.
+        NonNull::new_unchecked(links)
     }
 }
 

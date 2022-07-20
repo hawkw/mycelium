@@ -41,12 +41,9 @@ use core::{
 ///
 /// // This example uses the Rust standard library for convenience, but
 /// // the MPSC queue itself does not require std.
-/// use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 ///
 /// /// A simple queue entry that stores an `i32`.
-/// // This type must be `repr(C)` in order for the cast in `Linked::links`
-/// // to be sound.
-/// #[repr(C)]
 /// #[derive(Debug, Default)]
 /// struct Entry {
 ///    links: mpsc_queue::Links<Entry>,
@@ -79,14 +76,15 @@ use core::{
 ///         // some random `NonNull<Entry>`, this would not be the case, and
 ///         // this could be constructing an erroneous `Pin` from a referent
 ///         // that may not be pinned!
-///         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+///         Pin::new_unchecked(Box::from_raw(target.as_ptr()))
 ///     }
 ///
 ///     /// Access an element's `Links`.
 ///     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-///         // Safety: this cast is safe only because `Entry` `is repr(C)` and
-///         // the links is the first field.
-///         target.cast()
+///         // Using `ptr::addr_of_mut!` permits us to avoid creating a temporary
+///         // reference without using layout-dependent casts.
+///         let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+///         NonNull::new_unchecked(links)
 ///     }
 /// }
 ///
@@ -160,7 +158,7 @@ use core::{
 /// #     Linked,
 /// #     mpsc_queue::{self, MpscQueue},
 /// # };
-/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
 /// # #[repr(C)]
 /// # #[derive(Debug, Default)]
@@ -181,7 +179,8 @@ use core::{
 /// #     }
 /// #
 /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-/// #         target.cast()
+/// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+/// #        NonNull::new_unchecked(links)
 /// #     }
 /// # }
 /// #
@@ -233,7 +232,7 @@ use core::{
 /// #     Linked,
 /// #     mpsc_queue::{self, MpscQueue},
 /// # };
-/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
 /// # #[repr(C)]
 /// # #[derive(Debug, Default)]
@@ -254,7 +253,8 @@ use core::{
 /// #     }
 /// #
 /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-/// #         target.cast()
+/// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+/// #        NonNull::new_unchecked(links)
 /// #     }
 /// # }
 /// #
@@ -481,7 +481,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// #     Linked,
     /// #     mpsc_queue::{self, MpscQueue},
     /// # };
-    /// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+    /// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
     /// #
     /// #
     ///
@@ -507,7 +507,8 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// #     }
     /// #
     /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-    /// #         target.cast()
+    /// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+    /// #        NonNull::new_unchecked(links)
     /// #     }
     /// # }
     /// #
@@ -1485,8 +1486,8 @@ mod tests {
 mod test_util {
     use super::*;
     use crate::loom::alloc;
-    pub use std::{boxed::Box, pin::Pin, println, vec, vec::Vec};
-    #[repr(C)]
+    pub use std::{boxed::Box, pin::Pin, println, ptr, vec, vec::Vec};
+
     pub(super) struct Entry {
         links: Links<Entry>,
         pub(super) val: i32,
@@ -1521,9 +1522,8 @@ mod test_util {
         }
 
         unsafe fn links(target: NonNull<Entry>) -> NonNull<Links<Entry>> {
-            // Safety: this cast is safe only because `Entry` `is repr(C)` and
-            // the links is the first field.
-            target.cast()
+            let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+            NonNull::new_unchecked(links)
         }
     }
 
