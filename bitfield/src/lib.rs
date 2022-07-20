@@ -108,30 +108,57 @@ macro_rules! impl_frombits_for_bool {
     }
 }
 
-impl_frombits_for_ty! {
-    impl FromBits<u8, u16, u32, u64, usize> for u8 {}
-    impl FromBits<u16, u32, u64, usize> for u16 {}
-    impl FromBits<u32, u64, usize> for u32 {}
-    impl FromBits<u32, usize> for usize {}
-    impl FromBits<u64> for u64 {}
-
-    impl FromBits<u8, u16, u32, u64, usize> for i8 {}
-    impl FromBits<u16, u32, u64, usize> for i16 {}
-    impl FromBits<u32, u64, usize> for i32 {}
-    impl FromBits<u32, usize> for isize {}
-    impl FromBits<u64> for i64 {}
-}
-
 impl_frombits_for_bool! {
     impl FromBits<u8, u16, u32, u64, usize> for bool {}
+}
+
+impl_frombits_for_ty! {
+    impl FromBits<u8, u16, u32, u64> for u8 {}
+    impl FromBits<u16, u32, u64> for u16 {}
+    impl FromBits<u32, u64> for u32 {}
+    impl FromBits<u64> for u64 {}
+
+    impl FromBits<u8, u16, u32, u64> for i8 {}
+    impl FromBits<u16, u32, u64> for i16 {}
+    impl FromBits<u32, u64> for i32 {}
+    impl FromBits<u64> for i64 {}
+
+    // Rust doesn't support 8 bit targets, so {u,i}size are always at least 16 bit wide,
+    // source: https://doc.rust-lang.org/1.45.2/src/core/convert/num.rs.html#134-139
+    //
+    // This allows the following impls to be supported on all platforms.
+    // Impls for {u,i}32 and {u,i}64 however need to be restricted (see below).
+    impl FromBits<usize> for u8 {}
+    impl FromBits<usize> for i8 {}
+    impl FromBits<usize> for u16 {}
+    impl FromBits<usize> for i16 {}
+
+    impl FromBits<usize> for usize {}
+    impl FromBits<usize> for isize {}
+}
+
+#[cfg(target_pointer_width = "16")]
+impl_frombits_for_ty! {
+    impl FromBits<u16, u32, u64> for usize {}
+    impl FromBits<u16, u32, u64> for isize {}
+}
+
+#[cfg(target_pointer_width = "32")]
+impl_frombits_for_ty! {
+    impl FromBits<u32, u64> for usize {}
+    impl FromBits<u32, u64> for isize {}
+
+    impl FromBits<usize> for u32 {}
+    impl FromBits<usize> for i32 {}
 }
 
 #[cfg(target_pointer_width = "64")]
 impl_frombits_for_ty! {
     impl FromBits<u64> for usize {}
-}
-
-#[cfg(target_pointer_width = "64")]
-impl_frombits_for_ty! {
     impl FromBits<u64> for isize {}
+
+    impl FromBits<usize> for u32 {}
+    impl FromBits<usize> for i32 {}
+    impl FromBits<usize> for u64 {}
+    impl FromBits<usize> for i64 {}
 }
