@@ -61,12 +61,14 @@ const INITIALIZED: u8 = 2;
 // === impl InitOnce ===
 
 impl<T> InitOnce<T> {
-    /// Returns a new `InitOnce` in the uninitialized state.
-    #[must_use]
-    pub const fn uninitialized() -> Self {
-        Self {
-            value: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicU8::new(UNINITIALIZED),
+    loom_const_fn! {
+        /// Returns a new `InitOnce` in the uninitialized state.
+        #[must_use]
+        pub fn uninitialized() -> Self {
+            Self {
+                value: UnsafeCell::new(MaybeUninit::uninit()),
+                state: AtomicU8::new(UNINITIALIZED),
+            }
         }
     }
 
@@ -220,14 +222,16 @@ unsafe impl<T: Sync> Sync for InitOnce<T> {}
 // === impl Lazy ===
 
 impl<T, F> Lazy<T, F> {
-    /// Returns a new `Lazy` cell, initialized with the provided `initializer`
-    /// function.
-    #[must_use]
-    pub const fn new(initializer: F) -> Self {
-        Self {
-            value: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicU8::new(UNINITIALIZED),
-            initializer,
+    loom_const_fn! {
+        /// Returns a new `Lazy` cell, initialized with the provided `initializer`
+        /// function.
+        #[must_use]
+        pub fn new(initializer: F) -> Self {
+            Self {
+                value: UnsafeCell::new(MaybeUninit::uninit()),
+                state: AtomicU8::new(UNINITIALIZED),
+                initializer,
+            }
         }
     }
 
