@@ -44,12 +44,9 @@ pub use self::cursor::{Cursor, CursorMut};
 ///
 /// // This example uses the Rust standard library for convenience, but
 /// // the doubly-linked list itself does not require std.
-/// use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 ///
 /// /// A simple queue entry that stores an `i32`.
-/// // This type must be `repr(C)` in order for the cast in `Linked::links`
-/// // to be sound.
-/// #[repr(C)]
 /// #[derive(Debug, Default)]
 /// struct Entry {
 ///    links: list::Links<Entry>,
@@ -87,9 +84,14 @@ pub use self::cursor::{Cursor, CursorMut};
 ///
 ///     /// Access an element's `Links`.
 ///     unsafe fn links(target: NonNull<Entry>) -> NonNull<list::Links<Entry>> {
-///         // Safety: this cast is safe only because `Entry` `is repr(C)` and
-///         // the links is the first field.
-///         target.cast()
+///         // Using `ptr::addr_of_mut!` permits us to avoid creating a temporary
+///         // reference without using layout-dependent casts.
+///         let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+///
+///         // `NonNull::new_unchecked` is safe to use here, because the pointer that
+///         // we offset was not null, implying that the pointer produced by offsetting
+///         // it will also not be null.
+///         NonNull::new_unchecked(links)
 ///     }
 /// }
 ///
@@ -110,8 +112,7 @@ pub use self::cursor::{Cursor, CursorMut};
 /// #     Linked,
 /// #     list::{self, List},
 /// # };
-/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
-/// # #[repr(C)]
+/// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: list::Links<Entry>,
@@ -126,7 +127,8 @@ pub use self::cursor::{Cursor, CursorMut};
 /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
 /// #     }
 /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<list::Links<Entry>> {
-/// #         target.cast()
+/// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+/// #        NonNull::new_unchecked(links)
 /// #     }
 /// # }
 /// # impl Entry {
@@ -164,8 +166,7 @@ pub use self::cursor::{Cursor, CursorMut};
 /// #     Linked,
 /// #     list::{self, List},
 /// # };
-/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
-/// # #[repr(C)]
+/// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: list::Links<Entry>,
@@ -180,7 +181,8 @@ pub use self::cursor::{Cursor, CursorMut};
 /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
 /// #     }
 /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<list::Links<Entry>> {
-/// #         target.cast()
+/// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+/// #        NonNull::new_unchecked(links)
 /// #     }
 /// # }
 /// # impl Entry {

@@ -1,8 +1,13 @@
 use super::*;
-use std::{boxed::Box, pin::Pin, ptr::NonNull, vec, vec::Vec};
+use std::{
+    boxed::Box,
+    pin::Pin,
+    ptr::{self, NonNull},
+    vec,
+    vec::Vec,
+};
 
 #[derive(Debug)]
-#[repr(C)]
 struct Entry<'a> {
     links: Links<Entry<'a>>,
     val: i32,
@@ -30,9 +35,12 @@ unsafe impl<'a> Linked<Links<Self>> for Entry<'a> {
     }
 
     unsafe fn links(target: NonNull<Entry<'a>>) -> NonNull<Links<Entry<'a>>> {
-        // Safety: this is safe because the `links` are the first field of
-        // `Entry`, and `Entry` is `repr(C)`.
-        target.cast()
+        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+        // Safety: it's fine to use `new_unchecked` here; if the pointer that we
+        // offset to the `links` field is not null (which it shouldn't be, as we
+        // received it as a `NonNull`), the offset pointer should therefore also
+        // not be null.
+        NonNull::new_unchecked(links)
     }
 }
 
