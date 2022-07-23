@@ -301,8 +301,7 @@ feature! {
 
     impl Core {
         fn new() -> Self {
-            let (stub_task, join) = TaskRef::new(Stub, Stub);
-            core::mem::forget(join);
+            let (stub_task, _) = TaskRef::new(Stub, Stub);
             Self {
                 run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
             }
