@@ -116,6 +116,7 @@ pub struct Task<S, F: Future, STO> {
     storage: PhantomData<STO>,
 }
 
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum JoinError {
     Canceled,
@@ -568,7 +569,11 @@ impl TaskRef {
     unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError>> {
         let poll_join_fn = self.header().vtable.poll_join;
         let mut slot = mem::MaybeUninit::<T>::uninit();
-        match poll_join_fn(self.0, NonNull::from(&mut slot).cast::<()>(), cx) {
+        match test_dbg!(poll_join_fn(
+            self.0,
+            NonNull::from(&mut slot).cast::<()>(),
+            cx
+        )) {
             Poll::Ready(Ok(())) => {
                 // if the poll function returned `Ok`, we get to take the
                 // output!

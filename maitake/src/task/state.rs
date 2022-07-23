@@ -324,13 +324,13 @@ impl StateCell {
             // Run the transition function.
             let res = transition(&mut next);
 
-            if current.0 == next.0 {
+            if test_dbg!(current.0 == next.0) {
                 return res;
             }
 
             match self
                 .0
-                .compare_exchange_weak(current.0, next.0, AcqRel, Acquire)
+                .compare_exchange_weak(current.0, test_dbg!(next).0, AcqRel, Acquire)
             {
                 Ok(_) => return res,
                 Err(actual) => current = State(actual),
