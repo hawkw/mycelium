@@ -1,43 +1,6 @@
 use super::*;
 use crate::loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use util::{Chan, Yield};
-
-mod util {
-    use core::{
-        future::Future,
-        pin::Pin,
-        task::{Context, Poll},
-    };
-
-    pub(crate) use crate::wait::cell::test_util::Chan;
-
-    pub(crate) struct Yield {
-        yields: usize,
-    }
-
-    impl Future for Yield {
-        type Output = ();
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-            let yields = &mut self.as_mut().yields;
-            if *yields == 0 {
-                return Poll::Ready(());
-            }
-            *yields -= 1;
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    }
-
-    impl Yield {
-        pub(crate) fn once() -> Self {
-            Self::new(1)
-        }
-
-        pub(crate) fn new(yields: usize) -> Self {
-            Self { yields }
-        }
-    }
-}
+use crate::{future, wait::cell::test_util::Chan};
 
 #[cfg(all(feature = "alloc", not(loom)))]
 mod alloc {
@@ -52,7 +15,7 @@ mod alloc {
         crate::util::trace_init();
 
         SCHEDULER.spawn(async {
-            Yield::once().await;
+            future::yield_now().await;
             IT_WORKED.store(true, Ordering::Release);
         });
 
@@ -74,7 +37,7 @@ mod alloc {
         crate::util::trace_init();
         for _ in 0..TASKS {
             SCHEDULER.spawn(async {
-                Yield::once().await;
+                future::yield_now().await;
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             })
         }
@@ -104,7 +67,7 @@ mod alloc {
         });
 
         SCHEDULER.spawn(async move {
-            Yield::once().await;
+            future::yield_now().await;
             chan.wake();
         });
 
@@ -151,7 +114,7 @@ mod alloc {
 
         for i in 0..TASKS {
             SCHEDULER.spawn(async move {
-                Yield::new(i).await;
+                future::Yield::new(i).await;
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             })
         }
@@ -206,7 +169,7 @@ mod custom_storage {
         crate::util::trace_init();
 
         MyBoxTask::spawn(&SCHEDULER, async {
-            Yield::once().await;
+            future::yield_now().await;
             IT_WORKED.store(true, Ordering::Release);
         });
 
@@ -230,7 +193,7 @@ mod custom_storage {
 
         for _ in 0..TASKS {
             MyBoxTask::spawn(&SCHEDULER, async {
-                Yield::once().await;
+                future::yield_now().await;
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             })
         }
@@ -261,7 +224,7 @@ mod custom_storage {
         });
 
         MyBoxTask::spawn(&SCHEDULER, async move {
-            Yield::once().await;
+            future::yield_now().await;
             chan.wake();
         });
 
@@ -309,7 +272,7 @@ mod custom_storage {
 
         for i in 0..TASKS {
             MyBoxTask::spawn(&SCHEDULER, async move {
-                Yield::new(i).await;
+                future::Yield::new(i).await;
                 COMPLETED.fetch_add(1, Ordering::SeqCst);
             })
         }
@@ -366,7 +329,7 @@ mod loom {
             scheduler.spawn({
                 let it_worked = it_worked.clone();
                 track_future(async move {
-                    Yield::once().await;
+                    future::yield_now().await;
                     it_worked.store(true, Ordering::Release);
                 })
             });
@@ -425,7 +388,7 @@ mod loom {
             });
 
             scheduler.spawn(async move {
-                Yield::once().await;
+                future::yield_now().await;
                 chan.wake();
             });
 
@@ -446,7 +409,7 @@ mod loom {
                 scheduler.spawn({
                     let completed = completed.clone();
                     track_future(async move {
-                        Yield::once().await;
+                        future::yield_now().await;
                         completed.fetch_add(1, Ordering::SeqCst);
                     })
                 });
@@ -478,7 +441,7 @@ mod loom {
                         scheduler.spawn({
                             let completed = completed.clone();
                             track_future(async move {
-                                Yield::once().await;
+                                future::yield_now().await;
                                 completed.fetch_add(1, Ordering::SeqCst);
                             })
                         });

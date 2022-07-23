@@ -1,12 +1,9 @@
-use crate::{
-    loom::{
-        cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicUsize, Ordering::*},
-            spin::{Mutex, MutexGuard},
-        },
+use crate::loom::{
+    cell::UnsafeCell,
+    sync::{
+        atomic::{AtomicUsize, Ordering::*},
+        spin::{Mutex, MutexGuard},
     },
-    util,
 };
 use cordyceps::{
     list::{self, List},

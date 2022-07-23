@@ -6,7 +6,6 @@ use crate::{
             spin::Mutex,
         },
     },
-    util,
     wait::{self, WaitResult},
 };
 use cordyceps::{
