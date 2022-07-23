@@ -144,9 +144,9 @@ impl StateCell {
             }
 
             let had_join_waiter = if test_dbg!(completed) {
-                // unset the join handle flag, as we are waking the join handle
-                // now.
-                next_state = next_state.with(State::HAS_JOIN_HANDLE, false).with(State::HAS_OUTPUT, true);
+                // set the output flag so that the joinhandle knows it is now
+                // safe to read the task's output.
+                next_state = next_state.with(State::HAS_OUTPUT, true);
                 test_dbg!(state.get(State::HAS_JOIN_HANDLE))
             } else {
                 false
