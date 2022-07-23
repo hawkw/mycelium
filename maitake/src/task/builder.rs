@@ -1,4 +1,4 @@
-use super::{Future, Schedule, Storage, Task, TaskRef};
+use super::{Future, JoinHandle, Schedule, Storage, Task, TaskRef};
 use core::panic::Location;
 
 /// Builds a new [`Task`] prior to spawning it.
@@ -89,13 +89,15 @@ impl<'a, S: Schedule> Builder<'a, S> {
     /// instance as this task's scheduler!
     #[inline]
     #[track_caller]
-    pub fn spawn_allocated<STO, F>(&self, task: STO::StoredTask)
+    pub fn spawn_allocated<STO, F>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
     where
         F: Future + 'static,
+        F::Output: 'static,
         STO: Storage<S, F>,
     {
-        let task = TaskRef::build_allocated::<S, F, STO>(&self.settings, task);
+        let (task, join) = TaskRef::build_allocated::<S, F, STO>(&self.settings, task);
         self.scheduler.schedule(task);
+        join
     }
 
     feature! {
@@ -104,12 +106,17 @@ impl<'a, S: Schedule> Builder<'a, S> {
         /// Spawns a new task with this builder's configured settings.
         #[inline]
         #[track_caller]
-        pub fn spawn(&self, future: impl Future + 'static) {
+        pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
             use alloc::boxed::Box;
             use super::BoxStorage;
             let task = Box::new(Task::<S, _, BoxStorage>::new(self.scheduler.clone(), future));
-            let task = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
+            let (task, join) = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
             self.scheduler.schedule(task);
+            join
         }
     }
 }

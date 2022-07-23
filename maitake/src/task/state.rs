@@ -27,7 +27,8 @@ mycelium_bitfield::bitfield! {
         ///
         /// If the `JoinHandle` is dropped, this flag is unset.
         pub(crate) const HAS_JOIN_HANDLE: bool;
-
+        /// If set, this task has output ready to be taken by a [`JoinHandle`].
+        pub(crate) const HAS_OUTPUT: bool;
         /// The number of currently live references to this task.
         ///
         /// When this is 0, the task may be deallocated.
@@ -145,7 +146,7 @@ impl StateCell {
             let had_join_waiter = if test_dbg!(completed) {
                 // unset the join handle flag, as we are waking the join handle
                 // now.
-                next_state = next_state.with(State::HAS_JOIN_HANDLE, false);
+                next_state = next_state.with(State::HAS_JOIN_HANDLE, false).with(State::HAS_OUTPUT, true);
                 test_dbg!(state.get(State::HAS_JOIN_HANDLE))
             } else {
                 false
@@ -269,6 +270,18 @@ impl StateCell {
     }
 
     #[inline]
+    pub(super) fn create_join_handle(&self) {
+        self.transition(|state| {
+            debug_assert!(
+                !state.get(State::HAS_JOIN_HANDLE),
+                "task already has a join handle, cannot create a new one! state={state:?}"
+            );
+
+            *state = state.with(State::HAS_JOIN_HANDLE, true);
+        })
+    }
+
+    #[inline]
     pub(super) fn drop_join_handle(&self) {
         const MASK: usize = !State::HAS_JOIN_HANDLE.raw_mask();
         let _prev = self.0.fetch_and(MASK, Release);
@@ -277,6 +290,25 @@ impl StateCell {
             "tried to drop a join handle when the task did not have a join handle!\nstate: {:#?}",
             State(_prev),
         )
+    }
+
+    /// Returns `true` if it's okay to take the task's output.
+    pub(super) fn try_take_output(&self) -> bool {
+        self.transition(|state| {
+            // If the task has not completed, we can't take its join output.
+            if test_dbg!(!state.get(State::COMPLETED)) {
+                *state = state.with(State::HAS_JOIN_HANDLE, true);
+                return false;
+            }
+
+            // If the task does not have output, we cannot take it.
+            if test_dbg!(!state.get(State::HAS_OUTPUT)) {
+                return false;
+            }
+
+            *state = state.with(State::HAS_OUTPUT, false);
+            true
+        })
     }
 
     pub(super) fn load(&self, order: Ordering) -> State {
