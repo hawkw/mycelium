@@ -56,7 +56,11 @@ mod loom {
 
 #[cfg(all(not(loom), feature = "alloc"))]
 mod alloc {
-    use crate::{scheduler::Schedule, task::*};
+    use crate::{
+        future,
+        scheduler::{Schedule, Scheduler},
+        task::*,
+    };
     use alloc::boxed::Box;
     use core::ptr;
 
@@ -86,5 +90,31 @@ mod alloc {
 
         // clean up after ourselves by ensuring the box is deallocated
         unsafe { drop(Box::from_raw(task_ptr)) }
+    }
+
+    #[test]
+    fn join_handle_wakes() {
+        crate::util::trace_init();
+
+        let scheduler = Scheduler::new();
+        let join = scheduler.spawn(async move {
+            future::yield_now().await;
+            "hello world!"
+        });
+
+        let mut join = tokio_test::task::spawn(join);
+
+        // the join handle should be pending until the scheduler runs.
+        tokio_test::assert_pending!(test_dbg!(join.poll()), "join handle should be pending");
+        assert!(!join.is_woken());
+
+        // tick the scheduler.
+        scheduler.tick();
+
+        // the spawned task should complete on this tick.
+        assert!(join.is_woken());
+        let output =
+            tokio_test::assert_ready_ok!(test_dbg!(join.poll()), "join handle should be notified");
+        assert_eq!(test_dbg!(output), "hello world!");
     }
 }
