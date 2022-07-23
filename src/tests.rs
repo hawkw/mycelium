@@ -40,41 +40,9 @@ mod alloc {
 }
 
 mod myco_async {
-    use core::{
-        future::Future,
-        pin::Pin,
-        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-        task::{Context, Poll},
-    };
-    use maitake::scheduler::StaticScheduler;
+    use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use maitake::{future, scheduler::StaticScheduler};
     use mycelium_util::sync::Lazy;
-
-    struct Yield {
-        yields: usize,
-    }
-
-    impl Future for Yield {
-        type Output = ();
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-            let yields = &mut self.as_mut().yields;
-            if *yields == 0 {
-                return Poll::Ready(());
-            }
-            *yields -= 1;
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    }
-
-    impl Yield {
-        fn once() -> Self {
-            Self::new(1)
-        }
-
-        fn new(yields: usize) -> Self {
-            Self { yields }
-        }
-    }
 
     mycotest::decl_test! {
         fn basically_works() -> mycotest::TestResult {
@@ -82,7 +50,7 @@ mod myco_async {
             static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
             SCHEDULER.spawn(async {
-                Yield::once().await;
+                future::yield_now().await;
                 IT_WORKED.store(true, Ordering::Release);
             });
 
@@ -106,7 +74,7 @@ mod myco_async {
 
             for _ in 0..TASKS {
                 SCHEDULER.spawn(async {
-                    Yield::once().await;
+                    future::yield_now().await;
                     COMPLETED.fetch_add(1, Ordering::SeqCst);
                 })
             }
@@ -131,7 +99,7 @@ mod myco_async {
 
             for i in 0..TASKS {
                 SCHEDULER.spawn(async move {
-                    Yield::new(i).await;
+                    future::Yield::new(i).await;
                     COMPLETED.fetch_add(1, Ordering::SeqCst);
                 })
             }
