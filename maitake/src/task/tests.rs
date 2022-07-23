@@ -62,7 +62,10 @@ mod alloc {
         task::*,
     };
     use alloc::boxed::Box;
-    use core::ptr;
+    use core::{
+        ptr,
+        sync::atomic::{AtomicBool, Ordering},
+    };
 
     #[derive(Copy, Clone, Debug)]
     struct NopSchedule;
@@ -116,5 +119,23 @@ mod alloc {
         let output =
             tokio_test::assert_ready_ok!(test_dbg!(join.poll()), "join handle should be notified");
         assert_eq!(test_dbg!(output), "hello world!");
+    }
+
+    #[test]
+    fn drop_join_handle() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicBool = AtomicBool::new(false);
+        let scheduler = Scheduler::new();
+        let join = scheduler.spawn(async move {
+            future::yield_now().await;
+            COMPLETED.store(true, Ordering::Relaxed);
+        });
+
+        drop(join);
+
+        // tick the scheduler.
+        scheduler.tick();
+
+        assert!(COMPLETED.load(Ordering::Relaxed))
     }
 }
