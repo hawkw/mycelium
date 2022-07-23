@@ -597,7 +597,9 @@ impl TaskRef {
 
 impl Clone for TaskRef {
     #[inline]
+    #[track_caller]
     fn clone(&self) -> Self {
+        test_trace!("clone {:?}", self);
         self.state().clone_ref();
         Self(self.0)
     }
@@ -605,7 +607,9 @@ impl Clone for TaskRef {
 
 impl Drop for TaskRef {
     #[inline]
+    #[track_caller]
     fn drop(&mut self) {
+        test_trace!("drop {:?}", self);
         if !self.state().drop_ref() {
             return;
         }

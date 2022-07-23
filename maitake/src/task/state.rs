@@ -248,6 +248,7 @@ impl StateCell {
 
     #[inline]
     pub(super) fn drop_ref(&self) -> bool {
+        test_trace!("State::drop_ref");
         // We do not need to synchronize with other cores unless we are going to
         // delete the task.
         let old_refs = self.0.fetch_sub(REF_ONE, Release);
@@ -257,8 +258,8 @@ impl StateCell {
         // bits, and we can avoid doing the bitwise-and (since there are no
         // higher bits that are not part of the ref count). This is probably a
         // premature optimization lol.
-        let old_refs = old_refs >> State::REFS.least_significant_index();
         test_dbg!(State::REFS.unpack(old_refs));
+        let old_refs = old_refs >> State::REFS.least_significant_index();
 
         // Did we drop the last ref?
         if test_dbg!(old_refs) > 1 {
@@ -271,6 +272,7 @@ impl StateCell {
 
     #[inline]
     pub(super) fn create_join_handle(&self) {
+        test_trace!("State::create_join_handle");
         self.transition(|state| {
             debug_assert!(
                 !state.get(State::HAS_JOIN_HANDLE),
@@ -283,8 +285,14 @@ impl StateCell {
 
     #[inline]
     pub(super) fn drop_join_handle(&self) {
+        test_trace!("State::drop_join_handle");
         const MASK: usize = !State::HAS_JOIN_HANDLE.raw_mask();
         let _prev = self.0.fetch_and(MASK, Release);
+        test_trace!(
+            "drop_join_handle; prev_state:\n{}\nstate:\n{}",
+            State::from_bits(_prev),
+            self.load(Acquire),
+        );
         debug_assert!(
             State(_prev).get(State::HAS_JOIN_HANDLE),
             "tried to drop a join handle when the task did not have a join handle!\nstate: {:#?}",
@@ -320,7 +328,8 @@ impl StateCell {
     fn transition<T>(&self, mut transition: impl FnMut(&mut State) -> T) -> T {
         let mut current = self.load(Acquire);
         loop {
-            let mut next = test_dbg!(current);
+            test_trace!("transition; current:\n{}", current);
+            let mut next = current;
             // Run the transition function.
             let res = transition(&mut next);
 
@@ -328,9 +337,10 @@ impl StateCell {
                 return res;
             }
 
+            test_trace!("transition; next:\n{}", next);
             match self
                 .0
-                .compare_exchange_weak(current.0, test_dbg!(next).0, AcqRel, Acquire)
+                .compare_exchange_weak(current.0, next.0, AcqRel, Acquire)
             {
                 Ok(_) => return res,
                 Err(actual) => current = State(actual),
