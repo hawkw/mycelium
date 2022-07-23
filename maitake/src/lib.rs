@@ -11,6 +11,7 @@ pub(crate) mod util;
 pub(crate) mod trace;
 pub(crate) mod loom;
 
+pub mod future;
 pub mod scheduler;
 pub mod sync;
 pub mod task;
