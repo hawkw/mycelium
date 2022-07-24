@@ -330,7 +330,7 @@ macro_rules! make_packers {
                 /// Returns a raw, shifted mask for unpacking this packing spec.
                 #[inline]
                 pub const fn raw_mask(&self) -> $Bits {
-                    self.mask << self.shift
+                    self.mask
                 }
 
                 /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
