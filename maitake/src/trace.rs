@@ -97,6 +97,21 @@ macro_rules! test_dbg {
 }
 
 #[cfg(not(test))]
+macro_rules! test_debug {
+    ($($args:tt)+) => {};
+}
+
+#[cfg(test)]
+macro_rules! test_debug {
+    ($($args:tt)+) => {
+        debug!(
+            location = %core::panic::Location::caller(),
+            $($args)+
+        );
+    };
+}
+
+#[cfg(not(test))]
 macro_rules! test_trace {
     ($($args:tt)+) => {};
 }
@@ -104,7 +119,7 @@ macro_rules! test_trace {
 #[cfg(test)]
 macro_rules! test_trace {
     ($($args:tt)+) => {
-        debug!(
+        trace!(
             location = %core::panic::Location::caller(),
             $($args)+
         );

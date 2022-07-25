@@ -248,7 +248,7 @@ impl StateCell {
 
     #[inline]
     pub(super) fn drop_ref(&self) -> bool {
-        test_trace!("State::drop_ref");
+        test_debug!("StateCell::drop_ref");
         // We do not need to synchronize with other cores unless we are going to
         // delete the task.
         let old_refs = self.0.fetch_sub(REF_ONE, Release);
@@ -272,7 +272,7 @@ impl StateCell {
 
     #[inline]
     pub(super) fn create_join_handle(&self) {
-        test_trace!("State::create_join_handle");
+        test_debug!("StateCell::create_join_handle");
         self.transition(|state| {
             debug_assert!(
                 !state.get(State::HAS_JOIN_HANDLE),
@@ -285,7 +285,7 @@ impl StateCell {
 
     #[inline]
     pub(super) fn drop_join_handle(&self) {
-        test_trace!("State::drop_join_handle");
+        test_debug!("StateCell::drop_join_handle");
         const MASK: usize = !State::HAS_JOIN_HANDLE.raw_mask();
         let _prev = self.0.fetch_and(MASK, Release);
         test_trace!(
@@ -325,10 +325,11 @@ impl StateCell {
 
     /// Advance this task's state by running the provided
     /// `transition` function on the current [`State`].
+    #[cfg_attr(test, track_caller)]
     fn transition<T>(&self, mut transition: impl FnMut(&mut State) -> T) -> T {
         let mut current = self.load(Acquire);
         loop {
-            test_trace!("transition; current:\n{}", current);
+            test_trace!("StateCell::transition; current:\n{}", current);
             let mut next = current;
             // Run the transition function.
             let res = transition(&mut next);
@@ -337,7 +338,7 @@ impl StateCell {
                 return res;
             }
 
-            test_trace!("transition; next:\n{}", next);
+            test_trace!("StateCell::transition; next:\n{}", next);
             match self
                 .0
                 .compare_exchange_weak(current.0, next.0, AcqRel, Acquire)

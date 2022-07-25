@@ -363,7 +363,7 @@ where
             "Task::poll"
         );
         let mut this = ptr.0.cast::<Self>();
-        test_trace!(task = ?fmt::alt(this.as_ref()));
+        test_debug!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
         let state = &this.as_ref().state();
         match test_dbg!(state.start_poll()) {
@@ -606,7 +606,7 @@ impl Clone for TaskRef {
     #[inline]
     #[track_caller]
     fn clone(&self) -> Self {
-        test_trace!("clone {:?}", self);
+        test_debug!("clone {:?}", self);
         self.state().clone_ref();
         Self(self.0)
     }
@@ -616,7 +616,7 @@ impl Drop for TaskRef {
     #[inline]
     #[track_caller]
     fn drop(&mut self) {
-        test_trace!("drop {:?}", self);
+        test_debug!("drop {:?}", self);
         if !self.state().drop_ref() {
             return;
         }

@@ -448,7 +448,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         // okay, there are tasks waiting on the queue; we must acquire the lock
         // on the linked list and wake the next task from the queue.
         let mut queue = self.queue.lock();
-        test_trace!("wake: -> locked");
+        test_debug!("wake: -> locked");
 
         // the queue's state may have changed while we were waiting to acquire
         // the lock, so we need to acquire a new snapshot.
@@ -529,13 +529,13 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     fn load(&self) -> State {
         #[allow(clippy::let_and_return)]
         let state = State::from_bits(self.state.load(SeqCst));
-        test_trace!("state.load() = {state:?}");
+        test_debug!("state.load() = {state:?}");
         state
     }
 
     #[cfg_attr(test, track_caller)]
     fn store(&self, state: State) {
-        test_trace!("state.store({state:?}");
+        test_debug!("state.store({state:?}");
         self.state.store(state as usize, SeqCst);
     }
 
@@ -547,7 +547,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
             .compare_exchange(current as usize, new as usize, SeqCst, SeqCst)
             .map(State::from_bits)
             .map_err(State::from_bits);
-        test_trace!("state.compare_exchange({current:?}, {new:?}) = {res:?}");
+        test_debug!("state.compare_exchange({current:?}, {new:?}) = {res:?}");
         res
     }
 
@@ -680,9 +680,9 @@ impl<K: PartialEq, V> Waiter<K, V> {
         );
 
         // Try to wait...
-        test_trace!("poll_wait: locking...");
+        test_debug!("poll_wait: locking...");
         let mut waiters = queue.queue.lock();
-        test_trace!("poll_wait: -> locked");
+        test_debug!("poll_wait: -> locked");
         let mut queue_state = queue.load();
 
         // transition the queue to the waiting state
@@ -729,7 +729,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
         queue: &WaitMap<K, V>,
         cx: &mut Context<'_>,
     ) -> Poll<WaitResult<V>> {
-        test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
+        test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let this = self.as_mut().project();
 
         match test_dbg!(&this.state) {
@@ -790,7 +790,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
     fn release(mut self: Pin<&mut Self>, queue: &WaitMap<K, V>) {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
-        test_trace!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
+        test_debug!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
 
         // if we're not enqueued, we don't have to do anything else.
         if state != WaitState::Waiting {
