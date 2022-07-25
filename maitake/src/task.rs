@@ -392,7 +392,10 @@ where
             OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(PollAction::Enqueue) => Self::schedule(ptr),
             OrDrop::Action(PollAction::WakeJoinWaiter) => {
-                this.as_ref().join_waker.wake();
+                // set the `CLOSED` bit on the wait cell so that the join waker
+                // will always know that the task has completed, even if a join
+                // waker was not present when we ended this poll.
+                this.as_ref().join_waker.close();
             }
             OrDrop::Action(PollAction::None) => {}
         }
@@ -440,11 +443,7 @@ where
                 Ok(_) => Poll::Pending,
                 // we were notified while trying to register --- we can now read the
                 // output
-                Err(WaitCellError::Notifying) => continue,
-                // the other waitcell errors should never be returned.
-                Err(WaitCellError::Closed) => {
-                    unreachable!("join waker `WaitCell` is never closed, this should never happen")
-                }
+                Err(WaitCellError::Notifying) | Err(WaitCellError::Closed) => continue,
                 Err(WaitCellError::Parking) => {
                     unreachable!("multiple threads should not race on a join waker...what do")
                 }
