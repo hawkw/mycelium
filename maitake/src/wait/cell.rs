@@ -131,6 +131,10 @@ impl WaitCell {
         match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel)) {
             Ok(_) => registered(),
             Err(actual) => {
+                // If the `compare_exchange` fails above, this means that we were notified for one of
+                // two reasons: either the cell was awoken, or the cell was closed.
+                //
+                // Bail out of the parking state, and determine what to report to the caller.
                 test_trace!(state = ?actual, "was notified");
                 let waker = self.waker.with_mut(|waker| unsafe { (*waker).take() });
                 // Reset to the WAITING state by clearing everything *except*
