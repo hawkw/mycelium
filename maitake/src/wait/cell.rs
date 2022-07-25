@@ -131,10 +131,16 @@ impl WaitCell {
         match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel)) {
             Ok(_) => registered(),
             Err(actual) => {
+                // If the `compare_exchange` fails above, this means that we were notified for one of
+                // two reasons: either the cell was awoken, or the cell was closed.
+                //
+                // Bail out of the parking state, and determine what to report to the caller.
                 test_trace!(state = ?actual, "was notified");
                 let waker = self.waker.with_mut(|waker| unsafe { (*waker).take() });
                 // Reset to the WAITING state by clearing everything *except*
-                // the closed bits (which must remain set).
+                // the closed bits (which must remain set). This `fetch_and`
+                // does *not* set the CLOSED bit if it is unset, it just doesn't
+                // clear it.
                 let state = test_dbg!(self.fetch_and(State::CLOSED, AcqRel));
                 // The only valid state transition while we were parking is to
                 // add the CLOSED bit.
@@ -147,9 +153,13 @@ impl WaitCell {
                     waker.wake();
                 }
 
-                // We just went to the closed state, so sorry new waker, shops
-                // closed
-                closed()
+                // Was the `CLOSED` bit set while we were clearing other bits?
+                // If so, the cell is closed. Otherwise, we must have been notified.
+                if state.is(State::CLOSED) {
+                    closed()
+                } else {
+                    notifying()
+                }
             }
         }
     }
