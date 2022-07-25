@@ -32,7 +32,7 @@ mod loom {
     fn taskref_clones_deallocate() {
         loom::model(|| {
             let track = Track::new(());
-            let task = TaskRef::new(NopScheduler, async move {
+            let (task, _) = TaskRef::new(NopScheduler, async move {
                 drop(track);
             });
 
