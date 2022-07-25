@@ -52,6 +52,24 @@ mod loom {
             }
         });
     }
+
+    #[test]
+    fn joinhandle_deallocates() {
+        loom::model(|| {
+            let track = Track::new(());
+            let (task, join) = TaskRef::new(NopScheduler, async move {
+                drop(track);
+            });
+
+            let mut thread = loom::thread::spawn(move || {
+                drop(join);
+            });
+
+            drop(task);
+
+            thread.join().unwrap();
+        });
+    }
 }
 
 #[cfg(all(not(loom), feature = "alloc"))]
