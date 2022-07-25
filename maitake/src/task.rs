@@ -627,7 +627,7 @@ impl Drop for TaskRef {
     #[inline]
     #[track_caller]
     fn drop(&mut self) {
-        test_debug!("drop {:?}", self);
+        test_debug!(task.addr = ?self.0, "drop TaskRef");
         if !self.state().drop_ref() {
             return;
         }
