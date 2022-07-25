@@ -415,29 +415,40 @@ where
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), JoinError>> {
+        use crate::wait::cell::Error as WaitCellError;
+
         trace!(
             task.addr = ?task,
             task.output = %type_name::<<F>::Output>(),
             "Task::poll_join"
         );
         let task = task.cast::<Self>();
-        if task.as_ref().state().try_take_output() {
-            task.as_ref().inner.with_mut(|cell| {
-                match mem::replace(&mut *cell, Cell::Joined) {
-                    Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
-                    state => unreachable!("attempted to take join output on a task that has not completed! task: {task:?}; state: {state:?}"),
-                }
-            });
+        loop {
+            if task.as_ref().state().try_take_output() {
+                task.as_ref().inner.with_mut(|cell| {
+                    match mem::replace(&mut *cell, Cell::Joined) {
+                        Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
+                        state => unreachable!("attempted to take join output on a task that has not completed! task: {task:?}; state: {state:?}"),
+                    }
+                });
 
-            return Poll::Ready(Ok(()));
-        }
-
-        // okay, we did not take the output, register the join waiter.
-        match task.as_ref().join_waker.register_wait(cx.waker()) {
-            Ok(_) => Poll::Pending,
-            Err(err) => {
-                unreachable!("multiple threads should not race on a join waker...what do, {err:?}")
+                return Poll::Ready(Ok(()));
             }
+
+            // okay, we did not take the output, register the join waiter.
+            return match task.as_ref().join_waker.register_wait(cx.waker()) {
+                Ok(_) => Poll::Pending,
+                // we were notified while trying to register --- we can now read the
+                // output
+                Err(WaitCellError::Notifying) => continue,
+                // the other waitcell errors should never be returned.
+                Err(WaitCellError::Closed) => {
+                    unreachable!("join waker `WaitCell` is never closed, this should never happen")
+                }
+                Err(WaitCellError::Parking) => {
+                    unreachable!("multiple threads should not race on a join waker...what do")
+                }
+            };
         }
     }
 
