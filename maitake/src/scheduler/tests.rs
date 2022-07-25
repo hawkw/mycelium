@@ -159,39 +159,10 @@ mod loom {
     use super::*;
     use crate::loom::{
         self,
+        alloc::track_future,
         sync::{atomic::AtomicBool, Arc},
         thread,
     };
-    use core::{
-        future::Future,
-        pin::Pin,
-        task::{Context, Poll},
-    };
-
-    #[pin_project::pin_project]
-    struct TrackFuture<F> {
-        #[pin]
-        inner: F,
-        track: Arc<()>,
-    }
-
-    impl<F: Future> Future for TrackFuture<F> {
-        type Output = TrackFuture<F::Output>;
-        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            let this = self.project();
-            this.inner.poll(cx).map(|inner| TrackFuture {
-                inner,
-                track: this.track.clone(),
-            })
-        }
-    }
-
-    fn track_future<F: Future>(inner: F) -> TrackFuture<F> {
-        TrackFuture {
-            inner,
-            track: Arc::new(()),
-        }
-    }
 
     #[test]
     fn basically_works() {

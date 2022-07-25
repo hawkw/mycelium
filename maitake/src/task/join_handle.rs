@@ -1,10 +1,21 @@
-use super::{Context, JoinError, Poll, TaskRef};
+use super::{Context, Poll, TaskRef};
 use core::{future::Future, marker::PhantomData, pin::Pin};
 
 #[derive(Debug)]
 pub struct JoinHandle<T> {
     task: Option<TaskRef>,
     _t: PhantomData<fn(T)>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct JoinError {
+    kind: JoinErrorKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+enum JoinErrorKind {
+    Canceled,
 }
 
 impl<T> JoinHandle<T> {
@@ -49,5 +60,21 @@ impl<T> Drop for JoinHandle<T> {
         if let Some(ref task) = self.task {
             task.state().drop_join_handle();
         }
+    }
+}
+
+// === impl JoinError ===
+
+impl JoinError {
+    #[inline]
+    pub(crate) fn canceled() -> Self {
+        Self {
+            kind: JoinErrorKind::Canceled,
+        }
+    }
+
+    /// Returns `true` if a task failed to join because it was canceled.
+    pub fn is_canceled(&self) -> bool {
+        matches!(self.kind, JoinErrorKind::Canceled)
     }
 }

@@ -9,7 +9,11 @@
 //! [scheduler]: crate::scheduler
 #[cfg(feature = "alloc")]
 pub use self::storage::BoxStorage;
-pub use self::{builder::Builder, join_handle::JoinHandle, storage::Storage};
+pub use self::{
+    builder::Builder,
+    join_handle::{JoinError, JoinHandle},
+    storage::Storage,
+};
 pub use core::task::{Context, Poll, Waker};
 
 mod builder;
@@ -123,12 +127,6 @@ pub struct Task<S, F: Future, STO> {
     /// [`Box`]: alloc::boxed::Box
     /// [`Storage`]: crate::task::Storage
     storage: PhantomData<STO>,
-}
-
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum JoinError {
-    Canceled,
 }
 
 /// The task's header.
