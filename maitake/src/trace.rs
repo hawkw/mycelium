@@ -104,10 +104,7 @@ macro_rules! test_debug {
 #[cfg(test)]
 macro_rules! test_debug {
     ($($args:tt)+) => {
-        debug!(
-            location = %core::panic::Location::caller(),
-            $($args)+
-        );
+        debug!($($args)+);
     };
 }
 
@@ -119,10 +116,7 @@ macro_rules! test_trace {
 #[cfg(test)]
 macro_rules! test_trace {
     ($($args:tt)+) => {
-        trace!(
-            location = %core::panic::Location::caller(),
-            $($args)+
-        );
+        trace!($($args)+);
     };
 }
 
