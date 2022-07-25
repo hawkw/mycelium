@@ -3,9 +3,19 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## mycelium-bitfield-v0.1.2 - (2022-07-24)
+
+[5d6d7d5](https://github.com/hawkw/mycelium/5d6d7d5f7fd5eb70b2ece8f9697b5d46ca908d6a)...[8c34ef9](https://github.com/hawkw/mycelium/8c34ef9d43428afd963eee6472b88256927643b5)
+
+
+### Fixed
+
+- Respect 32 bit targets ([#255](https://github.com/hawkw/mycelium/issues/255)) ([9b02fae](https://github.com/hawkw/mycelium/9b02fae33166a07be80be9f619d1c2ad68186e84))
+- Fix `raw_mask` shifting twice ([#262](https://github.com/hawkw/mycelium/issues/262)) ([8c34ef9](https://github.com/hawkw/mycelium/8c34ef9d43428afd963eee6472b88256927643b5))
+
 ## mycelium-bitfield-v0.1.1 - (2022-07-16)
 
-[af8ad54](https://github.com/hawkw/mycelium/af8ad548baaa27ad6a5689ebf35164108ceeb181)...[aaa6137](https://github.com/hawkw/mycelium/aaa6137dc58616e8ffabe918ac00d348852073a2)
+[af8ad54](https://github.com/hawkw/mycelium/af8ad548baaa27ad6a5689ebf35164108ceeb181)...[5d6d7d5](https://github.com/hawkw/mycelium/5d6d7d5f7fd5eb70b2ece8f9697b5d46ca908d6a)
 
 
 ### Documented
