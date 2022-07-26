@@ -189,7 +189,6 @@ enum Cell<F: Future> {
     Joined,
 }
 
-// #[derive(Debug)]
 struct Vtable {
     /// Poll the future.
     poll: unsafe fn(TaskRef) -> Poll<()>,
