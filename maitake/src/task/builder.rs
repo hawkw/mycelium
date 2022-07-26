@@ -87,6 +87,10 @@ impl<'a, S: Schedule> Builder<'a, S> {
     ///
     /// Note that the `StoredTask` *must* be bound to the same scheduler
     /// instance as this task's scheduler!
+    ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
     #[inline]
     #[track_caller]
     pub fn spawn_allocated<STO, F>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
@@ -104,6 +108,10 @@ impl<'a, S: Schedule> Builder<'a, S> {
         #![feature = "alloc"]
 
         /// Spawns a new task with this builder's configured settings.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
         #[inline]
         #[track_caller]
         pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>

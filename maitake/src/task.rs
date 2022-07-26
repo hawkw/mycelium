@@ -194,10 +194,11 @@ struct Vtable {
     /// Poll the future.
     poll: unsafe fn(TaskRef) -> Poll<()>,
 
-    /// Attempts to read the task's output to the pointed memory location, if it
-    /// has completed and the output has not been taken.
+    /// Poll the task's `JoinHandle` for completion, storing the output at the
+    /// provided [`NonNull`] pointer if the task has completed.
     ///
-    /// Returns `false` if the task has not yet completed.
+    /// If the task has not completed, the [`Waker`] from the provided
+    /// [`Context`] is registered to be woken when the task completes.
     poll_join:
         unsafe fn(NonNull<Header>, NonNull<()>, &mut Context<'_>) -> Poll<Result<(), JoinError>>,
 

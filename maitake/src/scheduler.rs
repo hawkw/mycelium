@@ -84,6 +84,10 @@ impl StaticScheduler {
     /// This method is used to spawn a task that requires some bespoke
     /// procedure of allocation, typically of a custom [`Storage`] implementor.
     ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
+    ///
     /// [`Storage`]: crate::task::Storage
     #[inline]
     #[track_caller]
@@ -245,6 +249,11 @@ feature! {
             task::Builder::new(self.clone())
         }
 
+        /// Spawn a task.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
         #[inline]
         #[track_caller]
         pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
@@ -257,6 +266,17 @@ feature! {
             join
         }
 
+
+        /// Spawn a pre-allocated task
+        ///
+        /// This method is used to spawn a task that requires some bespoke
+        /// procedure of allocation, typically of a custom [`Storage`] implementor.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// [`Storage`]: crate::task::Storage
         #[inline]
         #[track_caller]
         pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>) -> JoinHandle<F::Output>
@@ -286,6 +306,11 @@ feature! {
             Self::default()
         }
 
+        /// Spawn a task.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
         #[inline]
         #[track_caller]
         pub fn spawn<F>(&'static self, future: F) -> JoinHandle<F::Output>

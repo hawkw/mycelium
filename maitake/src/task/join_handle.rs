@@ -1,12 +1,34 @@
 use super::{Context, Poll, TaskRef};
 use core::{future::Future, marker::PhantomData, pin::Pin};
 
+/// An owned permission to join a [task] (await its termination).
+///
+/// This is equivalent to the standard library's [`std::thread::JoinHandle`]
+/// type, but for asynchronous tasks rather than OS threads.
+///
+/// A `JoinHandle` *detaches* the associated task when it is dropped, which
+/// means that there is no longer any handle to the task and no way to await
+/// its termination.
+///
+/// `JoinHandle`s implement [`Future`], so a task's output can be awaited by
+/// `.await`ing its `JoinHandle`.
+///
+/// This `struct` is returned by the [`Scheduler::spawn`] and
+/// [`Scheduler::spawn_allocated`] methods, and the [`task::Builder::spawn`] and
+/// [`task::Builder::spawn_allocated`] methods.
+///
+/// [`Scheduler::spawn`]: crate::scheduler::Scheduler::spawn
+/// [`Scheduler::spawn_allocated`]: crate::scheduler::Scheduler::spawn_allocated
+/// [`task::Builder::spawn`]: crate::task::Builder::spawn
+/// [`task::Builder::spawn_allocated`]: crate::task::Builder::spawn_allocated
+/// [task]: crate::task
 #[derive(Debug)]
 pub struct JoinHandle<T> {
     task: Option<TaskRef>,
     _t: PhantomData<fn(T)>,
 }
 
+/// Errors returned by awaiting a [`JoinHandle`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct JoinError {
     kind: JoinErrorKind,
@@ -15,10 +37,13 @@ pub struct JoinError {
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 enum JoinErrorKind {
+    /// The task was canceled.
     Canceled,
 }
 
 impl<T> JoinHandle<T> {
+    /// Converts a `TaskRef` into a `JoinHandle`.
+    ///
     /// # Safety
     ///
     /// The pointed type must actually output a `T`-typed value.
