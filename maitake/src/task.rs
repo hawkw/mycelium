@@ -199,6 +199,9 @@ struct Vtable {
     ///
     /// If the task has not completed, the [`Waker`] from the provided
     /// [`Context`] is registered to be woken when the task completes.
+    // Splitting this up into type aliases just makes it *harder* to understand
+    // IMO...
+    #[allow(clippy::type_complexity)]
     poll_join:
         unsafe fn(NonNull<Header>, NonNull<()>, &mut Context<'_>) -> Poll<Result<(), JoinError>>,
 

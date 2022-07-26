@@ -34,6 +34,7 @@ pub struct JoinError {
     kind: JoinErrorKind,
 }
 
+#[allow(dead_code)] // this will be used when i implement task cancellation
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 enum JoinErrorKind {
@@ -91,6 +92,7 @@ impl<T> Drop for JoinHandle<T> {
 // === impl JoinError ===
 
 impl JoinError {
+    #[allow(dead_code)] // this will be used when i implement task cancellation
     #[inline]
     pub(crate) fn canceled() -> Self {
         Self {

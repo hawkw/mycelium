@@ -46,6 +46,7 @@ macro_rules! debug {
     };
 }
 
+#[cfg(loom)]
 macro_rules! info {
     ($($arg:tt)+) => {
         #[cfg(any(feature = "tracing-01", loom))]
