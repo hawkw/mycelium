@@ -76,7 +76,7 @@ mod myco_async {
                 SCHEDULER.spawn(async {
                     future::yield_now().await;
                     COMPLETED.fetch_add(1, Ordering::SeqCst);
-                })
+                });
             }
 
             let tick = SCHEDULER.tick();
@@ -101,7 +101,7 @@ mod myco_async {
                 SCHEDULER.spawn(async move {
                     future::Yield::new(i).await;
                     COMPLETED.fetch_add(1, Ordering::SeqCst);
-                })
+                });
             }
 
             let tick = SCHEDULER.tick();

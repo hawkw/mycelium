@@ -395,7 +395,7 @@ impl WaitQueue {
         // okay, there are tasks waiting on the queue; we must acquire the lock
         // on the linked list and wake the next task from the queue.
         let mut queue = self.queue.lock();
-        test_trace!("wake: -> locked");
+        test_debug!("wake: -> locked");
 
         // the queue's state may have changed while we were waiting to acquire
         // the lock, so we need to acquire a new snapshot.
@@ -525,13 +525,13 @@ impl WaitQueue {
     fn load(&self) -> QueueState {
         #[allow(clippy::let_and_return)]
         let state = QueueState::from_bits(self.state.load(SeqCst));
-        test_trace!("state.load() = {state:?}");
+        test_debug!("state.load() = {state:?}");
         state
     }
 
     #[cfg_attr(test, track_caller)]
     fn store(&self, state: QueueState) {
-        test_trace!("state.store({state:?}");
+        test_debug!("state.store({state:?}");
         self.state.store(state.0, SeqCst);
     }
 
@@ -547,7 +547,7 @@ impl WaitQueue {
             .compare_exchange(current.0, new.0, SeqCst, SeqCst)
             .map(QueueState::from_bits)
             .map_err(QueueState::from_bits);
-        test_trace!("state.compare_exchange({current:?}, {new:?}) = {res:?}");
+        test_debug!("state.compare_exchange({current:?}, {new:?}) = {res:?}");
         res
     }
 
@@ -637,7 +637,7 @@ impl Waiter {
         queue: &WaitQueue,
         cx: &mut Context<'_>,
     ) -> Poll<WaitResult<()>> {
-        test_trace!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
+        test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
         match test_dbg!(this.state.get(WaitStateBits::STATE)) {
@@ -657,9 +657,9 @@ impl Waiter {
                 }
 
                 // okay, no pending wakeups. try to wait...
-                test_trace!("poll_wait: locking...");
+                test_debug!("poll_wait: locking...");
                 let mut waiters = queue.queue.lock();
-                test_trace!("poll_wait: -> locked");
+                test_debug!("poll_wait: -> locked");
                 queue_state = queue.load();
 
                 // the whole queue was woken while we were trying to acquire
@@ -752,7 +752,7 @@ impl Waiter {
     fn release(mut self: Pin<&mut Self>, queue: &WaitQueue) {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
-        test_trace!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
+        test_debug!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
 
         // if we're not enqueued, we don't have to do anything else.
         if state.get(WaitStateBits::STATE) != WaitState::Waiting {

@@ -33,7 +33,7 @@ fn schedule_many() {
         SCHEDULER.spawn(async {
             future::yield_now().await;
             COMPLETED.fetch_add(1, Ordering::SeqCst);
-        })
+        });
     }
 
     let tick = SCHEDULER.tick();
@@ -57,7 +57,7 @@ fn many_yields() {
         SCHEDULER.spawn(async move {
             future::Yield::new(i).await;
             COMPLETED.fetch_add(1, Ordering::SeqCst);
-        })
+        });
     }
 
     let tick = SCHEDULER.tick();

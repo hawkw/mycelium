@@ -115,7 +115,7 @@ impl WaitCell {
             Ok(_) => {}
         }
 
-        test_trace!("-> wait cell locked!");
+        test_debug!("-> wait cell locked!");
         let prev_waker = self.waker.with_mut(|old_waker| unsafe {
             match &mut *old_waker {
                 Some(old_waker) if waker.will_wake(old_waker) => None,
@@ -124,7 +124,7 @@ impl WaitCell {
         });
 
         if let Some(prev_waker) = prev_waker {
-            test_trace!("Replaced an old waker in cell, waking");
+            test_debug!("Replaced an old waker in cell, waking");
             prev_waker.wake();
         }
 

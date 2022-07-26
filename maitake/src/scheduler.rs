@@ -1,4 +1,4 @@
-use crate::task::{self, Header, Storage, TaskRef};
+use crate::task::{self, Header, JoinHandle, Storage, TaskRef};
 use core::{future::Future, pin::Pin};
 
 use cordyceps::mpsc_queue::MpscQueue;
@@ -84,16 +84,22 @@ impl StaticScheduler {
     /// This method is used to spawn a task that requires some bespoke
     /// procedure of allocation, typically of a custom [`Storage`] implementor.
     ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
+    ///
     /// [`Storage`]: crate::task::Storage
     #[inline]
     #[track_caller]
-    pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask)
+    pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask) -> JoinHandle<F::Output>
     where
         F: Future + 'static,
+        F::Output: 'static,
         STO: Storage<&'static Self, F>,
     {
-        let tr = TaskRef::new_allocated::<&'static Self, F, STO>(task);
-        self.schedule(tr);
+        let (task, join) = TaskRef::new_allocated::<&'static Self, F, STO>(task);
+        self.schedule(task);
+        join
     }
 
     /// Returns a new [task `Builder`] for configuring tasks prior to spawning
@@ -243,20 +249,44 @@ feature! {
             task::Builder::new(self.clone())
         }
 
+        /// Spawn a task.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
         #[inline]
         #[track_caller]
-        pub fn spawn(&self, future: impl Future + 'static) {
-            self.schedule(TaskRef::new(self.clone(), future));
-        }
-
-        #[inline]
-        #[track_caller]
-        pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>)
+        pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
         where
             F: Future + 'static,
+            F::Output: 'static,
         {
-            let tr = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
-            self.schedule(tr);
+            let (task, join) = TaskRef::new(self.clone(), future);
+            self.schedule(task);
+            join
+        }
+
+
+        /// Spawn a pre-allocated task
+        ///
+        /// This method is used to spawn a task that requires some bespoke
+        /// procedure of allocation, typically of a custom [`Storage`] implementor.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// [`Storage`]: crate::task::Storage
+        #[inline]
+        #[track_caller]
+        pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
+            let (task, join) = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
+            self.schedule(task);
+            join
         }
 
         pub fn tick(&self) -> Tick {
@@ -276,16 +306,27 @@ feature! {
             Self::default()
         }
 
+        /// Spawn a task.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
         #[inline]
         #[track_caller]
-        pub fn spawn(&'static self, future: impl Future + 'static) {
-            self.schedule(TaskRef::new(self, future));
+        pub fn spawn<F>(&'static self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
+            let (task, join) = TaskRef::new(self, future);
+            self.schedule(task);
+            join
         }
     }
 
     impl Core {
         fn new() -> Self {
-            let stub_task = TaskRef::new(Stub, Stub);
+            let (stub_task, _) = TaskRef::new(Stub, Stub);
             Self {
                 run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
             }

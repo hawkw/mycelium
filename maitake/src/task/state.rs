@@ -23,6 +23,12 @@ mycelium_bitfield::bitfield! {
         /// [`Poll::Ready`]: core::task::Poll::Ready
         pub(crate) const COMPLETED: bool;
 
+        /// If set, this task has a [`JoinHandle`] awaiting its completion.
+        ///
+        /// If the `JoinHandle` is dropped, this flag is unset.
+        pub(crate) const HAS_JOIN_HANDLE: bool;
+        /// If set, this task has output ready to be taken by a [`JoinHandle`].
+        pub(crate) const HAS_OUTPUT: bool;
         /// The number of currently live references to this task.
         ///
         /// When this is 0, the task may be deallocated.
@@ -41,6 +47,19 @@ pub(super) enum ScheduleAction {
     Enqueue,
 
     /// The task does not need to be enqueued.
+    None,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum PollAction {
+    /// The task should be enqueued.
+    Enqueue,
+
+    /// The task's join waker should be woken.
+    WakeJoinWaiter,
+
+    /// The task does not need to be enqueued, and the join waker does not need
+    /// to be woken.
     None,
 }
 
@@ -109,27 +128,40 @@ impl StateCell {
         })
     }
 
-    pub(super) fn end_poll(&self, completed: bool) -> WakeAction {
+    pub(super) fn end_poll(&self, completed: bool) -> OrDrop<PollAction> {
         self.transition(|state| {
             // Cannot end a poll if a task is not being polled!
             debug_assert!(state.get(State::POLLING));
             debug_assert!(!state.get(State::COMPLETED));
-            let next_state = state
+            let mut next_state = state
                 .with(State::POLLING, false)
                 .with(State::COMPLETED, completed);
 
             // Was the task woken during the poll?
             if !test_dbg!(completed) && test_dbg!(state.get(State::WOKEN)) {
                 *state = test_dbg!(next_state);
-                return OrDrop::Action(ScheduleAction::Enqueue);
+                return OrDrop::Action(PollAction::Enqueue);
             }
+
+            let had_join_waiter = if test_dbg!(completed) {
+                // set the output flag so that the joinhandle knows it is now
+                // safe to read the task's output.
+                next_state = next_state.with(State::HAS_OUTPUT, true);
+                test_dbg!(state.get(State::HAS_JOIN_HANDLE))
+            } else {
+                false
+            };
 
             *state = next_state;
 
             if next_state.ref_count() == 0 {
+                debug_assert!(!had_join_waiter, "a task's ref count went to zero, but the `HAS_JOIN_HANDLE` bit was set! state: {state:?}");
                 OrDrop::Drop
+            } else if had_join_waiter {
+
+                OrDrop::Action(PollAction::WakeJoinWaiter)
             } else {
-                OrDrop::Action(ScheduleAction::None)
+                OrDrop::Action(PollAction::None)
             }
         })
     }
@@ -216,6 +248,7 @@ impl StateCell {
 
     #[inline]
     pub(super) fn drop_ref(&self) -> bool {
+        test_debug!("StateCell::drop_ref");
         // We do not need to synchronize with other cores unless we are going to
         // delete the task.
         let old_refs = self.0.fetch_sub(REF_ONE, Release);
@@ -225,8 +258,8 @@ impl StateCell {
         // bits, and we can avoid doing the bitwise-and (since there are no
         // higher bits that are not part of the ref count). This is probably a
         // premature optimization lol.
-        let old_refs = old_refs >> State::REFS.least_significant_index();
         test_dbg!(State::REFS.unpack(old_refs));
+        let old_refs = old_refs >> State::REFS.least_significant_index();
 
         // Did we drop the last ref?
         if test_dbg!(old_refs) > 1 {
@@ -237,23 +270,75 @@ impl StateCell {
         true
     }
 
+    #[inline]
+    pub(super) fn create_join_handle(&self) {
+        test_debug!("StateCell::create_join_handle");
+        self.transition(|state| {
+            debug_assert!(
+                !state.get(State::HAS_JOIN_HANDLE),
+                "task already has a join handle, cannot create a new one! state={state:?}"
+            );
+
+            *state = state.with(State::HAS_JOIN_HANDLE, true);
+        })
+    }
+
+    #[inline]
+    pub(super) fn drop_join_handle(&self) {
+        test_debug!("StateCell::drop_join_handle");
+        const MASK: usize = !State::HAS_JOIN_HANDLE.raw_mask();
+        let _prev = self.0.fetch_and(MASK, Release);
+        test_trace!(
+            "drop_join_handle; prev_state:\n{}\nstate:\n{}",
+            State::from_bits(_prev),
+            self.load(Acquire),
+        );
+        debug_assert!(
+            State(_prev).get(State::HAS_JOIN_HANDLE),
+            "tried to drop a join handle when the task did not have a join handle!\nstate: {:#?}",
+            State(_prev),
+        )
+    }
+
+    /// Returns `true` if it's okay to take the task's output.
+    pub(super) fn try_take_output(&self) -> bool {
+        self.transition(|state| {
+            // If the task has not completed, we can't take its join output.
+            if test_dbg!(!state.get(State::COMPLETED)) {
+                *state = state.with(State::HAS_JOIN_HANDLE, true);
+                return false;
+            }
+
+            // If the task does not have output, we cannot take it.
+            if test_dbg!(!state.get(State::HAS_OUTPUT)) {
+                return false;
+            }
+
+            *state = state.with(State::HAS_OUTPUT, false);
+            true
+        })
+    }
+
     pub(super) fn load(&self, order: Ordering) -> State {
         State(self.0.load(order))
     }
 
     /// Advance this task's state by running the provided
     /// `transition` function on the current [`State`].
+    #[cfg_attr(test, track_caller)]
     fn transition<T>(&self, mut transition: impl FnMut(&mut State) -> T) -> T {
         let mut current = self.load(Acquire);
         loop {
-            let mut next = test_dbg!(current);
+            test_trace!("StateCell::transition; current:\n{}", current);
+            let mut next = current;
             // Run the transition function.
             let res = transition(&mut next);
 
-            if current.0 == next.0 {
+            if test_dbg!(current.0 == next.0) {
                 return res;
             }
 
+            test_trace!("StateCell::transition; next:\n{}", next);
             match self
                 .0
                 .compare_exchange_weak(current.0, next.0, AcqRel, Acquire)

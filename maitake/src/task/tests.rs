@@ -1,8 +1,18 @@
 #[cfg(loom)]
 mod loom {
-    use crate::loom::{self, alloc::Track};
-    use crate::task::*;
-
+    use crate::{
+        future,
+        loom::{
+            self,
+            alloc::{Track, TrackFuture},
+            sync::{
+                atomic::{AtomicBool, Ordering},
+                Arc,
+            },
+        },
+        scheduler::Scheduler,
+        task::*,
+    };
     #[derive(Clone)]
     struct NopScheduler;
 
@@ -32,7 +42,7 @@ mod loom {
     fn taskref_clones_deallocate() {
         loom::model(|| {
             let track = Track::new(());
-            let task = TaskRef::new(NopScheduler, async move {
+            let (task, _) = TaskRef::new(NopScheduler, async move {
                 drop(track);
             });
 
@@ -52,13 +62,83 @@ mod loom {
             }
         });
     }
+
+    #[test]
+    fn joinhandle_deallocates() {
+        loom::model(|| {
+            let track = Track::new(());
+            let (task, join) = TaskRef::new(NopScheduler, async move {
+                drop(track);
+            });
+
+            let mut thread = loom::thread::spawn(move || {
+                drop(join);
+            });
+
+            drop(task);
+
+            thread.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn join_handle_wakes() {
+        loom::model(|| {
+            let scheduler = Scheduler::new();
+            let join = scheduler.spawn(TrackFuture::new(async move {
+                future::yield_now().await;
+                "hello world!"
+            }));
+
+            let scheduler_thread = loom::thread::spawn(move || {
+                scheduler.tick();
+            });
+
+            let output = loom::future::block_on(join);
+            assert_eq!(output.map(TrackFuture::into_inner), Ok("hello world!"));
+
+            scheduler_thread.join().unwrap();
+        })
+    }
+
+    #[test]
+    fn drop_join_handle() {
+        loom::model(|| {
+            let completed = Arc::new(AtomicBool::new(false));
+            let scheduler = Scheduler::new();
+            let join = scheduler.spawn({
+                let completed = completed.clone();
+                TrackFuture::new(async move {
+                    future::yield_now().await;
+                    completed.store(true, Ordering::Relaxed);
+                })
+            });
+
+            let thread = loom::thread::spawn(move || {
+                drop(join);
+            });
+
+            // tick the scheduler.
+            scheduler.tick();
+
+            thread.join().unwrap();
+            assert!(completed.load(Ordering::Relaxed))
+        })
+    }
 }
 
 #[cfg(all(not(loom), feature = "alloc"))]
 mod alloc {
-    use crate::{scheduler::Schedule, task::*};
+    use crate::{
+        future,
+        scheduler::{Schedule, Scheduler},
+        task::*,
+    };
     use alloc::boxed::Box;
-    use core::ptr;
+    use core::{
+        ptr,
+        sync::atomic::{AtomicBool, Ordering},
+    };
 
     #[derive(Copy, Clone, Debug)]
     struct NopSchedule;
@@ -86,5 +166,49 @@ mod alloc {
 
         // clean up after ourselves by ensuring the box is deallocated
         unsafe { drop(Box::from_raw(task_ptr)) }
+    }
+
+    #[test]
+    fn join_handle_wakes() {
+        crate::util::trace_init();
+
+        let scheduler = Scheduler::new();
+        let join = scheduler.spawn(async move {
+            future::yield_now().await;
+            "hello world!"
+        });
+
+        let mut join = tokio_test::task::spawn(join);
+
+        // the join handle should be pending until the scheduler runs.
+        tokio_test::assert_pending!(test_dbg!(join.poll()), "join handle should be pending");
+        assert!(!join.is_woken());
+
+        // tick the scheduler.
+        scheduler.tick();
+
+        // the spawned task should complete on this tick.
+        assert!(join.is_woken());
+        let output =
+            tokio_test::assert_ready_ok!(test_dbg!(join.poll()), "join handle should be notified");
+        assert_eq!(test_dbg!(output), "hello world!");
+    }
+
+    #[test]
+    fn drop_join_handle() {
+        crate::util::trace_init();
+        static COMPLETED: AtomicBool = AtomicBool::new(false);
+        let scheduler = Scheduler::new();
+        let join = scheduler.spawn(async move {
+            future::yield_now().await;
+            COMPLETED.store(true, Ordering::Relaxed);
+        });
+
+        drop(join);
+
+        // tick the scheduler.
+        scheduler.tick();
+
+        assert!(COMPLETED.load(Ordering::Relaxed))
     }
 }

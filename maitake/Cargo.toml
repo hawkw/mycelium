@@ -54,9 +54,10 @@ optional = true
 [dev-dependencies]
 futures-util = "0.3"
 futures = "0.3"
+tokio-test = "0.4"
 
 [target.'cfg(not(loom))'.dev-dependencies]
-tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = ["ansi", "fmt"] }
+tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["ansi", "fmt"] }
 tracing-02 = { package = "tracing", git = "https://github.com/tokio-rs/tracing", default-features = false }
 console-subscriber = "0.1.6"
 

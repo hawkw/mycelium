@@ -7,13 +7,17 @@
 //! reference a task once it is spawned (the [`TaskRef`] type).
 //!
 //! [scheduler]: crate::scheduler
-pub use self::builder::Builder;
 #[cfg(feature = "alloc")]
 pub use self::storage::BoxStorage;
-pub use self::storage::Storage;
+pub use self::{
+    builder::Builder,
+    join_handle::{JoinError, JoinHandle},
+    storage::Storage,
+};
 pub use core::task::{Context, Poll, Waker};
 
 mod builder;
+mod join_handle;
 mod state;
 mod storage;
 
@@ -23,8 +27,9 @@ mod tests;
 use crate::{
     loom::cell::UnsafeCell,
     scheduler::Schedule,
-    task::state::{OrDrop, ScheduleAction, StateCell},
+    task::state::{OrDrop, PollAction, ScheduleAction, StateCell},
     util::non_null,
+    wait::WaitCell,
 };
 
 use core::{
@@ -98,7 +103,20 @@ pub struct Task<S, F: Future, STO> {
     /// [`Output`]: core::future::Future::Output
     inner: UnsafeCell<Cell<F>>,
 
+    /// The task's `tracing` span, if `tracing` is enabled.
     span: crate::trace::Span,
+
+    /// The [`Waker`] of the [`JoinHandle`] for this task, if one exists.
+    ///
+    // TODO(eliza): using `WaitCell` here is, admittedly, not the most
+    // efficient. A `WaitCell` has its own atomic state word, but we really only
+    // need a couple bits of state to control access to the waker. This *could*
+    // be rolled into the task's `StateCell`, and the join waker could just be
+    // an `UnsafeCell<MaybeUninit<Waker>>`, which would probably be better ---
+    // it would mean we only need to ever touch _one_ atomic, and we wouldn't
+    // need a whole extra word in the task allocation just to store a couple
+    // bits. But, `WaitCell` works fine for now.
+    join_waker: WaitCell,
 
     /// The [`Storage`] type associated with this struct
     ///
@@ -161,14 +179,31 @@ pub(crate) struct Header {
 }
 
 enum Cell<F: Future> {
-    Future(F),
-    Finished(F::Output),
+    /// The future is still pending.
+    Pending(F),
+    /// The future has completed, and its output is ready to be taken by a
+    /// `JoinHandle`, if one exists.
+    Ready(F::Output),
+    /// The future has completed, and the task's output has been taken or is not
+    /// needed.
+    Joined,
 }
 
-#[derive(Debug)]
 struct Vtable {
     /// Poll the future.
     poll: unsafe fn(TaskRef) -> Poll<()>,
+
+    /// Poll the task's `JoinHandle` for completion, storing the output at the
+    /// provided [`NonNull`] pointer if the task has completed.
+    ///
+    /// If the task has not completed, the [`Waker`] from the provided
+    /// [`Context`] is registered to be woken when the task completes.
+    // Splitting this up into type aliases just makes it *harder* to understand
+    // IMO...
+    #[allow(clippy::type_complexity)]
+    poll_join:
+        unsafe fn(NonNull<Header>, NonNull<()>, &mut Context<'_>) -> Poll<Result<(), JoinError>>,
+
     /// Drops the task and deallocates its memory.
     deallocate: unsafe fn(NonNull<Header>),
 }
@@ -216,6 +251,7 @@ where
 {
     const TASK_VTABLE: Vtable = Vtable {
         poll: Self::poll,
+        poll_join: Self::poll_join,
         deallocate: Self::deallocate,
     };
 
@@ -240,9 +276,10 @@ where
                 state: StateCell::new(),
             },
             scheduler,
-            inner: UnsafeCell::new(Cell::Future(future)),
-            storage: PhantomData,
+            inner: UnsafeCell::new(Cell::Pending(future)),
+            join_waker: WaitCell::new(),
             span: crate::trace::Span::none(),
+            storage: PhantomData,
         }
     }
 
@@ -329,7 +366,7 @@ where
             "Task::poll"
         );
         let mut this = ptr.0.cast::<Self>();
-        test_trace!(task = ?fmt::alt(this.as_ref()));
+        test_debug!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
         let state = &this.as_ref().state();
         match test_dbg!(state.start_poll()) {
@@ -356,8 +393,14 @@ where
         // post-poll state transition
         match test_dbg!(state.end_poll(poll.is_ready())) {
             OrDrop::Drop => drop(STO::from_raw(this)),
-            OrDrop::Action(ScheduleAction::Enqueue) => Self::schedule(ptr),
-            OrDrop::Action(ScheduleAction::None) => {}
+            OrDrop::Action(PollAction::Enqueue) => Self::schedule(ptr),
+            OrDrop::Action(PollAction::WakeJoinWaiter) => {
+                // set the `CLOSED` bit on the wait cell so that the join waker
+                // will always know that the task has completed, even if a join
+                // waker was not present when we ended this poll.
+                this.as_ref().join_waker.close();
+            }
+            OrDrop::Action(PollAction::None) => {}
         }
 
         poll
@@ -373,6 +416,44 @@ where
         drop(STO::from_raw(this));
     }
 
+    unsafe fn poll_join(
+        task: NonNull<Header>,
+        outptr: NonNull<()>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), JoinError>> {
+        use crate::wait::cell::Error as WaitCellError;
+
+        trace!(
+            task.addr = ?task,
+            task.output = %type_name::<<F>::Output>(),
+            "Task::poll_join"
+        );
+        let task = task.cast::<Self>();
+        loop {
+            if task.as_ref().state().try_take_output() {
+                task.as_ref().inner.with_mut(|cell| {
+                    match mem::replace(&mut *cell, Cell::Joined) {
+                        Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
+                        state => unreachable!("attempted to take join output on a task that has not completed! task: {task:?}; state: {state:?}"),
+                    }
+                });
+
+                return Poll::Ready(Ok(()));
+            }
+
+            // okay, we did not take the output, register the join waiter.
+            return match task.as_ref().join_waker.register_wait(cx.waker()) {
+                Ok(_) => Poll::Pending,
+                // we were notified while trying to register --- we can now read the
+                // output
+                Err(WaitCellError::Notifying) | Err(WaitCellError::Closed) => continue,
+                Err(WaitCellError::Parking) => {
+                    unreachable!("multiple threads should not race on a join waker...what do")
+                }
+            };
+        }
+    }
+
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {
         #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
         let _span = self.span.enter();
@@ -380,13 +461,13 @@ where
         self.inner.with_mut(|cell| {
             let cell = unsafe { &mut *cell };
             let poll = match cell {
-                Cell::Future(future) => unsafe { Pin::new_unchecked(future).poll(&mut cx) },
-                Cell::Finished(_) => unreachable!("tried to poll a completed future!"),
+                Cell::Pending(future) => unsafe { Pin::new_unchecked(future).poll(&mut cx) },
+                _ => unreachable!("tried to poll a completed future!"),
             };
 
             match poll {
                 Poll::Ready(ready) => {
-                    *cell = Cell::Finished(ready);
+                    *cell = Cell::Ready(ready);
                     Poll::Ready(())
                 }
                 Poll::Pending => Poll::Pending,
@@ -430,7 +511,7 @@ impl TaskRef {
     const NO_BUILDER: &'static Settings<'static> = &Settings::new();
 
     #[track_caller]
-    pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> Self
+    pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> (Self, JoinHandle<F::Output>)
     where
         S: Schedule,
         F: Future,
@@ -440,7 +521,10 @@ impl TaskRef {
     }
 
     #[track_caller]
-    pub(crate) fn build_allocated<S, F, STO>(builder: &Settings<'_>, task: STO::StoredTask) -> Self
+    pub(crate) fn build_allocated<S, F, STO>(
+        builder: &Settings<'_>,
+        task: STO::StoredTask,
+    ) -> (Self, JoinHandle<F::Output>)
     where
         S: Schedule,
         F: Future,
@@ -485,12 +569,39 @@ impl TaskRef {
 
         #[cfg(not(any(feature = "tracing-01", feature = "tracing-02", test)))]
         let _ = builder;
-        Self(ptr)
+        let this = Self(ptr);
+        let join_handle = unsafe {
+            // Safety: it's fine to create a `JoinHandle` here, because we know
+            // the task's actual output type.
+            JoinHandle::from_task_ref(this.clone())
+        };
+        (this, join_handle)
     }
 
     pub(crate) fn poll(self) -> Poll<()> {
         let poll_fn = self.header().vtable.poll;
         unsafe { poll_fn(self) }
+    }
+
+    /// # Safety
+    ///
+    /// `T` *must* be the task's actual output type!
+    unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError>> {
+        let poll_join_fn = self.header().vtable.poll_join;
+        let mut slot = mem::MaybeUninit::<T>::uninit();
+        match test_dbg!(poll_join_fn(
+            self.0,
+            NonNull::from(&mut slot).cast::<()>(),
+            cx
+        )) {
+            Poll::Ready(Ok(())) => {
+                // if the poll function returned `Ok`, we get to take the
+                // output!
+                Poll::Ready(Ok(slot.assume_init_read()))
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     #[inline]
@@ -506,7 +617,9 @@ impl TaskRef {
 
 impl Clone for TaskRef {
     #[inline]
+    #[track_caller]
     fn clone(&self) -> Self {
+        test_debug!("clone {:?}", self);
         self.state().clone_ref();
         Self(self.0)
     }
@@ -514,7 +627,9 @@ impl Clone for TaskRef {
 
 impl Drop for TaskRef {
     #[inline]
+    #[track_caller]
     fn drop(&mut self) {
+        test_debug!(task.addr = ?self.0, "drop TaskRef");
         if !self.state().drop_ref() {
             return;
         }
@@ -547,16 +662,33 @@ unsafe fn _maitake_header_nop_deallocate(ptr: NonNull<Header>) {
     unreachable!("stub task ({ptr:p}) should never be deallocated!");
 }
 
+// See https://github.com/rust-lang/rust/issues/97708 for why
+// this is necessary
+#[no_mangle]
+unsafe fn _maitake_header_nop_poll_join(
+    _ptr: NonNull<Header>,
+    _: NonNull<()>,
+    _: &mut Context<'_>,
+) -> Poll<Result<(), JoinError>> {
+    #[cfg(debug_assertions)]
+    unreachable!("stub task ({_ptr:?}) should never be polled!");
+    #[cfg(not(debug_assertions))]
+    false
+}
+
 impl Header {
+    const STUB_VTABLE: Vtable = Vtable {
+        poll: _maitake_header_nop,
+        poll_join: _maitake_header_nop_poll_join,
+        deallocate: _maitake_header_nop_deallocate,
+    };
+
     #[cfg(not(loom))]
     pub(crate) const fn new_stub() -> Self {
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
-            vtable: &Vtable {
-                poll: _maitake_header_nop,
-                deallocate: _maitake_header_nop_deallocate,
-            },
+            vtable: &Self::STUB_VTABLE,
         }
     }
 
@@ -633,9 +765,20 @@ unsafe impl Sync for Header {}
 impl<F: Future> fmt::Debug for Cell<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Cell::Finished(_) => f.pad("Cell::Finished(...)"),
-            Cell::Future(_) => f.pad("Cell::Future(...)"),
+            Cell::Pending(_) => f.pad("Cell::Pending(...)"),
+            Cell::Ready(_) => f.pad("Cell::Ready(...)"),
+            Cell::Joined => f.pad("Cell::Joined"),
         }
+    }
+}
+
+impl fmt::Debug for Vtable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Vtable")
+            .field("poll", &fmt::ptr(self.poll))
+            .field("poll_join", &fmt::ptr(self.poll_join as *const ()))
+            .field("deallocate", &fmt::ptr(self.deallocate))
+            .finish()
     }
 }
 
@@ -649,7 +792,7 @@ feature! {
     impl TaskRef {
 
         #[track_caller]
-        pub(crate) fn new<S, F>(scheduler: S, future: F) -> Self
+        pub(crate) fn new<S, F>(scheduler: S, future: F) -> (Self, JoinHandle<F::Output>)
         where
             S: Schedule,
             F: Future + 'static

@@ -1,4 +1,4 @@
-use super::{Future, Schedule, Storage, Task, TaskRef};
+use super::{Future, JoinHandle, Schedule, Storage, Task, TaskRef};
 use core::panic::Location;
 
 /// Builds a new [`Task`] prior to spawning it.
@@ -87,29 +87,44 @@ impl<'a, S: Schedule> Builder<'a, S> {
     ///
     /// Note that the `StoredTask` *must* be bound to the same scheduler
     /// instance as this task's scheduler!
+    ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
     #[inline]
     #[track_caller]
-    pub fn spawn_allocated<STO, F>(&self, task: STO::StoredTask)
+    pub fn spawn_allocated<STO, F>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
     where
         F: Future + 'static,
+        F::Output: 'static,
         STO: Storage<S, F>,
     {
-        let task = TaskRef::build_allocated::<S, F, STO>(&self.settings, task);
+        let (task, join) = TaskRef::build_allocated::<S, F, STO>(&self.settings, task);
         self.scheduler.schedule(task);
+        join
     }
 
     feature! {
         #![feature = "alloc"]
 
         /// Spawns a new task with this builder's configured settings.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
         #[inline]
         #[track_caller]
-        pub fn spawn(&self, future: impl Future + 'static) {
+        pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
             use alloc::boxed::Box;
             use super::BoxStorage;
             let task = Box::new(Task::<S, _, BoxStorage>::new(self.scheduler.clone(), future));
-            let task = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
+            let (task, join) = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
             self.scheduler.schedule(task);
+            join
         }
     }
 }

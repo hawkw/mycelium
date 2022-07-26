@@ -22,13 +22,16 @@ impl<S, F: Future> task::Storage<S, F> for MyBoxStorage {
     }
 }
 
-impl<F: Future + 'static> MyBoxTask<&'static StaticScheduler, F> {
-    fn spawn(scheduler: &'static StaticScheduler, future: F) {
+impl<F> MyBoxTask<&'static StaticScheduler, F>
+where
+    F: Future + 'static,
+    F::Output: 'static,
+{
+    fn spawn(scheduler: &'static StaticScheduler, future: F) -> task::JoinHandle<F::Output> {
         let task = MyBoxTask(Box::new(Task::new(scheduler, future)));
         scheduler.spawn_allocated::<F, MyBoxStorage>(task)
     }
 }
-
 #[test]
 fn basically_works() {
     static STUB: TaskStub = TaskStub::new();
@@ -64,7 +67,7 @@ fn schedule_many() {
         MyBoxTask::spawn(&SCHEDULER, async {
             future::yield_now().await;
             COMPLETED.fetch_add(1, Ordering::SeqCst);
-        })
+        });
     }
 
     let tick = SCHEDULER.tick();
@@ -88,7 +91,7 @@ fn many_yields() {
         MyBoxTask::spawn(&SCHEDULER, async move {
             future::Yield::new(i).await;
             COMPLETED.fetch_add(1, Ordering::SeqCst);
-        })
+        });
     }
 
     let tick = SCHEDULER.tick();

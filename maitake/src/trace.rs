@@ -46,6 +46,7 @@ macro_rules! debug {
     };
 }
 
+#[cfg(loom)]
 macro_rules! info {
     ($($arg:tt)+) => {
         #[cfg(any(feature = "tracing-01", loom))]
@@ -97,6 +98,18 @@ macro_rules! test_dbg {
 }
 
 #[cfg(not(test))]
+macro_rules! test_debug {
+    ($($args:tt)+) => {};
+}
+
+#[cfg(test)]
+macro_rules! test_debug {
+    ($($args:tt)+) => {
+        debug!($($args)+);
+    };
+}
+
+#[cfg(not(test))]
 macro_rules! test_trace {
     ($($args:tt)+) => {};
 }
@@ -104,10 +117,7 @@ macro_rules! test_trace {
 #[cfg(test)]
 macro_rules! test_trace {
     ($($args:tt)+) => {
-        debug!(
-            location = %core::panic::Location::caller(),
-            $($args)+
-        );
+        trace!($($args)+);
     };
 }
 

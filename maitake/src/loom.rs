@@ -6,7 +6,55 @@ mod inner {
     #![allow(dead_code)]
 
     #[cfg(feature = "alloc")]
-    pub(crate) use loom::alloc;
+    pub(crate) mod alloc {
+        use super::sync::Arc;
+        use core::{
+            future::Future,
+            pin::Pin,
+            task::{Context, Poll},
+        };
+        pub(crate) use loom::alloc::*;
+        #[pin_project::pin_project]
+        pub(crate) struct TrackFuture<F> {
+            #[pin]
+            inner: F,
+            track: Arc<()>,
+        }
+
+        impl<F: Future> Future for TrackFuture<F> {
+            type Output = TrackFuture<F::Output>;
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                let this = self.project();
+                this.inner.poll(cx).map(|inner| TrackFuture {
+                    inner,
+                    track: this.track.clone(),
+                })
+            }
+        }
+
+        impl<F> TrackFuture<F> {
+            /// Wrap a `Future` in a `TrackFuture` that participates in Loom's
+            /// leak checking.
+            #[track_caller]
+            pub(crate) fn new(inner: F) -> Self {
+                Self {
+                    inner,
+                    track: Arc::new(()),
+                }
+            }
+
+            /// Stop tracking this future, and return the inner value.
+            pub(crate) fn into_inner(self) -> F {
+                self.inner
+            }
+        }
+
+        #[track_caller]
+        pub(crate) fn track_future<F: Future>(inner: F) -> TrackFuture<F> {
+            TrackFuture::new(inner)
+        }
+    }
+
     pub(crate) use loom::{cell, future, model, thread};
 
     pub(crate) mod sync {
