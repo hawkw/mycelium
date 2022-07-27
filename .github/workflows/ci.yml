@@ -176,6 +176,7 @@ jobs:
     - name: run rustdoc
       run: |
         cargo doc \
+          --workspace \
           --message-format=json \
           --no-deps \
           --all-features \
