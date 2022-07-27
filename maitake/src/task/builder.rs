@@ -59,6 +59,8 @@ impl<'a, S: Schedule> Builder<'a, S> {
     /// enabled.
     ///
     /// By default, tasks will have the kind "task".
+    ///
+    /// [`name`]: Self::name
     pub fn kind(self, kind: &'static str) -> Self {
         Self {
             settings: Settings {

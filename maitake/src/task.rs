@@ -178,6 +178,11 @@ pub(crate) struct Header {
     vtable: &'static Vtable,
 }
 
+/// The core of a task: either the [`Future`] that was spawned, if the task
+/// has not yet completed, or the [`Output`] of the future, once the future has
+/// completed.
+///
+/// [`Output`]: Future::Output
 enum Cell<F: Future> {
     /// The future is still pending.
     Pending(F),
@@ -189,6 +194,20 @@ enum Cell<F: Future> {
     Joined,
 }
 
+/// A virtual function pointer table (vtable) that specifies the behavior
+/// of a [`Task`] instance.
+///
+/// This is distinct from the [`RawWakerVtable`] type in [`core::task`]: that
+/// type specifies the vtable for a task's [`Waker`], while this vtable
+/// specifies functions called by the runtime to poll, join, and deallocate a
+/// spawned task.
+///
+/// The first argument passed to all functions inside this vtable is a pointer
+/// to the task.
+///
+/// The functions inside this struct are only intended to be called on a pointer
+/// to a spawned [`Task`]. Calling one of the contained functions using
+/// any other pointer will cause undefined behavior.
 struct Vtable {
     /// Poll the future.
     poll: unsafe fn(TaskRef) -> Poll<()>,
