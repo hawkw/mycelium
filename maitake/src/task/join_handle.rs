@@ -17,11 +17,12 @@ use core::{future::Future, marker::PhantomData, pin::Pin};
 /// [`Scheduler::spawn_allocated`] methods, and the [`task::Builder::spawn`] and
 /// [`task::Builder::spawn_allocated`] methods.
 ///
+/// [task]: crate::task
+/// [`std::thread::JoinHandle`]: https://doc.rust-lang.org/stable/std/thread/struct.JoinHandle.html
 /// [`Scheduler::spawn`]: crate::scheduler::Scheduler::spawn
 /// [`Scheduler::spawn_allocated`]: crate::scheduler::Scheduler::spawn_allocated
 /// [`task::Builder::spawn`]: crate::task::Builder::spawn
 /// [`task::Builder::spawn_allocated`]: crate::task::Builder::spawn_allocated
-/// [task]: crate::task
 #[derive(Debug)]
 pub struct JoinHandle<T> {
     task: Option<TaskRef>,
