@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(tick.completed, 0);
         assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
 
-        assert_eq!(wait.wake(), true);
+        assert!(wait.wake());
         let tick = sched.tick();
         assert_eq!(tick.completed, 1);
         assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
