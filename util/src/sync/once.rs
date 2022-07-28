@@ -178,7 +178,6 @@ impl<T> InitOnce<T> {
     /// your code.
     #[cfg_attr(not(debug_assertions), inline(always))]
     #[cfg_attr(debug_assertions, track_caller)]
-    #[inline]
     #[must_use]
     pub unsafe fn get_unchecked(&self) -> &T {
         debug_assert_eq!(
