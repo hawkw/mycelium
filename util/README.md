@@ -30,7 +30,7 @@ in the [Mycelium] operating system and its related libraries.
 
 > **Warning**
 > This crate is not *really* intended for general public consumption &mdash;
-> it's written specifically for use in [`Mycelium`]. While it can be used
+> it's written specifically for use in [Mycelium]. While it can be used
 > elsewhere, it may have a number of Mycelium-specific quirks and design
 > decisions. It's being published to crates.io primarily so that other crates
 > which depend on it can be published, not because it's expected to be broadly

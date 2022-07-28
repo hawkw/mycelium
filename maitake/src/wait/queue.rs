@@ -198,7 +198,7 @@ pub struct WaitQueue {
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Wait<'a> {
-    /// The [`WaitQueue`] being waited on from.
+    /// The [`WaitQueue`] being waited on.
     queue: &'a WaitQueue,
 
     /// Entry in the wait queue linked list.
