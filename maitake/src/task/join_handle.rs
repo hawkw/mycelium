@@ -41,6 +41,9 @@ pub struct JoinError {
 enum JoinErrorKind {
     /// The task was canceled.
     Canceled,
+
+    /// A stub was awaited
+    StubNever,
 }
 
 impl<T> JoinHandle<T> {
@@ -98,6 +101,13 @@ impl JoinError {
     pub(crate) fn canceled() -> Self {
         Self {
             kind: JoinErrorKind::Canceled,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn stub() -> Self {
+        Self {
+            kind: JoinErrorKind::StubNever,
         }
     }
 

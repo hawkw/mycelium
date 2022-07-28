@@ -692,7 +692,7 @@ unsafe fn _maitake_header_nop_poll_join(
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
     #[cfg(not(debug_assertions))]
-    false
+    Poll::Ready(Err(JoinError::stub()))
 }
 
 impl Header {
