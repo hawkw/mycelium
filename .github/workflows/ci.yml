@@ -71,9 +71,18 @@ jobs:
       run: rustup show
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - uses: actions/checkout@v2
-    - name: run cargo check
+    - name: run cargo check (debug)
       run: |
         cargo check \
+          --workspace \
+          --all-features \
+          --quiet \
+          --message-format=json |
+          cargo-action-fmt
+    - name: run cargo check (release)
+      run: |
+        cargo check \
+          --release \
           --workspace \
           --all-features \
           --quiet \
