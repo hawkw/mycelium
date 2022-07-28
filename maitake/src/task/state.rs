@@ -26,9 +26,24 @@ mycelium_bitfield::bitfield! {
         /// If set, this task has a [`JoinHandle`] awaiting its completion.
         ///
         /// If the `JoinHandle` is dropped, this flag is unset.
+        ///
+        /// This flag does *not* indicate the presence of a [`Waker`] in the
+        /// `join_waker` slot; it only indicates that a [`JoinHandle`] for this
+        /// task *exists*. The join waker may not currently be registered if
+        /// this flag is set.
         pub(crate) const HAS_JOIN_HANDLE: bool;
+
+        /// If set, the task's [`JoinHandle`] has registered a [`Waker`] in the
+        /// task's `join_waker` slot.
+        ///
+        /// If this is not set, the `join_waker` slot may be uninitialized.
+        ///
+        /// If this is set, it implies that `HAS_JOIN_HANDLE` is also set.
+        pub(crate) const HAS_JOIN_WAKER: bool;
+
         /// If set, this task has output ready to be taken by a [`JoinHandle`].
         pub(crate) const HAS_OUTPUT: bool;
+
         /// The number of currently live references to this task.
         ///
         /// When this is 0, the task may be deallocated.

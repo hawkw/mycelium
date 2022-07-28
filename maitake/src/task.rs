@@ -108,15 +108,11 @@ pub struct Task<S, F: Future, STO> {
 
     /// The [`Waker`] of the [`JoinHandle`] for this task, if one exists.
     ///
-    // TODO(eliza): using `WaitCell` here is, admittedly, not the most
-    // efficient. A `WaitCell` has its own atomic state word, but we really only
-    // need a couple bits of state to control access to the waker. This *could*
-    // be rolled into the task's `StateCell`, and the join waker could just be
-    // an `UnsafeCell<MaybeUninit<Waker>>`, which would probably be better ---
-    // it would mean we only need to ever touch _one_ atomic, and we wouldn't
-    // need a whole extra word in the task allocation just to store a couple
-    // bits. But, `WaitCell` works fine for now.
-    join_waker: WaitCell,
+    /// # Safety
+    ///
+    /// This field is only initialized when the [`State::HAS_JOIN_WAKER`] bit is
+    /// set. If that bit is unset, this field may be uninitialized.
+    join_waker: UnsafeCell<mem::MaybeUninit<Waker>>,
 
     /// The [`Storage`] type associated with this struct
     ///
@@ -296,7 +292,7 @@ where
             },
             scheduler,
             inner: UnsafeCell::new(Cell::Pending(future)),
-            join_waker: WaitCell::new(),
+            join_waker: UnsafeCell::new(mem::MaybeUninit::uninit()),
             span: crate::trace::Span::none(),
             storage: PhantomData,
         }
