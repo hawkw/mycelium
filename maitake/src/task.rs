@@ -197,7 +197,7 @@ enum Cell<F: Future> {
 /// A virtual function pointer table (vtable) that specifies the behavior
 /// of a [`Task`] instance.
 ///
-/// This is distinct from the [`RawWakerVtable`] type in [`core::task`]: that
+/// This is distinct from the [`RawWakerVTable`] type in [`core::task`]: that
 /// type specifies the vtable for a task's [`Waker`], while this vtable
 /// specifies functions called by the runtime to poll, join, and deallocate a
 /// spawned task.

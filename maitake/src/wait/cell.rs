@@ -65,7 +65,7 @@ struct State(usize);
 #[derive(Debug)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Wait<'a> {
-    /// The [`WaitQueue`] being waited on from.
+    /// The [`WaitCell`] being waited on.
     cell: &'a WaitCell,
 
     /// Whether we have already polled once
