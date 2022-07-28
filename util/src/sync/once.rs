@@ -2,21 +2,23 @@
 //!
 //! This module provides:
 //!
-//! - [`InitOnce`]: a cell storing a [`MaybeUninit`] value which must be
+//! - [`InitOnce`]: a cell storing a [`CheckedMaybeUninit`] value which must be
 //!       manually initialized prior to use.
 //! - [`Lazy`]: an [`InitOnce`] cell coupled with an initializer function. The
 //!       [`Lazy`] cell ensures the initializer is called to initialize the
 //!       value the first time it is accessed.
-use crate::sync::{
-    atomic::{AtomicU8, Ordering},
-    spin::Backoff,
+use crate::{
+    mem::CheckedMaybeUninit,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        spin::Backoff,
+    },
+    unreachable_unchecked,
 };
-use crate::unreachable_unchecked;
 use core::{
     any,
     cell::UnsafeCell,
     fmt,
-    mem::MaybeUninit,
     ops::{Deref, DerefMut},
 };
 
@@ -31,7 +33,7 @@ use core::{
 ///
 /// [`get_unchecked`]: Self::get_unchecked
 pub struct InitOnce<T> {
-    value: UnsafeCell<MaybeUninit<T>>,
+    value: UnsafeCell<CheckedMaybeUninit<T>>,
     state: AtomicU8,
 }
 
@@ -40,7 +42,7 @@ pub struct InitOnce<T> {
 ///
 /// This can be used as a safer alternative to `static mut`.
 pub struct Lazy<T, F = fn() -> T> {
-    value: UnsafeCell<MaybeUninit<T>>,
+    value: UnsafeCell<CheckedMaybeUninit<T>>,
     state: AtomicU8,
     initializer: F,
 }
@@ -66,7 +68,7 @@ impl<T> InitOnce<T> {
         #[must_use]
         pub fn uninitialized() -> Self {
             Self {
-                value: UnsafeCell::new(MaybeUninit::uninit()),
+                value: UnsafeCell::new(CheckedMaybeUninit::uninit()),
                 state: AtomicU8::new(UNINITIALIZED),
             }
         }
@@ -87,7 +89,7 @@ impl<T> InitOnce<T> {
             return Err(TryInitError { value, actual });
         };
         unsafe {
-            *(self.value.get()) = MaybeUninit::new(value);
+            *(self.value.get()) = CheckedMaybeUninit::new(value);
         }
         let _prev = self.state.swap(INITIALIZED, Ordering::AcqRel);
         debug_assert_eq!(
@@ -227,7 +229,7 @@ impl<T, F> Lazy<T, F> {
         #[must_use]
         pub fn new(initializer: F) -> Self {
             Self {
-                value: UnsafeCell::new(MaybeUninit::uninit()),
+                value: UnsafeCell::new(CheckedMaybeUninit::uninit()),
                 state: AtomicU8::new(UNINITIALIZED),
                 initializer,
             }
@@ -304,7 +306,7 @@ where
             Ok(_) => {
                 // Now we have to actually initialize the cell.
                 unsafe {
-                    *(self.value.get()) = MaybeUninit::new((self.initializer)());
+                    *(self.value.get()) = CheckedMaybeUninit::new((self.initializer)());
                 }
                 if let Err(actual) = self.state.compare_exchange(
                     INITIALIZING,

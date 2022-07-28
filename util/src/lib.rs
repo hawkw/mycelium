@@ -13,6 +13,7 @@ pub mod error;
 pub mod fmt;
 pub mod io;
 pub mod math;
+pub mod mem;
 pub mod sync;
 
 pub(crate) mod loom;

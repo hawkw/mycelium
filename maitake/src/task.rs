@@ -607,6 +607,9 @@ impl TaskRef {
     /// `T` *must* be the task's actual output type!
     unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError>> {
         let poll_join_fn = self.header().vtable.poll_join;
+        // NOTE: we can't use `CheckedMaybeUninit` here, since the vtable method
+        // will cast this to a `MaybeUninit` and write to it; this would ignore
+        // the initialized tracking bit.
         let mut slot = mem::MaybeUninit::<T>::uninit();
         match test_dbg!(poll_join_fn(
             self.0,
