@@ -57,7 +57,16 @@ pub struct Free {
 impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
     #[cfg(not(loom))]
     pub const fn new(mut min_size: usize) -> Self {
+        // clippy doesn't like interior mutable items in `const`s, because
+        // mutating an instance of the `const` value will not mutate the const.
+        // that is the *correct* behavior here, as the const is used just as an
+        // array initializer; every time it's referenced, it *should* produce a
+        // new value. therefore, this warning is incorrect in this case.
+        //
+        // see https://github.com/rust-lang/rust-clippy/issues/7665
+        #[allow(clippy::declare_interior_mutable_const)]
         const ONE_FREE_LIST: spin::Mutex<List<Free>> = spin::Mutex::new(List::new());
+
         // ensure we don't split memory into regions too small to fit the free
         // block header in them.
         let free_block_size = mem::size_of::<Free>();
