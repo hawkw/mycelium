@@ -705,7 +705,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
         // this check will never trigger, if we are already waiting, we should
         // still be waiting.
         let mut cursor = waiters.cursor_front_mut();
-        if cursor.find(|n| &n.key == this.key).is_some() {
+        if cursor.any(|n| &n.key == this.key) {
             return duplicate();
         }
 
