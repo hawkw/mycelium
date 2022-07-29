@@ -32,12 +32,20 @@ mycelium_bitfield::bitfield! {
         /// `join_waker` slot; it only indicates that a [`JoinHandle`] for this
         /// task *exists*. The join waker may not currently be registered if
         /// this flag is set.
+        ///
+        /// [`Waker`]: core::task::Waker
+        /// [`JoinHandle`]: super::JoinHandle
         pub(crate) const HAS_JOIN_HANDLE: bool;
 
-        /// The state of the task's [`JoinHandle`] waker.
+        /// The state of the task's [`JoinHandle`] [`Waker`].
+        ///
+        /// [`Waker`]: core::task::Waker
+        /// [`JoinHandle`]: super::JoinHandle
         const JOIN_WAKER: JoinWakerState;
 
         /// If set, this task has output ready to be taken by a [`JoinHandle`].
+        ///
+        /// [`JoinHandle`]: super::JoinHandle
         pub(crate) const HAS_OUTPUT: bool;
 
         /// The number of currently live references to this task.
@@ -414,8 +422,11 @@ impl StateCell {
         })
     }
 
-    /// Returns `true` if this task has an un-dropped [`JoinHandle`] waker that
+    /// Returns `true` if this task has an un-dropped [`JoinHandle`] [`Waker`] that
     /// needs to be dropped.
+    ///
+    /// [`JoinHandle`]: super::JoinHandle
+    /// [`Waker`]: core::task::Waker
     pub(super) fn join_waker_needs_drop(&self) -> bool {
         let state = self.load(Acquire);
         match test_dbg!(state.get(State::JOIN_WAKER)) {

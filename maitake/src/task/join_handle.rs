@@ -104,6 +104,7 @@ impl JoinError {
         }
     }
 
+    #[allow(dead_code)] // this will be used when i implement task cancellation
     #[inline]
     pub(crate) fn stub() -> Self {
         Self {
