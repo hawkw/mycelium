@@ -131,7 +131,7 @@ pub(crate) struct Span {
 
 impl Span {
     #[inline(always)]
-    pub(crate) fn none() -> Self {
+    pub(crate) const fn none() -> Self {
         Span {
             #[cfg(any(feature = "tracing-01", loom))]
             span_01: tracing_01::Span::none(),

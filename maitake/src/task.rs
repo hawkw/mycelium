@@ -172,6 +172,12 @@ pub(crate) struct Header {
 /// `S`-typed [scheduler], and not the task's `Future` and `Storage` types. This
 /// reduces excessive monomorphization of waker vtable functions.
 ///
+/// This type knows the task's [`RawWaker`] vtable, as the raw waker methods
+/// need only be generic over the type of the scheduler. It does not know the
+/// task's *task* vtable, as the task vtable actually polls the future and
+/// deallocates the task, and must therefore know the types of the task's future
+/// and storage.
+///
 /// [scheduler]: crate::scheduler::Schedule
 #[repr(C)]
 #[derive(Debug)]
@@ -297,6 +303,7 @@ where
     }
 
     #[inline]
+    #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
     fn span(&self) -> &trace::Span {
         &self.header().span
     }
@@ -337,20 +344,6 @@ where
         }
     }
 
-    #[inline]
-    unsafe fn drop_ref(this: NonNull<Self>) {
-        trace!(
-            task.addr = ?this,
-            task.output = %type_name::<<F>::Output>(),
-            "Task::drop_ref"
-        );
-        if !this.as_ref().state().drop_ref() {
-            return;
-        }
-
-        drop(STO::from_raw(this))
-    }
-
     unsafe fn poll(ptr: TaskRef) -> Poll<()> {
         trace!(
             task.addr = ?ptr,
@@ -375,19 +368,22 @@ where
         // existing task ref, rather than incrementing the task ref count. if
         // this waker is consumed during the poll, we don't want to decrement
         // its ref count when the poll ends.
-        let waker = mem::ManuallyDrop::new(Waker::from_raw(Schedulable::<S>::raw_waker(
-            this.as_ptr().cast(),
-        )));
-        let cx = Context::from_waker(&waker);
+        let waker = {
+            let raw = Schedulable::<S>::raw_waker(this.as_ptr().cast());
+            mem::ManuallyDrop::new(Waker::from_raw(raw))
+        };
 
         // actually poll the task
-        let pin = Pin::new_unchecked(this.as_mut());
-        let poll = pin.poll_inner(cx);
+        let poll = {
+            let cx = Context::from_waker(&waker);
+            let pin = Pin::new_unchecked(this.as_mut());
+            pin.poll_inner(cx)
+        };
 
         // post-poll state transition
         match test_dbg!(state.end_poll(poll.is_ready())) {
             OrDrop::Drop => drop(STO::from_raw(this)),
-            OrDrop::Action(PollAction::Enqueue) => Self::schedule(ptr),
+            OrDrop::Action(PollAction::Enqueue) => Schedulable::<S>::schedule(ptr),
             OrDrop::Action(PollAction::WakeJoinWaiter) => {
                 // set the `CLOSED` bit on the wait cell so that the join waker
                 // will always know that the task has completed, even if a join
@@ -544,6 +540,7 @@ impl<S: Schedule> Schedulable<S> {
     }
 
     #[inline(always)]
+    #[cfg(any(feature = "tracing-01", loom))]
     fn span(&self) -> &trace::Span {
         &self.header.span
     }
@@ -648,7 +645,7 @@ impl TaskRef {
                 loc.col = loc.column(),
             );
             unsafe {
-                ptr.as_mut().schedulable.span = span;
+                ptr.as_mut().schedulable.header.span = span;
             };
         }
 
@@ -786,6 +783,7 @@ impl Header {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
             vtable: &Self::STUB_VTABLE,
+            span: trace::Span::none(),
         }
     }
 
