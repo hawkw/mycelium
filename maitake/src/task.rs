@@ -24,13 +24,7 @@ mod storage;
 #[cfg(test)]
 mod tests;
 
-use crate::{
-    loom::cell::UnsafeCell,
-    scheduler::Schedule,
-    task::state::{OrDrop, PollAction, ScheduleAction, StateCell},
-    util::non_null,
-    wait::WaitCell,
-};
+use crate::{loom::cell::UnsafeCell, scheduler::Schedule, util::non_null};
 
 use core::{
     any::type_name,
@@ -42,9 +36,12 @@ use core::{
     task::{RawWaker, RawWakerVTable},
 };
 
-use self::builder::Settings;
+use self::{
+    builder::Settings,
+    state::{JoinAction, OrDrop, PollAction, ScheduleAction, StateCell},
+};
 use cordyceps::{mpsc_queue, Linked};
-use mycelium_util::fmt;
+use mycelium_util::{fmt, mem::CheckedMaybeUninit};
 
 /// A type-erased, reference-counted pointer to a spawned [`Task`].
 ///
@@ -112,7 +109,7 @@ pub struct Task<S, F: Future, STO> {
     ///
     /// This field is only initialized when the [`State::HAS_JOIN_WAKER`] bit is
     /// set. If that bit is unset, this field may be uninitialized.
-    join_waker: UnsafeCell<mem::MaybeUninit<Waker>>,
+    join_waker: UnsafeCell<CheckedMaybeUninit<Waker>>,
 
     /// The [`Storage`] type associated with this struct
     ///
@@ -292,7 +289,7 @@ where
             },
             scheduler,
             inner: UnsafeCell::new(Cell::Pending(future)),
-            join_waker: UnsafeCell::new(mem::MaybeUninit::uninit()),
+            join_waker: UnsafeCell::new(CheckedMaybeUninit::uninit()),
             span: crate::trace::Span::none(),
             storage: PhantomData,
         }
@@ -410,10 +407,10 @@ where
             OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(PollAction::Enqueue) => Self::schedule(ptr),
             OrDrop::Action(PollAction::WakeJoinWaiter) => {
-                // set the `CLOSED` bit on the wait cell so that the join waker
-                // will always know that the task has completed, even if a join
-                // waker was not present when we ended this poll.
-                this.as_ref().join_waker.close();
+                // wake the join waker
+                this.as_ref().join_waker.with_mut(|join_waker| unsafe {
+                    (*join_waker).assume_init_read().wake();
+                });
             }
             OrDrop::Action(PollAction::None) => {}
         }
@@ -436,17 +433,15 @@ where
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), JoinError>> {
-        use crate::wait::cell::Error as WaitCellError;
-
         trace!(
             task.addr = ?task,
             task.output = %type_name::<<F>::Output>(),
             "Task::poll_join"
         );
-        let task = task.cast::<Self>();
-        loop {
-            if task.as_ref().state().try_take_output() {
-                task.as_ref().inner.with_mut(|cell| {
+        let task = task.cast::<Self>().as_ref();
+        match test_dbg!(task.state().try_join()) {
+            JoinAction::TakeOutput => {
+                task.inner.with_mut(|cell| {
                     match mem::replace(&mut *cell, Cell::Joined) {
                         Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
                         state => unreachable!("attempted to take join output on a task that has not completed! task: {task:?}; state: {state:?}"),
@@ -455,18 +450,27 @@ where
 
                 return Poll::Ready(Ok(()));
             }
-
-            // okay, we did not take the output, register the join waiter.
-            return match task.as_ref().join_waker.register_wait(cx.waker()) {
-                Ok(_) => Poll::Pending,
-                // we were notified while trying to register --- we can now read the
-                // output
-                Err(WaitCellError::Notifying) | Err(WaitCellError::Closed) => continue,
-                Err(WaitCellError::Parking) => {
-                    unreachable!("multiple threads should not race on a join waker...what do")
-                }
-            };
+            JoinAction::Register => {
+                task.join_waker.with_mut(|waker| unsafe {
+                    // safety: we now have exclusive permission to write to the
+                    // join waker.
+                    (*waker).write(cx.waker().clone());
+                })
+            }
+            JoinAction::Reregister => {
+                task.join_waker.with_mut(|waker| unsafe {
+                    // safety: we now have exclusive permission to write to the
+                    // join waker.
+                    let waker = (*waker).assume_init_mut();
+                    let my_waker = cx.waker();
+                    if !waker.will_wake(my_waker) {
+                        *waker = my_waker.clone();
+                    }
+                });
+            }
         }
+        task.state().join_waker_registered();
+        Poll::Pending
     }
 
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {

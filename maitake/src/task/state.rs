@@ -3,6 +3,7 @@ use crate::loom::sync::atomic::{
     Ordering::{self, *},
 };
 use core::fmt;
+use mycelium_util::{sync::spin::Backoff, unreachable_unchecked};
 
 mycelium_bitfield::bitfield! {
     /// A snapshot of a task's current state.
@@ -33,13 +34,8 @@ mycelium_bitfield::bitfield! {
         /// this flag is set.
         pub(crate) const HAS_JOIN_HANDLE: bool;
 
-        /// If set, the task's [`JoinHandle`] has registered a [`Waker`] in the
-        /// task's `join_waker` slot.
-        ///
-        /// If this is not set, the `join_waker` slot may be uninitialized.
-        ///
-        /// If this is set, it implies that `HAS_JOIN_HANDLE` is also set.
-        pub(crate) const HAS_JOIN_WAKER: bool;
+        /// The state of the task's [`JoinHandle`] waker.
+        const JOIN_WAKER: JoinWakerState;
 
         /// If set, this task has output ready to be taken by a [`JoinHandle`].
         pub(crate) const HAS_OUTPUT: bool;
@@ -49,7 +45,6 @@ mycelium_bitfield::bitfield! {
         /// When this is 0, the task may be deallocated.
         const REFS = ..;
     }
-
 }
 
 /// An atomic cell that stores a task's current [`State`].
@@ -76,6 +71,20 @@ pub(super) enum PollAction {
     /// The task does not need to be enqueued, and the join waker does not need
     /// to be woken.
     None,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum JoinAction {
+    /// It's safe to take the task's output!
+    TakeOutput,
+
+    /// Register the *first* join waker; there is no previous join waker and the
+    /// slot is not initialized.
+    Register,
+
+    /// The task is not ready to read the output, but a previous join waker is
+    /// registered.
+    Reregister,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -106,6 +115,19 @@ impl State {
 
 const REF_ONE: usize = State::REFS.first_bit();
 const REF_MAX: usize = State::REFS.raw_mask();
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum JoinWakerState {
+    /// There is no join waker; the slot is uninitialized.
+    Empty = 0b00,
+    /// A join waker is *being* registered.
+    Registering = 0b01,
+    /// A join waker is registered, the slot is initialized.
+    Waiting = 0b10,
+    /// The join waker has been woken.
+    Woken = 0b11,
+}
 
 // === impl StateCell ===
 
@@ -144,7 +166,8 @@ impl StateCell {
     }
 
     pub(super) fn end_poll(&self, completed: bool) -> OrDrop<PollAction> {
-        self.transition(|state| {
+        let mut should_wait_for_join_waker = false;
+        let action = self.transition(|state| {
             // Cannot end a poll if a task is not being polled!
             debug_assert!(state.get(State::POLLING));
             debug_assert!(!state.get(State::COMPLETED));
@@ -158,27 +181,63 @@ impl StateCell {
                 return OrDrop::Action(PollAction::Enqueue);
             }
 
-            let had_join_waiter = if test_dbg!(completed) {
+            let had_join_waker = if test_dbg!(completed) {
                 // set the output flag so that the joinhandle knows it is now
                 // safe to read the task's output.
-                next_state = next_state.with(State::HAS_OUTPUT, true);
-                test_dbg!(state.get(State::HAS_JOIN_HANDLE))
+                next_state.set(State::HAS_OUTPUT, true);
+                match state.get(State::JOIN_WAKER) {
+                    JoinWakerState::Empty => false,
+                    JoinWakerState::Registering => {
+                        should_wait_for_join_waker = true;
+                        true
+                    },
+                    JoinWakerState::Waiting => {
+                        should_wait_for_join_waker = false;
+                        next_state.set(State::JOIN_WAKER, JoinWakerState::Empty);
+                        true
+                    },
+                    JoinWakerState::Woken => {
+                        debug_assert!(false, "join waker should not be woken until task has completed, wtf");
+                        false
+                    }
+                }
             } else {
                 false
             };
 
-            *state = next_state;
 
-            if next_state.ref_count() == 0 {
-                debug_assert!(!had_join_waiter, "a task's ref count went to zero, but the `HAS_JOIN_HANDLE` bit was set! state: {state:?}");
+            let action = if next_state.ref_count() == 0 {
+                debug_assert!(
+                    !had_join_waker,
+                    "a task's ref count went to zero, but the `HAS_JOIN_WAKER` bit was set! state: {state:?}",
+                );
+                debug_assert!(
+                    !state.get(State::HAS_JOIN_HANDLE),
+                    "a task's ref count went to zero, but the `HAS_JOIN_HANDLE` bit was set! state: {state:?}",
+                );
                 OrDrop::Drop
-            } else if had_join_waiter {
+            } else if had_join_waker {
+                debug_assert!(
+                    state.get(State::HAS_JOIN_HANDLE),
+                    "a task cannot have a join waker if it does not have a join handle!",
+                );
 
                 OrDrop::Action(PollAction::WakeJoinWaiter)
             } else {
                 OrDrop::Action(PollAction::None)
-            }
-        })
+            };
+
+            *state = next_state;
+
+            action
+        });
+
+        if should_wait_for_join_waker {
+            debug_assert_eq!(action, OrDrop::Action(PollAction::WakeJoinWaiter));
+            self.wait_for_join_waker();
+        }
+
+        action
     }
 
     /// Transition to the woken state by value, returning `true` if the task
@@ -315,22 +374,43 @@ impl StateCell {
         )
     }
 
-    /// Returns `true` if it's okay to take the task's output.
-    pub(super) fn try_take_output(&self) -> bool {
+    /// Returns whether if it's okay to take the task's output.
+    pub(super) fn try_join(&self) -> JoinAction {
+        fn should_register(state: &mut State) -> JoinAction {
+            let action = match state.get(State::JOIN_WAKER) {
+                JoinWakerState::Empty => JoinAction::Register,
+                x => {
+                    debug_assert_eq!(x, JoinWakerState::Waiting);
+                    JoinAction::Reregister
+                }
+            };
+            state.set(State::JOIN_WAKER, JoinWakerState::Registering);
+
+            action
+        }
+
         self.transition(|state| {
             // If the task has not completed, we can't take its join output.
             if test_dbg!(!state.get(State::COMPLETED)) {
-                *state = state.with(State::HAS_JOIN_HANDLE, true);
-                return false;
+                return should_register(state);
             }
 
             // If the task does not have output, we cannot take it.
             if test_dbg!(!state.get(State::HAS_OUTPUT)) {
-                return false;
+                return should_register(state);
             }
 
             *state = state.with(State::HAS_OUTPUT, false);
-            true
+            JoinAction::TakeOutput
+        })
+    }
+
+    pub(super) fn join_waker_registered(&self) {
+        self.transition(|state| {
+            debug_assert_eq!(state.get(State::JOIN_WAKER), JoinWakerState::Registering);
+            state
+                .set(State::HAS_JOIN_HANDLE, true)
+                .set(State::JOIN_WAKER, JoinWakerState::Waiting);
         })
     }
 
@@ -363,11 +443,55 @@ impl StateCell {
             }
         }
     }
+
+    fn wait_for_join_waker(&self) {
+        test_trace!("StateCell::wait_for_join_waker");
+        let mut state = self.load(Acquire);
+        let mut boff = Backoff::new();
+        loop {
+            state.set(State::JOIN_WAKER, JoinWakerState::Waiting);
+            let next = state.with(State::JOIN_WAKER, JoinWakerState::Woken);
+            match self
+                .0
+                .compare_exchange_weak(state.0, next.0, AcqRel, Acquire)
+            {
+                Ok(_) => return,
+                Err(actual) => state = State(actual),
+            }
+            boff.spin();
+        }
+    }
 }
 
 impl fmt::Debug for StateCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.load(Relaxed).fmt(f)
+    }
+}
+
+impl mycelium_bitfield::FromBits<usize> for JoinWakerState {
+    type Error = core::convert::Infallible;
+
+    /// The number of bits required to represent a value of this type.
+    const BITS: u32 = 2;
+
+    #[inline]
+    fn try_from_bits(bits: usize) -> Result<Self, Self::Error> {
+        match bits {
+            b if b == Self::Registering as usize => Ok(Self::Registering),
+            b if b == Self::Waiting as usize => Ok(Self::Waiting),
+            b if b == Self::Empty as usize => Ok(Self::Empty),
+            b if b == Self::Woken as usize => Ok(Self::Woken),
+            _ => unsafe {
+                // this should never happen unless the bitpacking code is broken
+                unreachable_unchecked!("invalid join waker state {bits:#b}")
+            },
+        }
+    }
+
+    #[inline]
+    fn into_bits(self) -> usize {
+        self as u8 as usize
     }
 }
 
