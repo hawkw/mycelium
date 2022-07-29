@@ -107,8 +107,11 @@ pub struct Task<S, F: Future, STO> {
     ///
     /// # Safety
     ///
-    /// This field is only initialized when the [`State::HAS_JOIN_WAKER`] bit is
-    /// set. If that bit is unset, this field may be uninitialized.
+    /// This field is only initialized when the [`State::JOIN_WAKER`] state
+    /// field is set to `JoinWakerState::Waiting`. If the join waker state is
+    /// any other value, this field may be uninitialized.
+    ///
+    /// [`State::JOIN_WAKER`]: state::State::JOIN_WAKER
     join_waker: UnsafeCell<CheckedMaybeUninit<Waker>>,
 
     /// The [`Storage`] type associated with this struct
