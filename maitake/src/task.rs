@@ -24,13 +24,7 @@ mod storage;
 #[cfg(test)]
 mod tests;
 
-use crate::{
-    loom::cell::UnsafeCell,
-    scheduler::Schedule,
-    task::state::{OrDrop, PollAction, ScheduleAction, StateCell},
-    util::non_null,
-    wait::WaitCell,
-};
+use crate::{loom::cell::UnsafeCell, scheduler::Schedule, util::non_null};
 
 use core::{
     any::type_name,
@@ -42,9 +36,12 @@ use core::{
     task::{RawWaker, RawWakerVTable},
 };
 
-use self::builder::Settings;
+use self::{
+    builder::Settings,
+    state::{JoinAction, OrDrop, PollAction, ScheduleAction, StateCell},
+};
 use cordyceps::{mpsc_queue, Linked};
-use mycelium_util::fmt;
+use mycelium_util::{fmt, mem::CheckedMaybeUninit};
 
 /// A type-erased, reference-counted pointer to a spawned [`Task`].
 ///
@@ -108,15 +105,14 @@ pub struct Task<S, F: Future, STO> {
 
     /// The [`Waker`] of the [`JoinHandle`] for this task, if one exists.
     ///
-    // TODO(eliza): using `WaitCell` here is, admittedly, not the most
-    // efficient. A `WaitCell` has its own atomic state word, but we really only
-    // need a couple bits of state to control access to the waker. This *could*
-    // be rolled into the task's `StateCell`, and the join waker could just be
-    // an `UnsafeCell<MaybeUninit<Waker>>`, which would probably be better ---
-    // it would mean we only need to ever touch _one_ atomic, and we wouldn't
-    // need a whole extra word in the task allocation just to store a couple
-    // bits. But, `WaitCell` works fine for now.
-    join_waker: WaitCell,
+    /// # Safety
+    ///
+    /// This field is only initialized when the [`State::JOIN_WAKER`] state
+    /// field is set to `JoinWakerState::Waiting`. If the join waker state is
+    /// any other value, this field may be uninitialized.
+    ///
+    /// [`State::JOIN_WAKER`]: state::State::JOIN_WAKER
+    join_waker: UnsafeCell<CheckedMaybeUninit<Waker>>,
 
     /// The [`Storage`] type associated with this struct
     ///
@@ -296,7 +292,7 @@ where
             },
             scheduler,
             inner: UnsafeCell::new(Cell::Pending(future)),
-            join_waker: WaitCell::new(),
+            join_waker: UnsafeCell::new(CheckedMaybeUninit::uninit()),
             span: crate::trace::Span::none(),
             storage: PhantomData,
         }
@@ -414,10 +410,10 @@ where
             OrDrop::Drop => drop(STO::from_raw(this)),
             OrDrop::Action(PollAction::Enqueue) => Self::schedule(ptr),
             OrDrop::Action(PollAction::WakeJoinWaiter) => {
-                // set the `CLOSED` bit on the wait cell so that the join waker
-                // will always know that the task has completed, even if a join
-                // waker was not present when we ended this poll.
-                this.as_ref().join_waker.close();
+                // wake the join waker
+                this.as_ref().join_waker.with_mut(|join_waker| unsafe {
+                    (*join_waker).assume_init_read().wake();
+                });
             }
             OrDrop::Action(PollAction::None) => {}
         }
@@ -440,17 +436,15 @@ where
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), JoinError>> {
-        use crate::wait::cell::Error as WaitCellError;
-
         trace!(
             task.addr = ?task,
             task.output = %type_name::<<F>::Output>(),
             "Task::poll_join"
         );
-        let task = task.cast::<Self>();
-        loop {
-            if task.as_ref().state().try_take_output() {
-                task.as_ref().inner.with_mut(|cell| {
+        let task = task.cast::<Self>().as_ref();
+        match test_dbg!(task.state().try_join()) {
+            JoinAction::TakeOutput => {
+                task.inner.with_mut(|cell| {
                     match mem::replace(&mut *cell, Cell::Joined) {
                         Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
                         state => unreachable!("attempted to take join output on a task that has not completed! task: {task:?}; state: {state:?}"),
@@ -459,18 +453,27 @@ where
 
                 return Poll::Ready(Ok(()));
             }
-
-            // okay, we did not take the output, register the join waiter.
-            return match task.as_ref().join_waker.register_wait(cx.waker()) {
-                Ok(_) => Poll::Pending,
-                // we were notified while trying to register --- we can now read the
-                // output
-                Err(WaitCellError::Notifying) | Err(WaitCellError::Closed) => continue,
-                Err(WaitCellError::Parking) => {
-                    unreachable!("multiple threads should not race on a join waker...what do")
-                }
-            };
+            JoinAction::Register => {
+                task.join_waker.with_mut(|waker| unsafe {
+                    // safety: we now have exclusive permission to write to the
+                    // join waker.
+                    (*waker).write(cx.waker().clone());
+                })
+            }
+            JoinAction::Reregister => {
+                task.join_waker.with_mut(|waker| unsafe {
+                    // safety: we now have exclusive permission to write to the
+                    // join waker.
+                    let waker = (*waker).assume_init_mut();
+                    let my_waker = cx.waker();
+                    if !waker.will_wake(my_waker) {
+                        *waker = my_waker.clone();
+                    }
+                });
+            }
         }
+        task.state().set_join_waker_registered();
+        Poll::Pending
     }
 
     fn poll_inner(&self, mut cx: Context<'_>) -> Poll<()> {
@@ -521,6 +524,27 @@ where
             .field("header", &self.header)
             .field("inner", &self.inner)
             .finish()
+    }
+}
+
+impl<S, F, STO> Drop for Task<S, F, STO>
+where
+    F: Future,
+{
+    fn drop(&mut self) {
+        // if there's a join waker, ensure that its destructor runs when the
+        // task is dropped.
+        // NOTE: this *should* never happen; we don't ever expect to deallocate
+        // a task while it still has a `JoinHandle`, since the `JoinHandle`
+        // holds a task ref. However, let's make sure we don't leak another task
+        // in case something weird happens, I guess...
+        if self.header.state.join_waker_needs_drop() {
+            self.join_waker.with_mut(|waker| unsafe {
+                // safety: we now have exclusive permission to write to the
+                // join waker.
+                (*waker).assume_init_drop();
+            });
+        }
     }
 }
 

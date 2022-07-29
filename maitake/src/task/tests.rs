@@ -168,6 +168,27 @@ mod alloc {
         unsafe { drop(Box::from_raw(task_ptr)) }
     }
 
+    /// This test just prints the size (in bytes) of an empty task struct.
+    #[test]
+    fn empty_task_size() {
+        type Future = futures::future::Ready<()>;
+        type EmptyTask = Task<NopSchedule, Future, BoxStorage>;
+        println!(
+            "{}: {}B",
+            core::any::type_name::<EmptyTask>(),
+            core::mem::size_of::<EmptyTask>(),
+        );
+        println!(
+            "{}: {}B",
+            core::any::type_name::<Future>(),
+            core::mem::size_of::<Future>(),
+        );
+        println!(
+            "task size: {}B",
+            core::mem::size_of::<EmptyTask>() - core::mem::size_of::<Future>()
+        );
+    }
+
     #[test]
     fn join_handle_wakes() {
         crate::util::trace_init();
