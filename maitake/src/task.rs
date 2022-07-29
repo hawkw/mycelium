@@ -68,6 +68,16 @@ pub struct TaskRef(NonNull<Header>);
 /// is returned. Once a task is spawned, it is primarily interacted with via
 /// [`TaskRef`]s.
 ///
+/// # Implementation Notes
+///
+/// This section discusses details about the implementation of Maitake's task
+/// system. This documentation is more relevant to developers working on Maitake
+/// than to users of the Maitake task system.
+///
+/// ## Vtables
+///
+/// A `Task`, once spawned, is rarely
+///
 /// [future]: core::future::Future
 /// [scheduler]: crate::scheduler::Schedule
 #[repr(C)]
