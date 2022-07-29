@@ -234,7 +234,7 @@ impl StateCell {
 
         if should_wait_for_join_waker {
             debug_assert_eq!(action, OrDrop::Action(PollAction::WakeJoinWaiter));
-            self.wait_for_join_waker();
+            self.wait_for_join_waker(self.load(Acquire));
         }
 
         action
@@ -405,13 +405,26 @@ impl StateCell {
         })
     }
 
-    pub(super) fn join_waker_registered(&self) {
+    pub(super) fn set_join_waker_registered(&self) {
         self.transition(|state| {
             debug_assert_eq!(state.get(State::JOIN_WAKER), JoinWakerState::Registering);
             state
                 .set(State::HAS_JOIN_HANDLE, true)
                 .set(State::JOIN_WAKER, JoinWakerState::Waiting);
         })
+    }
+
+    /// Returns `true` if this task has an un-dropped [`JoinHandle`] waker that
+    /// needs to be dropped.
+    pub(super) fn join_waker_needs_drop(&self) -> bool {
+        let state = self.load(Acquire);
+        match test_dbg!(state.get(State::JOIN_WAKER)) {
+            JoinWakerState::Empty | JoinWakerState::Woken => return false,
+            JoinWakerState::Registering => self.wait_for_join_waker(state),
+            JoinWakerState::Waiting => {}
+        }
+
+        true
     }
 
     pub(super) fn load(&self, order: Ordering) -> State {
@@ -444,9 +457,8 @@ impl StateCell {
         }
     }
 
-    fn wait_for_join_waker(&self) {
+    fn wait_for_join_waker(&self, mut state: State) {
         test_trace!("StateCell::wait_for_join_waker");
-        let mut state = self.load(Acquire);
         let mut boff = Backoff::new();
         loop {
             state.set(State::JOIN_WAKER, JoinWakerState::Waiting);

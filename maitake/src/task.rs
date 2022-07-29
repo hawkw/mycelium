@@ -469,7 +469,7 @@ where
                 });
             }
         }
-        task.state().join_waker_registered();
+        task.state().set_join_waker_registered();
         Poll::Pending
     }
 
@@ -521,6 +521,27 @@ where
             .field("header", &self.header)
             .field("inner", &self.inner)
             .finish()
+    }
+}
+
+impl<S, F, STO> Drop for Task<S, F, STO>
+where
+    F: Future,
+{
+    fn drop(&mut self) {
+        // if there's a join waker, ensure that its destructor runs when the
+        // task is dropped.
+        // NOTE: this *should* never happen; we don't ever expect to deallocate
+        // a task while it still has a `JoinHandle`, since the `JoinHandle`
+        // holds a task ref. However, let's make sure we don't leak another task
+        // in case something weird happens, I guess...
+        if self.header.state.join_waker_needs_drop() {
+            self.join_waker.with_mut(|waker| unsafe {
+                // safety: we now have exclusive permission to write to the
+                // join waker.
+                (*waker).assume_init_drop();
+            });
+        }
     }
 }
 
