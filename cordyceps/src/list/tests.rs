@@ -117,7 +117,7 @@ fn const_new() {
     const _: List<Entry> = List::new();
 }
 
-fn trace_init() -> tracing::dispatcher::DefaultGuard {
+fn trace_init() -> impl Drop {
     use tracing_subscriber::prelude::*;
     tracing_subscriber::fmt()
         .with_test_writer()

@@ -1044,8 +1044,7 @@ dependencies = [
 [[package]]
 name = "once_cell"
 version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18a6dbe30758c9f83eb00cbea4ac95966305f5a7772f3f42ebfc7fc7eddbd8e1"
+source = "git+https://github.com/hawkw/once_cell?branch=eliza/saethlin/provenance#ee55dd2504d6f1bfc8e0f216bd5253ba41f027bc"
 
 [[package]]
 name = "os_str_bytes"
