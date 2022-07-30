@@ -269,6 +269,40 @@ mod loom {
     }
 
     #[test]
+    fn current_task() {
+        loom::model(|| {
+            let scheduler = Scheduler::new();
+            // drop the join handle, but keep the task ref.
+            let task = {
+                let join = scheduler.spawn({
+                    track_future(async move {
+                        future::yield_now().await;
+                    })
+                });
+                join.task_ref()
+            };
+
+            let thread = loom::thread::spawn({
+                let scheduler = scheduler.clone();
+                move || {
+                    let current = scheduler.current_task();
+                    if let Some(current) = current {
+                        assert_eq!(current, task);
+                    }
+                }
+            });
+
+            loop {
+                if scheduler.tick().completed > 0 {
+                    break;
+                }
+            }
+
+            thread.join().expect("thread should not panic");
+        })
+    }
+
+    #[test]
     #[ignore] // this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
     fn cross_thread_spawn() {
         const TASKS: usize = 10;

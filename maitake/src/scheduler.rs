@@ -1,5 +1,8 @@
-use crate::task::{self, Header, JoinHandle, Storage, TaskRef};
-use core::{future::Future, pin::Pin};
+use crate::{
+    loom::sync::atomic::{AtomicPtr, Ordering},
+    task::{self, Header, JoinHandle, Storage, TaskRef},
+};
+use core::{future::Future, pin::Pin, ptr};
 
 use cordyceps::mpsc_queue::MpscQueue;
 
@@ -10,6 +13,7 @@ pub struct StaticScheduler(Core);
 #[derive(Debug)]
 struct Core {
     run_queue: MpscQueue<Header>,
+    current_task: AtomicPtr<Header>,
     // woken: AtomicBool,
 }
 
@@ -23,6 +27,11 @@ pub struct Tick {
 
 pub trait Schedule: Sized + Clone {
     fn schedule(&self, task: TaskRef);
+
+    /// Returns a [`TaskRef`] referencing the task currently being polled by
+    /// this scheduler, if a task is currently being polled.
+    #[must_use]
+    fn current_task(&self) -> Option<TaskRef>;
 
     /// Returns a new [task `Builder`] for configuring tasks prior to spawning
     /// them on this scheduler.
@@ -111,6 +120,14 @@ impl StaticScheduler {
         task::Builder::new(self)
     }
 
+    /// Returns a [`TaskRef`] referencing the task currently being polled by
+    /// this scheduler, if a task is currently being polled.
+    #[must_use]
+    #[inline]
+    pub fn current_task(&'static self) -> Option<TaskRef> {
+        self.0.current_task()
+    }
+
     pub fn tick(&'static self) -> Tick {
         self.0.tick_n(Self::DEFAULT_TICK_SIZE)
     }
@@ -126,7 +143,14 @@ impl Core {
     const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
         Self {
             run_queue: MpscQueue::new_with_static_stub(stub),
+            current_task: AtomicPtr::new(ptr::null_mut()),
         }
+    }
+
+    fn current_task(&self) -> Option<TaskRef> {
+        let ptr = self.current_task.load(Ordering::Acquire);
+        let ptr = ptr::NonNull::new(ptr)?;
+        Some(TaskRef::clone_from_raw(ptr))
     }
 
     fn tick_n(&self, n: usize) -> Tick {
@@ -138,10 +162,25 @@ impl Core {
 
         for task in self.run_queue.consume() {
             let _span = debug_span!("poll", ?task).entered();
+            // leak the task into the current task cell. cloning the TaskRef is
+            // necessary here as the task must stay alive as long as it's
+            // accessible from the scheduler.
+            self.current_task
+                .store(task.clone().leak().as_ptr(), Ordering::Release);
+
+            // poll the task
             let poll = task.poll();
             if poll.is_ready() {
                 tick.completed += 1;
             }
+
+            // clear the current task cell, dropping our clone of the task.
+            let task = {
+                let ptr = self.current_task.swap(ptr::null_mut(), Ordering::AcqRel);
+                ptr::NonNull::new(ptr).map(|ptr| unsafe { TaskRef::from_raw(ptr) })
+            };
+            drop(task);
+
             tick.polled += 1;
 
             debug!(poll = ?poll, tick.polled, tick.completed);
@@ -162,6 +201,12 @@ impl Schedule for &'static StaticScheduler {
         // self.woken.store(true, Ordering::Release);
         self.0.run_queue.enqueue(task);
     }
+
+    #[inline]
+    #[must_use]
+    fn current_task(&self) -> Option<TaskRef> {
+        self.0.current_task()
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -170,6 +215,10 @@ struct Stub;
 impl Schedule for Stub {
     fn schedule(&self, _: TaskRef) {
         unimplemented!("stub task should never be woken!")
+    }
+
+    fn current_task(&self) -> Option<TaskRef> {
+        None
     }
 }
 
@@ -289,6 +338,15 @@ feature! {
             join
         }
 
+
+        /// Returns a [`TaskRef`] referencing the task currently being polled by
+        /// this scheduler, if a task is currently being polled.
+        #[must_use]
+        #[inline]
+        pub fn current_task(&self) -> Option<TaskRef> {
+            self.0.current_task()
+        }
+
         pub fn tick(&self) -> Tick {
             self.0.tick_n(Self::DEFAULT_TICK_SIZE)
         }
@@ -298,6 +356,12 @@ feature! {
         fn schedule(&self, task: TaskRef) {
             // self.0.woken.store(true, Ordering::Release);
             self.0.run_queue.enqueue(task);
+        }
+
+        #[inline]
+        #[must_use]
+        fn current_task(&self) -> Option<TaskRef> {
+            self.0.current_task()
         }
     }
 
@@ -329,6 +393,7 @@ feature! {
             let (stub_task, _) = TaskRef::new(Stub, Stub);
             Self {
                 run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
+                current_task: AtomicPtr::new(ptr::null_mut()),
             }
         }
     }

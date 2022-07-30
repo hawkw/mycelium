@@ -23,7 +23,7 @@ use core::{future::Future, marker::PhantomData, pin::Pin};
 /// [`Scheduler::spawn_allocated`]: crate::scheduler::Scheduler::spawn_allocated
 /// [`task::Builder::spawn`]: crate::task::Builder::spawn
 /// [`task::Builder::spawn_allocated`]: crate::task::Builder::spawn_allocated
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct JoinHandle<T> {
     task: Option<TaskRef>,
     _t: PhantomData<fn(T)>,
@@ -59,6 +59,18 @@ impl<T> JoinHandle<T> {
             _t: PhantomData,
         }
     }
+
+    /// Returns a [`TaskRef`] referencing the task this [`JoinHandle`] is
+    /// associated with.
+    ///
+    /// This increases the task's reference count; its storage is not
+    /// deallocated until all such [`TaskRef`]s are dropped.
+    #[must_use]
+    pub fn task_ref(&self) -> TaskRef {
+        self.task
+            .clone()
+            .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
+    }
 }
 
 impl<T> Future for JoinHandle<T> {
@@ -90,6 +102,30 @@ impl<T> Drop for JoinHandle<T> {
         if let Some(ref task) = self.task {
             task.state().drop_join_handle();
         }
+    }
+}
+
+impl<T> PartialEq<TaskRef> for JoinHandle<T> {
+    fn eq(&self, other: &TaskRef) -> bool {
+        self.task.as_ref().unwrap() == other
+    }
+}
+
+impl<T> PartialEq<&'_ TaskRef> for JoinHandle<T> {
+    fn eq(&self, other: &&TaskRef) -> bool {
+        self.task.as_ref().unwrap() == *other
+    }
+}
+
+impl<T> PartialEq<JoinHandle<T>> for TaskRef {
+    fn eq(&self, other: &JoinHandle<T>) -> bool {
+        self == other.task.as_ref().unwrap()
+    }
+}
+
+impl<T> PartialEq<&'_ JoinHandle<T>> for TaskRef {
+    fn eq(&self, other: &&JoinHandle<T>) -> bool {
+        self == other.task.as_ref().unwrap()
     }
 }
 
