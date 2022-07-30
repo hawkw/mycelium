@@ -197,7 +197,6 @@ pub(crate) struct Header {
 ///
 /// [scheduler]: crate::scheduler::Schedule
 #[repr(C)]
-#[derive(Debug)]
 struct Schedulable<S> {
     /// The task's header.
     ///
@@ -609,12 +608,11 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Task")
-            // .field("future_type", &fmt::display(type_name::<F>()))
-            .field("storage", &fmt::display(type_name::<STO>()))
-            .field("output_type", &fmt::display(type_name::<F::Output>()))
-            .field("scheduler_type", &fmt::display(type_name::<S>()))
             .field("header", &self.header())
-            .field("inner", &self.inner)
+            .field("inner", &format_args!("UnsafeCell(<{}>)", type_name::<F>()))
+            .field("join_waker", &format_args!("UnsafeCell(<Waker>)"))
+            .field("scheduler", &fmt::display(type_name::<S>()))
+            .field("storage", &fmt::display(type_name::<STO>()))
             .finish()
     }
 }
@@ -639,6 +637,7 @@ where
         }
     }
 }
+
 // === impl Schedulable ===
 
 impl<S: Schedule> Schedulable<S> {
@@ -739,6 +738,15 @@ impl<S: Schedule> Schedulable<S> {
 
         let this = ptr as *mut _;
         Self::drop_ref(non_null(this))
+    }
+}
+
+impl<S> fmt::Debug for Schedulable<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Schedulable")
+            .field("header", &self.header)
+            .field("scheduler", &fmt::display(type_name::<S>()))
+            .finish()
     }
 }
 
@@ -1003,15 +1011,19 @@ unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
 unsafe impl Send for Header {}
 unsafe impl Sync for Header {}
 
+// === impl Cell ===
+
 impl<F: Future> fmt::Debug for Cell<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Cell::Pending(_) => f.pad("Cell::Pending(...)"),
-            Cell::Ready(_) => f.pad("Cell::Ready(...)"),
+            Cell::Pending(_) => write!(f, "Cell::Pending({})", type_name::<F>()),
+            Cell::Ready(_) => write!(f, "Cell::Ready({})", type_name::<F::Output>()),
             Cell::Joined => f.pad("Cell::Joined"),
         }
     }
 }
+
+// === impl Vtable ===
 
 impl fmt::Debug for Vtable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

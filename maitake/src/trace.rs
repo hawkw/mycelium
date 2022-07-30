@@ -1,5 +1,7 @@
 #![cfg_attr(not(test), allow(dead_code, unused_macros))]
 
+use mycelium_util::fmt;
+
 macro_rules! span {
     ($level:expr, $($arg:tt)+) => {
         crate::trace::Span {
@@ -121,7 +123,7 @@ macro_rules! test_trace {
     };
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct Span {
     #[cfg(any(feature = "tracing-01", loom))]
     pub(crate) span_01: tracing_01::Span,
@@ -167,6 +169,31 @@ impl Span {
     #[inline]
     pub(crate) fn tracing_01_id(&self) -> Option<core::num::NonZeroU64> {
         self.span_01.id().map(|id| id.into_non_zero_u64())
+    }
+}
+
+impl fmt::Debug for Span {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const TRACING_01_FIELD: &str = "tracing_01";
+        const TRACING_02_FIELD: &str = "tracing_02";
+
+        let mut s = f.debug_struct("Span");
+
+        #[cfg(any(feature = "tracing-01", loom))]
+        if let Some(id) = self.span_01.id() {
+            s.field(TRACING_01_FIELD, &id.into_u64());
+        } else {
+            s.field(TRACING_01_FIELD, &fmt::display("<none>"));
+        }
+
+        #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
+        if let Some(id) = self.span_02.id() {
+            s.field(TRACING_02_FIELD, &id.into_u64());
+        } else {
+            s.field(TRACING_01_FIELD, &fmt::display("<none>"));
+        }
+
+        s.finish()
     }
 }
 
