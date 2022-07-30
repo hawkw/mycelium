@@ -158,11 +158,22 @@ mod alloc {
         }));
 
         let task_ptr = Box::into_raw(task);
-        let header_ptr = unsafe { ptr::addr_of!((*task_ptr).header) };
-        assert_eq!(
-            task_ptr as *const (), header_ptr as *const (),
-            "header pointer and task allocation pointer must have the same address!"
-        );
+
+        // scope to ensure all task ptrs are dropped before we deallocate the
+        // task allocation
+        {
+            let header_ptr = unsafe { ptr::addr_of!((*task_ptr).schedulable.header) };
+            assert_eq!(
+                task_ptr as *const (), header_ptr as *const (),
+                "header pointer and task allocation pointer must have the same address!"
+            );
+
+            let sched_ptr = unsafe { ptr::addr_of!((*task_ptr).schedulable) };
+            assert_eq!(
+                task_ptr as *const (), sched_ptr as *const (),
+                "schedulable pointer and task allocation pointer must have the same address!"
+            );
+        }
 
         // clean up after ourselves by ensuring the box is deallocated
         unsafe { drop(Box::from_raw(task_ptr)) }
