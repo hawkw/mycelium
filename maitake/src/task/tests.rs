@@ -171,7 +171,7 @@ mod alloc {
             let sched_ptr = unsafe { ptr::addr_of!((*task_ptr).schedulable) };
             assert_eq!(
                 task_ptr as *const (), sched_ptr as *const (),
-                "header pointer and task allocation pointer must have the same address!"
+                "schedulable pointer and task allocation pointer must have the same address!"
             );
         }
 
