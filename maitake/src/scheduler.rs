@@ -20,8 +20,15 @@ struct Core {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Tick {
+    /// The total number of tasks polled on this scheduler tick.
     pub polled: usize,
+
+    /// The number of polled tasks that *completed* on this scheduler tick.
+    ///
+    /// This should always be <= `self.polled`.
     pub completed: usize,
+
+    /// `true` if the tick completed with any tasks remaining in the run queue.
     pub has_remaining: bool,
 }
 
