@@ -1,3 +1,4 @@
+use super::PollResult;
 use crate::loom::sync::atomic::{
     self, AtomicUsize,
     Ordering::{self, *},
@@ -65,19 +66,6 @@ pub(super) enum ScheduleAction {
     Enqueue,
 
     /// The task does not need to be enqueued.
-    None,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(super) enum PollAction {
-    /// The task should be enqueued.
-    Enqueue,
-
-    /// The task's join waker should be woken.
-    WakeJoinWaiter,
-
-    /// The task does not need to be enqueued, and the join waker does not need
-    /// to be woken.
     None,
 }
 
@@ -173,12 +161,17 @@ impl StateCell {
         })
     }
 
-    pub(super) fn end_poll(&self, completed: bool) -> OrDrop<PollAction> {
+    pub(super) fn end_poll(&self, completed: bool) -> PollResult {
         let mut should_wait_for_join_waker = false;
         let action = self.transition(|state| {
             // Cannot end a poll if a task is not being polled!
             debug_assert!(state.get(State::POLLING));
             debug_assert!(!state.get(State::COMPLETED));
+            debug_assert!(
+                state.ref_count() > 0,
+                "cannot poll a task that has zero references, what is happening!"
+            );
+
             let mut next_state = state
                 .with(State::POLLING, false)
                 .with(State::COMPLETED, completed);
@@ -186,7 +179,7 @@ impl StateCell {
             // Was the task woken during the poll?
             if !test_dbg!(completed) && test_dbg!(state.get(State::WOKEN)) {
                 *state = test_dbg!(next_state);
-                return OrDrop::Action(PollAction::Enqueue);
+                return PollResult::PendingSchedule;
             }
 
             let had_join_waker = if test_dbg!(completed) {
@@ -197,15 +190,26 @@ impl StateCell {
                     JoinWakerState::Empty => false,
                     JoinWakerState::Registering => {
                         should_wait_for_join_waker = true;
+                        debug_assert!(
+                            state.get(State::HAS_JOIN_HANDLE),
+                            "a task cannot register a join waker if it does not have a join handle!",
+                        );
                         true
-                    },
+                    }
                     JoinWakerState::Waiting => {
+                        debug_assert!(
+                            state.get(State::HAS_JOIN_HANDLE),
+                            "a task cannot have a join waker if it does not have a join handle!",
+                        );
                         should_wait_for_join_waker = false;
                         next_state.set(State::JOIN_WAKER, JoinWakerState::Empty);
                         true
-                    },
+                    }
                     JoinWakerState::Woken => {
-                        debug_assert!(false, "join waker should not be woken until task has completed, wtf");
+                        debug_assert!(
+                            false,
+                            "join waker should not be woken until task has completed, wtf"
+                        );
                         false
                     }
                 }
@@ -214,34 +218,19 @@ impl StateCell {
             };
 
 
-            let action = if next_state.ref_count() == 0 {
-                debug_assert!(
-                    !had_join_waker,
-                    "a task's ref count went to zero, but the `HAS_JOIN_WAKER` bit was set! state: {state:?}",
-                );
-                debug_assert!(
-                    !state.get(State::HAS_JOIN_HANDLE),
-                    "a task's ref count went to zero, but the `HAS_JOIN_HANDLE` bit was set! state: {state:?}",
-                );
-                OrDrop::Drop
-            } else if had_join_waker {
-                debug_assert!(
-                    state.get(State::HAS_JOIN_HANDLE),
-                    "a task cannot have a join waker if it does not have a join handle!",
-                );
-
-                OrDrop::Action(PollAction::WakeJoinWaiter)
-            } else {
-                OrDrop::Action(PollAction::None)
-            };
-
             *state = next_state;
 
-            action
+            if had_join_waker {
+                PollResult::ReadyJoined
+            } else if completed {
+                PollResult::Ready
+            } else {
+                PollResult::Pending
+            }
         });
 
         if should_wait_for_join_waker {
-            debug_assert_eq!(action, OrDrop::Action(PollAction::WakeJoinWaiter));
+            debug_assert_eq!(action, PollResult::ReadyJoined);
             self.wait_for_join_waker(self.load(Acquire));
         }
 

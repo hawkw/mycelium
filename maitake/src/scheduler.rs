@@ -154,6 +154,8 @@ impl Core {
     }
 
     fn tick_n(&self, n: usize) -> Tick {
+        use task::PollResult;
+
         let mut tick = Tick {
             polled: 0,
             completed: 0,
@@ -162,28 +164,27 @@ impl Core {
 
         for task in self.run_queue.consume() {
             let _span = debug_span!("poll", ?task).entered();
-            // leak the task into the current task cell. cloning the TaskRef is
-            // necessary here as the task must stay alive as long as it's
-            // accessible from the scheduler.
+            // store the currently polled task in the `current_task` pointer.
+            // using `TaskRef::as_ptr` is safe here, since we will clear the
+            // `current_task` pointer before dropping the `TaskRef`.
             self.current_task
-                .store(task.clone().leak().as_ptr(), Ordering::Release);
+                .store(task.as_ptr().as_ptr(), Ordering::Release);
 
             // poll the task
-            let poll = task.poll();
-            if poll.is_ready() {
-                tick.completed += 1;
-            }
+            let poll_result = task.poll();
 
-            // clear the current task cell, dropping our clone of the task.
-            let task = {
-                let ptr = self.current_task.swap(ptr::null_mut(), Ordering::AcqRel);
-                ptr::NonNull::new(ptr).map(|ptr| unsafe { TaskRef::from_raw(ptr) })
-            };
-            drop(task);
+            // clear the current task cell before potentially dropping the
+            // `TaskRef`.
+            self.current_task.store(ptr::null_mut(), Ordering::Release);
 
             tick.polled += 1;
+            match poll_result {
+                PollResult::Ready | PollResult::ReadyJoined => tick.completed += 1,
+                PollResult::PendingSchedule => self.run_queue.enqueue(task),
+                PollResult::Pending => {}
+            }
 
-            debug!(poll = ?poll, tick.polled, tick.completed);
+            debug!(poll = ?poll_result, tick.polled, tick.completed);
             if tick.polled == n {
                 return tick;
             }
