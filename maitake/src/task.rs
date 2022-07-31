@@ -52,7 +52,7 @@ use mycelium_util::{fmt, mem::CheckedMaybeUninit};
 ///
 /// `TaskRef`s are reference-counted, and the task will be deallocated when the
 /// last `TaskRef` pointing to it is dropped.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct TaskRef(NonNull<Header>);
 
 /// A task.
@@ -763,6 +763,31 @@ impl TaskRef {
         STO: Storage<S, F>,
     {
         Self::build_allocated::<S, F, STO>(Self::NO_BUILDER, task)
+    }
+
+    /// Converts a `TaskRef` a raw [`NonNull`] pointer to the task's [`Header`],
+    /// _without_ consuming the `TaskRef`'s held ref count.
+    pub(crate) fn leak(self) -> NonNull<Header> {
+        let this = mem::ManuallyDrop::new(self);
+        this.0
+    }
+
+    /// Convert a [`NonNull`] pointer to a task's [`Header`] into a `TaskRef` to
+    /// that task. This does **not** increment the task's reference count.
+    ///
+    /// # Safety
+    ///
+    /// This may *only* be called on a pointer returned by [`TaskRef::leak`]!.
+    pub(crate) unsafe fn from_raw(ptr: NonNull<Header>) -> Self {
+        Self(ptr)
+    }
+
+    /// Convert a [`NonNull`] pointer to a task's [`Header`] into a new `TaskRef` to
+    /// that task, incrementing the reference count.
+    pub(crate) fn clone_from_raw(ptr: NonNull<Header>) -> Self {
+        let this = Self(ptr);
+        this.state().clone_ref();
+        this
     }
 
     #[track_caller]

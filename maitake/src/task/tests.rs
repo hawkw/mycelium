@@ -1,7 +1,22 @@
+use crate::{future, scheduler::Schedule, task::*};
+
+#[derive(Copy, Clone, Debug)]
+struct NopSchedule;
+
+impl Schedule for NopSchedule {
+    fn schedule(&self, task: TaskRef) {
+        unimplemented!("nop scheduler tried to schedule task {:?}", task);
+    }
+
+    fn current_task(&self) -> Option<TaskRef> {
+        unimplemented!("nop scheduler does not have a current task")
+    }
+}
+
 #[cfg(loom)]
 mod loom {
+    use super::*;
     use crate::{
-        future,
         loom::{
             self,
             alloc::{Track, TrackFuture},
@@ -11,24 +26,13 @@ mod loom {
             },
         },
         scheduler::Scheduler,
-        task::*,
     };
-    #[derive(Clone)]
-    struct NopScheduler;
-
-    impl crate::scheduler::Schedule for NopScheduler {
-        fn schedule(&self, task: TaskRef) {
-            unimplemented!(
-                "nop scheduler should not actually schedule tasks (tried to schedule {task:?})"
-            )
-        }
-    }
 
     #[test]
     fn taskref_deallocates() {
         loom::model(|| {
             let track = Track::new(());
-            let task = TaskRef::new(NopScheduler, async move {
+            let task = TaskRef::new(NopSchedule, async move {
                 drop(track);
             });
 
@@ -42,7 +46,7 @@ mod loom {
     fn taskref_clones_deallocate() {
         loom::model(|| {
             let track = Track::new(());
-            let (task, _) = TaskRef::new(NopScheduler, async move {
+            let (task, _) = TaskRef::new(NopSchedule, async move {
                 drop(track);
             });
 
@@ -67,11 +71,11 @@ mod loom {
     fn joinhandle_deallocates() {
         loom::model(|| {
             let track = Track::new(());
-            let (task, join) = TaskRef::new(NopScheduler, async move {
+            let (task, join) = TaskRef::new(NopSchedule, async move {
                 drop(track);
             });
 
-            let mut thread = loom::thread::spawn(move || {
+            let thread = loom::thread::spawn(move || {
                 drop(join);
             });
 
@@ -128,26 +132,14 @@ mod loom {
 }
 
 #[cfg(all(not(loom), feature = "alloc"))]
-mod alloc {
-    use crate::{
-        future,
-        scheduler::{Schedule, Scheduler},
-        task::*,
-    };
+mod alloc_tests {
+    use super::*;
+    use crate::scheduler::Scheduler;
     use alloc::boxed::Box;
     use core::{
         ptr,
         sync::atomic::{AtomicBool, Ordering},
     };
-
-    #[derive(Copy, Clone, Debug)]
-    struct NopSchedule;
-
-    impl Schedule for NopSchedule {
-        fn schedule(&self, task: TaskRef) {
-            unimplemented!("nop scheduler tried to schedule task {:?}", task);
-        }
-    }
 
     /// This test ensures that layout-dependent casts in the `Task` struct's
     /// vtable methods are valid.
