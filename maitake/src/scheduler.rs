@@ -1,5 +1,5 @@
 use crate::{
-    loom::sync::atomic::{AtomicPtr, Ordering},
+    loom::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::*},
     task::{self, Header, JoinHandle, Storage, TaskRef},
 };
 use core::{future::Future, pin::Pin, ptr};
@@ -14,15 +14,38 @@ pub struct StaticScheduler(Core);
 struct Core {
     run_queue: MpscQueue<Header>,
     current_task: AtomicPtr<Header>,
-    // woken: AtomicBool,
+
+    /// A counter of how many tasks were spawned since the last scheduler tick.
+    spawned: AtomicUsize,
+
+    /// A counter of how many tasks were woken while not ticking the scheduler.
+    woken_external: AtomicUsize,
 }
 
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Tick {
+    /// The total number of tasks polled on this scheduler tick.
     pub polled: usize,
+
+    /// The number of polled tasks that *completed* on this scheduler tick.
+    ///
+    /// This should always be <= `self.polled`.
     pub completed: usize,
+
+    /// `true` if the tick completed with any tasks remaining in the run queue.
     pub has_remaining: bool,
+
+    /// The number of tasks that were spawned since the last tick.
+    pub spawned: usize,
+
+    /// The number of tasks that were woken from outside of their own `poll`
+    /// calls since the last tick.
+    pub woken_external: usize,
+
+    /// The number of tasks that were woken from within their own poll calls
+    /// during this tick.
+    pub woken_internal: usize,
 }
 
 pub trait Schedule: Sized + Clone {
@@ -144,13 +167,28 @@ impl Core {
         Self {
             run_queue: MpscQueue::new_with_static_stub(stub),
             current_task: AtomicPtr::new(ptr::null_mut()),
+            spawned: AtomicUsize::new(0),
+            woken_external: AtomicUsize::new(0),
         }
     }
 
+    #[inline(always)]
     fn current_task(&self) -> Option<TaskRef> {
-        let ptr = self.current_task.load(Ordering::Acquire);
+        let ptr = self.current_task.load(Acquire);
         let ptr = ptr::NonNull::new(ptr)?;
         Some(TaskRef::clone_from_raw(ptr))
+    }
+
+    #[inline(always)]
+    fn schedule(&self, task: TaskRef) {
+        self.woken_external.fetch_add(1, Relaxed);
+        self.run_queue.enqueue(task);
+    }
+
+    #[inline(always)]
+    fn spawn_inner(&self, task: TaskRef) {
+        self.spawned.fetch_add(1, Relaxed);
+        self.run_queue.enqueue(task);
     }
 
     fn tick_n(&self, n: usize) -> Tick {
@@ -159,7 +197,10 @@ impl Core {
         let mut tick = Tick {
             polled: 0,
             completed: 0,
-            has_remaining: true,
+            spawned: 0,
+            woken_external: 0,
+            woken_internal: 0,
+            has_remaining: false,
         };
 
         for task in self.run_queue.consume() {
@@ -167,31 +208,45 @@ impl Core {
             // store the currently polled task in the `current_task` pointer.
             // using `TaskRef::as_ptr` is safe here, since we will clear the
             // `current_task` pointer before dropping the `TaskRef`.
-            self.current_task
-                .store(task.as_ptr().as_ptr(), Ordering::Release);
+            self.current_task.store(task.as_ptr().as_ptr(), Release);
 
             // poll the task
             let poll_result = task.poll();
 
             // clear the current task cell before potentially dropping the
             // `TaskRef`.
-            self.current_task.store(ptr::null_mut(), Ordering::Release);
+            self.current_task.store(ptr::null_mut(), Release);
 
             tick.polled += 1;
             match poll_result {
                 PollResult::Ready | PollResult::ReadyJoined => tick.completed += 1,
-                PollResult::PendingSchedule => self.run_queue.enqueue(task),
+                PollResult::PendingSchedule => {
+                    self.run_queue.enqueue(task);
+                    tick.woken_internal += 1;
+                }
                 PollResult::Pending => {}
             }
 
             debug!(poll = ?poll_result, tick.polled, tick.completed);
             if tick.polled == n {
-                return tick;
+                // we haven't drained the current run queue.
+                tick.has_remaining = false;
+                break;
             }
         }
 
-        // we drained the current run queue.
-        tick.has_remaining = false;
+        tick.spawned = self.spawned.swap(0, Relaxed);
+        tick.woken_external = self.woken_external.swap(0, Relaxed);
+
+        // log scheduler metrics.
+        debug!(
+            tick.polled,
+            tick.completed,
+            tick.spawned,
+            tick.woken_external,
+            tick.woken_internal,
+            tick.has_remaining
+        );
 
         tick
     }
@@ -199,11 +254,9 @@ impl Core {
 
 impl Schedule for &'static StaticScheduler {
     fn schedule(&self, task: TaskRef) {
-        // self.woken.store(true, Ordering::Release);
-        self.0.run_queue.enqueue(task);
+        self.0.schedule(task)
     }
 
-    #[inline]
     #[must_use]
     fn current_task(&self) -> Option<TaskRef> {
         self.0.current_task()
@@ -312,7 +365,7 @@ feature! {
             F::Output: 'static,
         {
             let (task, join) = TaskRef::new(self.clone(), future);
-            self.schedule(task);
+            self.0.spawn_inner(task);
             join
         }
 
@@ -335,7 +388,7 @@ feature! {
             F::Output: 'static,
         {
             let (task, join) = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
-            self.schedule(task);
+            self.0.spawn_inner(task);
             join
         }
 
@@ -355,11 +408,9 @@ feature! {
 
     impl Schedule for Scheduler {
         fn schedule(&self, task: TaskRef) {
-            // self.0.woken.store(true, Ordering::Release);
-            self.0.run_queue.enqueue(task);
+            self.0.schedule(task)
         }
 
-        #[inline]
         #[must_use]
         fn current_task(&self) -> Option<TaskRef> {
             self.0.current_task()
@@ -384,7 +435,7 @@ feature! {
             F::Output: 'static,
         {
             let (task, join) = TaskRef::new(self, future);
-            self.schedule(task);
+            self.0.spawn_inner(task);
             join
         }
     }
@@ -395,6 +446,8 @@ feature! {
             Self {
                 run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
                 current_task: AtomicPtr::new(ptr::null_mut()),
+                spawned: AtomicUsize::new(0),
+                woken_external: AtomicUsize::new(0),
             }
         }
     }
