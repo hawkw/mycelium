@@ -809,7 +809,7 @@ impl TaskRef {
             let loc = builder
                 .location
                 .as_ref()
-                .unwrap_or_else(|| &*core::panic::Location::caller());
+                .unwrap_or_else(|| core::panic::Location::caller());
             let span = trace_span!(
                 "runtime.spawn",
                 kind = %builder.kind,
