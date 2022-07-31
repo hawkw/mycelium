@@ -40,7 +40,7 @@ use core::{
 
 use self::{
     builder::Settings,
-    state::{JoinAction, OrDrop, ScheduleAction, StateCell},
+    state::{JoinAction, OrDrop, ScheduleAction, StartPollAction, StateCell},
 };
 use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::{fmt, mem::CheckedMaybeUninit};
@@ -553,13 +553,20 @@ where
         let state = &this.as_ref().state();
         match test_dbg!(state.start_poll()) {
             // transitioned successfully!
-            Ok(_) => {}
-            Err(_state) => {
-                // TODO(eliza): could run the dealloc glue here instead of going
-                // through a ref cycle?
-                return PollResult::Ready;
+            StartPollAction::Poll => {}
+            // cancel culture has gone too far!
+            StartPollAction::Canceled { wake_join_waker } => {
+                trace!(task.addr = ?ptr, wake_join_waker, "task canceled!");
+                if wake_join_waker {
+                    this.as_ref().wake_join_waker();
+                    return PollResult::ReadyJoined;
+                } else {
+                    return PollResult::Ready;
+                }
             }
-        }
+            // can't poll this task for some reason...
+            StartPollAction::CantPoll => return PollResult::Ready,
+        };
 
         // wrap the waker in `ManuallyDrop` because we're converting it from an
         // existing task ref, rather than incrementing the task ref count. if
@@ -583,11 +590,7 @@ where
         // if the task is ready and has a `JoinHandle` to wake, wake the join
         // waker now.
         if result == PollResult::ReadyJoined {
-            this.as_ref().join_waker.with_mut(|join_waker| unsafe {
-                let join_waker = (*join_waker).assume_init_read();
-                test_debug!(?join_waker, "waking");
-                join_waker.wake();
-            });
+            this.as_ref().wake_join_waker()
         }
 
         result
@@ -668,6 +671,14 @@ where
                 }
                 Poll::Pending => Poll::Pending,
             }
+        })
+    }
+
+    unsafe fn wake_join_waker(&self) {
+        self.join_waker.with_mut(|join_waker| unsafe {
+            let join_waker = (*join_waker).assume_init_read();
+            test_debug!(?join_waker, "waking");
+            join_waker.wake();
         })
     }
 }
@@ -848,6 +859,24 @@ impl TaskRef {
     #[must_use]
     pub fn id(&self) -> TaskId {
         self.header().id
+    }
+
+    /// Forcibly cancel the task.
+    ///
+    /// This method returns `true` if the task was canceled successfully, and
+    /// `false` if the task could not be canceled (i.e., it has already completed,
+    /// has already been canceled, cancel culture has gone TOO FAR, et cetera).
+    pub fn cancel(&self) -> bool {
+        // try to set the canceled bit.
+        let canceled = self.state().cancel();
+
+        // if the task was successfully canceled, wake it so that it can clean
+        // up after itself.
+        if canceled {
+            todo!("(eliza) this probably needs a new vtable fn or something...");
+        }
+
+        canceled
     }
 
     #[track_caller]
