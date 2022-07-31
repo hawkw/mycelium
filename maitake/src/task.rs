@@ -38,7 +38,7 @@ use core::{
 
 use self::{
     builder::Settings,
-    state::{JoinAction, OrDrop, PollAction, ScheduleAction, StateCell},
+    state::{JoinAction, OrDrop, ScheduleAction, StateCell},
 };
 use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::{fmt, mem::CheckedMaybeUninit};
@@ -182,6 +182,32 @@ pub(crate) struct Header {
     span: trace::Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PollResult {
+    /// The task has completed, without waking a [`JoinHandle`] waker.
+    ///
+    /// The scheduler can increment a counter of completed tasks, and then drop
+    /// the [`TaskRef`].
+    Ready,
+
+    /// The task has completed and a [`JoinHandle`] waker has been woken.
+    ///
+    /// The scheduler can increment a counter of completed tasks, and then drop
+    /// the [`TaskRef`].
+    ReadyJoined,
+
+    /// The task is pending, but not woken.
+    ///
+    /// The scheduler can drop the [`TaskRef`], as whoever intends to wake the
+    /// task later is holding a clone of its [`Waker`].
+    Pending,
+
+    /// The task has woken itself during the poll.
+    ///
+    /// The scheduler should re-schedule the task, rather than dropping the [`TaskRef`].
+    PendingSchedule,
+}
+
 /// The task's [`Header`] and [scheduler] reference.
 ///
 /// This is factored out into a separate type from `Task` itself so that we can
@@ -310,12 +336,14 @@ enum Cell<F: Future> {
 ///
 /// #### Task `Vtable`
 ///
-/// * **`unsafe fn `[`poll`]`(`[`TaskRef`]`) -> `[`Poll`]`<()>`**
+/// * **`unsafe fn `[`poll`]`(`[`NonNull`]`<`[`Header`]`>) -> `[`PollResult`]**
 ///
-///   Polls the task.
+///   Polls the task's [`Future`].
 ///
-///   This consumes the [`TaskRef`], and may drop it if the task is not
-///   scheduled at the end of the poll.
+///   This does *not* consume a [`TaskRef`], as the scheduler may wish to do
+///   additional operations on the task even if it should be dropped. Instead,
+///   this function returns a [`PollResult`] that indicates what the scheduler
+///   should do with the task after the poll.
 ///
 /// * **`unsafe fn `[`poll_join`]`(`[`NonNull`]`<`[`Header`]`>, `[`NonNull`]`<()>,
 ///   &mut `[`Context`]`<'_>) -> `[`Poll`]`<Result<(), `[`JoinError`]`>>`**
@@ -353,8 +381,9 @@ enum Cell<F: Future> {
 /// [`poll_join`]: Task::poll_join
 /// [`deallocate`]: Task::deallocate
 struct Vtable {
-    /// Poll the future.
-    poll: unsafe fn(TaskRef) -> Poll<()>,
+    /// Poll the future, returning a [`PollResult`] that indicates what the
+    /// scheduler should do with the polled task.
+    poll: unsafe fn(NonNull<Header>) -> PollResult,
 
     /// Poll the task's `JoinHandle` for completion, storing the output at the
     /// provided [`NonNull`] pointer if the task has completed.
@@ -460,13 +489,13 @@ where
         }
     }
 
-    unsafe fn poll(ptr: TaskRef) -> Poll<()> {
+    unsafe fn poll(ptr: NonNull<Header>) -> PollResult {
         trace!(
             task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
             "Task::poll"
         );
-        let mut this = ptr.0.cast::<Self>();
+        let mut this = ptr.cast::<Self>();
         test_debug!(task = ?fmt::alt(this.as_ref()));
         // try to transition the task to the polling state
         let state = &this.as_ref().state();
@@ -476,7 +505,7 @@ where
             Err(_state) => {
                 // TODO(eliza): could run the dealloc glue here instead of going
                 // through a ref cycle?
-                return Poll::Ready(());
+                return PollResult::Ready;
             }
         }
 
@@ -497,19 +526,19 @@ where
         };
 
         // post-poll state transition
-        match test_dbg!(state.end_poll(poll.is_ready())) {
-            OrDrop::Drop => drop(STO::from_raw(this)),
-            OrDrop::Action(PollAction::Enqueue) => Schedulable::<S>::schedule(ptr),
-            OrDrop::Action(PollAction::WakeJoinWaiter) => {
-                // wake the join waker
-                this.as_ref().join_waker.with_mut(|join_waker| unsafe {
-                    (*join_waker).assume_init_read().wake();
-                });
-            }
-            OrDrop::Action(PollAction::None) => {}
+        let result = test_dbg!(state.end_poll(poll.is_ready()));
+
+        // if the task is ready and has a `JoinHandle` to wake, wake the join
+        // waker now.
+        if result == PollResult::ReadyJoined {
+            this.as_ref().join_waker.with_mut(|join_waker| unsafe {
+                let join_waker = (*join_waker).assume_init_read();
+                test_debug!(?join_waker, "waking");
+                join_waker.wake();
+            });
         }
 
-        poll
+        result
     }
 
     unsafe fn deallocate(ptr: NonNull<Header>) {
@@ -765,21 +794,23 @@ impl TaskRef {
         Self::build_allocated::<S, F, STO>(Self::NO_BUILDER, task)
     }
 
-    /// Converts a `TaskRef` a raw [`NonNull`] pointer to the task's [`Header`],
-    /// _without_ consuming the `TaskRef`'s held ref count.
-    pub(crate) fn leak(self) -> NonNull<Header> {
-        let this = mem::ManuallyDrop::new(self);
-        this.0
-    }
-
-    /// Convert a [`NonNull`] pointer to a task's [`Header`] into a `TaskRef` to
-    /// that task. This does **not** increment the task's reference count.
+    /// Returns a **non-owning** pointer to the referenced task's [`Header`].
+    ///
+    /// This does **not** modify the task's ref count, the [`TaskRef`] on which
+    /// this function is called still owns a reference. Therefore, this means
+    /// the returned [`NonNull`] pointer **may not** outlive this [`TaskRef`].
     ///
     /// # Safety
     ///
-    /// This may *only* be called on a pointer returned by [`TaskRef::leak`]!.
-    pub(crate) unsafe fn from_raw(ptr: NonNull<Header>) -> Self {
-        Self(ptr)
+    /// The returned [`NonNull`] pointer is not guaranteed to be valid if it
+    /// outlives the lifetime of this [`TaskRef`]. If this [`TaskRef`] is
+    /// dropped, it *may* deallocate the task, and the [`NonNull`] pointer may
+    /// dangle.
+    ///
+    /// **Do not** dereference the returned [`NonNull`] pointer unless at least
+    /// one [`TaskRef`] referencing this task is known to exist!
+    pub(crate) fn as_ptr(&self) -> NonNull<Header> {
+        self.0
     }
 
     /// Convert a [`NonNull`] pointer to a task's [`Header`] into a new `TaskRef` to
@@ -848,9 +879,9 @@ impl TaskRef {
         (this, join_handle)
     }
 
-    pub(crate) fn poll(self) -> Poll<()> {
+    pub(crate) fn poll(&self) -> PollResult {
         let poll_fn = self.header().vtable.poll;
-        unsafe { poll_fn(self) }
+        unsafe { poll_fn(self.0) }
     }
 
     /// # Safety
@@ -921,11 +952,11 @@ unsafe impl Sync for TaskRef {}
 // See https://github.com/rust-lang/rust/issues/97708 for why
 // this is necessary
 #[no_mangle]
-unsafe fn _maitake_header_nop(_ptr: TaskRef) -> Poll<()> {
+unsafe fn _maitake_header_nop(_ptr: NonNull<Header>) -> PollResult {
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
     #[cfg(not(debug_assertions))]
-    Poll::Pending
+    PollResult::Pending
 }
 
 // See https://github.com/rust-lang/rust/issues/97708 for why
