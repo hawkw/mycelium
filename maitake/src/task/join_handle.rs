@@ -24,6 +24,10 @@ use core::{future::Future, marker::PhantomData, pin::Pin};
 /// [`task::Builder::spawn`]: crate::task::Builder::spawn
 /// [`task::Builder::spawn_allocated`]: crate::task::Builder::spawn_allocated
 #[derive(Debug, PartialEq, Eq)]
+// This clippy lint appears to be triggered incorrectly; this type *does* derive
+// `Eq` based on its `PartialEq<Self>` impl, but it also implements `PartialEq`
+// with types other than `Self` (which cannot impl `Eq`).
+#[allow(clippy::derive_partial_eq_without_eq)]
 pub struct JoinHandle<T> {
     task: Option<TaskRef>,
     _t: PhantomData<fn(T)>,
