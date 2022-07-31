@@ -2,6 +2,8 @@ use super::{Future, JoinHandle, Schedule, Storage, TaskRef};
 use core::panic::Location;
 
 /// Builds a new [`Task`] prior to spawning it.
+///
+/// [`Task`]: crate::task::Task
 #[derive(Debug, Clone)]
 pub struct Builder<'a, S> {
     scheduler: S,
