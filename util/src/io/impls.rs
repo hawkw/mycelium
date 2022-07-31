@@ -230,7 +230,7 @@ impl Read for &[u8] {
     #[inline]
     #[cfg(feature = "alloc")]
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        buf.extend_from_slice(*self);
+        buf.extend_from_slice(self);
         let len = self.len();
         *self = &self[len..];
         Ok(len)

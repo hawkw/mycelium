@@ -401,7 +401,7 @@ impl WaitQueue {
         // the lock, so we need to acquire a new snapshot.
         state = self.load();
 
-        if let Some(waker) = self.wake_locked(&mut *queue, state) {
+        if let Some(waker) = self.wake_locked(&mut queue, state) {
             drop(queue);
             waker.wake();
         }
