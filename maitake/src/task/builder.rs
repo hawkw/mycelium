@@ -1,4 +1,4 @@
-use super::{Future, JoinHandle, Schedule, Storage, Task, TaskRef};
+use super::{Future, JoinHandle, Schedule, Storage, TaskRef};
 use core::panic::Location;
 
 /// Builds a new [`Task`] prior to spawning it.
@@ -122,7 +122,8 @@ impl<'a, S: Schedule> Builder<'a, S> {
             F::Output: 'static,
         {
             use alloc::boxed::Box;
-            use super::BoxStorage;
+            use super::{BoxStorage, Task};
+
             let task = Box::new(Task::<S, _, BoxStorage>::new(self.scheduler.clone(), future));
             let (task, join) = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
             self.scheduler.schedule(task);

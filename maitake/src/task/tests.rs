@@ -1,8 +1,4 @@
-use crate::{
-    future,
-    scheduler::{Schedule, Scheduler},
-    task::*,
-};
+use crate::{future, scheduler::Schedule, task::*};
 
 #[derive(Copy, Clone, Debug)]
 struct NopSchedule;
@@ -20,13 +16,16 @@ impl Schedule for NopSchedule {
 #[cfg(loom)]
 mod loom {
     use super::*;
-    use crate::loom::{
-        self,
-        alloc::{Track, TrackFuture},
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
+    use crate::{
+        loom::{
+            self,
+            alloc::{Track, TrackFuture},
+            sync::{
+                atomic::{AtomicBool, Ordering},
+                Arc,
+            },
         },
+        scheduler::Scheduler,
     };
 
     #[test]
@@ -135,6 +134,7 @@ mod loom {
 #[cfg(all(not(loom), feature = "alloc"))]
 mod alloc_tests {
     use super::*;
+    use crate::scheduler::Scheduler;
     use alloc::boxed::Box;
     use core::{
         ptr,
