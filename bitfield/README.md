@@ -14,7 +14,7 @@
 [docs-badge]: https://docs.rs/mycelium-bitfield/badge.svg
 [docs-url]: https://docs.rs/mycelium-bitfield
 [docs-main-badge]: https://img.shields.io/netlify/3ec00bb5-251a-4f83-ac7f-3799d95db0e6?label=docs%20%28main%20branch%29
-[docs-main-url]: https://mycelium.elizas.website/mycelium-bitfield
+[docs-main-url]: https://mycelium.elizas.website/mycelium_bitfield
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: ../LICENSE
 [tests-badge]: https://github.com/hawkw/mycelium/actions/workflows/ci.yml/badge.svg?branch=main
