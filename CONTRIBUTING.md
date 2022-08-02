@@ -48,20 +48,55 @@ SUBCOMMANDS:
 ```
 
 [`inoculate`]: https://github.com/hawkw/mycelium/tree/main/inoculate
-
 ### cargo aliases
 
 the following [cargo aliases] are provided for development:
 
 - `cargo inoculate` runs any `inoculate` subcommand
-- `cargo run-x64` runs the x86_64 kernel in QEMU
-- `cargo test-x64` runs the x86_64 kernel's kernel-mode test suite in QEMU
+- `cargo run-x64` runs the x86_64 kernel in [QEMU]
+- `cargo test-x64` runs the x86_64 kernel's kernel-mode test suite in [QEMU]
 - `cargo build-x64` builds the x86_64 bootable disk image
 - `cargo clippy-x64` runs the [clippy] linter with the kernel x86_64 target
   enabled (rather than the build host's target triple).
 
 [cargo aliases]: https://github.com/hawkw/mycelium/blob/main/.cargo/config
 [clippy]: https://github.com/rust-lang/rust-clippy
+
+### justfile
+
+in addition to `inoculate`, which is used to build and run the kernel, a
+`justfile` for the [Just] command runner is provided to automate testing and
+linting workflows that involve  multiple steps.
+
+note that any recipe that takes a `<crate>` can be invoked with the name of a
+specific crate in the workspace, or without a crate name to run that recipe for
+the whole Mycelium workspace.
+
+- `just preflight`: runs all tests and checks. recommended for running on a
+  branch prior to opening a pull request.
+- `just test <crate>`: runs all tests for `<crate>` (or the whole workspace if
+  no crate is provided), including host tests, [Loom] tests, [Miri] tests, and
+  doctests.
+- `just miri <crate>`: runs tests for `<crate>` in the [Miri] interpreter.
+- `just loom <crate>`: runs [Loom] models for `<crate>` (or all [Loom] models in
+  the workspace).
+- `just test-host <crate>`: runs standard `cargo test` tests (host tests) for
+  `<crate>` (or the whole workspace).
+- `just test-kernel`: runs the kernel test suite in [QEMU] --- this is
+  equivalent to `cargo test-x64`.
+- `just docs <crate>`: builds and opens development RustDoc documentation for
+  `<crate>` (or for the whole workspace).
+- `just lint <crate>`: runs [clippy] and [rustfmt] linting checks for
+  `<crate>`/the whole workspace.
+
+running `just --list` (or just `just`) will print a list of all available `just`
+recipes.
+
+see https://just.systems/man for more information on using [Just].
+
+[Miri]: https://github.com/rust-lang/miri
+[Loom]: https://crates.io/crates/loom
+[rustfmt]: https://github.com/rust-lang/rustfmt
 
 ### build dependencies
 
@@ -92,6 +127,11 @@ similarly, to use `inoculate`'s support for [`gdb`] (the GNU debugger), you need
 `gdb` installed on your system. it's probably also possible to debug mycelium with
 `lldb` somehow, but i haven't tried that.
 
+in order to use the [`justfile`], you need the [Just] command
+runner. this is optional, but useful to have. most of the Just recipes run tests
+using [`cargo nextest`] rather than `cargo test`, but the [`justfile`] will
+offer to install [`cargo nextest`] for you if needed.
+
 for NixOS users, there's an included [`shell.nix`] which can be used with
 [`nix-shell`] or [`direnv`]. this should ensure all required runtime
 dependencies and tools are present.
@@ -105,3 +145,6 @@ config file, i'd welcome a PR to add support for your preferred package manager.
 [`shell.nix`]: https://github.com/hawkw/mycelium/blob/main/shell.nix
 [`nix-shell`]: https://nixos.wiki/wiki/Development_environment_with_nix-shell
 [`direnv`]: https://direnv.net/
+[`cargo nextest`]: https://nextest.sh
+[`justfile`]: #justfile
+[Just]: https://just.systems
