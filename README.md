@@ -77,7 +77,7 @@ see [CONTRIBUTING.md] for details on development environment setup and tools.
 [helloworld]: https://github.com/hawkw/mycelium/blob/main/src/helloworld.wast
 [crates.io]: https://crates.io
 
-[`cordyceps]: https://github.com/hawkw/mycelium/tree/main/cordyceps
+[`cordyceps`]: https://github.com/hawkw/mycelium/tree/main/cordyceps
 [`maitake`]: https://github.com/hawkw/mycelium/tree/main/maitake
 [`mycelium-alloc`]: https://github.com/hawkw/mycelium/tree/main/alloc
 [`mycelium-bitfield`]: https://github.com/hawkw/mycelium/tree/main/bitfield
