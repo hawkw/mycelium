@@ -90,6 +90,5 @@ see [CONTRIBUTING.md] for details on development environment setup and tools.
 [intrusive]:
     https://www.boost.org/doc/libs/1_45_0/doc/html/intrusive/intrusive_vs_nontrusive.html
 [buddy]: https://en.wikipedia.org/wiki/Buddy_memory_allocation
-
 [QEMU]: https://www.qemu.org/
 [CONTRIBUTING.md]: https://github.com/hawkw/mycelium/blob/main/CONTRIBUTING.md

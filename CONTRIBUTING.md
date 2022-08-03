@@ -92,7 +92,7 @@ the whole Mycelium workspace.
 running `just --list` (or just `just`) will print a list of all available `just`
 recipes.
 
-see https://just.systems/man for more information on using [Just].
+see <https://just.systems/man> for more information on using [Just].
 
 [Miri]: https://github.com/rust-lang/miri
 [Loom]: https://crates.io/crates/loom
