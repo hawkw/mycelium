@@ -15,20 +15,20 @@ pub(crate) struct PathOptions {
     /// The path to the `bootloader` crate's Cargo manifest. If this is not
     /// provided, it will be located automatically.
     #[clap(long, parse(from_os_str))]
-    bootloader_manifest: Option<PathBuf>,
+    pub(super) bootloader_manifest: Option<PathBuf>,
 
     /// The path to the kernel's Cargo manifest. If this is not
     /// provided, it will be located automatically.
     #[clap(long, parse(from_os_str))]
-    kernel_manifest: Option<PathBuf>,
+    pub(super) kernel_manifest: Option<PathBuf>,
 
     /// Overrides the directory in which to build the output image.
     #[clap(short, long, parse(from_os_str), env = "OUT_DIR")]
-    out_dir: Option<PathBuf>,
+    pub(super) out_dir: Option<PathBuf>,
 
     /// Overrides the target directory for the kernel build.
     #[clap(short, long, parse(from_os_str), env = "CARGO_TARGET_DIR")]
-    target_dir: Option<PathBuf>,
+    pub(super) target_dir: Option<PathBuf>,
 }
 
 /// Options that configure `inoculate`'s output.

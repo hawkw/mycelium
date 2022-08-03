@@ -17,20 +17,18 @@ pub mod term;
 pub mod trace;
 
 #[derive(Debug, Parser)]
-#[clap(about, version, author = "Eliza Weisman <eliza@elizas.website>")]
+#[clap(
+    bin_name = "cargo",
+    about,
+    version,
+    author = "Eliza Weisman <eliza@elizas.website>"
+)]
 pub struct Options {
-    /// The path to the kernel binary.
-    #[clap(parse(from_os_str))]
-    kernel_bin: PathBuf,
-
     /// Which command to run?
     ///
     /// By default, an image is built but not run.
     #[clap(subcommand)]
-    pub cmd: Option<Subcommand>,
-
-    #[clap(flatten)]
-    paths: cli::PathOptions,
+    pub(crate) cmd: Cmd,
 
     /// Overrides the path to the `cargo` executable.
     ///
@@ -48,7 +46,27 @@ pub struct Options {
 }
 
 #[derive(Debug, Parser)]
-pub enum Subcommand {
+pub(crate) enum Cmd {
+    /// Run an `inoculate` command that builds the Mycelium kernel. This is
+    /// intended to be invoked via `cargo run` commands with a runner alias.
+    Inoculate {
+        /// The path to the kernel binary.
+        #[clap(parse(from_os_str))]
+        kernel_bin: PathBuf,
+
+        #[clap(flatten)]
+        paths: cli::PathOptions,
+
+        /// Which command to run?
+        ///
+        /// By default, an image is built but not run.
+        #[clap(subcommand)]
+        cmd: Option<InoculateCmd>,
+    },
+}
+
+#[derive(Debug, Parser)]
+pub(crate) enum InoculateCmd {
     #[clap(flatten)]
     Qemu(qemu::Cmd),
     /// Run `gdb` without launching the kernel in QEMU.
@@ -70,11 +88,11 @@ pub struct Paths {
     pub run_dir: PathBuf,
 }
 
-impl Subcommand {
-    pub fn run(&self, image: &Path, paths: &Paths) -> Result<()> {
+impl InoculateCmd {
+    pub(crate) fn run(&self, image: impl AsRef<Path>, paths: &Paths) -> Result<()> {
         match self {
-            Subcommand::Qemu(qemu) => qemu.run_qemu(image, paths),
-            Subcommand::Gdb => crate::gdb::run_gdb(paths.kernel_bin(), 1234).map(|_| ()),
+            InoculateCmd::Qemu(qemu) => qemu.run_qemu(image.as_ref(), paths),
+            InoculateCmd::Gdb => crate::gdb::run_gdb(paths.kernel_bin(), 1234).map(|_| ()),
         }
     }
 }
@@ -85,7 +103,46 @@ impl Options {
     }
 
     pub fn is_test(&self) -> bool {
-        matches!(self.cmd, Some(Subcommand::Qemu(qemu::Cmd::Test { .. })))
+        matches!(
+            self.cmd,
+            Cmd::Inoculate {
+                cmd: Some(InoculateCmd::Qemu(qemu::Cmd::Test { .. })),
+                ..
+            }
+        )
+    }
+
+    pub fn run(&self) -> Result<()> {
+        match self.cmd {
+            Cmd::Inoculate {
+                ref kernel_bin,
+                ref paths,
+                ref cmd,
+            } => {
+                tracing::info!("inoculating mycelium!");
+                tracing::trace!(
+                    ?cmd,
+                    paths.kernel_bin = ?kernel_bin,
+                    ?paths.bootloader_manifest,
+                    ?paths.kernel_manifest,
+                    ?paths.target_dir,
+                    ?paths.out_dir,
+                    "inoculate configuration"
+                );
+                let paths = paths.paths(kernel_bin)?;
+
+                let image = self
+                    .make_image(&paths)
+                    .context("making the mycelium image didnt work")
+                    .note("this sucks T_T")?;
+
+                if let Some(subcmd) = cmd {
+                    subcmd.run(image, &paths)?;
+                }
+
+                Ok(())
+            }
+        }
     }
 
     pub fn make_image(&self, paths: &Paths) -> Result<PathBuf> {
@@ -133,10 +190,6 @@ impl Options {
         );
 
         Ok(image)
-    }
-
-    pub fn paths(&self) -> Result<Paths> {
-        self.paths.paths(&self.kernel_bin)
     }
 }
 

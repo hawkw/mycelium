@@ -1,5 +1,5 @@
 [target.'cfg(all(target_arch = "x86_64", target_os="none"))']
-runner = "cargo run --package inoculate --"
+runner = "cargo run --package inoculate -- inoculate"
 
 [alias]
 run-x64 = "run -Z build-std=core,alloc --target=x86_64-mycelium.json -- run"
