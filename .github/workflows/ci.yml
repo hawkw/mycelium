@@ -49,16 +49,19 @@ jobs:
                 - 'cordyceps/**/*.rs'
                 - 'cordyceps/Cargo.toml'
                 - '.github/workflows/ci.yml'
+                - 'justfile'
             util:
               paths:
                 - 'util/**/*.rs'
                 - 'util/Cargo.toml'
                 - '.github/workflows/ci.yml'
+                - 'justfile'
             maitake:
               paths:
                 - 'maitake/**/*.rs'
                 - 'maitake/Cargo.toml'
                 - '.github/workflows/ci.yml'
+                - 'justfile'
 
   # run `cargo check` with the host target triple.
   check-host:
@@ -120,19 +123,12 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: cargo nextest run
-      run: |
-        cargo nextest run \
-          --workspace \
-          --all-features \
-          --profile ci
-    - name: cargo test --doc
-      run: |
-        cargo test --doc \
-          --workspace \
-          --all-features
+      run: just test-host
 
   # build a bootable image for the `x86_64-mycelium` target.
   build-x64:
@@ -145,9 +141,7 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - name: x86_64 boot image
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: build-x64
+      run: cargo build-x64
 
   # run kernel tests in QEMU for the `x86_64-mycelium` target.
   test-x64:
@@ -168,9 +162,7 @@ jobs:
 
     # run kernel tests in QEMU
     - name: run tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test-x64
+      run: cargo test-x64
 
   # check that RustDoc builds
   docs:
@@ -206,13 +198,12 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: |
-        ./bin/loom -p cordyceps \
-          --failure-output immediate-final \
-          --no-fail-fast
+      run: just loom cordyceps
 
   # run miri tests
   cordyceps_miri:
@@ -224,8 +215,12 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - name: run miri tests
-      run: ./bin/miri -p cordyceps
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run Miri tests
+      run: just miri cordyceps
 
   ### maitake ###
 
@@ -254,13 +249,12 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: |
-        ./bin/loom -p maitake \
-          --failure-output immediate-final \
-          --no-fail-fast
+      run: just loom maitake
 
   ### mycelium-util ###
 
@@ -274,10 +268,9 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
-      run: |
-        ./bin/loom -p mycelium-util \
-          --failure-output immediate-final \
-          --no-fail-fast
+      run: just loom mycelium-util
