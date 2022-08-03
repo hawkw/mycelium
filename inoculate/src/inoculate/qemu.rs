@@ -1,5 +1,8 @@
-use crate::term::{ColorMode, OwoColorize};
-use crate::Result;
+use super::{gdb, Paths};
+use crate::{
+    term::{ColorMode, OwoColorize},
+    Result,
+};
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
@@ -118,7 +121,7 @@ impl Cmd {
 
         // If the `--gdb` flag was passed, try to run gdb & connect to the kernel.
         if qemu_settings.gdb {
-            crate::gdb::run_gdb(binary, qemu_settings.gdb_port)?;
+            gdb::run_gdb(binary, qemu_settings.gdb_port)?;
             if let Err(error) = child.kill() {
                 tracing::error!(?error, "failed to kill qemu");
             }
@@ -128,7 +131,7 @@ impl Cmd {
     }
 
     #[tracing::instrument(skip(self, paths), level = "debug")]
-    pub fn run_qemu(&self, image: &Path, paths: &crate::Paths) -> Result<()> {
+    pub fn run_qemu(&self, image: &Path, paths: &Paths) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
             .arg(format!("format=raw,file={}", image.display()))

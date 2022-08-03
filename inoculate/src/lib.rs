@@ -1,54 +1,44 @@
 use clap::Parser;
-use color_eyre::{
-    eyre::{ensure, format_err, WrapErr},
-    Help,
-};
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
-};
+use color_eyre::{eyre::WrapErr, Help};
+use std::path::PathBuf;
 
 pub use color_eyre::eyre::Result;
 pub mod cargo;
 pub mod cli;
-pub mod gdb;
-pub mod qemu;
 pub mod term;
 pub mod trace;
+
+mod inoculate;
+mod xtask;
 
 #[derive(Debug, Parser)]
 #[clap(
     bin_name = "cargo",
     about,
     version,
-    author = "Eliza Weisman <eliza@elizas.website>"
+    author = "Eliza Weisman <eliza@elizas.website>",
+    propagate_version = true
 )]
-pub struct Options {
+pub struct Args {
     /// Which command to run?
     ///
     /// By default, an image is built but not run.
     #[clap(subcommand)]
     pub(crate) cmd: Cmd,
-
-    /// Overrides the path to the `cargo` executable.
-    ///
-    /// By default, this is read from the `CARGO` environment variable.
-    #[clap(
-        long = "cargo",
-        parse(from_os_str),
-        env = "CARGO",
-        default_value = "cargo"
-    )]
-    pub cargo_path: PathBuf,
-
-    #[clap(flatten)]
-    pub(crate) output: cli::OutputOptions,
 }
 
 #[derive(Debug, Parser)]
 pub(crate) enum Cmd {
+    /// the horrible Mycelium build tool (because that's a thing we have to have
+    /// now, apparently!)
+    ///
     /// Run an `inoculate` command that builds the Mycelium kernel. This is
     /// intended to be invoked via `cargo run` commands with a runner alias.
+    #[clap(
+        version,
+        author = "Eliza Weisman <eliza@elizas.website>",
+        propagate_version = true
+    )]
     Inoculate {
         /// The path to the kernel binary.
         #[clap(parse(from_os_str))]
@@ -61,63 +51,61 @@ pub(crate) enum Cmd {
         ///
         /// By default, an image is built but not run.
         #[clap(subcommand)]
-        cmd: Option<InoculateCmd>,
+        cmd: Option<inoculate::Cmd>,
+
+        #[clap(flatten)]
+        options: cli::Options,
+    },
+
+    /// Runs a Mycelium `cargo xtask`.
+    ///
+    /// These automate various workflows for testing, linting, and building
+    /// Mycelium.
+    #[clap(
+        version,
+        author = "Eliza Weisman <eliza@elizas.website>",
+        propagate_version = true
+    )]
+    Xtask {
+        #[clap(flatten)]
+        options: cli::Options,
+
+        #[clap(flatten)]
+        cargo_options: cli::CargoOptions,
+
+        /// Which `xtask` command to run?
+        #[clap(subcommand)]
+        cmd: xtask::Cmd,
     },
 }
 
-#[derive(Debug, Parser)]
-pub(crate) enum InoculateCmd {
-    #[clap(flatten)]
-    Qemu(qemu::Cmd),
-    /// Run `gdb` without launching the kernel in QEMU.
-    ///
-    /// This assumes QEMU was already started by a separate `cargo inoculate`
-    /// invocation, and that invocation was configured to listen for a GDB
-    /// connection on the default port.
-    Gdb,
-}
-
-#[derive(Debug)]
-pub struct Paths {
-    pub pwd: PathBuf,
-    pub kernel_bin: PathBuf,
-    pub kernel_manifest: PathBuf,
-    pub bootloader_manifest: PathBuf,
-    pub out_dir: PathBuf,
-    pub target_dir: PathBuf,
-    pub run_dir: PathBuf,
-}
-
-impl InoculateCmd {
-    pub(crate) fn run(&self, image: impl AsRef<Path>, paths: &Paths) -> Result<()> {
-        match self {
-            InoculateCmd::Qemu(qemu) => qemu.run_qemu(image.as_ref(), paths),
-            InoculateCmd::Gdb => crate::gdb::run_gdb(paths.kernel_bin(), 1234).map(|_| ()),
-        }
-    }
-}
-
-impl Options {
-    pub fn trace_init(&mut self) -> Result<()> {
-        self.output.trace_init()
+impl Args {
+    pub fn init_term(&mut self) -> Result<&mut Self> {
+        self.options_mut().init_term()?;
+        Ok(self)
     }
 
     pub fn is_test(&self) -> bool {
-        matches!(
-            self.cmd,
+        match self.cmd {
             Cmd::Inoculate {
-                cmd: Some(InoculateCmd::Qemu(qemu::Cmd::Test { .. })),
-                ..
-            }
-        )
+                cmd: Some(ref cmd), ..
+            } => cmd.is_test(),
+            _ => false,
+        }
     }
 
-    pub fn run(&self) -> Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         match self.cmd {
+            Cmd::Xtask {
+                ref options,
+                ref cargo_options,
+                ref cmd,
+            } => cmd.run(options, cargo_options),
             Cmd::Inoculate {
                 ref kernel_bin,
                 ref paths,
                 ref cmd,
+                ref options,
             } => {
                 tracing::info!("inoculating mycelium!");
                 tracing::trace!(
@@ -131,8 +119,8 @@ impl Options {
                 );
                 let paths = paths.paths(kernel_bin)?;
 
-                let image = self
-                    .make_image(&paths)
+                let image = paths
+                    .make_image(options)
                     .context("making the mycelium image didnt work")
                     .note("this sucks T_T")?;
 
@@ -145,74 +133,14 @@ impl Options {
         }
     }
 
-    pub fn make_image(&self, paths: &Paths) -> Result<PathBuf> {
-        let _span = tracing::info_span!("make_image").entered();
-
-        tracing::info!(
-            "Building kernel disk image ({})",
-            paths.relative(paths.kernel_bin()).display()
-        );
-
-        tracing::trace!(?paths.run_dir);
-        let mut cmd = self.cargo_cmd("builder");
-        cmd.current_dir(&paths.run_dir)
-            .arg("--kernel-manifest")
-            .arg(&paths.kernel_manifest())
-            .arg("--kernel-binary")
-            .arg(&paths.kernel_bin())
-            .arg("--out-dir")
-            .arg(&paths.out_dir)
-            .arg("--target-dir")
-            .arg(&paths.target_dir)
-            .stderr(Stdio::inherit())
-            .stdout(Stdio::piped());
-        tracing::debug!(?cmd, "running bootimage builder");
-        let output = cmd.status().context("run builder command")?;
-        // TODO(eliza): modes for capturing/piping stdout?
-
-        if !output.success() {
-            return Err(format_err!(
-                "bootloader's builder command exited with non-zero status code"
-            ))
-            .suggestion("if you had gotten all the inputs right, this should have worked");
+    fn options_mut(&mut self) -> &mut cli::Options {
+        match self.cmd {
+            Cmd::Inoculate {
+                ref mut options, ..
+            } => options,
+            Cmd::Xtask {
+                ref mut options, ..
+            } => options,
         }
-
-        let bin_name = paths.kernel_bin.file_name().unwrap().to_str().unwrap();
-        let image = paths.out_dir.join(format!("boot-bios-{}.img", bin_name));
-        ensure!(
-            image.exists(),
-            "disk image should probably exist after running bootloader build command"
-        );
-
-        tracing::info!(
-            "created bootable disk image ({})",
-            paths.relative(&image).display()
-        );
-
-        Ok(image)
-    }
-}
-
-// === impl Paths ===
-
-impl Paths {
-    pub fn kernel_bin(&self) -> &Path {
-        self.kernel_bin.as_ref()
-    }
-
-    pub fn kernel_manifest(&self) -> &Path {
-        self.kernel_manifest.as_ref()
-    }
-
-    pub fn bootloader_manifest(&self) -> &Path {
-        self.bootloader_manifest.as_ref()
-    }
-
-    pub fn pwd(&self) -> &Path {
-        self.pwd.as_ref()
-    }
-
-    pub fn relative<'path>(&self, path: &'path Path) -> &'path Path {
-        path.strip_prefix(self.pwd()).unwrap_or(path)
     }
 }

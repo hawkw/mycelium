@@ -12,6 +12,7 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "3", features = ["derive", "env"] }
+clap-cargo = "0.9.1"
 tracing = "0.1.23"
 tracing-subscriber = { version = "0.3.1", features = ["env-filter"] }
 tracing-error = "0.2"

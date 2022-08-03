@@ -1,4 +1,4 @@
-use color_eyre::eyre::format_err;
+use color_eyre::{eyre::format_err, Result};
 use std::{
     fmt,
     str::FromStr,
@@ -7,6 +7,13 @@ use std::{
 
 pub const CARGO_LOG_WIDTH: usize = 12;
 pub use owo_colors::{style, OwoColorize, Style};
+
+pub(crate) fn init_color_mode(color_mode: ColorMode) -> Result<()> {
+    color_mode.set_global();
+
+    // TODO(eliza): disable colors if colors are not enabled...
+    color_eyre::install()
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]

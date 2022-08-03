@@ -1,7 +1,8 @@
 [target.'cfg(all(target_arch = "x86_64", target_os="none"))']
-runner = "cargo run --package inoculate -- inoculate"
+runner = "cargo run --release --package inoculate -- inoculate"
 
 [alias]
+xtask = "run --release --package inoculate -- xtask"
 run-x64 = "run -Z build-std=core,alloc --target=x86_64-mycelium.json -- run"
 debug-x64 = "run -Z build-std=core,alloc --target=x86_64-mycelium.json -- run --serial --gdb"
 test-x64 = "test -Z build-std=core,alloc --target=x86_64-mycelium.json -- test"

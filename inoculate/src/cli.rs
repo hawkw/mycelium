@@ -1,9 +1,31 @@
-use super::{term, Paths};
+use super::{inoculate::Paths, term};
 use color_eyre::{
     eyre::{format_err, Result, WrapErr},
     Help,
 };
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, clap::Args)]
+pub struct Options {
+    /// Overrides the path to the `cargo` executable.
+    ///
+    /// By default, this is read from the `CARGO` environment variable.
+    #[clap(
+        next_help_heading = "CARGO OPTIONS",
+        group = "cargo-opts",
+        long = "cargo",
+        parse(from_os_str),
+        env = "CARGO",
+        default_value = "cargo"
+    )]
+    pub(crate) cargo_path: PathBuf,
+
+    #[clap(flatten)]
+    pub(crate) output: OutputOptions,
+
+    #[clap(long, env = "GITHUB_ACTIONS")]
+    pub(crate) ci: bool,
+}
 
 /// Options that configure the underlying `cargo test` invocation.
 #[derive(Debug, clap::Args)]
@@ -50,6 +72,31 @@ pub(crate) struct OutputOptions {
         default_value = "auto"
     )]
     pub(crate) color: term::ColorMode,
+}
+
+/// Options that configure `cargo` invocations.
+#[derive(Debug, clap::Args)]
+#[clap(
+    next_help_heading = "CARGO OPTIONS",
+    group = clap::ArgGroup::new("cargo-opts")
+)]
+pub(crate) struct CargoOptions {
+    #[clap(flatten)]
+    pub(crate) features: clap_cargo::Features,
+
+    #[clap(flatten)]
+    pub(crate) workspace: clap_cargo::Workspace,
+
+    #[clap(flatten)]
+    pub(crate) manifest: clap_cargo::Manifest,
+}
+
+// === impl Options ===
+
+impl Options {
+    pub fn init_term(&mut self) -> Result<()> {
+        self.output.init_term()
+    }
 }
 
 // === impl PathOptions ===
@@ -144,11 +191,11 @@ impl PathOptions {
 // === impl OutputOptions ===
 
 impl OutputOptions {
-    pub(crate) fn trace_init(&mut self) -> Result<()> {
+    pub(crate) fn init_term(&mut self) -> Result<()> {
         use crate::trace;
         use tracing_subscriber::prelude::*;
 
-        self.color.set_global();
+        term::init_color_mode(self.color)?;
 
         let fmt = tracing_subscriber::fmt::layer()
             .event_format(trace::CargoFormatter::new(self.color))

@@ -229,6 +229,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap-cargo"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841b17c26cdae63b80cd9014f4fb779b761c388908bdf58e15223a08d65e9b08"
+dependencies = [
+ "clap",
+ "doc-comment",
+]
+
+[[package]]
 name = "clap_derive"
 version = "3.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -352,6 +362,12 @@ dependencies = [
  "cfg-if",
  "once_cell",
 ]
+
+[[package]]
+name = "doc-comment"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "downcast-rs"
@@ -739,6 +755,7 @@ dependencies = [
  "atty",
  "bootloader-locator",
  "clap",
+ "clap-cargo",
  "color-eyre",
  "heck 0.3.3",
  "locate-cargo-manifest",
