@@ -5,23 +5,20 @@ use inoculate::{Options, Result};
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let opts = Options::parse();
+    let mut opts = Options::parse();
     opts.trace_init()?;
-    let color = opts.color;
-    color.set_global();
 
     tracing::info!("inoculating mycelium!");
+    let paths = opts.paths()?;
     tracing::trace!(
         ?opts.cmd,
-        ?opts.kernel_bin,
-        ?opts.bootloader_manifest,
-        ?opts.kernel_manifest,
-        ?opts.target_dir,
-        ?opts.out_dir,
+        ?paths.kernel_bin,
+        ?paths.bootloader_manifest,
+        ?paths.kernel_manifest,
+        ?paths.target_dir,
+        ?paths.out_dir,
         "inoculate configuration"
     );
-
-    let paths = opts.paths()?;
 
     let image = opts
         .make_image(&paths)

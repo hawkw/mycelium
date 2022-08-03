@@ -7,7 +7,7 @@ impl Options {
         cargo
             .arg(cmd)
             // propagate our color mode configuration
-            .env("CARGO_TERM_COLOR", self.color.as_str());
+            .env("CARGO_TERM_COLOR", self.output.color.as_str());
         cargo
     }
 }
