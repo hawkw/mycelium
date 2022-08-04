@@ -145,6 +145,15 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     #[cfg(test)]
     arch::run_tests();
 
+    unsafe {
+        core::arch::asm!(
+            "mov edx, 0
+            mov eax, 0
+            mov ecx, 0
+            div ecx" // divide by zero
+        )
+    }
+
     // if this function returns we would boot loop. Hang, instead, so the debug
     // output can be read.
     //

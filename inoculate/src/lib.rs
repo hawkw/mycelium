@@ -41,20 +41,20 @@ pub(crate) enum Cmd {
     )]
     Inoculate {
         /// The path to the kernel binary.
-        #[clap(parse(from_os_str))]
+        #[clap(parse(from_os_str), global = true)]
         kernel_bin: PathBuf,
 
         #[clap(flatten)]
         paths: cli::PathOptions,
+
+        #[clap(flatten)]
+        options: cli::Options,
 
         /// Which command to run?
         ///
         /// By default, an image is built but not run.
         #[clap(subcommand)]
         cmd: Option<inoculate::Cmd>,
-
-        #[clap(flatten)]
-        options: cli::Options,
     },
 
     /// Runs a Mycelium `cargo xtask`.
@@ -69,9 +69,6 @@ pub(crate) enum Cmd {
     Xtask {
         #[clap(flatten)]
         options: cli::Options,
-
-        #[clap(flatten)]
-        cargo_options: cli::CargoOptions,
 
         /// Which `xtask` command to run?
         #[clap(subcommand)]
@@ -98,9 +95,8 @@ impl Args {
         match self.cmd {
             Cmd::Xtask {
                 ref options,
-                ref cargo_options,
                 ref cmd,
-            } => cmd.run(options, cargo_options),
+            } => cmd.run(options),
             Cmd::Inoculate {
                 ref kernel_bin,
                 ref paths,

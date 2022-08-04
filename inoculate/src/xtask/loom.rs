@@ -100,6 +100,7 @@ impl LoomOptions {
         &self,
         opts: &cli::Options,
         cargo_opts: &cli::CargoOptions,
+        extra_args: &[String],
     ) -> Result<ExitStatus> {
         tracing::info!("Running Loom tests");
 
@@ -127,10 +128,11 @@ impl LoomOptions {
             cmd
         };
 
-        cargo_opts.crates_or_defaults(DEFAULT_CRATES, &mut cmd);
+        cargo_opts.configure_with_crates(DEFAULT_CRATES, &mut cmd);
+        self.configure_cmd(&mut cmd).args(extra_args);
 
-        self.configure_cmd(&mut cmd)
-            .status()
+        tracing::debug!(?cmd, "running");
+        cmd.status()
             .context("running Loom command failed")
             .with_note(|| format!("command: {:?}", cmd))
     }

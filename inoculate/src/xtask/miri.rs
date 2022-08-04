@@ -35,6 +35,7 @@ impl MiriOptions {
         &self,
         opts: &cli::Options,
         cargo_opts: &cli::CargoOptions,
+        extra_args: &[String],
     ) -> Result<ExitStatus> {
         tracing::info!("Running Miri tests");
 
@@ -52,13 +53,15 @@ impl MiriOptions {
         };
 
         cargo_opts
-            .crates_or_defaults(DEFAULT_CRATES, &mut cmd)
+            .configure_with_crates(DEFAULT_CRATES, &mut cmd)
             .envs([
                 (ENV_PROPTEST_CASES, self.proptest_cases.to_string()),
                 (ENV_MIRIFLAGS, self.miriflags.clone()),
             ])
             .arg("--lib")
-            .status()
+            .args(extra_args);
+        tracing::debug!(?cmd, "running");
+        cmd.status()
             .context("running Miri command failed")
             .with_note(|| format!("command: {:?}", cmd))
     }

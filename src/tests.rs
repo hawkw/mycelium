@@ -60,8 +60,8 @@ mod myco_async {
             mycotest::assert_eq!(tick.completed, 1);
             mycotest::assert!(!tick.has_remaining);
             mycotest::assert_eq!(tick.polled, 2);
-
-            Ok(())
+            panic!("hi kate");
+            // Ok(())
         }
     }
 

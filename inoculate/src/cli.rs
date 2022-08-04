@@ -16,14 +16,15 @@ pub struct Options {
         long = "cargo",
         parse(from_os_str),
         env = "CARGO",
-        default_value = "cargo"
+        default_value = "cargo",
+        global = true
     )]
     pub(crate) cargo_path: PathBuf,
 
     #[clap(flatten)]
     pub(crate) output: OutputOptions,
 
-    #[clap(long, env = "GITHUB_ACTIONS")]
+    #[clap(long, env = "GITHUB_ACTIONS", global = true)]
     pub(crate) ci: bool,
 }
 
@@ -36,7 +37,7 @@ pub struct Options {
 pub(crate) struct PathOptions {
     /// The path to the `bootloader` crate's Cargo manifest. If this is not
     /// provided, it will be located automatically.
-    #[clap(long, parse(from_os_str))]
+    #[clap(long, parse(from_os_str), global = true)]
     pub(super) bootloader_manifest: Option<PathBuf>,
 
     /// The path to the kernel's Cargo manifest. If this is not
@@ -45,11 +46,17 @@ pub(crate) struct PathOptions {
     pub(super) kernel_manifest: Option<PathBuf>,
 
     /// Overrides the directory in which to build the output image.
-    #[clap(short, long, parse(from_os_str), env = "OUT_DIR")]
+    #[clap(short, long, parse(from_os_str), env = "OUT_DIR", global = true)]
     pub(super) out_dir: Option<PathBuf>,
 
     /// Overrides the target directory for the kernel build.
-    #[clap(short, long, parse(from_os_str), env = "CARGO_TARGET_DIR")]
+    #[clap(
+        short,
+        long,
+        parse(from_os_str),
+        env = "CARGO_TARGET_DIR",
+        global = true
+    )]
     pub(super) target_dir: Option<PathBuf>,
 }
 
@@ -61,7 +68,13 @@ pub(crate) struct PathOptions {
 )]
 pub(crate) struct OutputOptions {
     /// Configures build logging.
-    #[clap(short, long, env = "RUST_LOG", default_value = "inoculate=info,warn")]
+    #[clap(
+        short,
+        long,
+        env = "RUST_LOG",
+        default_value = "inoculate=info,warn",
+        global = true
+    )]
     log: tracing_subscriber::EnvFilter,
 
     /// Whether to emit colors in output.
@@ -69,7 +82,8 @@ pub(crate) struct OutputOptions {
         long,
         possible_values(&["auto", "always", "never"]),
         env = "CARGO_TERM_COLORS",
-        default_value = "auto"
+        default_value = "auto",
+        global = true
     )]
     pub(crate) color: term::ColorMode,
 }
