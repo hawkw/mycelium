@@ -2,6 +2,7 @@ use crate::{cli, Result};
 
 mod loom;
 mod miri;
+mod release;
 
 #[derive(Debug, clap::Parser)]
 #[clap(trailing_var_arg = true)]
@@ -49,6 +50,9 @@ pub(crate) enum Cmd {
         #[clap(flatten)]
         cargo_opts: cli::CargoOptions,
     },
+
+    #[clap(flatten)]
+    Release(release::Cmd),
 }
 
 impl Cmd {
@@ -109,6 +113,7 @@ impl Cmd {
 
                 Ok(())
             }
+            Self::Release(release) => release.run(opts),
         }
     }
 }
