@@ -104,7 +104,7 @@ impl LoomOptions {
     ) -> Result<ExitStatus> {
         tracing::info!("Running Loom tests");
 
-        let mut cmd = if opts.has_nextest()? {
+        let mut cmd = if opts.install_nextest()? {
             let mut cmd = opts.cargo_cmd("nextest");
             let nextest_profile = if opts.ci {
                 tracing::info!("Configured for CI");

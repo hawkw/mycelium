@@ -40,7 +40,7 @@ impl MiriOptions {
         tracing::info!("Running Miri tests");
 
         let mut cmd = opts.cargo_cmd("miri");
-        if opts.has_nextest()? {
+        if opts.install_nextest()? {
             cmd.args(["nextest", "run"]);
             if opts.ci {
                 tracing::info!("Configuring nextest for CI");

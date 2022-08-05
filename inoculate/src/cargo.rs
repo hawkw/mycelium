@@ -12,7 +12,34 @@ impl cli::Options {
         cargo
     }
 
-    pub fn has_nextest(&self) -> Result<bool> {
+    pub fn install_nextest(&self) -> Result<bool> {
+        self.install_subcommand("nextest", "cargo-nextest")
+            .context("failed to find `cargo nextest`")
+    }
+
+    pub fn install_subcommand(&self, subcommand: &str, pkg: &str) -> Result<bool> {
+        if self.has_subcommand(subcommand)? {
+            return Ok(true);
+        }
+
+        if self.confirm(format_args!("missing `cargo {subcommand}`, install it?")) {
+            let mut install = self.cargo_cmd("install");
+            install.arg(pkg).arg("-f");
+            tracing::debug!(cmd = ?install, installing = %subcommand, "running");
+            let status = install
+                .status()
+                .with_context(|| format!("running {install:?}"))?;
+            if !status.success() {
+                eyre::bail!("running {install:?} failed, status: {status:?}");
+            }
+
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    pub fn has_subcommand(&self, command: &str) -> Result<bool> {
         (|| {
             let output = self
                 .cargo_cmd("--list")
@@ -25,9 +52,9 @@ impl cli::Options {
 
             let stdout = std::str::from_utf8(&output.stdout)
                 .context("parsing `cargo --list` output failed")?;
-            Ok::<bool, eyre::Error>(stdout.contains("nextest"))
+            Ok::<bool, eyre::Error>(stdout.contains(command))
         })()
-        .context("checking for `cargo nextest` failed")
+        .with_context(|| format!("checking for `cargo {command}` failed"))
     }
 }
 

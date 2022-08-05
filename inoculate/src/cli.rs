@@ -111,6 +111,30 @@ impl Options {
     pub fn init_term(&mut self) -> Result<()> {
         self.output.init_term()
     }
+
+    pub fn confirm(&self, question: impl std::fmt::Display) -> bool {
+        use std::io::{stdin, BufRead};
+        if self.ci {
+            tracing::warn!("{question} -> on CI, assuming `true`");
+            return true;
+        }
+
+        tracing::warn!("{question} [Y/n]");
+        let stdin = stdin().lock().lines();
+        for line in stdin {
+            match line {
+                Ok(line) if line.eq_ignore_ascii_case("y") || line.is_empty() => return true,
+                Ok(line) if line.eq_ignore_ascii_case("n") => return false,
+                Ok(line) => tracing::error!("invalid input {line:?}, expected one of [Y/n]"),
+                Err(error) => {
+                    tracing::error!(%error, "failed to read input, assuming 'false'");
+                    return false;
+                }
+            }
+        }
+
+        false
+    }
 }
 
 // === impl PathOptions ===
