@@ -1,4 +1,5 @@
 use crate::cli;
+use cargo_metadata::MetadataCommand;
 use color_eyre::eyre::{self, Result, WrapErr};
 use std::process::Command;
 
@@ -9,7 +10,16 @@ impl cli::Options {
             .arg(cmd)
             // propagate our color mode configuration
             .env("CARGO_TERM_COLOR", self.output.color.as_str());
+        if let Some(ref manifest_path) = self.manifest.manifest_path {
+            cargo.arg("--manifest-path").arg(manifest_path);
+        }
         cargo
+    }
+
+    pub fn metadata_command(&self) -> MetadataCommand {
+        let mut cmd = self.manifest.metadata();
+        cmd.cargo_path(&self.cargo_path);
+        cmd
     }
 
     pub fn install_nextest(&self) -> Result<bool> {

@@ -12,7 +12,21 @@ pub(crate) fn init_color_mode(color_mode: ColorMode) -> Result<()> {
     color_mode.set_global();
 
     // TODO(eliza): disable colors if colors are not enabled...
-    color_eyre::install()
+    color_eyre::config::HookBuilder::default()
+        .add_default_filters()
+        .add_frame_filter(Box::new(|frames| {
+            const FILTERS: &[&str] = &["std::panic", "std::rt::", "std::sys_common_backtrace"];
+            frames.retain(|frame| {
+                !FILTERS.iter().any(|&filter| {
+                    frame
+                        .name
+                        .as_deref()
+                        .unwrap_or_default()
+                        .starts_with(filter)
+                })
+            })
+        }))
+        .install()
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

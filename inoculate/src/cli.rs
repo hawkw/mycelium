@@ -26,6 +26,9 @@ pub struct Options {
 
     #[clap(long, env = "GITHUB_ACTIONS", global = true)]
     pub(crate) ci: bool,
+
+    #[clap(flatten)]
+    pub(crate) manifest: clap_cargo::Manifest,
 }
 
 /// Options that configure the underlying `cargo test` invocation.
@@ -100,9 +103,6 @@ pub(crate) struct CargoOptions {
 
     #[clap(flatten)]
     pub(crate) workspace: clap_cargo::Workspace,
-
-    #[clap(flatten)]
-    pub(crate) manifest: clap_cargo::Manifest,
 }
 
 // === impl Options ===
