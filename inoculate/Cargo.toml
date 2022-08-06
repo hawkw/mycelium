@@ -27,3 +27,4 @@ atty = "0.2"
 mycotest = { path = "../mycotest", features = ["alloc"] }
 heck = "0.3.3"
 semver = "1.0"
+prettydiff = "0.6"
