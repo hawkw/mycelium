@@ -1,49 +1,23 @@
-# configuration file for git-cliff (0.7.0)
+# configuration file for git-cliff (0.1.0)
 
 [changelog]
 # changelog header
 header = """
 # Changelog\n
-All notable changes to this project will be documented in this file.
-This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n
+All notable changes to this project will be documented in this file.\n
 """
 # template for the changelog body
 # https://tera.netlify.app/docs/#introduction
 body = """
 {% if version %}\
-    ## {{ version | trim_start_matches(pat="v") }} - ({{ timestamp | date(format="%Y-%m-%d") }})
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}\
-    ## Unreleased
+    ## [unreleased]
 {% endif %}\
-{% if previous %}\
-    {% if previous.commit_id %}
-        [{{ previous.commit_id | truncate(length=7, end="") }}](https://github.com/hawkw/mycelium/{{ previous.commit_id }})...\
-            [{{ commit_id | truncate(length=7, end="") }}](https://github.com/hawkw/mycelium/{{ commit_id }})
-    {% endif %}\
-{% endif %}
-{% set has_breaking = false -%}
-{% for commit in commits -%}
-    {% if commit.breaking -%}
-        {% set_global has_breaking = true -%}
-    {% endif -%}
-{% endfor -%}
-{% if has_breaking -%}
-    ### <a id = "{{ version }}-breaking"></a>Breaking Changes
-    {% for commit in commits -%}
-        {% if commit.breaking -%}
-            - **{{ commit.message | upper_first }}** ([{{ commit.id | truncate(length=7, end="") }}]({{ commit.id }}))<br />{{ commit.breaking_description }}
-        {% endif -%}
-    {% endfor -%}
-{% endif -%}
 {% for group, commits in commits | group_by(attribute="group") %}
     ### {{ group | upper_first }}
     {% for commit in commits %}
-        - {% if commit.breaking %}[**breaking**](#{{ version }}-breaking) {% endif -%} {{ commit.message | upper_first }} (\
-            [{{ commit.id | truncate(length=7, end="") }}](https://github.com/hawkw/mycelium/{{ commit.id }})\
-                {% for link in commit.links -%}
-                    , {{ link.text }}({{ link.href }})\
-                {% endfor -%}
-            )\
+        - {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }}\
     {% endfor %}
 {% endfor %}\n
 """
@@ -55,24 +29,36 @@ footer = """
 """
 
 [git]
+# parse the commits based on https://www.conventionalcommits.org
 conventional_commits = true
-commit_parsers = [
-    { body = ".*[dD]eprecate.*", group = "Deprecated" },
-    { message = "^feat", group = "Added"},
-    { message = "^fix", group = "Fixed"},
-    { message = "^doc", group = "Documented"},
-    { message = "^perf", group = "Performance"},
-    { message = "^chore", skip = true },
-    { message = "^test", skip = true },
-    { message = "prepare to release", skip = true },
-]
-filter_commits = false
+# filter out the commits that are not conventional
+filter_unconventional = true
 # regex for preprocessing the commit messages
 commit_preprocessors = [
-    { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/hawkw/mycelium/issues/${2}))"},
+    { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/orhun/git-cliff/issues/${2}))"},
 ]
-link_parsers = [
-    { pattern = "[fF]ixes #(\\d+)", text = "fixes [#${1}]", href = "https://github.com/hawkw/mycelium/issues/$1"},
-    { pattern = "[cC]loses #(\\d+)", text = "closes [#${1}]", href = "https://github.com/hawkw/mycelium/issues/$1"},
-    { pattern = "[sS]ee #(\\d+)", text = "see [#${1}]", href = "https://github.com/hawkw/mycelium/issues/$1"},
+# regex for parsing and grouping commits
+commit_parsers = [
+    { message = "^feat", group = "Features"},
+    { message = "^fix", group = "Bug Fixes"},
+    { message = "^doc", group = "Documentation"},
+    { message = "^perf", group = "Performance"},
+    { message = "^refactor", group = "Refactor"},
+    { message = "^style", group = "Styling"},
+    { message = "^test", group = "Testing"},
+    { message = "^chore\\(release\\): prepare for", skip = true},
+    { message = "^chore", group = "Miscellaneous Tasks"},
+    { body = ".*security", group = "Security"},
 ]
+# filter out the commits that are not matched by commit parsers
+filter_commits = false
+# glob pattern for matching git tags
+tag_pattern = "v[0-9]*"
+# regex for skipping tags
+skip_tags = "v0.1.0-beta.1"
+# regex for ignoring tags
+ignore_tags = ""
+# sort the tags chronologically
+date_order = false
+# sort the commits inside sections by oldest/newest order
+sort_commits = "oldest"

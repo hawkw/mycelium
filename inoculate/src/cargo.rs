@@ -23,18 +23,18 @@ impl cli::Options {
     }
 
     pub fn install_nextest(&self) -> Result<bool> {
-        self.install_subcommand("nextest", "cargo-nextest")
+        self.install_subcommand("nextest")
             .context("failed to find `cargo nextest`")
     }
 
-    pub fn install_subcommand(&self, subcommand: &str, pkg: &str) -> Result<bool> {
+    pub fn install_subcommand(&self, subcommand: &str) -> Result<bool> {
         if self.has_subcommand(subcommand)? {
             return Ok(true);
         }
 
         if self.confirm(format_args!("missing `cargo {subcommand}`, install it?")) {
             let mut install = self.cargo_cmd("install");
-            install.arg(pkg).arg("-f");
+            install.arg(format!("cargo-{subcommand}")).arg("-f");
             tracing::debug!(cmd = ?install, installing = %subcommand, "running");
             let status = install
                 .status()

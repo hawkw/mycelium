@@ -2,10 +2,12 @@ use clap::Parser;
 use color_eyre::{eyre::WrapErr, Help};
 use std::path::PathBuf;
 
+#[macro_use]
+pub mod term;
+
 pub use color_eyre::eyre::Result;
 pub mod cargo;
 pub mod cli;
-pub mod term;
 pub mod trace;
 
 mod inoculate;

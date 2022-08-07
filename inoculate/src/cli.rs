@@ -115,11 +115,14 @@ impl Options {
     pub fn confirm(&self, question: impl std::fmt::Display) -> bool {
         use std::io::{stdin, BufRead};
         if self.ci {
-            tracing::warn!("{question} -> on CI, assuming `true`");
+            tracing::info!(
+                cargo.skip_tag = true,
+                "{question} -> on CI, assuming `true`"
+            );
             return true;
         }
 
-        tracing::warn!("{question} [Y/n]");
+        tracing::info!(cargo.skip_tag = true, "{question} [Y/n]");
         let stdin = stdin().lock().lines();
         for line in stdin {
             match line {

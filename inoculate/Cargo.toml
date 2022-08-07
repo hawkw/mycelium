@@ -16,7 +16,7 @@ cargo_metadata = "0.15"
 clap = { version = "3", features = ["derive", "env"] }
 clap-cargo = { version = "0.9.1", features = ["cargo_metadata"] }
 tracing = "0.1.23"
-tracing-subscriber = { version = "0.3.1", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.1", features = ["env-filter", "tracing-log"] }
 tracing-error = "0.2"
 color-eyre = "0.6"
 bootloader-locator = "0.0.4"
@@ -28,3 +28,4 @@ mycotest = { path = "../mycotest", features = ["alloc"] }
 heck = "0.3.3"
 semver = "1.0"
 prettydiff = "0.6"
+git-cliff = "0.8.1"

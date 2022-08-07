@@ -18,7 +18,10 @@ struct Visitor<'styles, 'writer> {
     writer: Writer<'writer>,
     is_empty: bool,
     styles: &'styles Styles,
+    skip_cargo_format: bool,
     did_cargo_format: bool,
+    needs_comma: bool,
+    log_target: Option<String>,
 }
 
 #[derive(Debug)]
@@ -50,11 +53,20 @@ where
     ) -> fmt::Result {
         let metadata = event.metadata();
         let level = metadata.level();
+        let skip_tag = if *level == Level::INFO {
+            metadata
+                .fields()
+                .iter()
+                .any(|field| field.name() == SKIP_CARGO_FORMAT)
+        } else {
+            false
+        };
 
-        let include_spans = {
-            let mut visitor = self.visitor(*level, writer.by_ref());
+        let (include_spans, log_target) = {
+            let mut visitor = self.visitor(*level, writer.by_ref(), skip_tag);
             event.record(&mut visitor);
-            !visitor.did_cargo_format && ctx.lookup_current().is_some()
+            let include_spans = !visitor.did_cargo_format && ctx.lookup_current().is_some();
+            (include_spans, visitor.log_target)
         };
 
         writer.write_char('\n')?;
@@ -64,7 +76,10 @@ where
                 writer,
                 "   {} {}{}",
                 "-->".style(self.styles.pipes),
-                metadata.file().unwrap_or_else(|| metadata.target()),
+                log_target
+                    .as_deref()
+                    .or_else(|| metadata.file())
+                    .unwrap_or_else(|| metadata.target()),
                 DisplayOpt(metadata.line().map(Prefixed::prefix(":"))),
             )?;
             ctx.visit_spans(|span| {
@@ -89,6 +104,8 @@ where
         Ok(())
     }
 }
+const SKIP_CARGO_FORMAT: &str = "cargo.skip_tag";
+const LOG_FIELD_PREFIX: &str = "log.";
 
 impl CargoFormatter {
     pub(crate) fn new(colors: ColorMode) -> Self {
@@ -101,13 +118,17 @@ impl CargoFormatter {
         &'styles self,
         level: Level,
         writer: Writer<'writer>,
+        skip_cargo_format: bool,
     ) -> Visitor<'styles, 'writer> {
         Visitor {
             level,
             writer,
             is_empty: true,
             styles: &self.styles,
+            skip_cargo_format,
             did_cargo_format: false,
+            needs_comma: false,
+            log_target: None,
         }
     }
 }
@@ -120,14 +141,39 @@ impl<'styles, 'writer> Visitor<'styles, 'writer> {
 }
 
 impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        let name = field.name();
+        if name.starts_with(LOG_FIELD_PREFIX) {
+            if name == "log.file" || (name == "log.target" && self.log_target.is_none()) {
+                self.log_target = Some(value.to_string());
+            }
+            return;
+        }
+
+        self.record_debug(field, &value)
+    }
+
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        let name = field.name();
+
+        // skip `log` metadata fields
+        if name.starts_with(LOG_FIELD_PREFIX) {
+            return;
+        }
+
+        // skip `cargo.skip_tag` fields, this is a special marker to control formatting
+        if name == SKIP_CARGO_FORMAT {
+            return;
+        }
+
         // If we're writing the first field of the event, either emit cargo
         // formatting, or a level header.
         if self.is_empty {
             // If the level is `INFO` and it has a message that's
             // shaped like a cargo log tag, emit the cargo tag followed by the
             // rest of the message.
-            if self.level == Level::INFO && field.name() == Self::MESSAGE {
+            if self.level == Level::INFO && field.name() == Self::MESSAGE && !self.skip_cargo_format
+            {
                 let message = format!("{:?}", value);
                 if let Some((tag, message)) = message.as_str().split_once(' ') {
                     if tag.len() <= Self::INDENT {
@@ -147,6 +193,7 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
                         let _ = self.writer.write_str(message);
                         self.is_empty = false;
                         self.did_cargo_format = true;
+                        self.needs_comma = !message.ends_with(|ch: char| ch.is_ascii_punctuation());
                         return;
                     }
                 }
@@ -185,13 +232,15 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
                     ":".style(self.styles.bold)
                 ),
             };
-        } else {
+        } else if self.needs_comma {
             // If this is *not* the first field of the event, prefix it with a
             // comma for the preceding field, instead of a cargo tag or level tag.
             let _ = self.writer.write_str(", ");
+        } else {
+            let _ = self.writer.write_char(' ');
         }
 
-        if field.name() == Self::MESSAGE {
+        if name == Self::MESSAGE {
             let _ = write!(self.writer, "{:?}", value.style(self.styles.bold));
         } else {
             let _ = write!(
@@ -204,6 +253,7 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
         }
 
         self.is_empty = false;
+        self.needs_comma = true;
     }
 }
 
