@@ -23,11 +23,13 @@ pub fn init_interrupts() {
     interrupt::init::<InterruptHandlers>();
     tracing::info!("IDT initialized!");
 }
+
 #[derive(Debug)]
 pub struct RustbootBootInfo {
     inner: &'static boot_info::BootInfo,
     has_framebuffer: bool,
 }
+
 type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
