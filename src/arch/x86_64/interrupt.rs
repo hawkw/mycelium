@@ -72,7 +72,17 @@ pub(super) fn init_gdt() {
     let code_selector = segment::Selector::cs();
     tracing::trace!(code_selector = fmt::alt(code_selector));
     unsafe {
+        // set the code segment selector
         code_selector.set_cs();
+
+        // in protected mode and long mode, the code segment, stack segment,
+        // data segment, and extra segment must all have base address 0 and
+        // limit `2^64`, since actual segmentation is not used in those modes.
+        // therefore, we must zero the SS, DS, and ES registers.
+        segment::Selector::null().set_ss();
+        segment::Selector::null().set_ds();
+        segment::Selector::null().set_es();
+
         task::StateSegment::load_tss(tss_selector);
     }
 
