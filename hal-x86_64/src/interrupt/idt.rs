@@ -214,42 +214,6 @@ impl Attrs {
     }
 }
 
-// impl fmt::Debug for Attrs {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         f.debug_struct("Attrs")
-//             .field("gate_kind", &self.gate_kind())
-//             .field("ring", &self.ring())
-//             .field("is_32_bit", &self.is_32_bit())
-//             .field("is_present", &self.is_present())
-//             .field("bits", &format_args!("{:b}", self))
-//             .finish()
-//     }
-// }
-
-// impl fmt::Binary for Attrs {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         f.debug_tuple("Attrs")
-//             .field(&format_args!("{:#08b}", self.0))
-//             .finish()
-//     }
-// }
-
-impl fmt::UpperHex for Attrs {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Attrs")
-            .field(&format_args!("{:#X}", self.0))
-            .finish()
-    }
-}
-
-impl fmt::LowerHex for Attrs {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Attrs")
-            .field(&format_args!("{:#x}", self.0))
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
