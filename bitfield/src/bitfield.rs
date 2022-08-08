@@ -482,9 +482,9 @@ macro_rules! bitfield {
         impl core::fmt::Binary for $Name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 if f.alternate() {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self)).finish()
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self.0)).finish()
                 } else {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:b}", self)).finish()
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:b}", self.0)).finish()
                 }
             }
         }
