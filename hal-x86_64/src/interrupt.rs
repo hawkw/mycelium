@@ -1,4 +1,4 @@
-use crate::{segment, VAddr};
+use crate::{cpu, segment, VAddr};
 use core::{arch::asm, marker::PhantomData};
 use hal_core::interrupt::{ctx, Handlers};
 use mycelium_util::{bits, fmt};
@@ -47,7 +47,7 @@ bits::bitfield! {
     /// which table the segment selector references.
     pub struct SelectorErrorCode<u16> {
         const EXTERNAL: bool;
-        const TABLE = 2;
+        const TABLE: cpu::DescriptorTable;
         const INDEX = 13;
     }
 }
@@ -157,6 +157,7 @@ impl hal_core::interrupt::Control for Idt {
     #[inline]
     unsafe fn enable(&mut self) {
         crate::cpu::intrinsics::sti();
+        tracing::trace!("interrupts enabled");
     }
 
     fn is_enabled(&self) -> bool {

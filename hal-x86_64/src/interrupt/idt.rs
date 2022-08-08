@@ -168,11 +168,13 @@ impl Idt {
 
     pub fn load(&'static self) {
         let ptr = cpu::DtablePtr::new(self);
+        tracing::debug!(?ptr, "loading IDT");
         unsafe {
             // Safety: the `'static` bound ensures the IDT isn't going away
             // unless you did something really evil.
             cpu::intrinsics::lidt(ptr)
         }
+        tracing::debug!("IDT loaded!");
     }
 }
 
@@ -236,7 +238,6 @@ impl Attrs {
         self.set(Self::RING, ring)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
