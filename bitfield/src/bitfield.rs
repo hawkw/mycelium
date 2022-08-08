@@ -488,6 +488,28 @@ macro_rules! bitfield {
                 }
             }
         }
+
+        #[automatically_derived]
+        impl core::fmt::UpperHex for $Name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#X}", self.0)).finish()
+                } else {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:X}", self.0)).finish()
+                }
+            }
+        }
+
+        #[automatically_derived]
+        impl core::fmt::LowerHex for $Name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#x}", self.0)).finish()
+                } else {
+                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:x}", self.0)).finish()
+                }
+            }
+        }
     };
     (@field<$T:ident>, prev: $Prev:ident:
         $(#[$meta:meta])*
