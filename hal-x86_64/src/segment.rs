@@ -85,10 +85,6 @@ impl Selector {
         Self::INDEX.pack_into(index, &mut self.0);
         self
     }
-
-    pub fn bits(&self) -> u16 {
-        self.0
-    }
 }
 
 #[cfg(test)]
