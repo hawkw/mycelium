@@ -411,6 +411,8 @@ impl fmt::Debug for PageFaultCode {
     }
 }
 
+// === impl SelectorErrorCode ===
+
 impl SelectorErrorCode {
     #[inline]
     fn named(self, segment_kind: &'static str) -> NamedSelectorErrorCode {
@@ -419,20 +421,27 @@ impl SelectorErrorCode {
             code: self,
         }
     }
+
+    fn display(&self) -> impl fmt::Display {
+        struct PrettyErrorCode(SelectorErrorCode);
+
+        impl fmt::Display for PrettyErrorCode {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let table = self.0.get(SelectorErrorCode::TABLE);
+                let index = self.0.get(SelectorErrorCode::INDEX);
+                write!(f, "{table} index {index}")?;
+                if self.0.get(SelectorErrorCode::EXTERNAL) {
+                    f.write_str(" (from an external source)")?;
+                }
+                write!(f, " (error code {:#b})", self.0.bits())?;
+
+                Ok(())
+            }
+        }
+
+        PrettyErrorCode(*self)
+    }
 }
-
-// === impl SelectorErrorCode ===
-
-// impl fmt::Display for SelectorErrorCode {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         write!(f, "{} index {}", self.table(), self.index())?;
-//         if self.is_external() {
-//             f.write_str(" (from an external source)")?;
-//         }
-
-//         Ok(())
-//     }
-// }
 
 struct NamedSelectorErrorCode {
     segment_kind: &'static str,
@@ -442,7 +451,7 @@ struct NamedSelectorErrorCode {
 impl fmt::Display for NamedSelectorErrorCode {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.segment_kind, self.code)
+        write!(f, "{} at {}", self.segment_kind, self.code.display())
     }
 }
 
