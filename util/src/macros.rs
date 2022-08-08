@@ -1,14 +1,15 @@
-#[macro_export]
-macro_rules! feature {
+macro_rules! loom_const_fn {
     (
-        #![$meta:meta]
-        $($item:item)*
+        $(#[$meta:meta])*
+        $vis:vis fn $name:ident($($arg:ident: $T:ty),*) -> $Ret:ty $body:block
     ) => {
-        $(
-            #[cfg($meta)]
-            #[cfg_attr(docsrs, doc(cfg($meta)))]
-            $item
-        )*
+        $(#[$meta])*
+        #[cfg(not(loom))]
+        $vis const fn $name($($arg: $T),*) -> $Ret $body
+
+        $(#[$meta])*
+        #[cfg(loom)]
+        $vis fn $name($($arg: $T),*) -> $Ret $body
     }
 }
 
@@ -64,22 +65,4 @@ macro_rules! unreachable_unchecked {
             core::hint::unreachable_unchecked();
         }
     });
-}
-
-/// Variadic version of [`core::cmp::max`].
-#[macro_export]
-macro_rules! max {
-    ($arg:expr) => { $arg };
-    ($arg1:expr, $($arg:expr),+) => {
-        core::cmp::max($arg1, $crate::max!( $($arg),+ ))
-    };
-}
-
-/// Variadic version of [`core::cmp::min`].
-#[macro_export]
-macro_rules! min {
-    ($arg:expr) => { $arg };
-    ($arg1:expr, $($arg:expr),+) => {
-        core::cmp::min($arg1, $crate::min!( $($arg),+ ))
-    };
 }

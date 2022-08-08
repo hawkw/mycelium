@@ -96,7 +96,6 @@ pub fn oops(oops: Oops<'_>) -> ! {
     )
     .draw(&mut target)
     .unwrap();
-    drop(target);
     drop(framebuf);
 
     let mk_writer = MakeTextWriter::new_at(
@@ -137,9 +136,10 @@ pub fn oops(oops: Oops<'_>) -> ! {
             )
             .unwrap();
             writeln!(writer, "%rsp    = {:#016x}", registers.stack_ptr.as_usize()).unwrap();
-            writeln!(writer, "%cs     = {:016x}", registers.code_segment).unwrap();
-            writeln!(writer, "%ss     = {:016x}", registers.stack_segment).unwrap();
             writeln!(writer, "%rflags = {:#016b}", registers.cpu_flags).unwrap();
+
+            writeln!(writer, "%cs:\n{}", registers.code_segment).unwrap();
+            writeln!(writer, "%ss:\n{}", registers.stack_segment).unwrap();
         }
 
         tracing::debug!(target: "oops", instruction_ptr = ?registers.instruction_ptr);
@@ -316,7 +316,7 @@ fn disassembly<'a>(rip: usize, mk_writer: &'a impl MakeWriter<'a>) {
         // memory. whoopsie.
         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
         let indent = if i == 0 { "> " } else { "  " };
-        let _ = write!(mk_writer.make_writer(), "{}{:016x}: ", indent, ptr).unwrap();
+        let _ = write!(mk_writer.make_writer(), "{}{:016x}: ", indent, ptr);
         match decoder.decode_slice(bytes) {
             Ok(inst) => {
                 let _ = writeln!(mk_writer.make_writer(), "{}", inst);

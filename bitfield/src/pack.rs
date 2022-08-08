@@ -1,4 +1,4 @@
-//! bit manipulation utilities
+//! Packing spec types.
 //!
 //! This module provides a set of types to make packing bit ranges easier. These
 //! utilities can be used in `const fn`.
@@ -20,7 +20,7 @@
 //!
 //! Packing into the least-significant _n_ bits:
 //! ```
-//! use mycelium_util::bits::Pack32;
+//! use mycelium_bitfield::Pack32;
 //!
 //! const LEAST_SIGNIFICANT_8: Pack32 = Pack32::least_significant(8);
 //!
@@ -36,7 +36,7 @@
 //! Packing specs can be defined in relation to each other.
 //!
 //! ```
-//! use mycelium_util::bits::Pack64;
+//! use mycelium_bitfield::Pack64;
 //!
 //! const LOW: Pack64 = Pack64::least_significant(12);
 //! const MID: Pack64 = LOW.next(8);
@@ -55,7 +55,7 @@
 //! The same example can be written a little bit more neatly using methods:
 //!
 //! ```
-//! # use mycelium_util::bits::Pack64;
+//! # use mycelium_bitfield::Pack64;
 //! const LOW: Pack64 = Pack64::least_significant(12);
 //! const MID: Pack64 = LOW.next(8);
 //! const HIGH: Pack64 = MID.next(4);
@@ -74,7 +74,7 @@
 //! representation:
 //!
 //! ```
-//! # use mycelium_util::bits::Pack64;
+//! # use mycelium_bitfield::Pack64;
 //! # const LOW: Pack64 = Pack64::least_significant(12);
 //! # const MID: Pack64 = LOW.next(8);
 //! # const HIGH: Pack64 = MID.next(4);
@@ -84,16 +84,16 @@
 //! #     .pack(0x0f, &MID)
 //! #     .bits();
 //! #
-//! assert_eq!(LOW.unpack(coffee), 0xfee);
-//! assert_eq!(MID.unpack(coffee), 0x0f);
-//! assert_eq!(HIGH.unpack(coffee), 0xc);
+//! assert_eq!(LOW.unpack_bits(coffee), 0xfee);
+//! assert_eq!(MID.unpack_bits(coffee), 0x0f);
+//! assert_eq!(HIGH.unpack_bits(coffee), 0xc);
 //! ```
 //!
 //! Any previously set bit patterns in the packed range will be overwritten, but
 //! existing values outside of a packing spec's range are preserved:
 //!
 //! ```
-//! # use mycelium_util::bits::Pack64;
+//! # use mycelium_bitfield::Pack64;
 //! # const LOW: Pack64 = Pack64::least_significant(12);
 //! # const MID: Pack64 = LOW.next(8);
 //! # const HIGH: Pack64 = MID.next(4);
@@ -110,7 +110,7 @@
 //! defining them in relation to each other.
 //!
 //! ```
-//! use mycelium_util::bits::Pack64;
+//! use mycelium_bitfield::Pack64;
 //!
 //! // pack a 12-bit value starting at the ninth bit
 //! let low = Pack64::from_range(9..=21);
@@ -129,9 +129,12 @@
 //!
 //! assert_eq!(val, 0xfeedc0ffee00); // starting to detect a bit of a theme here...
 //! ```
-
+//!
+use super::FromBits;
 use core::{
+    any::type_name,
     fmt,
+    marker::PhantomData,
     ops::{Bound, Range, RangeBounds},
 };
 
@@ -144,10 +147,12 @@ macro_rules! make_packers {
                 stringify!($Bits),
                 "`] values."
             )]
-            #[derive(Copy, Clone, PartialEq, Eq)]
-            pub struct $Pack {
+            #[doc = ""]
+            #[doc = "See the [module-level documentation](crate::pack) for details on using packing specs."]
+            pub struct $Pack<T = $Bits, F = ()> {
                 mask: $Bits,
                 shift: u32,
+                _dst_ty: PhantomData<fn(&T, &F)>,
             }
 
             #[doc = concat!(
@@ -157,35 +162,28 @@ macro_rules! make_packers {
                 stringify!($Pack),
                 "`]."
             )]
+            #[doc = ""]
+            #[doc = "See the [module-level documentation](crate::pack) for details on using packing specs."]
             #[derive(Copy, Clone, PartialEq, Eq)]
             pub struct $Packing($Bits);
 
-            #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-            pub struct $Pair {
-                src: $Pack,
-                dst: $Pack,
+            #[doc = concat!(
+                "A pair of [",
+                stringify!($Pack),
+                "]s, allowing a bit range to be unpacked from one offset in a [",
+                stringify!($Bits),
+                "] value, and packed into a different offset in a different value."
+            )]
+            #[doc = ""]
+            #[doc = "See the [module-level documentation](crate::pack) for details on using packing specs."]
+            pub struct $Pair<T = $Bits> {
+                src: $Pack<T>,
+                dst: $Pack<T>,
                 dst_shl: $Bits,
                 dst_shr: $Bits,
             }
 
-            impl $Pack {
-                // XXX(eliza): why is this always `u32`? ask the stdlib i guess...
-                const SIZE_BITS: u32 = <$Bits>::MAX.leading_ones();
-
-                /// Returns a value with the first `n` bits set.
-                const fn mk_mask(n: u32) -> $Bits {
-                    if n == 0 {
-                        return 0
-                    };
-                    let one: $Bits = 1; // lolmacros
-                    let shift = one.wrapping_shl(n - 1);
-                    shift | (shift.saturating_sub(1))
-                }
-
-                const fn shift_next(&self) -> u32 {
-                    Self::SIZE_BITS - self.mask.leading_zeros()
-                }
-
+            impl $Pack<$Bits> {
                 #[doc = concat!(
                     "Wrap a [`",
                     stringify!($Bits),
@@ -203,35 +201,22 @@ macro_rules! make_packers {
                     $Packing::new(value)
                 }
 
+
                 /// Returns a packer for packing a value into the first `bits` bits.
                 pub const fn least_significant(n: u32) -> Self {
                     Self {
                         mask: Self::mk_mask(n),
                         shift: 0,
+                        _dst_ty: core::marker::PhantomData,
                     }
                 }
 
-                /// Returns a packer for packing a value into the next more-significant
-                /// `n` from `self`.
-                pub const fn next(&self, n: u32) -> Self {
-                    let shift = self.shift_next();
-                    let mask = Self::mk_mask(n) << shift;
-                    Self { mask, shift }
-                }
-
-                /// Returns a packer for packing a value into the next `n` more-significant
-                ///  after the `bit`th bit.
-                pub const fn starting_at(bit: u32, n: u32) -> Self {
-                    let shift = bit.saturating_sub(1);
-                    let mask = Self::mk_mask(n) << shift;
-                    Self { shift, mask }
-                }
 
                 /// Returns a packer that will pack a value into the provided mask.
                 pub const fn from_mask(mask: $Bits) -> Self {
                     let shift = mask.leading_zeros();
                     let mask = mask >> shift;
-                    Self { mask, shift }
+                    Self { mask, shift, _dst_ty: core::marker::PhantomData, }
                 }
 
                 /// This is a `const fn`-compatible equivalent of
@@ -283,46 +268,36 @@ macro_rules! make_packers {
                     );
                     Self::starting_at(start, end.saturating_sub(start))
                 }
+            }
 
-                /// Returns a pair type for packing bits from the range
-                /// specified by `self` at the specified offset `at`, which may
-                /// differ from `self`'s offset.
-                ///
-                /// The packing pair can be used to pack bits from one location
-                /// into another location, and vice versa.
-                pub const fn pair_at(&self, at: u32) -> $Pair {
-                    let dst = Self::starting_at(at, self.bits());
-                    self.pair_with(dst)
-                }
+            impl<T, F> $Pack<T, F> {
+                // XXX(eliza): why is this always `u32`? ask the stdlib i guess...
+                const SIZE_BITS: u32 = <$Bits>::MAX.leading_ones();
 
-                /// Returns a pair type for packing bits from the range
-                /// specified by `self` after the specified packing spec.
-                pub const fn pair_after(&self, after: &Self) -> $Pair {
-                    self.pair_at(after.shift_next())
-                }
-
-                /// Returns a pair type for packing bits from the range
-                /// specified by `self` into the range specified by `with`.
-                ///
-                /// # Note
-                /// The two ranges must be the same size. This can be asserted
-                /// by the `assert_valid` method on the returned pair type.
-                pub const fn pair_with(&self, dst: Self) -> $Pair {
-                    // TODO(eliza): validate that `dst.shift + self.bits() < N_BITS` in
-                    // const fn somehow lol
-                    let (dst_shl, dst_shr) = if dst.shift > self.shift {
-                        // If the destination is greater than `self`, we need to
-                        // shift left.
-                        ((dst.shift - self.shift) as $Bits, 0)
-                    } else {
-                        // Otherwise, shift down.
-                        (0, (self.shift - dst.shift) as $Bits)
+                /// Returns a value with the first `n` bits set.
+                const fn mk_mask(n: u32) -> $Bits {
+                    if n == 0 {
+                        return 0
                     };
-                    $Pair {
-                        src: *self,
-                        dst,
-                        dst_shl,
-                        dst_shr,
+                    let one: $Bits = 1; // lolmacros
+                    let shift = one.wrapping_shl(n - 1);
+                    shift | (shift.saturating_sub(1))
+                }
+
+                const fn shift_next(&self) -> u32 {
+                    Self::SIZE_BITS - self.mask.leading_zeros()
+                }
+
+                #[doc(hidden)]
+                pub const fn typed<T2, F2>(self) -> $Pack<T2, F2>
+                where
+                    T2: FromBits<$Bits>
+                {
+                    assert!(T2::BITS >= self.bits());
+                    $Pack {
+                        shift: self.shift,
+                        mask: self.mask,
+                        _dst_ty: PhantomData,
                     }
                 }
 
@@ -332,8 +307,22 @@ macro_rules! make_packers {
                     Self::SIZE_BITS - (self.mask >> self.shift).leading_zeros()
                 }
 
+                /// Returns the maximum value of this packing spec (i.e. a value
+                /// with all the bits set)
                 pub const fn max_value(&self) -> $Bits {
                     (1 << self.bits()) - 1
+                }
+
+                /// Returns a value with the first bit in this packing spec set.
+                #[inline]
+                pub const fn first_bit(&self) -> $Bits {
+                    1 << self.shift
+                }
+
+                /// Returns a raw, shifted mask for unpacking this packing spec.
+                #[inline]
+                pub const fn raw_mask(&self) -> $Bits {
+                    self.mask
                 }
 
                 /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
@@ -349,45 +338,6 @@ macro_rules! make_packers {
                     rest | (value << self.shift)
                 }
 
-                /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
-                ///
-                /// # Panics
-                ///
-                /// Panics if any other bits outside of [`self.bits()`] are set
-                /// in `value`.
-                ///
-                /// [`self.bits()`]: Self::bits
-                pub fn pack(&self, value: $Bits, base: $Bits) -> $Bits {
-                    assert!(
-                        value <= self.max_value(),
-                        "bits outside of packed range are set!\n     value: {:0x},\n max_value: {:0x}",
-                        value,
-                        self.max_value(),
-                    );
-                    self.pack_truncating(value, base)
-                }
-
-                /// Pack the [`self.bits()`] least-significant bits from `value`
-                /// into `base`, mutating `base`.
-                ///
-                /// # Panics
-                ///
-                /// Panics if any other bits outside of [`self.bits()`] are set
-                /// in `value`.
-                ///
-                /// [`self.bits()`]: Self::bits
-                pub fn pack_into<'base>(&self, value: $Bits, base: &'base mut $Bits) -> &'base mut $Bits {
-                    assert!(
-                        value <= self.max_value(),
-                        "bits outside of packed range are set!\n     value: {:0x},\n max_value: {:0x}",
-                        value,
-                        self.max_value(),
-                    );
-                    *base &= !self.mask;
-                    *base |= (value << self.shift);
-                    base
-                }
-
                 /// Pack the [`self.bits()`] least-significant bits from `value`
                 /// into `base`, mutating `base`.
                 ///
@@ -401,6 +351,33 @@ macro_rules! make_packers {
                     *base |= (value << self.shift);
                     base
                 }
+
+                /// Returns a new packer for packing a `T2`-typed value in the
+                /// next [`T2::BITS`](crate::FromBits::BITS) bits after `self`.
+                pub const fn then<T2>(&self) -> $Pack<T2, F>
+                where
+                    T2: FromBits<$Bits>
+                {
+                    self.next(T2::BITS).typed()
+                }
+
+                /// Returns a packer for packing a value into the next more-significant
+                /// `n` from `self`.
+                pub const fn next(&self, n: u32) -> $Pack<$Bits, F> {
+                    let shift = self.shift_next();
+                    let mask = Self::mk_mask(n) << shift;
+                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
+                }
+
+                /// Returns a packer for packing a value into all the remaining
+                /// more-significant bits after `self`.
+                pub const fn remaining(&self) -> $Pack<$Bits, F> {
+                    let shift = self.shift_next();
+                    let n = Self::SIZE_BITS - shift;
+                    let mask = Self::mk_mask(n) << shift;
+                    $Pack { mask, shift, _dst_ty: core::marker::PhantomData, }
+                }
+
 
                 /// Set _all_ bits packed by this packer to 1.
                 ///
@@ -458,9 +435,10 @@ macro_rules! make_packers {
 
                 /// Unpack this packer's bits from `source`.
                 #[inline]
-                pub const fn unpack(&self, src: $Bits) -> $Bits {
+                pub const fn unpack_bits(&self, src: $Bits) -> $Bits {
                     (src & self.mask) >> self.shift
                 }
+
 
                 /// Returns `true` if **any** bits specified by this packing spec
                 /// are set in `src`.
@@ -477,7 +455,7 @@ macro_rules! make_packers {
                     bits & self.mask == self.mask
                 }
 
-                /// Asserts that this packing pair is valid.
+                /// Asserts that this packing spec is valid.
                 ///
                 /// Because assertions cannot be made in `const fn`, this
                 /// performs validating assertions that would ideally be made
@@ -487,6 +465,63 @@ macro_rules! make_packers {
                 #[track_caller]
                 pub fn assert_valid(&self) {
                     self.assert_valid_inner(&"")
+                }
+
+
+                /// Assert all of a set of packing specs are valid for packing
+                /// and unpacking values into the same bitfield.
+                ///
+                /// This asserts that each individual packing spec is valid (by
+                /// calling [`assert_valid`](Self::assert_valid) on that spec),
+                /// and asserts that no two packing specs in `specs` overlap
+                /// (indicating that they can safely represent a single
+                /// bitfield's subranges).
+                ///
+                /// This function takes a slice of `(&str, Self)` tuples, with
+                /// the `&str`s providing a name for each packing spec. This name
+                /// is used to refer to that packing spec in panic messages.
+                #[track_caller]
+                pub fn assert_all_valid(specs: &[(&str, Self)]) {
+                    for (name, spec) in specs {
+                        spec.assert_valid_inner(&format_args!(" ({name})"));
+                        for (other_name, other_spec) in specs {
+                            // Don't test if this spec overlaps with itself ---
+                            // they obviously overlap.
+                            if name == other_name {
+                                continue;
+                            }
+                            if spec.raw_mask() & other_spec.raw_mask() > 0 {
+                                let maxlen = core::cmp::max(name.len(), other_name.len());
+                                panic!(
+                                    "mask for {name} overlaps with {other_name}\n\
+                                    {name:>width$} = {this_mask:#b}\n\
+                                    {other_name:>width$} = {that_mask:#b}",
+                                    name = name,
+                                    other_name = other_name,
+                                    this_mask = spec.raw_mask(),
+                                    that_mask = other_spec.raw_mask(),
+                                    width = maxlen + 2,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                /// Returns the index of the least-significant bit of this
+                /// packing spec (i.e. the bit position of the start of the
+                /// packed range).
+                pub const fn least_significant_index(&self) -> u32 {
+                    self.shift
+                }
+
+                /// Returns the index of the most-significant bit of this
+                /// packing spec (i.e. the bit position of the end of the
+                /// packed range).
+                ///
+                /// This will always be greater than the value returned by
+                /// [`least_significant_index`](Self::least_significant_index).
+                pub const fn most_significant_index(&self) -> u32 {
+                    Self::SIZE_BITS - self.mask.leading_zeros()
                 }
 
                 #[track_caller]
@@ -519,42 +554,199 @@ macro_rules! make_packers {
                         self,
                         cx,
                     );
-
+                    assert_eq!(self.most_significant_index() - self.least_significant_index(), self.bits(),
+                    "most_significant_index - least_significant_index ({} + {} = {}) must equal total number of bits ({})\n\
+                    -> while checking validity of {:?}{}",
+                        self.most_significant_index(),
+                        self.least_significant_index(),
+                        self.most_significant_index() - self.least_significant_index(), self.bits(),
+                        self, cx
+                    )
                 }
             }
 
-            impl fmt::Debug for $Pack {
+            impl<T, F> $Pack<T, F>
+            where
+                T: FromBits<$Bits>,
+            {
+                /// Returns a packing spec for packing a `T`-typed value in the
+                /// first [`T::BITS`](FromBits::BITS) least-significant bits.
+                pub const fn first() -> Self {
+                    $Pack::<$Bits, ()>::least_significant(T::BITS).typed()
+                }
+
+                /// Returns a packer for packing a value into the next `n` more-significant
+                /// after the `bit`th bit.
+                pub const fn starting_at(bit: u32, n: u32) -> Self {
+                    let shift = bit.saturating_sub(1);
+                    let mask = Self::mk_mask(n) << shift;
+                    Self { mask, shift, _dst_ty: PhantomData, }
+                }
+
+                /// Returns a pair type for packing bits from the range
+                /// specified by `self` at the specified offset `at`, which may
+                /// differ from `self`'s offset.
+                ///
+                /// The packing pair can be used to pack bits from one location
+                /// into another location, and vice versa.
+                pub const fn pair_at(&self, at: u32) -> $Pair<T> {
+                    let dst = Self::starting_at(at, self.bits());
+                    self.pair_with(dst)
+                }
+
+                /// Returns a pair type for packing bits from the range
+                /// specified by `self` after the specified packing spec.
+                pub const fn pair_after(&self, after: &Self) -> $Pair<T> {
+                    self.pair_at(after.shift_next())
+                }
+
+                /// Returns a pair type for packing bits from the range
+                /// specified by `self` into the range specified by `with`.
+                ///
+                /// # Note
+                ///
+                /// The two ranges must be the same size. This can be asserted
+                /// by the `assert_valid` method on the returned pair type.
+                pub const fn pair_with(&self, dst: Self) -> $Pair<T> {
+                    // TODO(eliza): validate that `dst.shift + self.bits() < N_BITS` in
+                    // const fn somehow lol
+                    let (dst_shl, dst_shr) = if dst.shift > self.shift {
+                        // If the destination is greater than `self`, we need to
+                        // shift left.
+                        ((dst.shift - self.shift) as $Bits, 0)
+                    } else {
+                        // Otherwise, shift down.
+                        (0, (self.shift - dst.shift) as $Bits)
+                    };
+
+                    $Pair {
+                        src: self.typed(),
+                        dst: dst.typed(),
+                        dst_shl,
+                        dst_shr,
+                    }
+                }
+                /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
+                ///
+                /// # Panics
+                ///
+                /// Panics if any other bits outside of [`self.bits()`] are set
+                /// in `value`.
+                ///
+                /// [`self.bits()`]: Self::bits
+                pub fn pack(&self, value: T, base: $Bits) -> $Bits {
+                    let value = value.into_bits();
+                    assert!(
+                        value <= self.max_value(),
+                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
+                        value,
+                        self.max_value(),
+                    );
+                    self.pack_truncating(value, base)
+                }
+
+                /// Pack the [`self.bits()`] least-significant bits from `value`
+                /// into `base`, mutating `base`.
+                ///
+                /// # Panics
+                ///
+                /// Panics if any other bits outside of [`self.bits()`] are set
+                /// in `value`.
+                ///
+                /// [`self.bits()`]: Self::bits
+                pub fn pack_into<'base>(&self, value: T, base: &'base mut $Bits) -> &'base mut $Bits {
+                    let value = value.into_bits();
+                    assert!(
+                        value <= self.max_value(),
+                        "bits outside of packed range are set!\n     value: {:#b},\n max_value: {:#b}",
+                        value,
+                        self.max_value(),
+                    );
+                    *base &= !self.mask;
+                    *base |= (value << self.shift);
+                    base
+                }
+
+                /// Attempts to unpack a `T`-typed value from `src`.
+                ///
+                /// # Returns
+                ///
+                /// - `Ok(T)` if a `T`-typed value could be constructed from the
+                ///   bits in `src`
+                /// - `Err(T::Error)` if `src` does not contain a valid bit
+                ///   pattern for a `T`-typed value, as determined by `T`'s
+                ///   [`FromBits::try_from_bits`] implementation.
+                pub fn try_unpack(&self, src: $Bits) -> Result<T, T::Error> {
+                    T::try_from_bits(self.unpack_bits(src))
+                }
+
+                /// Unpacks a `T`-typed value from `src`.
+                ///
+                /// # Panics
+                ///
+                /// This method panics if `src` does not contain a valid bit
+                /// pattern for a `T`-typed value, as determined by `T`'s
+                /// [`FromBits::try_from_bits`] implementation.
+                pub fn unpack(&self, src: $Bits) -> T
+                where
+                    T: FromBits<$Bits>,
+                {
+                    let bits = self.unpack_bits(src);
+                    match T::try_from_bits(bits) {
+                        Ok(value) => value,
+                        Err(e) => panic!("failed to construct {} from bits {:#b} ({}): {}", type_name::<T>(), bits, bits, e),
+                    }
+                }
+            }
+
+            impl<T, F> Clone for $Pack<T, F> {
+                fn clone(&self) -> Self {
+                    Self {
+                        mask: self.mask,
+                        shift: self.shift,
+                        _dst_ty: PhantomData,
+                    }
+                }
+            }
+
+            impl<T, F> Copy for $Pack<T, F> {}
+
+            impl<T, F> fmt::Debug for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
 
-            impl fmt::UpperHex for $Pack {
+            impl<T, F> fmt::UpperHex for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#X}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
 
-            impl fmt::LowerHex for $Pack {
+            impl<T, F> fmt::LowerHex for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#x}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
 
-            impl fmt::Binary for $Pack {
+            impl<T, F> fmt::Binary for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pack))
                         .field("mask", &format_args!("{:#b}", self.mask))
                         .field("shift", &self.shift)
+                        .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
             }
@@ -564,6 +756,29 @@ macro_rules! make_packers {
                     Self::from_range(range)
                 }
             }
+
+            impl<A, B, F> PartialEq<$Pack<B, F>> for $Pack<A, F> {
+                #[inline]
+                fn eq(&self, other: &$Pack<B, F>) -> bool {
+                    self.mask == other.mask && self.shift == other.shift
+                }
+            }
+
+            impl<A, B, F> PartialEq<&'_ $Pack<B, F>> for $Pack<A, F> {
+                #[inline]
+                fn eq(&self, other: &&'_ $Pack<B, F>) -> bool {
+                    self.eq(*other)
+                }
+            }
+
+            impl<A, B, F> PartialEq<$Pack<B, F>> for &'_ $Pack<A, F> {
+                #[inline]
+                fn eq(&self, other: &$Pack<B, F>) -> bool {
+                    (*self).eq(other)
+                }
+            }
+
+            impl<T, F> Eq for $Pack<T, F> {}
 
             // === packing type ===
 
@@ -614,7 +829,7 @@ macro_rules! make_packers {
                 /// # Panics
                 ///
                 /// If `value` contains bits outside the range specified by `packer`.
-                pub fn pack(self, value: $Bits, packer: &$Pack) -> Self {
+                pub fn pack<T: FromBits<$Bits>>(self, value: T, packer: &$Pack<T>) -> Self {
                     Self(packer.pack(value, self.0))
                 }
 
@@ -769,7 +984,20 @@ macro_rules! make_packers {
                 }
             }
 
-            impl fmt::UpperHex for $Pair {
+            impl<T> Clone for $Pair<T> {
+                fn clone(&self) -> Self {
+                    Self {
+                        src: self.src,
+                        dst: self.dst,
+                        dst_shl: self.dst_shl,
+                        dst_shr: self.dst_shr,
+                    }
+                }
+            }
+
+            impl<T> Copy for $Pair<T> {}
+
+            impl<T> fmt::Debug for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pair))
                         .field("src", &self.src)
@@ -780,7 +1008,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl fmt::LowerHex for $Pair {
+            impl<T> fmt::UpperHex for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pair))
                         .field("src", &self.src)
@@ -791,7 +1019,7 @@ macro_rules! make_packers {
                 }
             }
 
-            impl fmt::Binary for $Pair {
+            impl<T> fmt::LowerHex for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($Pair))
                         .field("src", &self.src)
@@ -801,11 +1029,47 @@ macro_rules! make_packers {
                         .finish()
                 }
             }
+
+            impl<T> fmt::Binary for $Pair<T> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.debug_struct(stringify!($Pair))
+                        .field("src", &self.src)
+                        .field("dst", &self.dst)
+                        .field("dst_shl", &self.dst_shl)
+                        .field("dst_shr", &self.dst_shr)
+                        .finish()
+                }
+            }
+
+            impl<A, B> PartialEq<$Pair<B>> for $Pair<A> {
+                #[inline]
+                fn eq(&self, other: &$Pair<B>) -> bool {
+                    self.src == other.src && self.dst == other.dst
+                }
+            }
+
+            impl<A, B> PartialEq<&'_ $Pair<B>> for $Pair<A> {
+                #[inline]
+                fn eq(&self, other: &&'_ $Pair<B>) -> bool {
+                    self.eq(*other)
+                }
+            }
+
+            impl<A, B> PartialEq<$Pair<B>> for &'_ $Pair<A> {
+                #[inline]
+                fn eq(&self, other: &$Pair<B>) -> bool {
+                    (*self).eq(other)
+                }
+            }
+
+
+            impl<T> Eq for $Pair<T> {}
         )+
     }
 }
 
 make_packers! {
+    pub struct PackUsize { bits: usize, packing: PackingUsize, pair: PairUsize }
     pub struct Pack64 { bits: u64, packing: Packing64, pair: Pair64, }
     pub struct Pack32 { bits: u32, packing: Packing32, pair: Pair32, }
     pub struct Pack16 { bits: u16, packing: Packing16, pair: Pair16, }
@@ -861,14 +1125,14 @@ mod tests {
                         let pack2 = pack1.next(nbits);
 
                         let packed1 = pack1.pack(val1, base);
-                        prop_assert_bits_eq!(pack1.unpack(packed1), val1);
+                        prop_assert_bits_eq!(pack1.unpack_bits(packed1), val1);
 
                         let packed2 = pack2.pack(val1, base);
-                        prop_assert_bits_eq!(pack2.unpack(packed2), val1);
+                        prop_assert_bits_eq!(pack2.unpack_bits(packed2), val1);
 
                         let packed3 = pack1.pack(val1, pack2.pack(val2, base));
-                        prop_assert_bits_eq!(pack1.unpack(packed3), val1);
-                        prop_assert_bits_eq!(pack2.unpack(packed3), val2);
+                        prop_assert_bits_eq!(pack1.unpack_bits(packed3), val1);
+                        prop_assert_bits_eq!(pack2.unpack_bits(packed3), val2);
                     }
                 )+
             }
@@ -907,7 +1171,7 @@ mod tests {
     }
 
     macro_rules! test_from_range {
-        ($(fn $fn:ident<$Pack:ident>($max:expr);)+) => {
+        ($(fn $fn:ident<$Pack:ident, $Bits:ty>($max:expr);)+) => {
             proptest! {
                 $(
                     #[test]
@@ -951,7 +1215,7 @@ mod tests {
                     ) {
                         let pack_from_src = $Pack::least_significant(src_len);
                         let src = 0;
-                        let pack_from_dst = $Pack::starting_at(dst_at, src_len);
+                        let pack_from_dst = $Pack::<$Bits>::starting_at(dst_at, src_len);
                         let dst = pack_from_dst.set_all(0);
                         let pair = pack_from_src.pair_at(dst_at);
                         let state = format!(
@@ -961,12 +1225,12 @@ mod tests {
 
                         let packed = pair.pack_from_src(src, dst);
                         prop_assert_bits_eq!(packed, pack_from_src.set_all(0), state);
-                        prop_assert_bits_eq!(pack_from_src.unpack(packed), pack_from_dst.unpack(dst), &state);
+                        prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);
 
                         let dst = <$Bits>::max_value();
                         let packed = pair.pack_from_src(src, dst);
                         prop_assert_bits_eq!(packed, pack_from_src.set_all(0), state);
-                        prop_assert_bits_eq!(pack_from_src.unpack(packed), pack_from_dst.unpack(dst), &state);
+                        prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);
                     }
                 )+
             }
@@ -989,7 +1253,7 @@ mod tests {
                         )),
                     ) {
                         let pack_from_src = $Pack::least_significant(src_len);
-                        let pack_from_dst = $Pack::starting_at(dst_at, src_len);
+                        let pack_from_dst = $Pack::<$Bits>::starting_at(dst_at, src_len);
                         let pair = pack_from_src.pair_at(dst_at);
                         let state = format!(
                             "src_len={}; dst_at={}; src={:#x}; dst={:#x};\npack_from_dst={:#?}\npair={:#?}",
@@ -997,7 +1261,7 @@ mod tests {
                         );
 
                         let packed = pair.pack_from_src(src, dst);
-                        prop_assert_bits_eq!(pack_from_src.unpack(packed), pack_from_dst.unpack(dst), &state);
+                        prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);
 
                         let dst_unset = pack_from_dst.unset_all(dst);
                         prop_assert_bits_eq!(pair.pack_from_dst(packed, dst_unset), dst, &state);
@@ -1022,10 +1286,10 @@ mod tests {
     }
 
     test_from_range! {
-        fn pack_from_src_range_64<Pack64>(64);
-        fn pack_from_src_range_32<Pack32>(32);
-        fn pack_from_src_range_16<Pack16>(16);
-        fn pack_from_src_range_8<Pack8>(8);
+        fn pack_from_src_range_64<Pack64, u64>(64);
+        fn pack_from_src_range_32<Pack32, u32>(32);
+        fn pack_from_src_range_16<Pack16, u16>(16);
+        fn pack_from_src_range_8<Pack8, u8>(8);
     }
 
     test_pair_least_sig_zeroed! {

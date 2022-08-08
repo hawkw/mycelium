@@ -37,30 +37,38 @@ unsafe impl GlobalAlloc for Heap {
     }
 }
 
-mycotest::decl_test! {
-    fn basic_alloc() {
-        // Let's allocate something, for funsies
-        use alloc::vec::Vec;
-        let mut v = Vec::new();
-        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
-        v.push(5u64);
-        tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
-        v.push(10u64);
-        tracing::info!(vec=?v, vec.addr=?v.as_ptr());
-        assert_eq!(v.pop(), Some(10));
-        assert_eq!(v.pop(), Some(5));
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mycotest::*;
 
-mycotest::decl_test! {
-    fn alloc_big() {
-        use alloc::vec::Vec;
-        let mut v = Vec::new();
+    decl_test! {
+        fn basic_alloc() -> TestResult {
+            // Let's allocate something, for funsies
+            use alloc::vec::Vec;
+            let mut v = Vec::new();
+            tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
+            v.push(5u64);
+            tracing::info!(vec = ?v, vec.addr = ?v.as_ptr());
+            v.push(10u64);
+            tracing::info!(vec=?v, vec.addr=?v.as_ptr());
+            assert_eq!(v.pop(), Some(10));
+            assert_eq!(v.pop(), Some(5));
 
-        for i in 0..2048 {
-            v.push(i);
+            Ok(())
         }
+    }
 
-        tracing::info!(vec = ?v);
+    decl_test! {
+        fn alloc_big() {
+            use alloc::vec::Vec;
+            let mut v = Vec::new();
+
+            for i in 0..2048 {
+                v.push(i);
+            }
+
+            tracing::info!(vec = ?v);
+        }
     }
 }

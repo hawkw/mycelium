@@ -1,0 +1,75 @@
+[package]
+name = "maitake"
+version = "0.1.0"
+authors = [
+    "Eliza Weisman <eliza@elizas.website>",
+    "James Munns <james@onevariable.com>"
+]
+description = "Async runtime construction kit"
+repository = "https://github.com/hawkw/mycelium"
+documentation = "https://docs.rs/maitake"
+homepage = "https://mycelium.elizas.website"
+license = "MIT"
+readme = "README.md"
+keywords = ["async", "no_std", "task", "runtime", "scheduler"]
+categories = [
+    "no-std",
+    "async",
+]
+edition = "2021"
+rust-version = "1.61.0"
+
+# NOTE! As a workaround for https://github.com/rust-lang/rust/issues/97708,
+# maitake uses some `no_mangle` functions. This will cause linker errors if
+# you attempt to use two versions of maitake in the same binary. Until then,
+# we use the "links" key to prevent two versions of maitake in the same
+# dependency graph
+links = "maitake"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["alloc"]
+alloc = ["cordyceps/alloc"]
+no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad"]
+
+[dependencies]
+mycelium-bitfield = { path = "../bitfield" }
+mycelium-util = { path = "../util" }
+cordyceps = { path = "../cordyceps" }
+pin-project = "1"
+
+[dependencies.tracing-02]
+package = "tracing"
+default_features = false
+git = "https://github.com/tokio-rs/tracing"
+optional = true
+
+[dependencies.tracing-01]
+package = "tracing"
+default_features = false
+version = "0.1.35"
+optional = true
+
+[dev-dependencies]
+futures-util = "0.3"
+futures = "0.3"
+tokio-test = "0.4"
+
+[target.'cfg(not(loom))'.dev-dependencies]
+tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["ansi", "fmt"] }
+tracing-02 = { package = "tracing", git = "https://github.com/tokio-rs/tracing", default-features = false }
+console-subscriber = "0.1.6"
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = { version = "0.5.5", features = ["futures", "checkpoint"] }
+tracing_01 = { package = "tracing", version = "0.1", default_features = false }
+tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name = "tokio-console"
+required-features = ["tracing-01"]

@@ -3,6 +3,7 @@ name = "hal-x86_64"
 version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>", "iximeow <git@iximeow.net>"]
 edition = "2018"
+license = "MIT"
 
 [features]
 log = ["tracing/log"]

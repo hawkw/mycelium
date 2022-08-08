@@ -1,6 +1,10 @@
 name: CI
 
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
 
 env:
   # disable incremental compilation.
@@ -22,51 +26,83 @@ env:
   RUSTUP_MAX_RETRIES: 10
   # don't emit giant backtraces in the CI logs.
   RUST_BACKTRACE: short
+  # loom config
+  LOOM_LOG: "mycelium=trace,cordyceps=trace,maitake=trace,debug"
 
 jobs:
-  is_enabled:
-    # continue-on-error: true # Uncomment once integration is finished
+  changed_paths:
+    continue-on-error: true # Uncomment once integration is finished
     runs-on: ubuntu-latest
     # Map a step output to a job output
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
+      paths_result: ${{ steps.skip_check.outputs.paths_result }}
     steps:
       - id: skip_check
         uses: fkirc/skip-duplicate-actions@master
         with:
-          paths: '["**.rs", "**/Cargo.toml", "Cargo.lock", ".github/workflows/ci.yml"]'
-          do_not_skip: '["workflow_dispatch"]'
+          do_not_skip: '["workflow_dispatch", "push"]'
+          paths_ignore: '["**/README.md"]'
+          paths_filter: |
+            cordyceps:
+              paths:
+                - 'cordyceps/**/*.rs'
+                - 'cordyceps/Cargo.toml'
+                - '.github/workflows/ci.yml'
+                - 'justfile'
+            util:
+              paths:
+                - 'util/**/*.rs'
+                - 'util/Cargo.toml'
+                - '.github/workflows/ci.yml'
+                - 'justfile'
+            maitake:
+              paths:
+                - 'maitake/**/*.rs'
+                - 'maitake/Cargo.toml'
+                - '.github/workflows/ci.yml'
+                - 'justfile'
 
   # run `cargo check` with the host target triple.
   check-host:
     name: cargo check (host)
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
       run: rustup show
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - uses: actions/checkout@v2
-    - name: run cargo check
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: check
-        args: --all --all-features
+    - name: run cargo check (debug)
+      run: |
+        cargo check \
+          --workspace \
+          --all-features \
+          --quiet \
+          --message-format=json |
+          cargo-action-fmt
+    - name: run cargo check (release)
+      run: |
+        cargo check \
+          --release \
+          --workspace \
+          --all-features \
+          --quiet \
+          --message-format=json |
+          cargo-action-fmt
 
   # check code style with `rustfmt`
   rustfmt:
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
     - name: run rustfmt
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: fmt
-        args: --all -- --check
+      run: cargo fmt --check
 
   # run host tests
   #
@@ -81,40 +117,38 @@ jobs:
   test-host:
     runs-on: ubuntu-latest
     name: cargo test (host)
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
     steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - name: run host tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test
-        args: --all --all-features
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: cargo nextest run
+      run: just test-host
 
   # build a bootable image for the `x86_64-mycelium` target.
   build-x64:
     name: build boot image (x86_64)
     runs-on: ubuntu-latest
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
     steps:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
     - name: x86_64 boot image
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: build-x64
-
+      run: cargo build-x64
 
   # run kernel tests in QEMU for the `x86_64-mycelium` target.
   test-x64:
     name: cargo test (cross x64)
     runs-on: ubuntu-latest
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -128,7 +162,115 @@ jobs:
 
     # run kernel tests in QEMU
     - name: run tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test-x64
+      run: cargo test-x64
 
+  # check that RustDoc builds
+  docs:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: run rustdoc
+      run: |
+        cargo doc \
+          --workspace \
+          --message-format=json \
+          --no-deps \
+          --all-features \
+          --document-private-items |
+          cargo-action-fmt
+      env:
+        RUSTDOCFLAGS: "--cfg docsrs -Dwarnings"
+
+  ### cordyceps ###
+
+  # run loom tests
+  cordyceps_loom:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).cordyceps.should_skip
+    runs-on: ubuntu-latest
+    name: Loom tests (cordyceps)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: just loom cordyceps
+
+  # run miri tests
+  cordyceps_miri:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).cordyceps.should_skip
+    runs-on: ubuntu-latest
+    name: Miri tests (codyceps)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run Miri tests
+      run: just miri cordyceps
+
+  ### maitake ###
+
+  # test with `--no-default-features`
+  maitake_no_default_features:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).maitake.should_skip
+    runs-on: ubuntu-latest
+    name: Tests (maitake, no-default-features)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: run tests
+      # don't run doctests with `no-default-features`, as some of them
+      # require liballoc.
+      run: cargo test -p maitake --no-default-features --tests --lib
+
+  # run loom tests
+  maitake_loom:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).maitake.should_skip
+    runs-on: ubuntu-latest
+    name: Loom tests (maitake)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: just loom maitake
+
+  ### mycelium-util ###
+
+  # run loom tests
+  util_loom:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).util.should_skip
+    runs-on: ubuntu-latest
+    name: Loom tests (mycelium-util)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: just loom mycelium-util

@@ -1,13 +1,21 @@
 use crate::{cpu, task};
 use core::{arch::asm, mem};
 use mycelium_util::{
-    bits::{self, Pack16, Pack64},
+    bits::{self, Pack64},
     fmt,
 };
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct Selector(u16);
+mycelium_util::bits::bitfield! {
+    #[derive(Eq, PartialEq)]
+    pub struct Selector<u16> {
+        /// The first 2 least-significant bits are the selector's priveliege ring.
+        const RING: cpu::Ring;
+        /// The next bit is set if this is an LDT segment selector.
+        const IS_LDT: bool;
+        /// The remaining bits are the index in the GDT/LDT.
+        const INDEX = 5;
+    }
+}
 
 /// A 64-bit mode user segment descriptor.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -47,120 +55,15 @@ pub fn code_segment() -> Selector {
     Selector(value)
 }
 
-// === impl Gdt ===
-
-impl<const SIZE: usize> Gdt<SIZE> {
-    pub fn load(&'static self) {
-        // Create the descriptor table pointer with *just* the actual table, so
-        // that the next push index isn't considered a segment descriptor!
-        let ptr = cpu::DtablePtr::new(&self.entries);
-        tracing::trace!(?ptr, "loading GDT");
-        unsafe {
-            // Safety: the `'static` bound ensures the GDT isn't going away
-            // unless you did something really evil.
-            cpu::intrinsics::lgdt(ptr)
-        }
-        tracing::trace!("loaded GDT!");
-    }
-
-    pub const fn new() -> Self {
-        Gdt {
-            entries: [0; SIZE],
-            sys_segments: [false; SIZE],
-            push_at: 1,
-        }
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub fn add_segment(&mut self, segment: Descriptor) -> Selector {
-        let ring = segment.ring_bits();
-        let idx = self.push(segment.0);
-        let selector = Selector::from_raw(Selector::from_index(idx).0 | ring as u16);
-        tracing::trace!(idx, ?selector, "added segment");
-        selector
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub fn add_sys_segment(&mut self, segment: SystemDescriptor) -> Selector {
-        tracing::trace!(?segment, "Gdt::add_add_sys_segment");
-        let idx = self.push(segment.low);
-        self.sys_segments[idx as usize] = true;
-        self.push(segment.high);
-        // sys segments are always ring 0
-        let selector = Selector::new(idx, cpu::Ring::Ring0);
-        tracing::trace!(idx, ?selector, "added system segment");
-        selector
-    }
-
-    const fn push(&mut self, entry: u64) -> u16 {
-        let idx = self.push_at;
-        self.entries[idx] = entry;
-        self.push_at += 1;
-        idx as u16
-    }
-}
-
-impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct GdtEntries<'a, const SIZE: usize>(&'a Gdt<SIZE>);
-        impl<const SIZE: usize> fmt::Debug for GdtEntries<'_, SIZE> {
-            #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let mut sys0 = None;
-                let mut entries = f.debug_list();
-                for (&entry, &is_sys) in self.0.entries[..self.0.push_at]
-                    .iter()
-                    .zip(self.0.sys_segments.iter())
-                {
-                    if let Some(low) = sys0.take() {
-                        entries.entry(&SystemDescriptor { low, high: entry });
-                    } else if is_sys {
-                        sys0 = Some(entry);
-                    } else {
-                        entries.entry(&Descriptor(entry));
-                    }
-                }
-
-                entries.finish()
-            }
-        }
-
-        f.debug_struct("Gdt")
-            .field("capacity", &SIZE)
-            .field("len", &(self.push_at - 1))
-            .field("entries", &GdtEntries(self))
-            .finish()
-    }
-}
-
-// === impl Selector ===
+// === impl Segment ===
 
 impl Selector {
-    /// The first 2 least significant bits are the selector's priveliege ring.
-    const RING: Pack16 = Pack16::least_significant(2);
-    /// The next bit is set if this is an LDT segment selector.
-    const LDT_BIT: Pack16 = Self::RING.next(1);
-    /// The remaining bits are the index in the GDT/LDT.
-    const INDEX: Pack16 = Self::LDT_BIT.next(5);
-
-    /// Used by multiple `fmt::Debug` impls, `const`-ified to prevent typos.
-    const NAME: &'static str = "segment::Selector";
-
     pub const fn null() -> Self {
         Self(0)
     }
 
-    pub fn new(idx: u16, ring: cpu::Ring) -> Self {
-        Self(
-            Pack16::pack_in(0)
-                .pack(idx, &Self::INDEX)
-                .pack(ring as u8 as u16, &Self::RING)
-                .bits(),
-        )
-    }
-
     pub const fn from_index(u: u16) -> Self {
-        Self(Self::INDEX.pack_truncating(u, 0))
+        Self(Self::INDEX.pack_truncating(0, u))
     }
 
     pub const fn from_raw(u: u16) -> Self {
@@ -168,14 +71,7 @@ impl Selector {
     }
 
     pub fn ring(self) -> cpu::Ring {
-        cpu::Ring::from_u8(self.ring_bits())
-    }
-
-    /// Separated out from constructing the `cpu::Ring` for use in `const fn`s
-    /// (since `Ring::from_u8` panics), but shouldn't be public because it
-    /// performs no validation.
-    const fn ring_bits(self) -> u8 {
-        Self::RING.unpack(self.0) as u8
+        self.get(Self::RING)
     }
 
     /// Returns which descriptor table (GDT or LDT) this selector references.
@@ -184,7 +80,7 @@ impl Selector {
     ///
     /// This will never return [`cpu::DescriptorTable::Idt`], as a segment
     /// selector only references segmentation table descriptors.
-    pub const fn table(&self) -> cpu::DescriptorTable {
+    pub fn table(&self) -> cpu::DescriptorTable {
         if self.is_gdt() {
             cpu::DescriptorTable::Gdt
         } else {
@@ -193,45 +89,41 @@ impl Selector {
     }
 
     /// Returns true if this is an LDT segment selector.
-    pub const fn is_ldt(&self) -> bool {
-        Self::LDT_BIT.contained_in_any(self.0)
+    pub fn is_ldt(&self) -> bool {
+        self.get(Self::IS_LDT)
     }
 
     /// Returns true if this is a GDT segment selector.
     #[inline]
-    pub const fn is_gdt(&self) -> bool {
+    pub fn is_gdt(&self) -> bool {
         !self.is_ldt()
     }
 
     /// Returns the index into the LDT or GDT this selector refers to.
     pub const fn index(&self) -> u16 {
-        Self::INDEX.unpack(self.0)
+        Self::INDEX.unpack_bits(self.0)
     }
 
     pub fn set_gdt(&mut self) -> &mut Self {
-        Self::LDT_BIT.unset_all_in(&mut self.0);
-        self
+        self.set(Self::IS_LDT, false)
     }
 
     pub fn set_ldt(&mut self) -> &mut Self {
-        Self::LDT_BIT.set_all_in(&mut self.0);
-        self
+        self.set(Self::IS_LDT, true)
     }
 
     pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
         tracing::trace!("before set_ring: {:b}", self.0);
-        Self::RING.pack_into(ring as u16, &mut self.0);
+        self.set(Self::RING, ring);
         tracing::trace!("after set_ring: {:b}", self.0);
         self
     }
 
     pub fn set_index(&mut self, index: u16) -> &mut Self {
-        Self::INDEX.pack_into(index, &mut self.0);
-        self
+        self.set(Self::INDEX, index)
     }
 
-    /// Returns this selector's bits as a `u16`.
-    pub fn bits(self) -> u16 {
+    pub fn bits(&self) -> u16 {
         self.0
     }
 
@@ -317,37 +209,90 @@ impl Selector {
     }
 }
 
-impl fmt::Debug for Selector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(Self::NAME)
-            .field("ring", &self.ring())
-            .field("index", &self.index())
-            .field("is_gdt", &self.is_gdt())
-            .field("bits", &format_args!("{:#b}", self.0))
-            .finish()
+// === impl Gdt ===
+
+impl<const SIZE: usize> Gdt<SIZE> {
+    pub fn load(&'static self) {
+        // Create the descriptor table pointer with *just* the actual table, so
+        // that the next push index isn't considered a segment descriptor!
+        let ptr = cpu::DtablePtr::new(&self.entries);
+        tracing::trace!(?ptr, "loading GDT");
+        unsafe {
+            // Safety: the `'static` bound ensures the GDT isn't going away
+            // unless you did something really evil.
+            cpu::intrinsics::lgdt(ptr)
+        }
+        tracing::trace!("loaded GDT!");
+    }
+
+    pub const fn new() -> Self {
+        Gdt {
+            entries: [0; SIZE],
+            sys_segments: [false; SIZE],
+            push_at: 1,
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn add_segment(&mut self, segment: Descriptor) -> Selector {
+        let ring = segment.ring_bits();
+        let idx = self.push(segment.0);
+        let selector = Selector::from_raw(Selector::from_index(idx).0 | ring as u16);
+        tracing::trace!(idx, ?selector, "added segment");
+        selector
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn add_sys_segment(&mut self, segment: SystemDescriptor) -> Selector {
+        tracing::trace!(?segment, "Gdt::add_add_sys_segment");
+        let idx = self.push(segment.low);
+        self.sys_segments[idx as usize] = true;
+        self.push(segment.high);
+        // sys segments are always ring 0
+        let selector = Selector::null()
+            .with(Selector::INDEX, idx)
+            .with(Selector::RING, cpu::Ring::Ring0);
+        tracing::trace!(idx, ?selector, "added system segment");
+        selector
+    }
+
+    const fn push(&mut self, entry: u64) -> u16 {
+        let idx = self.push_at;
+        self.entries[idx] = entry;
+        self.push_at += 1;
+        idx as u16
     }
 }
 
-impl fmt::UpperHex for Selector {
+impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple(Self::NAME)
-            .field(&format_args!("{:#X}", self.0))
-            .finish()
-    }
-}
+        struct GdtEntries<'a, const SIZE: usize>(&'a Gdt<SIZE>);
+        impl<const SIZE: usize> fmt::Debug for GdtEntries<'_, SIZE> {
+            #[inline]
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let mut sys0 = None;
+                let mut entries = f.debug_list();
+                for (&entry, &is_sys) in self.0.entries[..self.0.push_at]
+                    .iter()
+                    .zip(self.0.sys_segments.iter())
+                {
+                    if let Some(low) = sys0.take() {
+                        entries.entry(&SystemDescriptor { low, high: entry });
+                    } else if is_sys {
+                        sys0 = Some(entry);
+                    } else {
+                        entries.entry(&Descriptor(entry));
+                    }
+                }
 
-impl fmt::LowerHex for Selector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple(Self::NAME)
-            .field(&format_args!("{:#x}", self.0))
-            .finish()
-    }
-}
+                entries.finish()
+            }
+        }
 
-impl fmt::Binary for Selector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple(Self::NAME)
-            .field(&format_args!("{:#b}", self.0))
+        f.debug_struct("Gdt")
+            .field("capacity", &SIZE)
+            .field("len", &(self.push_at - 1))
+            .field("entries", &GdtEntries(self))
             .finish()
     }
 }
@@ -427,7 +372,7 @@ impl Descriptor {
     /// (since `Ring::from_u8` panics), but shouldn't be public because it
     /// performs no validation.
     const fn ring_bits(&self) -> u8 {
-        Self::RING.unpack(self.0) as u8
+        Self::RING.unpack_bits(self.0) as u8
     }
 
     pub const fn with_ring(self, ring: cpu::Ring) -> Self {
@@ -618,15 +563,21 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
+    fn prettyprint() {
+        let selector = Selector::null()
+            .with(Selector::INDEX, 30)
+            .with(Selector::RING, cpu::Ring::Ring0);
+        println!("{selector}");
+    }
+
+    #[test]
     fn segment_selector_is_correct_size() {
         assert_eq!(size_of::<Selector>(), 2);
     }
 
     #[test]
     fn selector_pack_specs_valid() {
-        Selector::RING.assert_valid();
-        Selector::LDT_BIT.assert_valid();
-        Selector::INDEX.assert_valid();
+        Selector::assert_valid()
     }
 
     #[test]

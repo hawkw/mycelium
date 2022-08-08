@@ -1,20 +1,24 @@
 [workspace]
 members = [
     "alloc",
+    "bitfield",
     "cordyceps",
     "util",
     "hal-core",
     "hal-x86_64",
     "inoculate",
+    "maitake",
     "mycotest",
     "trace",
 ]
+resolver = "2"
 
 [package]
 name = "mycelium-kernel"
 version = "0.0.1"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
 edition = "2018"
+license = "MIT"
 
 [lib]
 name = "mycelium_kernel"
@@ -31,6 +35,7 @@ opt-level = 3
 [dependencies]
 hal-core = { path = "hal-core", features = ["embedded-graphics-core"] }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
+maitake = { path = "maitake", features = ["tracing-02"] }
 mycelium-util = { path = "util" }
 mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
 rlibc = "1.0"
@@ -85,6 +90,11 @@ tracing-core = { git = "https://github.com/tokio-rs/tracing" }
 # https://github.com/rust-osdev/volatile/pull/25 merges upstream. this is
 # necessary to build with unstable features on recent nightlies.
 volatile = { git = "https://github.com/hawkw/volatile", branch = "eliza/update-features" }
+# patch `once_cell` to use https://github.com/matklad/once_cell/pull/185 so that
+# Miri doesn't reject `tracing`'s use of `once_cell`.
+#
+# remove this patch once once_cell#185 is merged.
+once_cell = { git = "https://github.com/hawkw/once_cell", branch = "eliza/saethlin/provenance" }
 
 # Custom profile for Loom tests: enable release optimizations so that the loom
 # tests are less slow, but don't disable debug assertions.

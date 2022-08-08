@@ -5,6 +5,7 @@ edition = "2018"
 description = """
 the horrible mycelium build tool (because that's a thing we have to have now apparently!)
 """
+license = "MIT"
 
 # See more keys and their definitions at
 # https://doc.rust-lang.org/cargo/reference/manifest.html

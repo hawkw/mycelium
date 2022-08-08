@@ -1,14 +1,64 @@
 use crate::error;
 use core::fmt;
+/// A specialized [`Result`] type for I/O operations.
+///
+/// This type is broadly used across [`mycelium_util::io`] for any operation which may
+/// produce an error.
+///
+/// This typedef is generally used to avoid writing out [`io::Error`] directly and
+/// is otherwise a direct mapping to [`Result`].
+///
+/// While usual Rust style is to import types directly, aliases of [`Result`]
+/// often are not, to make it easier to distinguish between them. [`Result`] is
+/// generally assumed to be [`core::result::Result`][`Result`], and so users of this alias
+/// will generally use `io::Result` instead of shadowing the [prelude]'s import
+/// of [`core::result::Result`][`Result`].
+///
+/// [`mycelium_util::io`]: crate::io
+/// [`io::Error`]: Error
+/// [`Result`]: core::result::Result
+/// [prelude]: core::prelude
 
 pub type Result<T> = core::result::Result<T, self::Error>;
+
+/// The error type for I/O operations of the [`Read`], [`Write`], [`Seek`], and
+/// associated traits.
+///
+/// Errors mostly originate from the underlying OS, but custom instances of
+/// `Error` can be created with crafted error messages and a particular value of
+/// [`ErrorKind`].
+///
+/// [`Read`]: crate::io::Read
+/// [`Write`]: crate::io::Write
+/// [`Seek`]: crate::io::Seek
 #[derive(Debug)]
 pub struct Error<E: error::Error + 'static = &'static str> {
     kind: ErrorKind,
     source: Option<E>,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+/// A list specifying general categories of I/O error.
+///
+/// This list is intended to grow over time and it is not recommended to
+/// exhaustively match against it.
+///
+/// It is used with the [`io::Error`] type.
+///
+/// [`io::Error`]: Error
+///
+/// # Handling errors and matching on `ErrorKind`
+///
+/// In application code, use `match` for the `ErrorKind` values you are
+/// expecting; use `_` to match "all other errors".
+///
+/// In comprehensive and thorough tests that want to verify that a test doesn't
+/// return any known incorrect error kind, you may want to cut-and-paste the
+/// current full list of errors from here into your test code, and then match
+/// `_` as the correct case. This seems counterintuitive, but it will make your
+/// tests more robust. In particular, if you want to verify that your code does
+/// produce an unrecognized error kind, the robust solution is to check for all
+/// the recognized error kinds and fail in those cases.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum ErrorKind {
     /// An entity was not found, often a file.
@@ -78,6 +128,10 @@ pub enum ErrorKind {
 }
 
 impl<E: error::Error + 'static> Error<E> {
+    /// Returns a new I/O error with the provided [`ErrorKind`] and `source`
+    /// error.
+    #[must_use]
+    #[inline]
     pub fn new(kind: ErrorKind, source: E) -> Self {
         Self {
             kind,
@@ -85,6 +139,9 @@ impl<E: error::Error + 'static> Error<E> {
         }
     }
 
+    /// Returns the [`ErrorKind`] of this error.
+    #[must_use]
+    #[inline]
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }

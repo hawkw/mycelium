@@ -95,7 +95,7 @@ impl<'a> TestName<'a> {
     }
 
     fn parse(line: &'a str) -> Option<Self> {
-        let mut line = line.trim().split_whitespace();
+        let mut line = line.split_whitespace();
         let module = line.next()?;
         let name = line.next()?;
         Some(Self::new(module, name))
