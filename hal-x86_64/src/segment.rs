@@ -1,5 +1,5 @@
 use crate::cpu;
-use core::{arch::asm, fmt};
+use core::arch::asm;
 /// Returns the current code segment selector in `%cs`.
 pub fn code_segment() -> Selector {
     let value: u16;
@@ -88,33 +88,6 @@ impl Selector {
 
     pub fn bits(&self) -> u16 {
         self.0
-    }
-}
-
-// impl fmt::Debug for Selector {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         f.debug_struct("segment::Selector")
-//             .field("ring", &self.ring())
-//             .field("index", &self.index())
-//             .field("is_gdt", &self.is_gdt())
-//             .field("bits", &format_args!("{:#b}", self.0))
-//             .finish()
-//     }
-// }
-
-impl fmt::UpperHex for Selector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("segment::Selector")
-            .field(&format_args!("{:#X}", self.0))
-            .finish()
-    }
-}
-
-impl fmt::LowerHex for Selector {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("segment::Selector")
-            .field(&format_args!("{:#x}", self.0))
-            .finish()
     }
 }
 
