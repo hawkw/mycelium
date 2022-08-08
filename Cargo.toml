@@ -86,10 +86,6 @@ sysroot_path = "target/x86_64/sysroot"
 # use `tracing` 0.2 from git
 tracing = { git = "https://github.com/tokio-rs/tracing" }
 tracing-core = { git = "https://github.com/tokio-rs/tracing" }
-# temporary patch to use my branch of `volatile` until PR
-# https://github.com/rust-osdev/volatile/pull/25 merges upstream. this is
-# necessary to build with unstable features on recent nightlies.
-volatile = { git = "https://github.com/hawkw/volatile", branch = "eliza/update-features" }
 # patch `once_cell` to use https://github.com/matklad/once_cell/pull/185 so that
 # Miri doesn't reject `tracing`'s use of `once_cell`.
 #
