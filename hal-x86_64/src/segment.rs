@@ -123,10 +123,6 @@ impl Selector {
         self.set(Self::INDEX, index)
     }
 
-    pub fn bits(&self) -> u16 {
-        self.0
-    }
-
     /// Returns the current selector in the `cs` (code segment) register
     pub fn cs() -> Self {
         let sel: u16;

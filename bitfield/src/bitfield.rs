@@ -11,13 +11,14 @@
 /// # Generated Implementations
 ///
 /// The `bitfield!` macro generates a type with the following functions, where
-/// `T` is the integer type that represents the bitfield (one of `u8`, `u16`,
-/// `u32`, `u64`, or `usize`):
+/// `{int}` is the integer type that represents the bitfield (one of `u8`,
+/// `u16`,`u32`, `u64`, or `usize`):
 ///
 /// | Function | Description |
 /// |:--|:--|
-/// | `fn new() -> Self` | Returns a new instance of the bitfield type with all bits zeroed. |
-/// | `fn from_bits(bits: T) -> Self` | Converts a `T` into an instance of the bitfield type. |
+/// | `const fn new() -> Self` | Returns a new instance of the bitfield type with all bits zeroed. |
+/// | `const fn from_bits(bits: {int}) -> Self` | Converts an `{int}` into an instance of the bitfield type. |
+/// | `const fn bits(self) -> {int}` | Returns this bitfield's bits as a raw integer value. |
 /// | `fn with<U>(self, packer: Self::Packer<U>, value: U) -> Self` | Given one of this type's generated packing specs for a `U`-typed value, and a `U`-typed value, returns a new instance of `Self` with the bit representation of `value` packed into the range represented by `packer`. |
 /// | `fn set<U>(&mut self, packer: Self::Packer<U>, value: U) -> &mut Self` | Similar to `with`, except `self` is mutated in place, rather than returning a new  instance of `Self`. |
 /// | `fn get<U>(&self, packer: Self::Packer<U>) -> U` | Given one of this type's generated packing specs for a `U`-typed value, unpacks the bit range represented by that value as a `U` and returns it. This method panics if the requested bit range does not contain a valid bit pattern for a `U`-typed value, as determined by `U`'s implementation of the [`FromBits`] trait. |
@@ -46,6 +47,8 @@
 /// | [`fmt::Display`] | Pretty-prints the bitfield in a very nice-looking multi-line format which I'm rather proud of. See [here](#example-display-output) for examples of this format. |
 /// | [`Copy`] | Behaves identically as the [`Copy`] implementation for the underlying integer type. |
 /// | [`Clone`] | Behaves identically as the [`Clone`] implementation for the underlying integer type. |
+/// | [`From`]`<{int}> for Self` | Converts a raw integer value into an instance of the bitfield type. This is equivalent to calling the bitfield type's `from_bits` function. |
+/// | [`From`]`<Self> for {int}` | Converts an instance of the bitfield type into a raw integer value. This is equivalent to calling the bitfield type's `bits` method. |
 ///
 /// Additional traits may be derived for the bitfield type, such as
 /// [`PartialEq`], [`Eq`], and [`Default`]. These traits are not automatically
@@ -308,13 +311,23 @@ macro_rules! bitfield {
             ),+];
 
             /// Constructs a new instance of `Self` from the provided raw bits.
+            #[inline]
+            #[must_use]
             $vis const fn from_bits(bits: $T) -> Self {
                 Self(bits)
             }
 
             /// Constructs a new instance of `Self` with all bits set to 0.
+            #[inline]
+            #[must_use]
             $vis const fn new() -> Self {
                 Self(0)
+            }
+
+            /// Returns the raw bit representatiion of `self` as an integer.
+            #[inline]
+            $vis const fn bits(self) -> $T {
+                self.0
             }
 
             /// Packs the bit representation of `value` into `self` at the bit
@@ -508,6 +521,22 @@ macro_rules! bitfield {
                 } else {
                     f.debug_tuple(stringify!($Name)).field(&format_args!("{:x}", self.0)).finish()
                 }
+            }
+        }
+
+        #[automatically_derived]
+        impl From<$T> for $Name {
+            #[inline]
+            fn from(val: $T) -> Self {
+                Self::from_bits(val)
+            }
+        }
+
+        #[automatically_derived]
+        impl From<$Name> for $T {
+            #[inline]
+            fn from($Name(bits): $Name) -> Self {
+                bits
             }
         }
     };
