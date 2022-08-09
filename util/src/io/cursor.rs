@@ -454,7 +454,7 @@ mod tests {
         let mut buf = [0];
         reader
             .read_exact(&mut buf)
-            .expect("read_exact must succeed")
+            .expect_err("read_exact on empty buffer must fail")
     }
 
     #[test]
