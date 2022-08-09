@@ -385,6 +385,43 @@ impl Descriptor {
     }
 }
 
+impl fmt::Debug for Descriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // pretty-print the flags and other data
+        f.debug_struct(Self::NAME)
+            .field("ring", &self.ring())
+            .field("flags", &self.flags())
+            .field("limit", &self.limit())
+            .field("base", &format_args!("{:#x}", self.base()))
+            .field("bits", &format_args!("{:#x}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::UpperHex for Descriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple(Self::NAME)
+            .field(&format_args!("{:#X}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::LowerHex for Descriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple(Self::NAME)
+            .field(&format_args!("{:#x}", self.0))
+            .finish()
+    }
+}
+
+impl fmt::Binary for Descriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple(Self::NAME)
+            .field(&format_args!("{:#b}", self.0))
+            .finish()
+    }
+}
+
 bitflags::bitflags! {
     /// Flags for a GDT descriptor. Not all flags are valid for all descriptor types.
     pub struct DescriptorFlags: u64 {
