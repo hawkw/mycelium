@@ -44,6 +44,7 @@
 /// |:--|:--|
 /// | [`fmt::Debug`] | The `Debug` implementation prints the bitfield as a "struct", with a "field" for each packing spec in the bitfield. If any of the bitfield's packing specs pack typed values, that type's [`fmt::Debug`] implementation is used rather than printing the value as an integer. |
 /// | [`fmt::Binary`] | Prints the raw bits of this bitfield as a binary number. |
+/// | [`fmt::UpperHex`] and [`fmt::LowerHex`] | Prints the raw bits of this bitfield in hexadecimal. |
 /// | [`fmt::Display`] | Pretty-prints the bitfield in a very nice-looking multi-line format which I'm rather proud of. See [here](#example-display-output) for examples of this format. |
 /// | [`Copy`] | Behaves identically as the [`Copy`] implementation for the underlying integer type. |
 /// | [`Clone`] | Behaves identically as the [`Clone`] implementation for the underlying integer type. |
@@ -262,6 +263,8 @@
 /// [`fmt::Debug`]: core::fmt::Debug
 /// [`fmt::Display`]: core::fmt::Display
 /// [`fmt::Binary`]: core::fmt::Binary
+/// [`fmt::UpperHex`]: core::fmt::UpperHex
+/// [`fmt::LowerHex`]: core::fmt::LowerHex
 /// [transparent]: https://doc.rust-lang.org/reference/type-layout.html#the-transparent-representation
 /// [`example`]: crate::example
 /// [`ExampleBitfield`]: crate::example::ExampleBitfield
@@ -495,9 +498,9 @@ macro_rules! bitfield {
         impl core::fmt::Binary for $Name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 if f.alternate() {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#b}", self.0)).finish()
+                    write!(f, concat!(stringify!($Name), "({:#b})"), self.0)
                 } else {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:b}", self.0)).finish()
+                    write!(f, concat!(stringify!($Name), "({:b})"), self.0)
                 }
             }
         }
@@ -506,9 +509,9 @@ macro_rules! bitfield {
         impl core::fmt::UpperHex for $Name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 if f.alternate() {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#X}", self.0)).finish()
+                    write!(f, concat!(stringify!($Name), "({:#X})"), self.0)
                 } else {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:X}", self.0)).finish()
+                    write!(f, concat!(stringify!($Name), "({:X})"), self.0)
                 }
             }
         }
@@ -517,9 +520,9 @@ macro_rules! bitfield {
         impl core::fmt::LowerHex for $Name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 if f.alternate() {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:#x}", self.0)).finish()
+                    write!(f, concat!(stringify!($Name), "({:#x})"), self.0)
                 } else {
-                    f.debug_tuple(stringify!($Name)).field(&format_args!("{:x}", self.0)).finish()
+                    write!(f, concat!(stringify!($Name), "({:x})"), self.0)
                 }
             }
         }

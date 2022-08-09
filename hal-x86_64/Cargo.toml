@@ -15,7 +15,7 @@ mycelium-trace = { path = "../trace" }
 bitflags = "1.2"
 mycotest = { path = "../mycotest"}
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }
-volatile = { version = "0.4.4", features = ["unstable"] }
+volatile = { version = "0.4.5", features = ["unstable"] }
 
 [dev-dependencies]
 proptest = "1"
