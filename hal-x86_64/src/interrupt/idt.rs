@@ -45,7 +45,7 @@ impl Descriptor {
     }
 
     pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Self {
-        self.segment = segment::Selector::cs();
+        self.segment = segment::Selector::current_cs();
         let addr = handler as u64;
         self.offset_low = addr as u16;
         self.offset_mid = (addr >> 16) as u16;

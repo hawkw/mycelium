@@ -146,7 +146,7 @@ impl Selector {
     }
 
     /// Returns the current selector in the `cs` (code segment) register
-    pub fn cs() -> Self {
+    pub fn current_cs() -> Self {
         let sel: u16;
         unsafe {
             asm!("mov {0:x}, cs", out(reg) sel, options(nomem, nostack, preserves_flags));

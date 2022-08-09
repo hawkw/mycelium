@@ -69,7 +69,7 @@ pub(super) fn init_gdt() {
     tracing::trace!("GDT loaded");
 
     // set new segment selectors
-    let code_selector = segment::Selector::cs();
+    let code_selector = segment::Selector::current_cs();
     tracing::trace!(code_selector = fmt::alt(code_selector));
     unsafe {
         // set the code segment selector
