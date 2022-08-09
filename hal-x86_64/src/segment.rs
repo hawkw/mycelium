@@ -1,3 +1,4 @@
+/// x86 memory segmentation structures.
 use crate::{cpu, task};
 use core::{arch::asm, mem};
 use mycelium_util::{
@@ -6,6 +7,19 @@ use mycelium_util::{
 };
 
 mycelium_util::bits::bitfield! {
+    /// A segment selector.
+    ///
+    /// These values are stored in a segmentation register (`ss`, `cs`, `ds`, `es`,
+    /// `gs`, or `fs`) to select the current segment in that register. A selector
+    /// consists of two bits indicating the privilege ring of that segment, a bit
+    /// indicating whether it selects a [GDT] or LDT, and a 5-bit index into [GDT]
+    /// or LDT indicating which segment is selected.
+    ///
+    /// Refer to sections 3.4.3 and 3.4.4 in [Vol. 3A of the _Intel® 64 and IA-32
+    /// Architectures Developer's Manual_][manual] for details.
+    ///
+    /// [GDT]: Gdt
+    /// [manual]: https://www.intel.com/content/www/us/en/architecture-and-technology/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.html
     #[derive(Eq, PartialEq)]
     pub struct Selector<u16> {
         /// The first 2 least-significant bits are the selector's priveliege ring.
@@ -18,15 +32,30 @@ mycelium_util::bits::bitfield! {
 }
 
 /// A 64-bit mode user segment descriptor.
+///
+/// A segment descriptor is an entry in a [GDT] or LDT that provides the
+/// processor with the size and location of a segment, as well as access control
+/// and status information.
+///
+/// Refer to section 3.4.5 in [Vol. 3A of the _Intel® 64 and IA-32 Architectures
+/// Developer's Manual_][manual] for details.
+///
+/// [GDT]: Gdt
+/// [manual]: https://www.intel.com/content/www/us/en/architecture-and-technology/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.html
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct Descriptor(u64);
 
-/// A Global Descriptor Table (GDT).
+/// A [Global Descriptor Table (GDT)][gdt].
 ///
 /// This can have up to 65535 entries, but in 64-bit mode, you don't need most
 /// of those (since you can't do real segmentation), so it defaults to 8.
 ///
+/// Refer to section 3.5.1 in [Vol. 3A of the _Intel® 64 and IA-32 Architectures
+/// Developer's Manual_][manual] for details.
+///
+/// [gdt]: https://wiki.osdev.org/Global_Descriptor_Table
+/// [manual]: https://www.intel.com/content/www/us/en/architecture-and-technology/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.html
 // TODO(eliza): i'd like to make the size a u16 to enforce this limit and cast
 //   it to `usize` in the array, but this requires unstable const generics
 //   features and i didn't want to mess with it...
@@ -132,9 +161,16 @@ impl Selector {
         Self(sel)
     }
 
+    /// Sets `self` as the current code segment selector in the `cs` register.
+    ///
+    /// # Notes
+    ///
+    /// In 64-bit long mode, the code segment selector *must* have a base
+    /// address of 0 and limit 2^64.
+    ///
     /// # Safety
+    ///
     /// lol
-    #[inline]
     pub unsafe fn set_cs(self) {
         // because x86 is a very well designed and normal CPU architecture, you
         // can set the value of the `cs` register with a normal `mov`
@@ -169,35 +205,81 @@ impl Selector {
         );
     }
 
+    /// Sets `self` as the current stack segment selector in the `ss` register.
+    ///
+    /// # Notes
+    ///
+    /// In 64-bit long mode, the stack segment selector *must* have a base
+    /// address of 0 and limit 2^64.
+    ///
     /// # Safety
+    ///
     /// lol
     pub unsafe fn set_ss(self) {
         asm!("mov ss, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set stack segment");
     }
 
+    /// Sets `self` as the current data segment selector in the `ds` register.
+    ///
+    /// # Notes
+    ///
+    /// In 64-bit long mode, the data segment selector *must* have a base
+    /// address of 0 and limit 2^64.
+    ///
     /// # Safety
+    ///
     /// lol
     pub unsafe fn set_ds(self) {
         asm!("mov ds, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set data segment");
     }
 
+    /// Sets `self` as the current segment in the general-purpose data segment
+    /// register `es` ("Extra Segment").
+    ///
+    /// # Notes
+    ///
+    /// In 64-bit long mode, the extra segment selector *must* have a base
+    /// address of 0 and limit 2^64.
+    ///
     /// # Safety
+    ///
     /// lol
     pub unsafe fn set_es(self) {
         asm!("mov es, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set extra segment");
     }
 
+    /// Sets `self` as the current segment in the general-purpose data segment
+    /// register `fs` ("File Segment").
+    ///
+    /// # Notes
+    ///
+    /// Unlike the `cs`, `ss`, `ds`, and `es` registers, the `fs` register need
+    /// not be zeroed in long mode, and can be used by the operating system. In
+    /// particular, the `gs` and `fs` registers may be useful for storing
+    /// thread- or CPU-local data.
+    ///
     /// # Safety
+    ///
     /// lol
     pub unsafe fn set_fs(self) {
         asm!("mov fs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
         tracing::trace!(selector = fmt::alt(self), "set fs");
     }
-
+    /// Sets `self` as the current segment in the general-purpose data segment
+    /// register `gs` ("G Segment").
+    ///
+    /// # Notes
+    ///
+    /// Unlike the `cs`, `ss`, `ds`, and `es` registers, the `gs` register need
+    /// not be zeroed in long mode, and can be used by the operating system. In
+    /// particular, the `gs` and `fs` registers may be useful for storing
+    /// thread- or CPU-local data.
+    ///
     /// # Safety
+    ///
     /// lol
     pub unsafe fn set_gs(self) {
         asm!("mov gs, {:x}", in(reg) self.0, options(nostack, preserves_flags));
@@ -208,6 +290,11 @@ impl Selector {
 // === impl Gdt ===
 
 impl<const SIZE: usize> Gdt<SIZE> {
+    /// Sets `self` as the current GDT.
+    ///
+    /// This method is safe, because the `'static` bound on `self` ensures that
+    /// the pointed GDT doesn't go away while it's active. Therefore, this
+    /// method is a safe wrapper around the `lgdt` CPU instruction
     pub fn load(&'static self) {
         // Create the descriptor table pointer with *just* the actual table, so
         // that the next push index isn't considered a segment descriptor!
@@ -221,6 +308,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
         tracing::trace!("loaded GDT!");
     }
 
+    /// Returns a new `Gdt` with all entries zeroed.
     pub const fn new() -> Self {
         Gdt {
             entries: [0; SIZE],

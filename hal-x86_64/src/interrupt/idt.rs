@@ -65,7 +65,10 @@ impl Descriptor {
         self
     }
 
-    pub(crate) fn attrs(&mut self) -> &mut Attrs {
+    /// Mutably borrows the descriptor's [attributes](Attrs).
+    #[inline]
+    #[must_use]
+    pub fn attrs_mut(&mut self) -> &mut Attrs {
         &mut self.attrs
     }
 }

@@ -21,6 +21,7 @@ pub struct StateSegment {
 }
 
 impl StateSegment {
+    /// Returns a new task-state segment with all fields zeroed.
     pub const fn empty() -> Self {
         Self {
             privilege_stacks: [VAddr::zero(); 3],
@@ -39,13 +40,22 @@ impl StateSegment {
         VAddr::of(self).offset(self.iomap_offset as i32)
     }
 
+    /// Loads the provided [`selector`](segment::Selector) into the current task
+    /// register.
+    ///
+    /// Prefer this higher-level wrapper to the [`ltr` CPU intrinsic][ltr].
+    ///
     /// # Safety
     ///
-    /// its bad
-    pub unsafe fn load_tss(sel: segment::Selector) {
-        tracing::trace!(selector = ?sel, "setting TSS...");
-        cpu::intrinsics::ltr(sel);
-        tracing::debug!(selector = ?sel, "TSS set");
+    /// The caller is responsible for ensuring that `selector` selects a valid
+    /// task state segment, and that the selected TSS will not be deallocated as
+    /// long as it's active.
+    ///
+    /// [ltr]: crate::cpu::intrinsics::ltr
+    pub unsafe fn load_tss(selector: segment::Selector) {
+        tracing::trace!(?selector, "setting TSS...");
+        cpu::intrinsics::ltr(selector);
+        tracing::debug!(?selector, "TSS set");
     }
 }
 
