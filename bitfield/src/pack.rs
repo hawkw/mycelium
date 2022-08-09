@@ -278,7 +278,7 @@ macro_rules! make_packers {
                 const fn mk_mask(n: u32) -> $Bits {
                     if n == 0 {
                         return 0
-                    };
+                    }
                     let one: $Bits = 1; // lolmacros
                     let shift = one.wrapping_shl(n - 1);
                     shift | (shift.saturating_sub(1))
@@ -596,7 +596,7 @@ macro_rules! make_packers {
 
                 /// Returns a pair type for packing bits from the range
                 /// specified by `self` after the specified packing spec.
-                pub const fn pair_after(&self, after: &Self) -> $Pair<T> {
+                pub const fn pair_after(&self, after: Self) -> $Pair<T> {
                     self.pair_at(after.shift_next())
                 }
 
@@ -626,6 +626,7 @@ macro_rules! make_packers {
                         dst_shr,
                     }
                 }
+
                 /// Pack the [`self.bits()`] least-significant bits from `value` into `base`.
                 ///
                 /// # Panics
