@@ -77,13 +77,6 @@ pub struct SystemDescriptor {
     high: u64,
 }
 
-/// Returns the current code segment selector in `%cs`.
-pub fn code_segment() -> Selector {
-    let value: u16;
-    unsafe { asm!("mov {0:x}, cs", out(reg) value) };
-    Selector(value)
-}
-
 // === impl Segment ===
 
 impl Selector {
