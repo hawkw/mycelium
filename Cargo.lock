@@ -583,10 +583,12 @@ dependencies = [
 name = "hal-x86_64"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "hal-core",
  "mycelium-trace",
  "mycelium-util",
  "mycotest",
+ "proptest",
  "tracing 0.2.0",
  "volatile",
 ]

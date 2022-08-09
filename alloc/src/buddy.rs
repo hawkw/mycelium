@@ -399,7 +399,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
             block.addr = ?block,
             block.order = order,
             block.size = size,
-            "calculating buddy..."
+            "calculating buddy"
         );
 
         // Find the relative offset of `block` from the base of the heap.

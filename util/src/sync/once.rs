@@ -136,7 +136,7 @@ impl<T> InitOnce<T> {
     #[track_caller]
     #[inline]
     #[must_use]
-    fn get(&self) -> &T {
+    pub fn get(&self) -> &T {
         if self.state.load(Ordering::Acquire) != INITIALIZED {
             panic!("InitOnce<{}> not yet initialized!", any::type_name::<T>());
         }

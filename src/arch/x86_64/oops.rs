@@ -136,9 +136,9 @@ pub fn oops(oops: Oops<'_>) -> ! {
             )
             .unwrap();
             writeln!(writer, "%rsp    = {:#016x}", registers.stack_ptr.as_usize()).unwrap();
-            writeln!(writer, "%cs     = {:016x}", registers.code_segment).unwrap();
-            writeln!(writer, "%ss     = {:016x}", registers.stack_segment).unwrap();
             writeln!(writer, "%rflags = {:#016b}", registers.cpu_flags).unwrap();
+            writeln!(writer, "%cs     = {:?}", registers.code_segment).unwrap();
+            writeln!(writer, "%ss     = {:?}", registers.stack_segment).unwrap();
         }
 
         tracing::debug!(target: "oops", instruction_ptr = ?registers.instruction_ptr);

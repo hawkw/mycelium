@@ -10,7 +10,7 @@ pub struct Port {
 
 /// Describes which descriptor table ([GDT], [LDT], or [IDT]) a selector references.
 ///
-/// [GDT]: https://en.wikipedia.org/wiki/Global_Descriptor_Table
+/// [GDT]: crate::segment::Gdt
 /// [LDT]: https://en.wikipedia.org/wiki/Global_Descriptor_Table#Local_Descriptor_Table
 /// [IDT]: crate::interrupt::Idt
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -18,7 +18,7 @@ pub enum DescriptorTable {
     /// The selector references a descriptor in the [Global Descriptor Table
     /// (GDT)][gdt].
     ///
-    /// [gdt]: https://en.wikipedia.org/wiki/Global_Descriptor_Table
+    /// [gdt]: crate::segment::Gdt
     Gdt,
 
     /// The selector references an entry in a [Local Descriptor Table
@@ -185,5 +185,18 @@ impl DtablePtr {
         let base = t as *const _ as *const ();
 
         Self { limit, base }
+    }
+}
+
+impl fmt::Debug for DtablePtr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // avoid creating misaligned references by moving these i guess? idk why
+        // rustc is okay with this but i'll trust it.
+        let limit = self.limit;
+        let base = self.base;
+        f.debug_struct("DtablePtr")
+            .field("base", &format_args!("{:0p}", base))
+            .field("limit", &limit)
+            .finish()
     }
 }

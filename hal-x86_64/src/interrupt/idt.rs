@@ -1,5 +1,5 @@
 use crate::{cpu, segment};
-use core::{arch::asm, fmt};
+use core::fmt;
 use mycelium_util::bits;
 
 #[repr(C)]
@@ -12,9 +12,9 @@ pub struct Idt {
 #[repr(C)]
 pub struct Descriptor {
     offset_low: u16,
-    pub segment: segment::Selector,
+    segment: segment::Selector,
     ist_offset: u8,
-    pub attrs: Attrs,
+    attrs: Attrs,
     offset_mid: u16,
     offset_hi: u32,
     _zero: u32,
@@ -44,8 +44,8 @@ impl Descriptor {
         }
     }
 
-    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
-        self.segment = segment::code_segment();
+    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Self {
+        self.segment = segment::Selector::current_cs();
         let addr = handler as u64;
         self.offset_low = addr as u16;
         self.offset_mid = (addr >> 16) as u16;
@@ -53,7 +53,23 @@ impl Descriptor {
         self.attrs
             .set_present(true)
             .set_32_bit(true)
-            .set_gate_kind(GateKind::Interrupt)
+            .set_gate_kind(GateKind::Interrupt);
+        self
+    }
+
+    /// Sets the descriptor's [Interrupt Stack Table][ist] offset.
+    ///
+    /// [ist]: https://en.wikipedia.org/wiki/Task_state_segment#Inner-level_stack_pointers
+    pub(crate) fn set_ist_offset(&mut self, ist_offset: u8) -> &mut Self {
+        self.ist_offset = ist_offset;
+        self
+    }
+
+    /// Mutably borrows the descriptor's [attributes](Attrs).
+    #[inline]
+    #[must_use]
+    pub fn attrs_mut(&mut self) -> &mut Attrs {
+        &mut self.attrs
     }
 }
 
@@ -136,6 +152,9 @@ impl Idt {
 
     pub const SECURITY_EXCEPTION: usize = 30;
 
+    /// Chosen by fair die roll, guaranteed to be random.
+    pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
+
     pub const fn new() -> Self {
         Self {
             descriptors: [Descriptor::null(); Self::NUM_VECTORS],
@@ -143,13 +162,22 @@ impl Idt {
     }
 
     pub(super) fn set_isr(&mut self, vector: usize, isr: *const ()) {
-        let attrs = self.descriptors[vector].set_handler(isr);
-        tracing::debug!(vector, isr = ?isr, ?attrs, "set isr");
+        let descr = self.descriptors[vector].set_handler(isr);
+        if vector == Self::DOUBLE_FAULT {
+            descr.set_ist_offset(Self::DOUBLE_FAULT_IST_OFFSET as u8);
+        }
+        tracing::debug!(vector, ?isr, ?descr, "set isr");
     }
 
     pub fn load(&'static self) {
-        let ptr = crate::cpu::DtablePtr::new(self);
-        unsafe { asm!("lidt [{0}]", in(reg) &ptr) }
+        let ptr = cpu::DtablePtr::new(self);
+        tracing::debug!(?ptr, "loading IDT");
+        unsafe {
+            // Safety: the `'static` bound ensures the IDT isn't going away
+            // unless you did something really evil.
+            cpu::intrinsics::lidt(ptr)
+        }
+        tracing::debug!("IDT loaded!");
     }
 }
 

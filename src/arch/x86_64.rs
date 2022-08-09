@@ -2,22 +2,34 @@ use bootloader::boot_info;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
-pub use hal_x86_64::{interrupt, mm, NAME};
+pub use hal_x86_64::{mm, NAME};
 use mycelium_util::sync::InitOnce;
 
 mod framebuf;
-use self::framebuf::FramebufWriter;
-
+pub mod interrupt;
 mod oops;
+
 pub use self::oops::{oops, Oops};
 
+use self::framebuf::FramebufWriter;
+
 pub type MinPageSize = mm::size::Size4Kb;
+
+#[tracing::instrument]
+pub fn init_interrupts() {
+    interrupt::init_gdt();
+    tracing::info!("GDT initialized!");
+
+    interrupt::init::<InterruptHandlers>();
+    tracing::info!("IDT initialized!");
+}
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
     inner: &'static boot_info::BootInfo,
     has_framebuffer: bool,
 }
+
 type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {

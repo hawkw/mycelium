@@ -1,9 +1,11 @@
-use crate::{segment, VAddr};
-use core::{arch::asm, fmt, marker::PhantomData};
+use crate::{cpu, segment, VAddr};
+use core::{arch::asm, marker::PhantomData};
 use hal_core::interrupt::{ctx, Handlers};
+use mycelium_util::{bits, fmt};
 
 pub mod idt;
 pub mod pic;
+
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
@@ -37,7 +39,7 @@ pub struct Interrupt<T = ()> {
 #[repr(transparent)]
 pub struct PageFaultCode(u32);
 
-mycelium_util::bits::bitfield! {
+bits::bitfield! {
     /// Error code set by the "Invalid TSS", "Segment Not Present", "Stack-Segment
     /// Fault", and "General Protection Fault" faults.
     ///
@@ -45,7 +47,7 @@ mycelium_util::bits::bitfield! {
     /// which table the segment selector references.
     pub struct SelectorErrorCode<u16> {
         const EXTERNAL: bool;
-        const TABLE = 2;
+        const TABLE: cpu::DescriptorTable;
         const INDEX = 13;
     }
 }
@@ -64,12 +66,9 @@ pub struct Registers {
 static mut IDT: idt::Idt = idt::Idt::new();
 static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
 
+#[tracing::instrument(level = "info", name = "interrupts::init")]
 pub fn init<H: Handlers<Registers>>() -> Control {
     use hal_core::interrupt::Control;
-
-    let span = tracing::info_span!("interrupts::init");
-    let _enter = span.enter();
-
     tracing::info!("configuring 8259 PIC interrupts...");
 
     unsafe {
@@ -158,6 +157,7 @@ impl hal_core::interrupt::Control for Idt {
     #[inline]
     unsafe fn enable(&mut self) {
         crate::cpu::intrinsics::sti();
+        tracing::trace!("interrupts enabled");
     }
 
     fn is_enabled(&self) -> bool {
@@ -412,6 +412,8 @@ impl fmt::Debug for PageFaultCode {
     }
 }
 
+// === impl SelectorErrorCode ===
+
 impl SelectorErrorCode {
     #[inline]
     fn named(self, segment_kind: &'static str) -> NamedSelectorErrorCode {
@@ -420,20 +422,27 @@ impl SelectorErrorCode {
             code: self,
         }
     }
+
+    fn display(&self) -> impl fmt::Display {
+        struct PrettyErrorCode(SelectorErrorCode);
+
+        impl fmt::Display for PrettyErrorCode {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let table = self.0.get(SelectorErrorCode::TABLE);
+                let index = self.0.get(SelectorErrorCode::INDEX);
+                write!(f, "{table} index {index}")?;
+                if self.0.get(SelectorErrorCode::EXTERNAL) {
+                    f.write_str(" (from an external source)")?;
+                }
+                write!(f, " (error code {:#b})", self.0.bits())?;
+
+                Ok(())
+            }
+        }
+
+        PrettyErrorCode(*self)
+    }
 }
-
-// === impl SelectorErrorCode ===
-
-// impl fmt::Display for SelectorErrorCode {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         write!(f, "{} index {}", self.table(), self.index())?;
-//         if self.is_external() {
-//             f.write_str(" (from an external source)")?;
-//         }
-
-//         Ok(())
-//     }
-// }
 
 struct NamedSelectorErrorCode {
     segment_kind: &'static str,
@@ -443,7 +452,7 @@ struct NamedSelectorErrorCode {
 impl fmt::Display for NamedSelectorErrorCode {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.segment_kind, self.code)
+        write!(f, "{} at {}", self.segment_kind, self.code.display())
     }
 }
 

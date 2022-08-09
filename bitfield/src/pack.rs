@@ -268,14 +268,6 @@ macro_rules! make_packers {
                     );
                     Self::starting_at(start, end.saturating_sub(start))
                 }
-
-                /// Returns a packer for packing a value into the next `n` more-significant
-                /// after the `bit`th bit.
-                pub const fn starting_at(bit: u32, n: u32) -> Self {
-                    let shift = bit.saturating_sub(1);
-                    let mask = Self::mk_mask(n) << shift;
-                    Self { mask, shift, _dst_ty: PhantomData, }
-                }
             }
 
             impl<T, F> $Pack<T, F> {
@@ -583,20 +575,28 @@ macro_rules! make_packers {
                     $Pack::<$Bits, ()>::least_significant(T::BITS).typed()
                 }
 
+                /// Returns a packer for packing a value into the next `n` more-significant
+                /// after the `bit`th bit.
+                pub const fn starting_at(bit: u32, n: u32) -> Self {
+                    let shift = bit.saturating_sub(1);
+                    let mask = Self::mk_mask(n) << shift;
+                    Self { mask, shift, _dst_ty: PhantomData, }
+                }
+
                 /// Returns a pair type for packing bits from the range
                 /// specified by `self` at the specified offset `at`, which may
                 /// differ from `self`'s offset.
                 ///
                 /// The packing pair can be used to pack bits from one location
                 /// into another location, and vice versa.
-                pub const fn pair_at(&self, at: u32) -> $Pair {
-                    let dst = $Pack::starting_at(at, self.bits());
-                    self.pair_with(dst.typed())
+                pub const fn pair_at(&self, at: u32) -> $Pair<T> {
+                    let dst = Self::starting_at(at, self.bits());
+                    self.pair_with(dst)
                 }
 
                 /// Returns a pair type for packing bits from the range
                 /// specified by `self` after the specified packing spec.
-                pub const fn pair_after(&self, after: &Self) -> $Pair {
+                pub const fn pair_after(&self, after: Self) -> $Pair<T> {
                     self.pair_at(after.shift_next())
                 }
 
@@ -604,9 +604,10 @@ macro_rules! make_packers {
                 /// specified by `self` into the range specified by `with`.
                 ///
                 /// # Note
+                ///
                 /// The two ranges must be the same size. This can be asserted
                 /// by the `assert_valid` method on the returned pair type.
-                pub const fn pair_with(&self, dst: Self) -> $Pair {
+                pub const fn pair_with(&self, dst: Self) -> $Pair<T> {
                     // TODO(eliza): validate that `dst.shift + self.bits() < N_BITS` in
                     // const fn somehow lol
                     let (dst_shl, dst_shr) = if dst.shift > self.shift {
@@ -617,6 +618,7 @@ macro_rules! make_packers {
                         // Otherwise, shift down.
                         (0, (self.shift - dst.shift) as $Bits)
                     };
+
                     $Pair {
                         src: self.typed(),
                         dst: dst.typed(),
@@ -1214,7 +1216,7 @@ mod tests {
                     ) {
                         let pack_from_src = $Pack::least_significant(src_len);
                         let src = 0;
-                        let pack_from_dst = $Pack::starting_at(dst_at, src_len);
+                        let pack_from_dst = $Pack::<$Bits>::starting_at(dst_at, src_len);
                         let dst = pack_from_dst.set_all(0);
                         let pair = pack_from_src.pair_at(dst_at);
                         let state = format!(
