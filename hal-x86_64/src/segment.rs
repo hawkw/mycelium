@@ -196,13 +196,7 @@ impl Selector {
             retaddr = lateout(reg) _,
             options(preserves_flags),
         );
-
         tracing::trace!(selector = fmt::alt(self), "set code segment");
-        let actual_selector = Self::cs();
-        tracing::trace!(
-            actual_selector = fmt::alt(actual_selector),
-            "read %cs just to check"
-        );
     }
 
     /// Sets `self` as the current stack segment selector in the `ss` register.
