@@ -436,17 +436,25 @@ mod tests {
         let in_buf = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let reader = &mut &in_buf[..];
         let mut buf = [];
-        assert!(reader.read_exact(&mut buf).is_ok());
+        reader
+            .read_exact(&mut buf)
+            .expect("read_exact must succeed");
         let mut buf = [8];
-        assert!(reader.read_exact(&mut buf).is_ok());
+        reader
+            .read_exact(&mut buf)
+            .expect("read_exact must succeed");
         assert_eq!(buf[0], 0);
         assert_eq!(reader.len(), 7);
         let mut buf = [0, 0, 0, 0, 0, 0, 0];
-        assert!(reader.read_exact(&mut buf).is_ok());
+        reader
+            .read_exact(&mut buf)
+            .expect("read_exact must succeed");
         assert_eq!(buf, [1, 2, 3, 4, 5, 6, 7]);
         assert_eq!(reader.len(), 0);
         let mut buf = [0];
-        assert!(reader.read_exact(&mut buf).is_err());
+        reader
+            .read_exact(&mut buf)
+            .expect("read_exact must succeed")
     }
 
     #[test]
@@ -508,7 +516,8 @@ mod tests {
         );
         assert_eq!(r.seek(SeekFrom::Current(0x10)).unwrap(), 0x8000000000000006);
         assert_eq!(r.seek(SeekFrom::Current(0)).unwrap(), 0x8000000000000006);
-        assert!(r.seek(SeekFrom::Current(0x7ffffffffffffffd)).is_err());
+        r.seek(SeekFrom::Current(0x7ffffffffffffffd))
+            .expect_err("`seek` with big offset must fail");
         assert_eq!(r.seek(SeekFrom::Current(-0x8000000000000000)).unwrap(), 6);
 
         let mut r = Cursor::new(vec![10]);
@@ -519,7 +528,8 @@ mod tests {
         );
         assert_eq!(r.seek(SeekFrom::Current(0x10)).unwrap(), 0x8000000000000006);
         assert_eq!(r.seek(SeekFrom::Current(0)).unwrap(), 0x8000000000000006);
-        assert!(r.seek(SeekFrom::Current(0x7ffffffffffffffd)).is_err());
+        r.seek(SeekFrom::Current(0x7ffffffffffffffd))
+            .expect_err("`seek` with big offset must fail");
         assert_eq!(r.seek(SeekFrom::Current(-0x8000000000000000)).unwrap(), 6);
 
         let mut buf = [0];
@@ -531,7 +541,8 @@ mod tests {
         );
         assert_eq!(r.seek(SeekFrom::Current(0x10)).unwrap(), 0x8000000000000006);
         assert_eq!(r.seek(SeekFrom::Current(0)).unwrap(), 0x8000000000000006);
-        assert!(r.seek(SeekFrom::Current(0x7ffffffffffffffd)).is_err());
+        r.seek(SeekFrom::Current(0x7ffffffffffffffd))
+            .expect_err("`seek` with big offset must fail");
         assert_eq!(r.seek(SeekFrom::Current(-0x8000000000000000)).unwrap(), 6);
 
         #[cfg(feature = "alloc")]
@@ -544,7 +555,8 @@ mod tests {
             );
             assert_eq!(r.seek(SeekFrom::Current(0x10)).unwrap(), 0x8000000000000006);
             assert_eq!(r.seek(SeekFrom::Current(0)).unwrap(), 0x8000000000000006);
-            assert!(r.seek(SeekFrom::Current(0x7ffffffffffffffd)).is_err());
+            r.seek(SeekFrom::Current(0x7ffffffffffffffd))
+                .expect_err("`seek` with big offset must fail");
             assert_eq!(r.seek(SeekFrom::Current(-0x8000000000000000)).unwrap(), 6);
         }
     }
@@ -553,19 +565,23 @@ mod tests {
     fn seek_before_0() {
         let buf = [0xff];
         let mut r = Cursor::new(&buf[..]);
-        assert!(r.seek(SeekFrom::End(-2)).is_err());
+        r.seek(SeekFrom::End(-2))
+            .expect_err("`seek` before 0 must fail");
 
         let mut r = Cursor::new(vec![10]);
-        assert!(r.seek(SeekFrom::End(-2)).is_err());
+        r.seek(SeekFrom::End(-2))
+            .expect_err("`seek` before 0 must fail");
 
         let mut buf = [0];
         let mut r = Cursor::new(&mut buf[..]);
-        assert!(r.seek(SeekFrom::End(-2)).is_err());
+        r.seek(SeekFrom::End(-2))
+            .expect_err("`seek` before 0 must fail");
 
         #[cfg(feature = "alloc")]
         {
             let mut r = Cursor::new(vec![10].into_boxed_slice());
-            assert!(r.seek(SeekFrom::End(-2)).is_err());
+            r.seek(SeekFrom::End(-2))
+                .expect_err("`seek` before 0 must fail");
         }
     }
 
@@ -616,7 +632,8 @@ mod tests {
     #[cfg(feature = "alloc")]
     fn vec_seek_before_0() {
         let mut r = Cursor::new(Vec::new());
-        assert!(r.seek(SeekFrom::End(-2)).is_err());
+        r.seek(SeekFrom::End(-2))
+            .expect_err("`seek` before 0 must fail");
     }
 
     #[test]
