@@ -151,6 +151,19 @@ impl Ring {
     }
 }
 
+impl bits::FromBits<u64> for Ring {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(u: u64) -> Result<Self, Self::Error> {
+        Ok(Self::from_u8(u as u8))
+    }
+
+    fn into_bits(self) -> u64 {
+        self as u8 as u64
+    }
+}
+
 impl bits::FromBits<u16> for Ring {
     const BITS: u32 = 2;
     type Error = core::convert::Infallible;

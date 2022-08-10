@@ -2,11 +2,11 @@
 use crate::{cpu, task};
 use core::{arch::asm, mem};
 use mycelium_util::{
-    bits::{self, Pack64},
+    bits::{self, Pack64, Packing64, Pair64},
     fmt,
 };
 
-mycelium_util::bits::bitfield! {
+bits::bitfield! {
     /// A segment selector.
     ///
     /// These values are stored in a segmentation register (`ss`, `cs`, `ds`, `es`,
@@ -31,20 +31,76 @@ mycelium_util::bits::bitfield! {
     }
 }
 
-/// A 64-bit mode user segment descriptor.
-///
-/// A segment descriptor is an entry in a [GDT] or LDT that provides the
-/// processor with the size and location of a segment, as well as access control
-/// and status information.
-///
-/// Refer to section 3.4.5 in [Vol. 3A of the _Intel® 64 and IA-32 Architectures
-/// Developer's Manual_][manual] for details.
-///
-/// [GDT]: Gdt
-/// [manual]: https://www.intel.com/content/www/us/en/architecture-and-technology/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.html
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct Descriptor(u64);
+bits::bitfield! {
+    /// A 64-bit mode user segment descriptor.
+    ///
+    /// A segment descriptor is an entry in a [GDT] or LDT that provides the
+    /// processor with the size and location of a segment, as well as access control
+    /// and status information.
+    ///
+    /// Refer to section 3.4.5 in [Vol. 3A of the _Intel® 64 and IA-32 Architectures
+    /// Developer's Manual_][manual] for details.
+    ///
+    /// [GDT]: Gdt
+    /// [manual]: https://www.intel.com/content/www/us/en/architecture-and-technology/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.html
+    #[derive(Eq, PartialEq)]
+    pub struct Descriptor<u64> {
+        /// First 16 bits of the limit field (ignored in 64-bit mode)
+        const LIMIT_LOW = 16;
+        /// First 24 bits of the base field (ignored in 64-bit mode)
+        const BASE_LOW = 24;
+
+        // Access flags (5 bits).
+        // In order, least to most significant:
+        // - `ACCESSED`
+        // - `READABLE`/`WRITABLE`
+        // - `DIRECTION`/`CONFORMING`
+        // - `EXECUTABLE` (code/data)
+        // - `TYPE` (user/system)
+
+        /// Set by the processor if this segment has been accessed. Only cleared by software.
+        /// _Setting_ this bit in software prevents GDT writes on first use.
+        const ACCESSED: bool;
+
+        /// Readable bit for code segments/writable bit for data segments.
+        const READABLE: bool;
+        /// Direction bit for code segments/conforming bit for data segments.
+        const CONFORMING: bool;
+        /// Executable bit (if 1, this is a code segment)
+        const IS_CODE_SEGMENT: bool;
+        /// Descriptor type bit (if 1, this is a user segment)
+        const IS_USER_SEGMENT: bool;
+        /// Priveliege ring.
+        const RING: cpu::Ring;
+        /// Present bit
+        const IS_PRESENT: bool;
+        /// High 4 bits of the limit (ignored in 64-bit mode)
+        const LIMIT_HIGH = 4;
+
+        // High flags (5 bits).
+        // In order, least to most significant:
+        // - `AVAILABLE`
+        // - `LONG_MODE`
+        // - `DEFAULT_SIZE`
+        // - `GRANULARITY`
+
+        /// Available for use by the Operating System
+        const AVAILABLE: bool;
+
+        /// Must be set for 64-bit code segments, unset otherwise.
+        const IS_LONG_MODE: bool;
+
+        /// Use 32-bit (as opposed to 16-bit) operands. If [`LONG_MODE`][Self::LONG_MODE] is set,
+        /// this must be unset. In 64-bit mode, ignored for data segments.
+        const IS_32_BIT: bool;
+
+        /// Limit field is scaled by 4096 bytes. In 64-bit mode, ignored for all segments.
+        const GRANULARITY: bool;
+
+        /// Highest 8 bits of the base field
+        const BASE_MID = 8;
+    }
+}
 
 /// A [Global Descriptor Table (GDT)][gdt].
 ///
@@ -371,54 +427,56 @@ impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
 // === impl Descriptor ===
 
 impl Descriptor {
-    /// First 16 bits of the limit field (ignored in 64-bit mode)
-    const LIMIT_LOW: Pack64 = Pack64::least_significant(16);
-    /// First 24 bits of the base field (ignored in 64-bit mode)
-    const BASE_LOW: Pack64 = Self::LIMIT_LOW.next(24);
-    /// In order, least to most significant:
-    /// - accessed bit
-    /// - readable bit for code/writable bit for data
-    /// - direction/conforming for code/data
-    /// - executable bit (code segment if 1)
-    /// - descriptor type (1 for user, 0 for system segments)
-    const ACCESS_FLAGS: Pack64 = Self::BASE_LOW.next(5);
-    const RING: Pack64 = Self::ACCESS_FLAGS.next(2);
-    const PRESENT_BIT: Pack64 = Self::RING.next(1);
-    /// High 4 bits of the limit (ignored in 64-bit mode)
-    const LIMIT_HIGH: Pack64 = Self::PRESENT_BIT.next(4);
-    const FLAGS: Pack64 = Self::LIMIT_HIGH.next(4);
-    /// Highest 8 bits of the base field
-    const BASE_MID: Pack64 = Self::FLAGS.next(8);
+    const LIMIT_LOW_PAIR: Pair64 = Self::LIMIT_LOW.pair_with(limit::LOW);
+    const LIMIT_HIGH_PAIR: Pair64 = Self::LIMIT_HIGH.pair_with(limit::HIGH);
 
-    const LIMIT_LOW_PAIR: bits::Pair64 = Self::LIMIT_LOW.pair_with(limit::LOW);
-    const LIMIT_HIGH_PAIR: bits::Pair64 = Self::LIMIT_HIGH.pair_with(limit::HIGH);
+    const BASE_LOW_PAIR: Pair64 = Self::BASE_LOW.pair_with(base::LOW);
+    const BASE_MID_PAIR: Pair64 = Self::BASE_MID.pair_with(base::MID);
 
-    const BASE_LOW_PAIR: bits::Pair64 = Self::BASE_LOW.pair_with(base::LOW);
-    const BASE_MID_PAIR: bits::Pair64 = Self::BASE_MID.pair_with(base::MID);
+    // Access flags (5 bits).
+    // In order, least to most significant:
+    // - `ACCESSED`
+    // - `READABLE`/`WRITABLE`
+    // - `DIRECTION`/`CONFORMING`
+    // - `EXECUTABLE` (code/data)
+    // - `TYPE` (user/system)
+    // TODO(eliza): add a nicer `mycelium-bitfield` API for combining pack specs...
+    const ACCESS_FLAGS: Pack64 = Self::BASE_LOW.typed::<u64, ()>().next(5);
 
     // hahaha lol no limits
-    const DEFAULT_BITS: u64 = Self::LIMIT_LOW.set_all(Self::LIMIT_HIGH.set_all(0));
+    const DEFAULT_BITS: u64 = Packing64::new(0)
+        .set_all(&Self::LIMIT_LOW)
+        .set_all(&Self::LIMIT_HIGH)
+        .bits();
 
-    /// Used by multiple `fmt::Debug` impls, `const`-ified to prevent typos.
-    const NAME: &'static str = "segment::Descriptor";
+    const USER_FLAGS: u64 = Packing64::new(0)
+        .set_all(&Self::IS_USER_SEGMENT)
+        .set_all(&Self::IS_PRESENT)
+        .set_all(&Self::READABLE)
+        .set_all(&Self::ACCESSED)
+        .set_all(&Self::GRANULARITY)
+        .bits();
+
+    const CODE_FLAGS: u64 = Packing64::new(Self::USER_FLAGS)
+        .set_all(&Self::IS_CODE_SEGMENT)
+        .bits();
+    const DATA_FLAGS: u64 = Packing64::new(Self::USER_FLAGS)
+        .set_all(&Self::IS_32_BIT)
+        .bits();
 
     /// Returns a new segment descriptor for a 64-bit code segment.
     pub const fn code() -> Self {
-        Self(Self::DEFAULT_BITS | DescriptorFlags::CODE.bits() | DescriptorFlags::LONG_MODE.bits())
+        Self(Self::DEFAULT_BITS | Self::CODE_FLAGS | Self::IS_LONG_MODE.raw_mask())
     }
 
     /// Returns a new segment descriptor for a 32-bit code segment.
     pub const fn code_32() -> Self {
-        Self(
-            Self::DEFAULT_BITS
-                | DescriptorFlags::CODE.bits()
-                | DescriptorFlags::DEFAULT_SIZE.bits(),
-        )
+        Self(Self::DEFAULT_BITS | Self::CODE_FLAGS | Self::IS_32_BIT.raw_mask())
     }
 
     /// Returns a new segment descriptor for data segment.
     pub const fn data() -> Self {
-        Self(Self::DEFAULT_BITS | DescriptorFlags::DATA.bits())
+        Self(Self::DEFAULT_BITS | Self::DATA_FLAGS)
     }
 
     pub fn ring(&self) -> cpu::Ring {
@@ -449,101 +507,11 @@ impl Descriptor {
     pub const fn with_ring(self, ring: cpu::Ring) -> Self {
         Self(Self::RING.pack_truncating(ring as u8 as u64, self.0))
     }
-
-    /// Returns a `Descriptor` with `flags` set.
-    pub const fn with_flags(self, flags: &DescriptorFlags) -> Self {
-        Self(self.0 | flags.bits())
-    }
-
-    pub const fn flags(&self) -> DescriptorFlags {
-        DescriptorFlags::from_bits_truncate(self.0)
-    }
-}
-
-impl fmt::Debug for Descriptor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // pretty-print the flags and other data
-        f.debug_struct(Self::NAME)
-            .field("ring", &self.ring())
-            .field("flags", &self.flags())
-            .field("limit", &self.limit())
-            .field("base", &format_args!("{:#x}", self.base()))
-            .field("bits", &format_args!("{:#x}", self.0))
-            .finish()
-    }
-}
-
-impl fmt::UpperHex for Descriptor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple(Self::NAME)
-            .field(&format_args!("{:#X}", self.0))
-            .finish()
-    }
-}
-
-impl fmt::LowerHex for Descriptor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple(Self::NAME)
-            .field(&format_args!("{:#x}", self.0))
-            .finish()
-    }
-}
-
-impl fmt::Binary for Descriptor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple(Self::NAME)
-            .field(&format_args!("{:#b}", self.0))
-            .finish()
-    }
-}
-
-bitflags::bitflags! {
-    /// Flags for a GDT descriptor. Not all flags are valid for all descriptor types.
-    pub struct DescriptorFlags: u64 {
-        /// Set by the processor if this segment has been accessed. Only cleared by software.
-        /// _Setting_ this bit in software prevents GDT writes on first use.
-        const ACCESSED          = 1 << 40;
-        /// For 32-bit data segments, sets the segment as writable. For 32-bit code segments,
-        /// sets the segment as _readable_. In 64-bit mode, ignored for all segments.
-        const WRITABLE          = 1 << 41;
-        /// For code segments, sets the segment as “conforming”, influencing the
-        /// privilege checks that occur on control transfers. For 32-bit data segments,
-        /// sets the segment as "expand down". In 64-bit mode, ignored for data segments.
-        const CONFORMING        = 1 << 42;
-        /// This flag must be set for code segments and unset for data segments.
-        const EXECUTABLE        = 1 << 43;
-        /// This flag must be set for user segments (in contrast to system segments).
-        const USER_SEGMENT      = 1 << 44;
-        /// Must be set for any segment, causes a segment not present exception if not set.
-        const PRESENT           = 1 << 47;
-        /// Available for use by the Operating System
-        const AVAILABLE         = 1 << 52;
-        /// Must be set for 64-bit code segments, unset otherwise.
-        const LONG_MODE         = 1 << 53;
-        /// Use 32-bit (as opposed to 16-bit) operands. If [`LONG_MODE`][Self::LONG_MODE] is set,
-        /// this must be unset. In 64-bit mode, ignored for data segments.
-        const DEFAULT_SIZE      = 1 << 54;
-        /// Limit field is scaled by 4096 bytes. In 64-bit mode, ignored for all segments.
-        const GRANULARITY       = 1 << 55;
-    }
-}
-
-impl DescriptorFlags {
-    const BASE: Self = Self::from_bits_truncate(
-        Self::USER_SEGMENT.bits()
-            | Self::PRESENT.bits()
-            | Self::WRITABLE.bits()
-            | Self::ACCESSED.bits()
-            | Self::GRANULARITY.bits(),
-    );
-
-    const CODE: Self = Self::from_bits_truncate(Self::BASE.bits() | Self::EXECUTABLE.bits());
-    const DATA: Self = Self::from_bits_truncate(Self::BASE.bits() | Self::DEFAULT_SIZE.bits());
 }
 
 impl SystemDescriptor {
     const BASE_HIGH: bits::Pack64 = bits::Pack64::least_significant(32);
-    const BASE_HIGH_PAIR: bits::Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
+    const BASE_HIGH_PAIR: Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
 
     pub fn tss(tss: &'static task::StateSegment) -> Self {
         let tss_addr = tss as *const _ as u64;
@@ -552,7 +520,8 @@ impl SystemDescriptor {
         // limit (-1 because the bound is inclusive)
         let limit = (mem::size_of::<task::StateSegment>() - 1) as u64;
 
-        let low = Pack64::pack_in(DescriptorFlags::PRESENT.bits())
+        let low = Pack64::pack_in(0)
+            .pack(true, &Descriptor::IS_PRESENT)
             .pack_from_src(limit, &Descriptor::LIMIT_LOW_PAIR)
             // base addr (low 24 bits)
             .pack_from_src(tss_addr, &Descriptor::BASE_LOW_PAIR)
@@ -595,11 +564,8 @@ impl fmt::Debug for SystemDescriptor {
             )
             .field("base_low", &fmt::hex(Descriptor::BASE_LOW.unpack(self.low)))
             .field("type", &fmt::bin(Descriptor::ACCESS_FLAGS.unpack(self.low)))
-            .field("ring", &fmt::bin(Descriptor::RING.unpack(self.low)))
-            .field(
-                "present",
-                &fmt::bin(Descriptor::PRESENT_BIT.unpack(self.low)),
-            )
+            .field("ring", &Descriptor::RING.unpack(self.low))
+            .field("present", &Descriptor::IS_PRESENT.unpack(self.low))
             .field(
                 "limit_high",
                 &fmt::bin(Descriptor::LIMIT_HIGH.unpack(self.low)),
@@ -653,17 +619,21 @@ mod tests {
 
     #[test]
     fn descriptor_pack_specs_valid() {
-        Descriptor::ACCESS_FLAGS.assert_valid();
-        Descriptor::PRESENT_BIT.assert_valid();
-        Descriptor::FLAGS.assert_valid();
-        Descriptor::RING.assert_valid();
+        Descriptor::assert_valid();
+        assert_eq!(Descriptor::IS_PRESENT.raw_mask(), 1 << 47);
+    }
 
-        Descriptor::BASE_LOW_PAIR.assert_valid();
-        Descriptor::BASE_MID_PAIR.assert_valid();
-        SystemDescriptor::BASE_HIGH_PAIR.assert_valid();
-
+    #[test]
+    fn descriptor_pack_pairs_valid() {
         Descriptor::LIMIT_LOW_PAIR.assert_valid();
         Descriptor::LIMIT_HIGH_PAIR.assert_valid();
+        Descriptor::BASE_LOW_PAIR.assert_valid();
+        Descriptor::BASE_MID_PAIR.assert_valid();
+    }
+
+    #[test]
+    fn sys_descriptor_pack_pairs_valid() {
+        SystemDescriptor::BASE_HIGH_PAIR.assert_valid()
     }
 
     #[test]
@@ -714,8 +684,8 @@ mod tests {
             let base = tss_descr.base();
             prop_assert_eq!(
                 base, addr,
-                "expected={:x}; actual={:x}\ndescr={:#?}",
-                addr, base, tss_descr,
+                "\n  left: {:#064b}\n right: {:#064b}\n descr: {:#?}\n  addr: {:#x}\n",
+                addr, base, tss_descr, addr
             );
         }
 
