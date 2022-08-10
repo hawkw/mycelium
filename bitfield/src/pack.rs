@@ -607,7 +607,7 @@ macro_rules! make_packers {
                 ///
                 /// The two ranges must be the same size. This can be asserted
                 /// by the `assert_valid` method on the returned pair type.
-                pub const fn pair_with(&self, dst: Self) -> $Pair<T> {
+                pub const fn pair_with<F2>(&self, dst: $Pack<T, F2>) -> $Pair<T> {
                     // TODO(eliza): validate that `dst.shift + self.bits() < N_BITS` in
                     // const fn somehow lol
                     let (dst_shl, dst_shr) = if dst.shift > self.shift {
