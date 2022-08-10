@@ -830,20 +830,20 @@ macro_rules! make_packers {
                 /// # Panics
                 ///
                 /// If `value` contains bits outside the range specified by `packer`.
-                pub fn pack<T: FromBits<$Bits>>(self, value: T, packer: &$Pack<T>) -> Self {
+                pub fn pack<T: FromBits<$Bits>, F>(self, value: T, packer: &$Pack<T, F>) -> Self {
                     Self(packer.pack(value, self.0))
                 }
 
                 /// Set _all_ bits in the range specified by `packer` to 1 in `self`.
                 #[inline]
-                pub const fn set_all(self, packer: &$Pack) -> Self {
+                pub const fn set_all<T, F>(self, packer: &$Pack<T, F>) -> Self {
                     Self(packer.set_all(self.0))
                 }
 
                 /// Set _all_ bits in the range specified by `packer` to 0 in
                 /// `self`.
                 #[inline]
-                pub const fn unset_all(self, packer: &$Pack) -> Self {
+                pub const fn unset_all<T, F>(self, packer: &$Pack<T, F>) -> Self {
                     Self(packer.unset_all(self.0))
                 }
 
@@ -851,7 +851,7 @@ macro_rules! make_packers {
                 /// Returns `true` if **any** bits specified by `packer` are set
                 /// in `self`.
                 #[inline]
-                pub const fn contains_any(self, packer: &$Pack) -> bool {
+                pub const fn contains_any<T, F>(self, packer: &$Pack<T, F>) -> bool {
                     packer.contained_in_any(self.0)
                 }
 
@@ -859,7 +859,7 @@ macro_rules! make_packers {
                 /// Returns `true` if **any** bits specified by `packer` are set
                 /// in `self`.
                 #[inline]
-                pub const fn contains_all(self, packer: &$Pack) -> bool {
+                pub const fn contains_all<T, F>(self, packer: &$Pack<T, F>) -> bool {
                     packer.contained_in_all(self.0)
                 }
 
