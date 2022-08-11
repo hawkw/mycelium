@@ -16,21 +16,44 @@ use core::fmt;
 /// [`JoinHandle::id`]: crate::task::JoinHandle::id
 /// [`Task::id`]: crate::task::Task::id
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct TaskId(usize);
+pub struct TaskId(u64);
 
 impl TaskId {
-    #[inline]
-    #[must_use]
-    pub(crate) fn next() -> Self {
-        // Don't use loom atomics, since this has to go in a static.
-        use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+    // On platforms with 64-bit atomic operations, track the next task ID counter
+    // as an `AtomicUsize`.
+    if_atomic_u64! {
+        #[inline]
+        #[must_use]
+        pub(crate) fn next() -> Self {
+            // Don't use loom atomics, since this has to go in a static.
+            use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
-        // ID 0 is reserved for stub tasks.
-        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
-        let id = NEXT_ID.fetch_add(1, Relaxed);
+            // ID 0 is reserved for stub tasks.
+            static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+            let id = NEXT_ID.fetch_add(1, Relaxed);
 
-        debug_assert!(id > 0, "task ID counter should not overflow!");
-        Self(id)
+            debug_assert!(id > 0, "64-bit task ID counter should not overflow!");
+            Self(id)
+        }
+    }
+
+    // On platforms without 64-bit atomics, fall back to tracking the next task
+    // ID using a mutex.
+    if_no_atomic_u64! {
+        #[inline]
+        #[must_use]
+        pub(crate) fn next() -> Self {
+            use mycelium_util::sync::spin::Mutex;
+
+            // ID 0 is reserved for stub tasks.
+            static NEXT_ID: Mutex<u64> = Mutex::new(1);
+
+            let mut next = NEXT_ID.lock();
+            let id = *next;
+            debug_assert!(id > 0, "64-bit task ID counter should not overflow!");
+            *next += 1;
+            Self(id)
+        }
     }
 
     #[must_use]
