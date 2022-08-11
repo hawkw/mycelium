@@ -419,6 +419,7 @@ macro_rules! trace_waker_op {
             {
                 task.id = (*$ptr).span().tracing_01_id(),
                 task.addr = ?$ptr,
+                task.tid = %(*$ptr).header.id,
                 op = concat!("waker.", stringify!($op)),
             },
             concat!("Task::", stringify!($method)),
@@ -430,6 +431,7 @@ macro_rules! trace_waker_op {
             target: "runtime::waker",
             {
                 task.addr = ?$ptr,
+                task.tid = %(*$ptr).header.id,
                 op = concat!("waker.", stringify!($op)),
             },
             concat!("Task::", stringify!($method)),
@@ -510,6 +512,7 @@ where
         trace!(
             task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
+            task.tid = %ptr.as_ref().id,
             "Task::poll"
         );
         let mut this = ptr.cast::<Self>();
@@ -562,6 +565,7 @@ where
         trace!(
             task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
+            task.tid = %ptr.as_ref().id,
             "Task::deallocate"
         );
         let this = ptr.cast::<Self>();
@@ -573,12 +577,13 @@ where
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), JoinError>> {
+        let task = task.cast::<Self>().as_ref();
         trace!(
             task.addr = ?task,
             task.output = %type_name::<<F>::Output>(),
+            task.tid = %task.id(),
             "Task::poll_join"
         );
-        let task = task.cast::<Self>().as_ref();
         match test_dbg!(task.state().try_join()) {
             JoinAction::TakeOutput => {
                 task.inner.with_mut(|cell| {
@@ -711,6 +716,7 @@ impl<S: Schedule> Schedulable<S> {
     unsafe fn drop_ref(this: NonNull<Self>) {
         trace!(
             task.addr = ?this,
+            task.tid = %this.as_ref().header.id,
             "Schedulable::drop_ref"
         );
         if !this.as_ref().state().drop_ref() {
@@ -875,6 +881,7 @@ impl TaskRef {
                 // XXX(eliza): would be nice to not use emptystring here but
                 // `tracing` 0.2 is missing `Option` value support :(
                 task.name = builder.name.unwrap_or(""),
+                task.tid = %unsafe { ptr.as_ref().schedulable.header.id },
                 task.addr = ?ptr,
                 task.output = %type_name::<F::Output>(),
                 task.storage = %type_name::<STO>(),
@@ -891,6 +898,7 @@ impl TaskRef {
         trace!(
             task.name = builder.name.unwrap_or(""),
             task.addr = ?ptr,
+            task.tid = %unsafe { ptr.as_ref().id },
             task.kind = %builder.kind,
             "Task<..., Output = {}>::new",
             type_name::<F::Output>()
@@ -951,7 +959,7 @@ impl Clone for TaskRef {
     #[inline]
     #[track_caller]
     fn clone(&self) -> Self {
-        test_debug!("clone {:?}", self);
+        test_debug!(task.addr = ?self.0, task.tid = %self.id(), "clone TaskRef");
         self.state().clone_ref();
         Self(self.0)
     }
@@ -961,7 +969,7 @@ impl Drop for TaskRef {
     #[inline]
     #[track_caller]
     fn drop(&mut self) {
-        test_debug!(task.addr = ?self.0, "drop TaskRef");
+        test_debug!(task.addr = ?self.0, task.tid = %self.id(), "drop TaskRef");
         if !self.state().drop_ref() {
             return;
         }
@@ -981,6 +989,8 @@ unsafe impl Sync for TaskRef {}
 // this is necessary
 #[no_mangle]
 unsafe fn _maitake_header_nop(_ptr: NonNull<Header>) -> PollResult {
+    debug_assert!(_ptr.as_ref().id.is_stub());
+
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
     #[cfg(not(debug_assertions))]
@@ -991,6 +1001,7 @@ unsafe fn _maitake_header_nop(_ptr: NonNull<Header>) -> PollResult {
 // this is necessary
 #[no_mangle]
 unsafe fn _maitake_header_nop_deallocate(ptr: NonNull<Header>) {
+    debug_assert!(ptr.as_ref().id.is_stub());
     unreachable!("stub task ({ptr:p}) should never be deallocated!");
 }
 
@@ -1002,6 +1013,7 @@ unsafe fn _maitake_header_nop_poll_join(
     _: NonNull<()>,
     _: &mut Context<'_>,
 ) -> Poll<Result<(), JoinError>> {
+    debug_assert!(_ptr.as_ref().id.is_stub());
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
     #[cfg(not(debug_assertions))]

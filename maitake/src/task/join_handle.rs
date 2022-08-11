@@ -116,7 +116,7 @@ impl<T> Future for JoinHandle<T> {
 
 impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {
-        test_debug!(task = ?self.task, "drop JoinHandle");
+        test_debug!(task = ?self.task, task.tid = %self.id(), "drop JoinHandle");
         // if the JoinHandle has not already been consumed, clear the join
         // handle flag on the task.
         if let Some(ref task) = self.task {

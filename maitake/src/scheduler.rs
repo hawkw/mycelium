@@ -204,7 +204,7 @@ impl Core {
         };
 
         for task in self.run_queue.consume() {
-            let _span = debug_span!("poll", ?task).entered();
+            let _span = debug_span!("poll", ?task, task.tid = %task.id()).entered();
             // store the currently polled task in the `current_task` pointer.
             // using `TaskRef::as_ptr` is safe here, since we will clear the
             // `current_task` pointer before dropping the `TaskRef`.
