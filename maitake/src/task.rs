@@ -11,12 +11,14 @@
 pub use self::storage::BoxStorage;
 pub use self::{
     builder::Builder,
+    id::TaskId,
     join_handle::{JoinError, JoinHandle},
     storage::Storage,
 };
 pub use core::task::{Context, Poll, Waker};
 
 mod builder;
+mod id;
 mod join_handle;
 mod state;
 mod storage;
@@ -177,6 +179,9 @@ pub(crate) struct Header {
     ///
     /// [waker vtable]: core::task::RawWakerVTable
     vtable: &'static Vtable,
+
+    /// The task's ID.
+    id: TaskId,
 
     /// The task's `tracing` span, if `tracing` is enabled.
     span: trace::Span,
@@ -479,6 +484,7 @@ where
                     run_queue: mpsc_queue::Links::new(),
                     vtable: &Self::TASK_VTABLE,
                     state: StateCell::new(),
+                    id: TaskId::next(),
                     span: crate::trace::Span::none(),
                 },
                 scheduler,
@@ -487,6 +493,17 @@ where
             join_waker: UnsafeCell::new(CheckedMaybeUninit::uninit()),
             storage: PhantomData,
         }
+    }
+
+    /// Returns a [`TaskId`] that uniquely identifies this [task].
+    ///
+    /// The returned ID does *not* increment the task's reference count, and may
+    /// persist even after the task it identifies has completed and been
+    /// deallocated.
+    #[inline]
+    #[must_use]
+    pub fn id(&self) -> TaskId {
+        self.header().id
     }
 
     unsafe fn poll(ptr: NonNull<Header>) -> PollResult {
@@ -784,6 +801,17 @@ impl<S> fmt::Debug for Schedulable<S> {
 impl TaskRef {
     const NO_BUILDER: &'static Settings<'static> = &Settings::new();
 
+    /// Returns a [`TaskId`] that uniquely identifies this [task].
+    ///
+    /// The returned ID does *not* increment the task's reference count, and may
+    /// persist even after the task it identifies has completed and been
+    /// deallocated.
+    #[inline]
+    #[must_use]
+    pub fn id(&self) -> TaskId {
+        self.header().id
+    }
+
     #[track_caller]
     pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> (Self, JoinHandle<F::Output>)
     where
@@ -994,6 +1022,7 @@ impl Header {
             state: StateCell::new(),
             vtable: &Self::STUB_VTABLE,
             span: trace::Span::none(),
+            id: TaskId::stub(),
         }
     }
 

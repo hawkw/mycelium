@@ -1,4 +1,4 @@
-use super::{Context, Poll, TaskRef};
+use super::{Context, Poll, TaskId, TaskRef};
 use core::{future::Future, marker::PhantomData, pin::Pin};
 
 /// An owned permission to join a [task] (await its termination).
@@ -64,16 +64,32 @@ impl<T> JoinHandle<T> {
         }
     }
 
-    /// Returns a [`TaskRef`] referencing the task this [`JoinHandle`] is
+    /// Borrows the [`TaskRef`] referencing the task this [`JoinHandle`] is
     /// associated with.
     ///
-    /// This increases the task's reference count; its storage is not
-    /// deallocated until all such [`TaskRef`]s are dropped.
+    /// This does not increase the task's reference count. The returned
+    /// `&TaskRef` can be cloned, returning a new [`TaskRef`], and increasing
+    /// the task's reference count. The task is not deallocated until all such
+    /// [`TaskRef`]s are dropped.
     #[must_use]
-    pub fn task_ref(&self) -> TaskRef {
+    #[inline]
+    #[track_caller]
+    pub fn task_ref(&self) -> &TaskRef {
         self.task
-            .clone()
+            .as_ref()
             .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
+    }
+
+    /// Returns a [`TaskId`] that uniquely identifies this [task].
+    ///
+    /// The returned ID does *not* increment the task's reference count, and may
+    /// persist even after the task it identifies has completed and been
+    /// deallocated.
+    #[must_use]
+    #[inline]
+    #[track_caller]
+    pub fn id(&self) -> TaskId {
+        self.task_ref().id()
     }
 }
 
