@@ -419,7 +419,7 @@ macro_rules! trace_waker_op {
             {
                 task.id = (*$ptr).span().tracing_01_id(),
                 task.addr = ?$ptr,
-                task.tid = %(*$ptr).header.id,
+                task.tid = (*$ptr).header.id.as_u64(),
                 op = concat!("waker.", stringify!($op)),
             },
             concat!("Task::", stringify!($method)),
@@ -431,7 +431,7 @@ macro_rules! trace_waker_op {
             target: "runtime::waker",
             {
                 task.addr = ?$ptr,
-                task.tid = %(*$ptr).header.id,
+                task.tid = (*$ptr).header.id.as_u64(),
                 op = concat!("waker.", stringify!($op)),
             },
             concat!("Task::", stringify!($method)),
@@ -512,7 +512,7 @@ where
         trace!(
             task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
-            task.tid = %ptr.as_ref().id,
+            task.tid = ptr.as_ref().id.as_u64(),
             "Task::poll"
         );
         let mut this = ptr.cast::<Self>();
@@ -565,7 +565,7 @@ where
         trace!(
             task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
-            task.tid = %ptr.as_ref().id,
+            task.tid = ptr.as_ref().id.as_u64(),
             "Task::deallocate"
         );
         let this = ptr.cast::<Self>();
@@ -581,7 +581,7 @@ where
         trace!(
             task.addr = ?task,
             task.output = %type_name::<<F>::Output>(),
-            task.tid = %task.id(),
+            task.tid = task.id().as_u64(),
             "Task::poll_join"
         );
         match test_dbg!(task.state().try_join()) {
@@ -716,7 +716,7 @@ impl<S: Schedule> Schedulable<S> {
     unsafe fn drop_ref(this: NonNull<Self>) {
         trace!(
             task.addr = ?this,
-            task.tid = %this.as_ref().header.id,
+            task.tid = this.as_ref().header.id.as_u64(),
             "Schedulable::drop_ref"
         );
         if !this.as_ref().state().drop_ref() {
@@ -881,7 +881,7 @@ impl TaskRef {
                 // XXX(eliza): would be nice to not use emptystring here but
                 // `tracing` 0.2 is missing `Option` value support :(
                 task.name = builder.name.unwrap_or(""),
-                task.tid = %unsafe { ptr.as_ref().schedulable.header.id },
+                task.tid = unsafe { ptr.as_ref() }.schedulable.header.id.as_u64(),
                 task.addr = ?ptr,
                 task.output = %type_name::<F::Output>(),
                 task.storage = %type_name::<STO>(),
@@ -898,7 +898,7 @@ impl TaskRef {
         trace!(
             task.name = builder.name.unwrap_or(""),
             task.addr = ?ptr,
-            task.tid = %unsafe { ptr.as_ref().id },
+            task.tid = unsafe { ptr.as_ref() }.id.as_u64(),
             task.kind = %builder.kind,
             "Task<..., Output = {}>::new",
             type_name::<F::Output>()
@@ -959,7 +959,11 @@ impl Clone for TaskRef {
     #[inline]
     #[track_caller]
     fn clone(&self) -> Self {
-        test_debug!(task.addr = ?self.0, task.tid = %self.id(), "clone TaskRef");
+        test_debug!(
+            task.addr = ?self.0,
+            task.tid = self.id().as_u64(),
+            "clone TaskRef",
+        );
         self.state().clone_ref();
         Self(self.0)
     }
@@ -969,7 +973,11 @@ impl Drop for TaskRef {
     #[inline]
     #[track_caller]
     fn drop(&mut self) {
-        test_debug!(task.addr = ?self.0, task.tid = %self.id(), "drop TaskRef");
+        test_debug!(
+            task.addr = ?self.0,
+            task.tid = self.id().as_u64(),
+            "drop TaskRef",
+        );
         if !self.state().drop_ref() {
             return;
         }

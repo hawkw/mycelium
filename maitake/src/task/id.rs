@@ -68,6 +68,12 @@ impl TaskId {
     pub(crate) fn is_stub(self) -> bool {
         self.0 == 0
     }
+
+    #[inline]
+    #[allow(dead_code)] // currently only used when tracing is enabled
+    pub(crate) fn as_u64(self) -> u64 {
+        self.0
+    }
 }
 
 impl fmt::UpperHex for TaskId {
