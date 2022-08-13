@@ -65,7 +65,7 @@ impl TaskId {
     #[allow(dead_code)]
     #[must_use]
     #[inline]
-    pub(crate) fn is_stub(&self) -> bool {
+    pub(crate) fn is_stub(self) -> bool {
         self.0 == 0
     }
 }
