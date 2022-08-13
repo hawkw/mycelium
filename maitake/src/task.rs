@@ -497,7 +497,7 @@ where
         }
     }
 
-    /// Returns a [`TaskId`] that uniquely identifies this [task].
+    /// Returns a [`TaskId`] that uniquely identifies this task.
     ///
     /// The returned ID does *not* increment the task's reference count, and may
     /// persist even after the task it identifies has completed and been
@@ -807,7 +807,7 @@ impl<S> fmt::Debug for Schedulable<S> {
 impl TaskRef {
     const NO_BUILDER: &'static Settings<'static> = &Settings::new();
 
-    /// Returns a [`TaskId`] that uniquely identifies this [task].
+    /// Returns a [`TaskId`] that uniquely identifies this task.
     ///
     /// The returned ID does *not* increment the task's reference count, and may
     /// persist even after the task it identifies has completed and been

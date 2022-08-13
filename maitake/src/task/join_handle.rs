@@ -85,6 +85,8 @@ impl<T> JoinHandle<T> {
     /// The returned ID does *not* increment the task's reference count, and may
     /// persist even after the task it identifies has completed and been
     /// deallocated.
+    ///
+    /// [task]: crate::task
     #[must_use]
     #[inline]
     #[track_caller]
