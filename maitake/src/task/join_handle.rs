@@ -64,19 +64,15 @@ impl<T> JoinHandle<T> {
         }
     }
 
-    /// Borrows the [`TaskRef`] referencing the task this [`JoinHandle`] is
+    /// Returns a [`TaskRef`] referencing the task this [`JoinHandle`] is
     /// associated with.
     ///
-    /// This does not increase the task's reference count. The returned
-    /// `&TaskRef` can be cloned, returning a new [`TaskRef`], and increasing
-    /// the task's reference count. The task is not deallocated until all such
-    /// [`TaskRef`]s are dropped.
+    /// This increases the task's reference count; its storage is not
+    /// deallocated until all such [`TaskRef`]s are dropped.
     #[must_use]
-    #[inline]
-    #[track_caller]
-    pub fn task_ref(&self) -> &TaskRef {
+    pub fn task_ref(&self) -> TaskRef {
         self.task
-            .as_ref()
+            .clone()
             .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
     }
 
@@ -91,7 +87,10 @@ impl<T> JoinHandle<T> {
     #[inline]
     #[track_caller]
     pub fn id(&self) -> TaskId {
-        self.task_ref().id()
+        self.task
+            .as_ref()
+            .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
+            .id()
     }
 }
 
@@ -121,10 +120,19 @@ impl<T> Drop for JoinHandle<T> {
         // if the JoinHandle has not already been consumed, clear the join
         // handle flag on the task.
         if let Some(ref task) = self.task {
-            test_debug!(task = ?self.task, task.tid = self.id().as_u64(), consumed = false, "drop JoinHandle");
+            test_debug!(
+                task = ?self.task,
+                task.tid = task.id().as_u64(),
+                consumed = false,
+                "drop JoinHandle",
+            );
             task.state().drop_join_handle();
         } else {
-            test_debug!(task = ?self.task, consumed = true, "drop JoinHandle");
+            test_debug!(
+                task = ?self.task,
+                consumed = true,
+                "drop JoinHandle",
+            );
         }
     }
 }
