@@ -30,6 +30,7 @@ use core::{future::Future, marker::PhantomData, pin::Pin};
 #[allow(clippy::derive_partial_eq_without_eq)]
 pub struct JoinHandle<T> {
     task: Option<TaskRef>,
+    id: TaskId,
     _t: PhantomData<fn(T)>,
 }
 
@@ -58,8 +59,10 @@ impl<T> JoinHandle<T> {
     /// The pointed type must actually output a `T`-typed value.
     pub(super) unsafe fn from_task_ref(task: TaskRef) -> Self {
         task.state().create_join_handle();
+        let id = task.id();
         Self {
             task: Some(task),
+            id,
             _t: PhantomData,
         }
     }
@@ -87,10 +90,7 @@ impl<T> JoinHandle<T> {
     #[inline]
     #[track_caller]
     pub fn id(&self) -> TaskId {
-        self.task
-            .as_ref()
-            .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
-            .id()
+        self.id
     }
 }
 
