@@ -871,17 +871,18 @@ impl TaskRef {
         // attach the task span, if tracing is enabled.
         #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
         {
-            let loc = builder
-                .location
-                .as_ref()
-                .unwrap_or_else(|| core::panic::Location::caller());
+            let loc = match builder.location {
+                Some(ref loc) => loc,
+                None => core::panic::Location::caller(),
+            };
+            let header = &mut unsafe { ptr.as_mut() }.schedulable.header;
             let span = trace_span!(
                 "runtime.spawn",
                 kind = %builder.kind,
                 // XXX(eliza): would be nice to not use emptystring here but
                 // `tracing` 0.2 is missing `Option` value support :(
                 task.name = builder.name.unwrap_or(""),
-                task.tid = unsafe { ptr.as_ref() }.schedulable.header.id.as_u64(),
+                task.tid = header.id.as_u64(),
                 task.addr = ?ptr,
                 task.output = %type_name::<F::Output>(),
                 task.storage = %type_name::<STO>(),
@@ -889,20 +890,21 @@ impl TaskRef {
                 loc.line = loc.line(),
                 loc.col = loc.column(),
             );
-            unsafe {
-                ptr.as_mut().schedulable.header.span = span;
-            };
+
+            header.span = span;
+
+            trace!(
+                task.name = builder.name.unwrap_or(""),
+                task.addr = ?ptr,
+                task.tid = header.id.as_u64(),
+                task.kind = %builder.kind,
+                task.spawn_location = %loc,
+                "Task<..., Output = {}>::new",
+                type_name::<F::Output>()
+            );
         }
 
         let ptr = ptr.cast::<Header>();
-        trace!(
-            task.name = builder.name.unwrap_or(""),
-            task.addr = ?ptr,
-            task.tid = unsafe { ptr.as_ref() }.id.as_u64(),
-            task.kind = %builder.kind,
-            "Task<..., Output = {}>::new",
-            type_name::<F::Output>()
-        );
 
         #[cfg(not(any(feature = "tracing-01", feature = "tracing-02", test)))]
         let _ = builder;
