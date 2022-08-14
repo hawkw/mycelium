@@ -93,14 +93,15 @@ build-docs crate='' $RUSTDOCFLAGS='--cfg docsrs':
         {{ _fmt }}
 
 # run Miri, either for `crate` or for all crates with miri tests.
-miri crate='' $MIRIFLAGS='-Zmiri-strict-provenance -Zmiri-disable-isolation' $PROPTEST_CASES='10' $RUSTFLAGS="-Zrandomize-layout": _get-nextest
-    @echo "MIRIFLAGS=\"$MIRIFLAGS\""
-    @echo "RUSTFLAGS=\"$RUSTFLAGS\""
-    @echo "PROPTEST_CASES=$PROPTEST_CASES"
-    {{ _cargo }} miri {{ _testcmd }} \
+miri crate='' *args='': _get-nextest
+    MIRIFLAGS="{{ env_var_or_default("MIRIFLAGS", "-Zmiri-strict-provenance -Zmiri-disable-isolation") }}" \
+        RUSTFLAGS="{{ env_var_or_default("RUSTFLAGS", "-Zrandomize-layout") }}" \
+        PROPTEST_CASES="{{ env_var_or_default("PROPTEST_CASES", "10") }}" \
+        {{ _cargo }} miri {{ _testcmd }} \
         {{ if crate == '' { miri-crates } else { '-p' } }} {{ crate }} \
         {{ _test-profile }} \
-        --lib
+        --lib \
+        {{ args }}
 
 loom crate='' *args='': _get-nextest
     #!/usr/bin/env bash
