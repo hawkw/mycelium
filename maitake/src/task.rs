@@ -716,6 +716,7 @@ where
     F: Future,
 {
     fn drop(&mut self) {
+        test_debug!(task.tid = self.header().id.as_u64(), "Task::drop");
         // if there's a join waker, ensure that its destructor runs when the
         // task is dropped.
         // NOTE: this *should* never happen; we don't ever expect to deallocate
