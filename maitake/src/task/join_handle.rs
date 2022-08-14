@@ -1,5 +1,6 @@
 use super::{Context, Poll, TaskId, TaskRef};
 use core::{future::Future, marker::PhantomData, pin::Pin};
+use mycelium_util::fmt;
 
 /// An owned permission to join a [task] (await its termination).
 ///
@@ -23,7 +24,7 @@ use core::{future::Future, marker::PhantomData, pin::Pin};
 /// [`Scheduler::spawn_allocated`]: crate::scheduler::Scheduler::spawn_allocated
 /// [`task::Builder::spawn`]: crate::task::Builder::spawn
 /// [`task::Builder::spawn_allocated`]: crate::task::Builder::spawn_allocated
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 // This clippy lint appears to be triggered incorrectly; this type *does* derive
 // `Eq` based on its `PartialEq<Self>` impl, but it also implements `PartialEq`
 // with types other than `Self` (which cannot impl `Eq`).
@@ -158,6 +159,16 @@ impl<T> PartialEq<JoinHandle<T>> for TaskRef {
 impl<T> PartialEq<&'_ JoinHandle<T>> for TaskRef {
     fn eq(&self, other: &&JoinHandle<T>) -> bool {
         self == other.task.as_ref().unwrap()
+    }
+}
+
+impl<T> fmt::Debug for JoinHandle<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JoinHandle")
+            .field("output", &core::any::type_name::<T>())
+            .field("task", &fmt::opt(&self.task).or_else("<completed>"))
+            .field("id", &self.id)
+            .finish()
     }
 }
 
