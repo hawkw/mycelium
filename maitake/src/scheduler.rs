@@ -2,7 +2,7 @@ use crate::{
     loom::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::*},
     task::{self, Header, JoinHandle, Storage, TaskRef},
 };
-use core::{future::Future, pin::Pin, ptr};
+use core::{future::Future, ptr};
 
 use cordyceps::mpsc_queue::MpscQueue;
 
@@ -150,11 +150,12 @@ pub use new_static_scheduler as new_static;
 // === impl TaskStub ===
 
 impl TaskStub {
-    /// Create a new unique stub [`Task`].
-    #[cfg(not(loom))]
-    pub const fn new() -> Self {
-        Self {
-            hdr: Header::new_stub(),
+    loom_const_fn! {
+        /// Create a new unique stub [`Task`].
+        pub fn new() -> Self {
+            Self {
+                hdr: Header::new_static_stub(),
+            }
         }
     }
 }
@@ -335,26 +336,6 @@ impl Schedule for &'static StaticScheduler {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-struct Stub;
-
-impl Schedule for Stub {
-    fn schedule(&self, _: TaskRef) {
-        unimplemented!("stub task should never be woken!")
-    }
-
-    fn current_task(&self) -> Option<TaskRef> {
-        None
-    }
-}
-
-impl Future for Stub {
-    type Output = ();
-    fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<Self::Output> {
-        unreachable!("the stub task should never be polled!")
-    }
-}
-
 // Additional types and capabilities only available with the "alloc"
 // feature active
 feature! {
@@ -514,7 +495,8 @@ feature! {
 
     impl Core {
         fn new() -> Self {
-            let (stub_task, _) = TaskRef::new(Stub, Stub);
+            let stub_task = Box::new(Task::new_stub());
+            let (stub_task, _) = TaskRef::new_allocated::<task::Stub, task::Stub, BoxStorage>(stub_task);
             Self {
                 run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
                 current_task: AtomicPtr::new(ptr::null_mut()),
