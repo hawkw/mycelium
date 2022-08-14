@@ -204,3 +204,12 @@ impl JoinError {
         self.id
     }
 }
+
+impl fmt::Display for JoinError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            JoinErrorKind::Canceled => write!(f, "task {} was canceled", self.id),
+            JoinErrorKind::StubNever => f.write_str("the stub task can never join"),
+        }
+    }
+}
