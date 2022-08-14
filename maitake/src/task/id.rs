@@ -109,3 +109,19 @@ impl fmt::Display for TaskId {
         fmt::Display::fmt(&self.0, f)
     }
 }
+
+// ==== PartialEq impls for refs ====
+
+impl PartialEq<&'_ TaskId> for TaskId {
+    #[inline]
+    fn eq(&self, other: &&Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialEq<TaskId> for &'_ TaskId {
+    #[inline]
+    fn eq(&self, other: &TaskId) -> bool {
+        self.0 == other.0
+    }
+}
