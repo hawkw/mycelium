@@ -608,11 +608,11 @@ where
     }
 
     unsafe fn poll_join(
-        task: NonNull<Header>,
+        ptr: NonNull<Header>,
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), JoinError>> {
-        let task = task.cast::<Self>().as_ref();
+        let task = ptr.cast::<Self>().as_ref();
         trace!(
             task.addr = ?task,
             task.output = %type_name::<<F>::Output>(),
