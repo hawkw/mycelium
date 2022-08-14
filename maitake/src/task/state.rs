@@ -227,26 +227,23 @@ impl StateCell {
                 "cannot poll a task that has zero references, what is happening!"
             );
 
-            let mut next_state = state
-                .with(State::POLLING, false)
-                .with(State::COMPLETED, completed);
+            state
+                .set(State::POLLING, false)
+                .set(State::COMPLETED, completed);
 
             // Was the task woken during the poll?
             if !test_dbg!(completed) && test_dbg!(state.get(State::WOKEN)) {
-                *state = test_dbg!(next_state);
                 return PollResult::PendingSchedule;
             }
 
             let had_join_waker = if test_dbg!(completed) {
                 // set the output flag so that the joinhandle knows it is now
                 // safe to read the task's output.
-                next_state.set(State::HAS_OUTPUT, true);
+                state.set(State::HAS_OUTPUT, true);
                 state.has_join_waker(&mut should_wait_for_join_waker)
             } else {
                 false
             };
-
-            *state = next_state;
 
             if had_join_waker {
                 PollResult::ReadyJoined
