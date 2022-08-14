@@ -1,4 +1,4 @@
-use super::{Context, Poll, TaskRef};
+use super::{Context, Poll, TaskId, TaskRef};
 use core::{future::Future, marker::PhantomData, pin::Pin};
 
 /// An owned permission to join a [task] (await its termination).
@@ -75,6 +75,23 @@ impl<T> JoinHandle<T> {
             .clone()
             .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
     }
+
+    /// Returns a [`TaskId`] that uniquely identifies this [task].
+    ///
+    /// The returned ID does *not* increment the task's reference count, and may
+    /// persist even after the task it identifies has completed and been
+    /// deallocated.
+    ///
+    /// [task]: crate::task
+    #[must_use]
+    #[inline]
+    #[track_caller]
+    pub fn id(&self) -> TaskId {
+        self.task
+            .as_ref()
+            .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
+            .id()
+    }
 }
 
 impl<T> Future for JoinHandle<T> {
@@ -100,11 +117,22 @@ impl<T> Future for JoinHandle<T> {
 
 impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {
-        test_debug!(task = ?self.task, "drop JoinHandle");
         // if the JoinHandle has not already been consumed, clear the join
         // handle flag on the task.
         if let Some(ref task) = self.task {
+            test_debug!(
+                task = ?self.task,
+                task.tid = task.id().as_u64(),
+                consumed = false,
+                "drop JoinHandle",
+            );
             task.state().drop_join_handle();
+        } else {
+            test_debug!(
+                task = ?self.task,
+                consumed = true,
+                "drop JoinHandle",
+            );
         }
     }
 }

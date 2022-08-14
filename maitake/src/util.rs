@@ -28,6 +28,44 @@ macro_rules! feature {
     }
 }
 
+macro_rules! if_atomic_u64 {
+    ($($item:item)*) => {
+        $(
+            // NOTE: `target_arch` values of "arm", "mips", and
+            // "powerpc" refer specifically to the 32-bit versions
+            // of those architectures; the 64-bit architectures get
+            // the `target_arch` strings "aarch64", "mips64", and
+            // "powerpc64", respectively.
+            #[cfg(not(any(
+                target_arch = "arm",
+                target_arch = "mips",
+                target_arch = "powerpc",
+                target_arch = "riscv32",
+            )))]
+            $item
+        )*
+    }
+}
+
+macro_rules! if_no_atomic_u64 {
+    ($($item:item)*) => {
+        $(
+            // NOTE: `target_arch` values of "arm", "mips", and
+            // "powerpc" refer specifically to the 32-bit versions
+            // of those architectures; the 64-bit architectures get
+            // the `target_arch` strings "aarch64", "mips64", and
+            // "powerpc64", respectively.
+            #[cfg(any(
+                target_arch = "arm",
+                target_arch = "mips",
+                target_arch = "powerpc",
+                target_arch = "riscv32",
+            ))]
+            $item
+        )*
+    }
+}
+
 macro_rules! loom_const_fn {
     (
         $(#[$meta:meta])*
