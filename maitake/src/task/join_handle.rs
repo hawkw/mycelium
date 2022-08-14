@@ -139,6 +139,8 @@ impl<T> Drop for JoinHandle<T> {
     }
 }
 
+// ==== PartialEq impls for JoinHandle/TaskRef ====
+
 impl<T> PartialEq<TaskRef> for JoinHandle<T> {
     fn eq(&self, other: &TaskRef) -> bool {
         self.task.as_ref().unwrap() == other
@@ -160,6 +162,36 @@ impl<T> PartialEq<JoinHandle<T>> for TaskRef {
 impl<T> PartialEq<&'_ JoinHandle<T>> for TaskRef {
     fn eq(&self, other: &&JoinHandle<T>) -> bool {
         self == other.task.as_ref().unwrap()
+    }
+}
+
+// ==== PartialEq impls for JoinHandle/TaskId ====
+
+impl<T> PartialEq<TaskId> for JoinHandle<T> {
+    #[inline]
+    fn eq(&self, other: &TaskId) -> bool {
+        self.id == other
+    }
+}
+
+impl<T> PartialEq<&'_ TaskId> for JoinHandle<T> {
+    #[inline]
+    fn eq(&self, other: &&TaskId) -> bool {
+        self.id == *other
+    }
+}
+
+impl<T> PartialEq<JoinHandle<T>> for TaskId {
+    #[inline]
+    fn eq(&self, other: &JoinHandle<T>) -> bool {
+        self == other.id
+    }
+}
+
+impl<T> PartialEq<&'_ JoinHandle<T>> for TaskId {
+    #[inline]
+    fn eq(&self, other: &&JoinHandle<T>) -> bool {
+        self == other.id
     }
 }
 
