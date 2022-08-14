@@ -39,6 +39,7 @@ pub struct JoinHandle<T> {
 #[derive(Debug, PartialEq, Eq)]
 pub struct JoinError {
     kind: JoinErrorKind,
+    id: TaskId,
 }
 
 #[allow(dead_code)] // this will be used when i implement task cancellation
@@ -177,22 +178,29 @@ impl<T> fmt::Debug for JoinHandle<T> {
 impl JoinError {
     #[allow(dead_code)] // this will be used when i implement task cancellation
     #[inline]
-    pub(crate) fn canceled() -> Self {
+    pub(crate) fn canceled(id: TaskId) -> Self {
         Self {
             kind: JoinErrorKind::Canceled,
+            id,
         }
     }
 
-    #[allow(dead_code)] // this will be used when i implement task cancellation
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn stub() -> Self {
         Self {
             kind: JoinErrorKind::StubNever,
+            id: TaskId::stub(),
         }
     }
 
     /// Returns `true` if a task failed to join because it was canceled.
     pub fn is_canceled(&self) -> bool {
         matches!(self.kind, JoinErrorKind::Canceled)
+    }
+
+    /// Returns the [`TaskId`] of the task that failed to join.
+    pub fn id(&self) -> TaskId {
+        self.id
     }
 }
