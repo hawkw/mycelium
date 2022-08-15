@@ -403,6 +403,12 @@ struct Vtable {
 
     /// Drops the task and deallocates its memory.
     deallocate: unsafe fn(NonNull<Header>),
+
+    /// The `wake_by_ref` function from the task's [`RawWakerVTable`].
+    ///
+    /// This is duplicated here as it's used to wake canceled tasks when a task
+    /// is canceled by a [`TaskRef`] or [`JoinHandle`].
+    wake_by_ref: unsafe fn(*const ()),
 }
 
 // === impl Task ===
@@ -465,10 +471,15 @@ impl<STO> Task<Stub, Stub, STO>
 where
     STO: Storage<Stub, Stub>,
 {
+    /// The stub task's vtable is mostly nops, as it should never be polled,
+    /// joined, or woken.
     const HEAP_STUB_VTABLE: Vtable = Vtable {
         poll: _maitake_header_nop,
         poll_join: _maitake_header_nop_poll_join,
+        // Heap allocated stub tasks *will* need to be deallocated, since the
+        // scheduler will deallocate its stub task if it's dropped.
         deallocate: Self::deallocate,
+        wake_by_ref: _maitake_header_nop_wake_by_ref,
     };
 
     loom_const_fn! {
@@ -503,6 +514,7 @@ where
         poll: Self::poll,
         poll_join: Self::poll_join,
         deallocate: Self::deallocate,
+        wake_by_ref: Schedulable::<S>::wake_by_ref,
     };
 
     /// Create a new (non-heap-allocated) Task.
@@ -874,7 +886,8 @@ impl TaskRef {
         // if the task was successfully canceled, wake it so that it can clean
         // up after itself.
         if canceled {
-            todo!("(eliza) this probably needs a new vtable fn or something...");
+            let wake_by_ref = self.header().vtable.wake_by_ref;
+            unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
         }
 
         canceled
@@ -1092,11 +1105,20 @@ unsafe fn _maitake_header_nop_poll_join(
     Poll::Ready(Err(JoinError::stub()))
 }
 
+// See https://github.com/rust-lang/rust/issues/97708 for why
+// this is necessary
+#[no_mangle]
+unsafe fn _maitake_header_nop_wake_by_ref(_ptr: *const ()) {
+    #[cfg(debug_assertions)]
+    unreachable!("stub task ({_ptr:?}) should never be woken!");
+}
+
 impl Header {
     const STATIC_STUB_VTABLE: Vtable = Vtable {
         poll: _maitake_header_nop,
         poll_join: _maitake_header_nop_poll_join,
         deallocate: _maitake_header_nop_deallocate,
+        wake_by_ref: _maitake_header_nop_wake_by_ref,
     };
 
     loom_const_fn! {
