@@ -78,7 +78,10 @@ pub(super) enum JoinAction {
     TakeOutput,
 
     /// The task was canceled, it cannot be joined.
-    Canceled,
+    Canceled {
+        /// If `true`, the task completed successfully before it was cancelled.
+        completed: bool,
+    },
 
     /// Register the *first* join waker; there is no previous join waker and the
     /// slot is not initialized.
@@ -377,9 +380,8 @@ impl StateCell {
         // XXX(eliza): this *could* probably just be a `fetch_or`, instead of a
         // whole `transition`...
         self.transition(|state| {
-            // you can't cancel a task that has completed, or one that has
-            // already been canceled, that doesn't make sense.
-            if state.get(State::COMPLETED) || state.get(State::CANCELED) {
+            // you can't cancel a task that has already been canceled, that doesn't make sense.
+            if state.get(State::CANCELED) {
                 return false;
             }
 
@@ -437,8 +439,12 @@ impl StateCell {
         }
 
         self.transition(|state| {
+            let has_output = test_dbg!(state.get(State::HAS_OUTPUT));
+
             if test_dbg!(state.get(State::CANCELED)) {
-                return JoinAction::Canceled;
+                return JoinAction::Canceled {
+                    completed: has_output,
+                };
             }
 
             // If the task has not completed, we can't take its join output.
@@ -447,7 +453,7 @@ impl StateCell {
             }
 
             // If the task does not have output, we cannot take it.
-            if test_dbg!(!state.get(State::HAS_OUTPUT)) {
+            if !has_output {
                 return should_register(state);
             }
 

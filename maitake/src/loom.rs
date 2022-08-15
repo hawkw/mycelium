@@ -14,6 +14,8 @@ mod inner {
             task::{Context, Poll},
         };
         pub(crate) use loom::alloc::*;
+
+        #[derive(Debug)]
         #[pin_project::pin_project]
         pub(crate) struct TrackFuture<F> {
             #[pin]
@@ -52,6 +54,13 @@ mod inner {
         #[track_caller]
         pub(crate) fn track_future<F: Future>(inner: F) -> TrackFuture<F> {
             TrackFuture::new(inner)
+        }
+
+        // PartialEq impl so that `assert_eq!(..., Ok(...))` works
+        impl<F: PartialEq> PartialEq for TrackFuture<F> {
+            fn eq(&self, other: &Self) -> bool {
+                self.inner == other.inner
+            }
         }
     }
 

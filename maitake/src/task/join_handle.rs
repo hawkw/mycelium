@@ -36,18 +36,21 @@ pub struct JoinHandle<T> {
 }
 
 /// Errors returned by awaiting a [`JoinHandle`].
-#[derive(Debug, PartialEq, Eq)]
-pub struct JoinError {
+#[derive(PartialEq, Eq)]
+pub struct JoinError<T> {
     kind: JoinErrorKind,
     id: TaskId,
+    output: Option<T>,
 }
 
-#[allow(dead_code)] // this will be used when i implement task cancellation
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 enum JoinErrorKind {
     /// The task was canceled.
-    Canceled,
+    Canceled {
+        /// `true` if the task was canceled after it completed successfully.
+        completed: bool,
+    },
 
     /// A stub was awaited
     StubNever,
@@ -101,7 +104,7 @@ impl<T> JoinHandle<T> {
 }
 
 impl<T> Future for JoinHandle<T> {
-    type Output = Result<T, JoinError>;
+    type Output = Result<T, JoinError<T>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -211,14 +214,15 @@ impl<T> fmt::Debug for JoinHandle<T> {
 
 // === impl JoinError ===
 
-impl JoinError {
-    #[allow(dead_code)] // this will be used when i implement task cancellation
+impl JoinError<()> {
     #[inline]
-    pub(crate) fn canceled(id: TaskId) -> Self {
-        Self {
-            kind: JoinErrorKind::Canceled,
+    #[must_use]
+    pub(super) fn canceled(completed: bool, id: TaskId) -> Poll<Result<(), Self>> {
+        Poll::Ready(Err(Self {
+            kind: JoinErrorKind::Canceled { completed },
             id,
-        }
+            output: None,
+        }))
     }
 
     #[allow(dead_code)]
@@ -227,25 +231,68 @@ impl JoinError {
         Self {
             kind: JoinErrorKind::StubNever,
             id: TaskId::stub(),
+            output: None,
         }
     }
 
+    pub(super) fn with_output<T>(self, output: Option<T>) -> JoinError<T> {
+        JoinError {
+            kind: self.kind,
+            id: self.id,
+            output,
+        }
+    }
+}
+
+impl<T> JoinError<T> {
     /// Returns `true` if a task failed to join because it was canceled.
     pub fn is_canceled(&self) -> bool {
-        matches!(self.kind, JoinErrorKind::Canceled)
+        matches!(self.kind, JoinErrorKind::Canceled { .. })
+    }
+
+    /// Returns `true` if the task completed successfully before it was canceled.
+    pub fn is_completed(&self) -> bool {
+        match self.kind {
+            JoinErrorKind::Canceled { completed } => completed,
+            _ => false,
+        }
     }
 
     /// Returns the [`TaskId`] of the task that failed to join.
     pub fn id(&self) -> TaskId {
         self.id
     }
+
+    /// Returns the task's output, if the task completed successfully before it
+    /// was canceled.
+    ///
+    /// Otherwise, returns `None`.
+    pub fn output(self) -> Option<T> {
+        self.output
+    }
 }
 
-impl fmt::Display for JoinError {
+impl<T> fmt::Display for JoinError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
-            JoinErrorKind::Canceled => write!(f, "task {} was canceled", self.id),
+            JoinErrorKind::Canceled { completed } => {
+                let completed = if completed {
+                    " (after completing successfully)"
+                } else {
+                    ""
+                };
+                write!(f, "task {} was canceled{completed}", self.id)
+            }
             JoinErrorKind::StubNever => f.write_str("the stub task can never join"),
         }
+    }
+}
+
+impl<T> fmt::Debug for JoinError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JoinError")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .finish()
     }
 }

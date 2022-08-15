@@ -398,8 +398,11 @@ struct Vtable {
     // Splitting this up into type aliases just makes it *harder* to understand
     // IMO...
     #[allow(clippy::type_complexity)]
-    poll_join:
-        unsafe fn(NonNull<Header>, NonNull<()>, &mut Context<'_>) -> Poll<Result<(), JoinError>>,
+    poll_join: unsafe fn(
+        NonNull<Header>,
+        NonNull<()>,
+        &mut Context<'_>,
+    ) -> Poll<Result<(), JoinError<()>>>,
 
     /// Drops the task and deallocates its memory.
     deallocate: unsafe fn(NonNull<Header>),
@@ -623,7 +626,7 @@ where
         ptr: NonNull<Header>,
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<(), JoinError>> {
+    ) -> Poll<Result<(), JoinError<()>>> {
         let task = ptr.cast::<Self>().as_ref();
         trace!(
             task.addr = ?task,
@@ -632,15 +635,16 @@ where
             "Task::poll_join"
         );
         match test_dbg!(task.state().try_join()) {
-            JoinAction::Canceled => return Poll::Ready(Err(JoinError::canceled(task.id()))),
+            JoinAction::Canceled { completed } => {
+                // if the task has completed before it was canceled, also try to
+                // read the output, so that it can be returned in the `JoinError`.
+                if completed {
+                    task.take_output(outptr);
+                }
+                return JoinError::canceled(completed, task.id());
+            }
             JoinAction::TakeOutput => {
-                task.inner.with_mut(|cell| {
-                    match mem::replace(&mut *cell, Cell::Joined) {
-                        Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
-                        state => unreachable!("attempted to take join output on a task that has not completed! task: {task:?}; state: {state:?}"),
-                    }
-                });
-
+                task.take_output(outptr);
                 return Poll::Ready(Ok(()));
             }
             JoinAction::Register => {
@@ -693,6 +697,15 @@ where
             test_debug!(?join_waker, "waking");
             join_waker.wake();
         })
+    }
+
+    unsafe fn take_output(&self, outptr: NonNull<()>) {
+        self.inner.with_mut(|cell| {
+            match mem::replace(&mut *cell, Cell::Joined) {
+                Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
+                state => unreachable!("attempted to take join output on a task that has not completed! task: {self:?}; state: {state:?}"),
+            }
+        });
     }
 }
 
@@ -1002,7 +1015,7 @@ impl TaskRef {
     /// # Safety
     ///
     /// `T` *must* be the task's actual output type!
-    unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError>> {
+    unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError<T>>> {
         let poll_join_fn = self.header().vtable.poll_join;
         // NOTE: we can't use `CheckedMaybeUninit` here, since the vtable method
         // will cast this to a `MaybeUninit` and write to it; this would ignore
@@ -1018,7 +1031,16 @@ impl TaskRef {
                 // output!
                 Poll::Ready(Ok(slot.assume_init_read()))
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Ready(Err(e)) => {
+                // if the task completed before being canceled, we can still
+                // take its output.
+                let output = if e.is_completed() {
+                    Some(slot.assume_init_read())
+                } else {
+                    None
+                };
+                Poll::Ready(Err(e.with_output(output)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -1099,7 +1121,7 @@ unsafe fn _maitake_header_nop_poll_join(
     _ptr: NonNull<Header>,
     _: NonNull<()>,
     _: &mut Context<'_>,
-) -> Poll<Result<(), JoinError>> {
+) -> Poll<Result<(), JoinError<()>>> {
     debug_assert!(_ptr.as_ref().id.is_stub());
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
