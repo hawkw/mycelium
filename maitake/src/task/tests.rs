@@ -114,15 +114,40 @@ mod loom {
                 "hello world!"
             }));
 
-            assert_eq!(join.cancel());
+            assert!(join.cancel());
             let scheduler_thread = loom::thread::spawn(move || {
                 scheduler.tick();
             });
 
             let err = loom::future::block_on(join).unwrap_err();
-            assert_eq!(err.is_canceled());
+            assert!(err.is_canceled());
 
             scheduler_thread.join().unwrap();
+        })
+    }
+
+    #[test]
+    fn taskref_cancels() {
+        loom::model(|| {
+            let scheduler = Scheduler::new();
+            let join = scheduler.spawn(TrackFuture::new(async move {
+                future::yield_now().await;
+                "hello world!"
+            }));
+
+            let taskref = join.task_ref();
+            let cancel_thread = loom::thread::spawn(move || {
+                assert!(taskref.cancel());
+            });
+            let scheduler_thread = loom::thread::spawn(move || {
+                scheduler.tick();
+            });
+
+            scheduler_thread.join().unwrap();
+            cancel_thread.join().unwrap();
+
+            let err = loom::future::block_on(join).unwrap_err();
+            assert!(err.is_canceled());
         })
     }
 
@@ -142,10 +167,10 @@ mod loom {
                 scheduler.tick();
             });
 
-            assert_eq!(join.cancel());
+            assert!(join.cancel());
 
             let err = loom::future::block_on(join).unwrap_err();
-            assert_eq!(err.is_canceled());
+            assert!(err.is_canceled());
 
             scheduler_thread.join().unwrap();
         })
@@ -265,7 +290,7 @@ mod alloc_tests {
     }
 
     #[test]
-    fn join_handle_cancels() {
+    fn join_handle_cancels_before_poll() {
         crate::util::trace_init();
 
         let scheduler = Scheduler::new();
@@ -289,6 +314,93 @@ mod alloc_tests {
         assert!(join.is_woken());
         let err = assert_ready_err!(test_dbg!(join.poll()), "join handle should be notified");
         assert!(err.is_canceled(), "JoinError must be canceled");
+        assert!(!err.is_completed(), "JoinError must be completed");
+    }
+
+    #[test]
+    fn join_handle_cancels_after_poll() {
+        crate::util::trace_init();
+
+        let scheduler = Scheduler::new();
+        let join = scheduler.spawn(async move {
+            future::yield_now().await;
+            "hello world!"
+        });
+
+        let mut join = tokio_test::task::spawn(join);
+
+        // the join handle should be pending until the scheduler runs.
+        assert_pending!(test_dbg!(join.poll()), "join handle should be pending");
+        assert!(!join.is_woken());
+
+        // tick the scheduler.
+        scheduler.tick();
+
+        join.cancel();
+
+        // the spawned task should complete on this tick.
+        assert!(join.is_woken());
+        let err = assert_ready_err!(test_dbg!(join.poll()), "join handle should be notified");
+        assert!(err.is_canceled(), "JoinError must be canceled");
+        assert!(err.is_completed(), "JoinError must be completed");
+    }
+
+    #[test]
+    fn taskref_cancels_before_poll() {
+        crate::util::trace_init();
+
+        let scheduler = Scheduler::new();
+        let join = scheduler.spawn(async move {
+            future::yield_now().await;
+            "hello world!"
+        });
+
+        let taskref = join.task_ref();
+        let mut join = tokio_test::task::spawn(join);
+
+        // the join handle should be pending until the scheduler runs.
+        assert_pending!(test_dbg!(join.poll()), "join handle should be pending");
+        assert!(!join.is_woken());
+
+        assert!(taskref.cancel());
+
+        // tick the scheduler.
+        scheduler.tick();
+
+        // the spawned task should complete on this tick.
+        assert!(join.is_woken());
+        let err = assert_ready_err!(test_dbg!(join.poll()), "join handle should be notified");
+        assert!(err.is_canceled(), "JoinError must be canceled");
+        assert!(!err.is_completed(), "JoinError must be completed");
+    }
+
+    #[test]
+    fn taskref_cancels_after_poll() {
+        crate::util::trace_init();
+
+        let scheduler = Scheduler::new();
+        let join = scheduler.spawn(async move {
+            future::yield_now().await;
+            "hello world!"
+        });
+
+        let taskref = join.task_ref();
+        let mut join = tokio_test::task::spawn(join);
+
+        // the join handle should be pending until the scheduler runs.
+        assert_pending!(test_dbg!(join.poll()), "join handle should be pending");
+        assert!(!join.is_woken());
+
+        // tick the scheduler.
+        scheduler.tick();
+
+        assert!(taskref.cancel());
+
+        // the spawned task should complete on this tick.
+        assert!(join.is_woken());
+        let err = assert_ready_err!(test_dbg!(join.poll()), "join handle should be notified");
+        assert!(err.is_canceled(), "JoinError must be canceled");
+        assert!(err.is_completed(), "JoinError must be completed");
     }
 
     #[test]
