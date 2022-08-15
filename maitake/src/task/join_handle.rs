@@ -81,6 +81,10 @@ impl<T> JoinHandle<T> {
             .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
     }
 
+    pub fn cancel(&self) -> bool {
+        self.task.as_ref().map(TaskRef::cancel).unwrap_or(false)
+    }
+
     /// Returns a [`TaskId`] that uniquely identifies this [task].
     ///
     /// The returned ID does *not* increment the task's reference count, and may
