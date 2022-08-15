@@ -632,6 +632,7 @@ where
             "Task::poll_join"
         );
         match test_dbg!(task.state().try_join()) {
+            JoinAction::Canceled => return Poll::Ready(Err(JoinError::canceled(task.id()))),
             JoinAction::TakeOutput => {
                 task.inner.with_mut(|cell| {
                     match mem::replace(&mut *cell, Cell::Joined) {
@@ -886,6 +887,7 @@ impl TaskRef {
         // if the task was successfully canceled, wake it so that it can clean
         // up after itself.
         if canceled {
+            test_debug!("woke canceled task");
             let wake_by_ref = self.header().vtable.wake_by_ref;
             unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
         }

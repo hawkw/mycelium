@@ -77,6 +77,9 @@ pub(super) enum JoinAction {
     /// It's safe to take the task's output!
     TakeOutput,
 
+    /// The task was canceled, it cannot be joined.
+    Canceled,
+
     /// Register the *first* join waker; there is no previous join waker and the
     /// slot is not initialized.
     Register,
@@ -382,8 +385,7 @@ impl StateCell {
 
             // this task is CANCELED! can't believe some of you are still
             // following it, smh...
-            state.set(State::CANCELED, true);
-            // XXX(eliza): should this set the WOKEN bit?
+            state.set(State::CANCELED, true).set(State::WOKEN, true);
 
             true
         })
@@ -435,6 +437,10 @@ impl StateCell {
         }
 
         self.transition(|state| {
+            if test_dbg!(state.get(State::CANCELED)) {
+                return JoinAction::Canceled;
+            }
+
             // If the task has not completed, we can't take its join output.
             if test_dbg!(!state.get(State::COMPLETED)) {
                 return should_register(state);
