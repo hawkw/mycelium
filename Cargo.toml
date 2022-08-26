@@ -45,6 +45,7 @@ rlibc = "1.0"
 bootloader = { version = "0.10.12" }
 embedded-graphics = "0.7"
 mycotest = { path = "mycotest" }
+thingbuf = { version = "0.1.3", features = ["static"], default-features = false }"
 
 [dev-dependencies]
 mycotest = { path = "mycotest", features = ["runner"] }
