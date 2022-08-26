@@ -10,6 +10,7 @@
 pub(crate) mod cell;
 pub mod map;
 pub mod queue;
+pub mod semaphore;
 
 pub use self::cell::WaitCell;
 #[doc(inline)]
