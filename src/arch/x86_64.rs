@@ -7,6 +7,7 @@ use mycelium_util::sync::InitOnce;
 
 mod framebuf;
 pub mod interrupt;
+pub mod keyboard;
 mod oops;
 
 pub use self::oops::{oops, Oops};
