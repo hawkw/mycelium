@@ -183,7 +183,7 @@ impl fmt::Debug for Span {
         if let Some(id) = self.span_01.id() {
             s.field(TRACING_01_FIELD, &id.into_u64());
         } else {
-            s.field(TRACING_01_FIELD, &fmt::display("<none>"));
+            s.field(TRACING_02_FIELD, &fmt::display("<none>"));
         }
 
         #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
