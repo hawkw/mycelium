@@ -1029,18 +1029,18 @@ unsafe fn _maitake_header_nop_poll_join(
 }
 
 impl Header {
-    const STUB_VTABLE: Vtable = Vtable {
-        poll: _maitake_header_nop,
-        poll_join: _maitake_header_nop_poll_join,
-        deallocate: _maitake_header_nop_deallocate,
-    };
-
     #[cfg(not(loom))]
     pub(crate) const fn new_stub() -> Self {
+        const STUB_VTABLE: Vtable = Vtable {
+            poll: _maitake_header_nop,
+            poll_join: _maitake_header_nop_poll_join,
+            deallocate: _maitake_header_nop_deallocate,
+        };
+
         Self {
             run_queue: mpsc_queue::Links::new_stub(),
             state: StateCell::new(),
-            vtable: &Self::STUB_VTABLE,
+            vtable: &STUB_VTABLE,
             span: trace::Span::none(),
             id: TaskId::stub(),
         }
