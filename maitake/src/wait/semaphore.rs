@@ -510,6 +510,13 @@ impl PinnedDrop for Acquire<'_> {
     }
 }
 
+// safety: the `Acquire` future is not automatically `Sync` because the `Waiter`
+// node contains an `UnsafeCell`, which is not `Sync`. this impl is safe because
+// the `Acquire` future will only access this `UnsafeCell` when mutably borrowed
+// (when polling or dropping the future), so the future itself is safe to share
+// immutably between threads.
+unsafe impl Sync for Acquire<'_> {}
+
 // === impl Permit ===
 
 impl Permit<'_> {

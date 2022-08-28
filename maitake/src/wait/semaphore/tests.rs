@@ -1,6 +1,8 @@
+use super::*;
+
 #[cfg(loom)]
 mod loom {
-    use super::super::*;
+    use super::*;
     use crate::loom::{
         self, future,
         sync::{
@@ -165,4 +167,21 @@ mod loom {
             assert_eq!(sem.available_permits(), 4);
         })
     }
+}
+
+fn assert_send_sync<T: Send + Sync>() {}
+
+#[test]
+fn semaphore_is_send_and_sync() {
+    assert_send_sync::<Semaphore>();
+}
+
+#[test]
+fn permit_is_send_and_sync() {
+    assert_send_sync::<Permit<'_>>();
+}
+
+#[test]
+fn acquire_is_send_and_sync() {
+    assert_send_sync::<crate::wait::semaphore::Acquire<'_>>();
 }
