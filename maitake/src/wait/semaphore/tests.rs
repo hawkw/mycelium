@@ -185,3 +185,18 @@ fn permit_is_send_and_sync() {
 fn acquire_is_send_and_sync() {
     assert_send_sync::<crate::wait::semaphore::Acquire<'_>>();
 }
+
+#[cfg(feature = "alloc")]
+mod alloc {
+    use super::*;
+
+    #[test]
+    fn owned_permit_is_send_and_sync() {
+        assert_send_sync::<OwnedPermit>();
+    }
+
+    #[test]
+    fn acquire_owned_is_send_and_sync() {
+        assert_send_sync::<AcquireOwned>();
+    }
+}

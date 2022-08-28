@@ -182,40 +182,10 @@ impl Semaphore {
 
     pub fn try_acquire(&self, permits: usize) -> Result<Permit<'_>, TryAcquireError> {
         trace!(permits, "Semaphore::try_acquire");
-        let mut available = self.permits.load(Relaxed);
-        loop {
-            // are there enough permits to satisfy the request?
-            match available {
-                Self::CLOSED => {
-                    trace!(permits, "Semaphore::try_acquire -> closed");
-                    return Err(TryAcquireError::Closed);
-                }
-                available if available < permits => {
-                    trace!(
-                        permits,
-                        available,
-                        "Semaphore::try_acquire -> insufficient permits"
-                    );
-                    return Err(TryAcquireError::InsufficientPermits);
-                }
-                _ => {}
-            }
-
-            let remaining = available - permits;
-            match self
-                .permits
-                .compare_exchange_weak(available, remaining, AcqRel, Acquire)
-            {
-                Ok(_) => {
-                    trace!(permits, remaining, "Semaphore::try_acquire -> acquired");
-                    return Ok(Permit {
-                        permits,
-                        semaphore: self,
-                    });
-                }
-                Err(actual) => available = actual,
-            }
-        }
+        self.try_acquire_inner(permits).map(|_| Permit {
+            permits,
+            semaphore: self,
+        })
     }
 
     pub fn close(&self) {
@@ -459,6 +429,75 @@ impl Semaphore {
             );
         }
     }
+
+    /// Drop an `Acquire` future.
+    ///
+    /// This is factored out into a method on `Semaphore`, because the same code
+    /// is run when dropping an `Acquire` future or an `AcquireOwned` future.
+    fn drop_acquire(&self, waiter: Pin<&mut Waiter>, permits: usize, queued: bool) {
+        // If the future is completed, there is no node in the wait list, so we
+        // can skip acquiring the lock.
+        if !queued {
+            return;
+        }
+
+        // This is where we ensure safety. The future is being dropped,
+        // which means we must ensure that the waiter entry is no longer stored
+        // in the linked list.
+        let mut waiters = self.waiters.lock();
+
+        let acquired_permits = permits - waiter.remaining_permits.remaining();
+
+        // Safety: we have locked the wait list.
+        unsafe {
+            // remove the entry from the list
+            let node = NonNull::from(Pin::into_inner_unchecked(waiter));
+            waiters.queue.remove(node)
+        };
+
+        if acquired_permits > 0 {
+            self.add_permits_locked(acquired_permits, waiters);
+        }
+    }
+
+    /// Try to acquire permits from the semaphore without waiting.
+    ///
+    /// This method is factored out because it's identical between the
+    /// `try_acquire` and `try_acquire_owned` methods, which behave identically
+    /// but return different permit types.
+    fn try_acquire_inner(&self, permits: usize) -> Result<(), TryAcquireError> {
+        let mut available = self.permits.load(Relaxed);
+        loop {
+            // are there enough permits to satisfy the request?
+            match available {
+                Self::CLOSED => {
+                    trace!(permits, "Semaphore::try_acquire -> closed");
+                    return Err(TryAcquireError::Closed);
+                }
+                available if available < permits => {
+                    trace!(
+                        permits,
+                        available,
+                        "Semaphore::try_acquire -> insufficient permits"
+                    );
+                    return Err(TryAcquireError::InsufficientPermits);
+                }
+                _ => {}
+            }
+
+            let remaining = available - permits;
+            match self
+                .permits
+                .compare_exchange_weak(available, remaining, AcqRel, Acquire)
+            {
+                Ok(_) => {
+                    trace!(permits, remaining, "Semaphore::try_acquire -> acquired");
+                    return Ok(());
+                }
+                Err(actual) => available = actual,
+            }
+        }
+    }
 }
 
 // === impl Acquire ===
@@ -484,29 +523,8 @@ impl PinnedDrop for Acquire<'_> {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         trace!(?this.queued, "Acquire::drop");
-        // If the future is completed, there is no node in the wait list, so we
-        // can skip acquiring the lock.
-        if !*this.queued {
-            return;
-        }
-
-        // This is where we ensure safety. The future is being dropped,
-        // which means we must ensure that the waiter entry is no longer stored
-        // in the linked list.
-        let mut waiters = this.semaphore.waiters.lock();
-
-        let acquired_permits = *this.permits - this.waiter.remaining_permits.remaining();
-
-        // Safety: we have locked the wait list.
-        unsafe {
-            // remove the entry from the list
-            let node = NonNull::from(Pin::into_inner_unchecked(this.waiter));
-            waiters.queue.remove(node)
-        };
-
-        if acquired_permits > 0 {
-            this.semaphore.add_permits_locked(acquired_permits, waiters);
-        }
+        this.semaphore
+            .drop_acquire(this.waiter, *this.permits, *this.queued)
     }
 }
 
@@ -544,9 +562,134 @@ impl Drop for Permit<'_> {
     }
 }
 
+// === Owned variants when `Arc` is available ===
+
+feature! {
+    #![feature = "alloc"]
+
+    use alloc::sync::Arc;
+
+    /// Future returned from [`Semaphore::acquire_owned()`].
+    ///
+    /// This is identical to the [`Acquire`] future, except that it takes an
+    /// [`Arc`] reference to the [`Semaphore`], allowing the returned future to
+    /// live for the `'static` lifetime, and returns an [`OwnedPermit`] (rather
+    /// than a [`Permit`]), which is also valid for the `'static` lifetime.
+    #[derive(Debug)]
+    #[pin_project(PinnedDrop)]
+    #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
+    pub struct AcquireOwned {
+        semaphore: Arc<Semaphore>,
+        queued: bool,
+        permits: usize,
+        #[pin]
+        waiter: Waiter,
+    }
+
+
+    #[derive(Debug)]
+    pub struct OwnedPermit {
+        permits: usize,
+        semaphore: Arc<Semaphore>,
+    }
+
+    impl Semaphore {
+        pub fn acquire_owned(self: &Arc<Self>, permits: usize) -> AcquireOwned {
+            AcquireOwned {
+                semaphore: self.clone(),
+                queued: false,
+                permits,
+                waiter: Waiter::new(permits),
+            }
+        }
+
+        pub fn try_acquire_owned(self: &Arc<Self>, permits: usize) -> Result<OwnedPermit, TryAcquireError> {
+            trace!(permits, "Semaphore::try_acquire_owned");
+            self.try_acquire_inner(permits).map(|_| OwnedPermit {
+                permits,
+                semaphore: self.clone(),
+            })
+        }
+    }
+
+    // === impl AcquireOwned ===
+
+    impl Future for AcquireOwned {
+        type Output = WaitResult<OwnedPermit>;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.project();
+            let poll = this
+                .semaphore
+                .poll_acquire(this.waiter, *this.permits, *this.queued, cx)
+                .map_ok(|_| OwnedPermit {
+                    permits: *this.permits,
+                    // TODO(eliza): might be nice to not have to bump the
+                    // refcount here...
+                    semaphore: this.semaphore.clone(),
+                });
+            *this.queued = poll.is_pending();
+            poll
+        }
+    }
+
+    #[pinned_drop]
+    impl PinnedDrop for AcquireOwned {
+        fn drop(mut self: Pin<&mut Self>) {
+            let this = self.project();
+            trace!(?this.queued, "AcquireOwned::drop");
+            this.semaphore
+                .drop_acquire(this.waiter, *this.permits, *this.queued)
+        }
+    }
+
+    // safety: this is safe for the same reasons as the `Sync` impl for the
+    // `Acquire` future.
+    unsafe impl Sync for AcquireOwned {}
+
+    // === impl OwnedPermit ===
+
+    impl OwnedPermit {
+        /// Forget this permit, dropping it *without* returning the number of
+        /// acquired permits to the semaphore.
+        ///
+        /// This permanently decreases the number of permits in the semaphore by
+        /// [`self.permits()`](Self::permits).
+        pub fn forget(mut self) {
+            self.permits = 0;
+        }
+
+        /// Returns the count of semaphore permits owned by this `OwnedPermit`.
+        #[inline]
+        #[must_use]
+        pub fn permits(&self) -> usize {
+            self.permits
+        }
+    }
+
+    impl Drop for OwnedPermit {
+        fn drop(&mut self) {
+            trace!(?self.permits, "OwnedPermit::drop");
+            self.semaphore.add_permits(self.permits);
+        }
+    }
+
+}
+
 // === impl Waiter ===
 
 impl Waiter {
+    fn new(permits: usize) -> Self {
+        Self {
+            node: UnsafeCell::new(Node {
+                links: list::Links::new(),
+                waker: None,
+                _pin: PhantomPinned,
+            }),
+            remaining_permits: RemainingPermits(AtomicUsize::new(permits)),
+        }
+    }
+
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
     fn take_waker(this: NonNull<Self>, list: &mut List<Self>) -> Option<Waker> {
