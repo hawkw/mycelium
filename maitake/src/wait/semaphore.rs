@@ -180,7 +180,7 @@ impl Semaphore {
         self.add_permits_locked(permits, self.waiters.lock());
     }
 
-    pub fn try_acquire(&self, permits: usize) -> Result<(), TryAcquireError> {
+    pub fn try_acquire(&self, permits: usize) -> Result<Permit<'_>, TryAcquireError> {
         trace!(permits, "Semaphore::try_acquire");
         let mut available = self.permits.load(Relaxed);
         loop {
@@ -208,7 +208,10 @@ impl Semaphore {
             {
                 Ok(_) => {
                     trace!(permits, remaining, "Semaphore::try_acquire -> acquired");
-                    return Ok(());
+                    return Ok(Permit {
+                        permits,
+                        semaphore: self,
+                    });
                 }
                 Err(actual) => available = actual,
             }
@@ -298,10 +301,12 @@ impl Semaphore {
                 lock = Some(self.waiters.lock());
             }
 
-            if let Err(actual) = test_dbg!(self
-                .permits
-                .compare_exchange(sem_curr, sem_next, AcqRel, Acquire))
-            {
+            if let Err(actual) = test_dbg!(self.permits.compare_exchange(
+                test_dbg!(sem_curr),
+                test_dbg!(sem_next),
+                AcqRel,
+                Acquire
+            )) {
                 // the semaphore was updated while we were trying to acquire
                 // permits.
                 sem_curr = actual;
@@ -311,7 +316,7 @@ impl Semaphore {
             // okay, we took some permits from the semaphore.
             acquired_permits += can_acquire;
             // did we acquire all the permits we needed?
-            if remaining == 0 {
+            if test_dbg!(remaining) == 0 {
                 if !queued {
                     // the wasn't already in the queue, so we won't need to
                     // remove it --- we're done!
@@ -323,8 +328,11 @@ impl Semaphore {
                     );
                     return Poll::Ready(Ok(()));
                 } else {
-                    // we'll need to dequeue the waiter.
-                    break self.waiters.lock();
+                    // we acquired all the permits we needed, but the waiter was
+                    // already in the queue, so we need to dequeue it. we may
+                    // have already acquired the lock on a previous CAS attempt
+                    // that failed, but if not, grab it now.
+                    break lock.unwrap_or_else(|| self.waiters.lock());
                 }
             }
 
@@ -534,7 +542,7 @@ impl Drop for Permit<'_> {
 impl Waiter {
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
-    fn take_waker(mut this: NonNull<Self>, list: &mut List<Self>) -> Option<Waker> {
+    fn take_waker(this: NonNull<Self>, list: &mut List<Self>) -> Option<Waker> {
         Self::with_node(this, list, |node| node.waker.take())
     }
 
