@@ -466,7 +466,7 @@ impl<'sem> Future for Acquire<'sem> {
                 permits: *this.permits,
                 semaphore: this.semaphore,
             });
-        *this.queued = poll.is_ready();
+        *this.queued = poll.is_pending();
         poll
     }
 }
