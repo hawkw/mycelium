@@ -20,7 +20,9 @@ use core::{
     ptr::{self, NonNull},
     task::{Context, Poll, Waker},
 };
-use mycelium_util::{fmt, sync::CachePadded};
+#[cfg(any(test, feature = "tracing-01", feature = "tracing-02"))]
+use mycelium_util::fmt;
+use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -56,8 +58,19 @@ pub struct Acquire<'sem> {
     waiter: Waiter,
 }
 
-#[derive(Debug)]
-pub struct AcquireError(());
+/// Errors returned by [`Semaphore::try_acquire`].
+
+#[derive(Debug, PartialEq)]
+pub enum TryAcquireError {
+    /// The semaphore has been [closed], so additional permits cannot be
+    /// acquired.
+    ///
+    /// [closed]: Semaphore::close
+    Closed,
+    /// The semaphore does not currently have enough permits to satisfy the
+    /// request.
+    InsufficientPermits,
+}
 
 /// The semaphore's queue of waiters. This is the portion of the semaphore's
 /// state stored inside the lock.
@@ -167,16 +180,51 @@ impl Semaphore {
         self.add_permits_locked(permits, self.waiters.lock());
     }
 
+    pub fn try_acquire(&self, permits: usize) -> Result<(), TryAcquireError> {
+        trace!(permits, "Semaphore::try_acquire");
+        let mut available = self.permits.load(Relaxed);
+        loop {
+            // are there enough permits to satisfy the request?
+            match available {
+                Self::CLOSED => {
+                    trace!(permits, "Semaphore::try_acquire -> closed");
+                    return Err(TryAcquireError::Closed);
+                }
+                available if available < permits => {
+                    trace!(
+                        permits,
+                        available,
+                        "Semaphore::try_acquire -> insufficient permits"
+                    );
+                    return Err(TryAcquireError::InsufficientPermits);
+                }
+                _ => {}
+            }
+
+            let remaining = available - permits;
+            match self
+                .permits
+                .compare_exchange_weak(available, remaining, AcqRel, Acquire)
+            {
+                Ok(_) => {
+                    trace!(permits, remaining, "Semaphore::try_acquire -> acquired");
+                    return Ok(());
+                }
+                Err(actual) => available = actual,
+            }
+        }
+    }
+
     fn poll_acquire(
         &self,
         mut node: Pin<&mut Waiter>,
-        num_permits: usize,
+        permits: usize,
         queued: bool,
         cx: &mut Context<'_>,
     ) -> Poll<WaitResult<()>> {
         trace!(
             waiter = ?fmt::ptr(node.as_mut()),
-            num_permits,
+            permits,
             queued,
             "Semaphore::poll_acquire"
         );
@@ -188,7 +236,7 @@ impl Semaphore {
         let needed_permits = if queued {
             waiter.remaining_permits.remaining()
         } else {
-            num_permits
+            permits
         };
 
         // okay, let's try to consume the requested number of permits from the
@@ -258,7 +306,7 @@ impl Semaphore {
                     // remove it --- we're done!
                     trace!(
                         waiter = ?fmt::ptr(node.as_mut()),
-                        num_permits,
+                        permits,
                         queued,
                         "Semaphore::poll_acquire -> all permits acquired; done"
                     );
@@ -277,7 +325,7 @@ impl Semaphore {
         if waiters.closed {
             trace!(
                 waiter = ?fmt::ptr(node.as_mut()),
-                num_permits,
+                permits,
                 queued,
                 "Semaphore::poll_acquire -> semaphore closed"
             );
@@ -289,7 +337,7 @@ impl Semaphore {
         if waiter.remaining_permits.add(&mut acquired_permits) {
             trace!(
                 waiter = ?fmt::ptr(node.as_mut()),
-                num_permits,
+                permits,
                 queued,
                 "Semaphore::poll_acquire -> remaining permits acquired; done"
             );
@@ -323,7 +371,7 @@ impl Semaphore {
             waiters.queue.push_front(node_ptr);
             trace!(
                 waiter = ?node_ptr,
-                num_permits,
+                permits,
                 queued,
                 "Semaphore::poll_acquire -> enqueued"
             );
