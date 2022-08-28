@@ -215,6 +215,17 @@ impl Semaphore {
         }
     }
 
+    pub fn close(&self) {
+        let mut waiters = self.waiters.lock();
+        self.permits.store(Self::CLOSED, Release);
+        waiters.closed = true;
+        while let Some(waiter) = waiters.queue.pop_back() {
+            if let Some(waker) = Waiter::take_waker(waiter, &mut waiters.queue) {
+                waker.wake();
+            }
+        }
+    }
+
     fn poll_acquire(
         &self,
         mut node: Pin<&mut Waiter>,
@@ -409,7 +420,7 @@ impl Semaphore {
                 .queue
                 .pop_back()
                 .expect("if `back()` returned `Some`, `pop_back()` will also return `Some`");
-            let waker = Waiter::with_node(waiter, &mut waiters.queue, |node| node.waker.take());
+            let waker = Waiter::take_waker(waiter, &mut waiters.queue);
             trace!(?waiter, ?waker, permits, "Semaphore::add_permits -> waking");
             if let Some(waker) = waker {
                 // TODO(eliza): wake in batches outside the lock.
@@ -513,6 +524,12 @@ impl Drop for Permit<'_> {
 // === impl Waiter ===
 
 impl Waiter {
+    #[inline(always)]
+    #[cfg_attr(loom, track_caller)]
+    fn take_waker(mut this: NonNull<Self>, list: &mut List<Self>) -> Option<Waker> {
+        Self::with_node(this, list, |node| node.waker.take())
+    }
+
     /// # Safety
     ///
     /// This is only safe to call while the list is locked. The dummy `_list`
