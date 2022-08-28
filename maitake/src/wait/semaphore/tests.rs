@@ -42,4 +42,20 @@ mod loom {
             }
         })
     }
+
+    #[test]
+    fn release_on_drop() {
+        loom::model(|| {
+            let sem = Arc::new(Semaphore::new(1));
+
+            let thread = thread::spawn({
+                let sem = sem.clone();
+                move || future::block_on(sem.acquire(1)).unwrap()
+            });
+
+            let permit = future::block_on(sem.acquire(1)).unwrap();
+            drop(permit);
+            thread.join().unwrap();
+        })
+    }
 }
