@@ -82,7 +82,7 @@ mod loom {
             sem.close();
 
             for thread in threads {
-                thread.join().unwrap();
+                let _ = thread.join().unwrap();
             }
         })
     }
@@ -106,6 +106,63 @@ mod loom {
             for thread in threads {
                 let _ = thread.join().unwrap();
             }
+        })
+    }
+
+    #[test]
+    fn concurrent_cancel() {
+        use futures_util::future::FutureExt;
+        fn run(sem: &Arc<Semaphore>) -> impl FnOnce() {
+            let sem = sem.clone();
+            move || {
+                future::block_on(async move {
+                    // poll two `acquire` futures immediately and then cancel
+                    // them, regardless of whether or not they complete.
+                    let _permit1 = {
+                        let acquire = sem.acquire(1);
+                        acquire.now_or_never()
+                    };
+                    let _permit2 = {
+                        let acquire = sem.acquire(1);
+                        acquire.now_or_never()
+                    };
+                })
+            }
+        }
+
+        loom::model(|| {
+            let sem = Arc::new(Semaphore::new(0));
+
+            let thread1 = thread::spawn(run(&sem));
+            let thread2 = thread::spawn(run(&sem));
+            let thread3 = thread::spawn(run(&sem));
+
+            thread1.join().unwrap();
+            sem.add_permits(10);
+            thread2.join().unwrap();
+            thread3.join().unwrap();
+        })
+    }
+
+    #[test]
+    fn drop_permits_while_acquiring() {
+        loom::model(|| {
+            let sem = Arc::new(Semaphore::new(4));
+            let permit1 = sem
+                .try_acquire(3)
+                .expect("semaphore has 4 permits, so we should acquire 3");
+            let thread1 = thread::spawn({
+                let sem = sem.clone();
+                move || {
+                    let _permit = future::block_on(sem.acquire(2)).unwrap();
+                    assert_eq!(sem.available_permits(), 2);
+                }
+            });
+
+            drop(permit1);
+            trace!("dropped permit 1");
+            thread1.join().unwrap();
+            assert_eq!(sem.available_permits(), 4);
         })
     }
 }
