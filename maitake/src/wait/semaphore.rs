@@ -394,6 +394,14 @@ impl Semaphore {
     #[inline(never)]
     fn add_permits_locked(&self, mut permits: usize, mut waiters: MutexGuard<'_, SemQueue>) {
         trace!(permits, "Semaphore::add_permits");
+        if waiters.closed {
+            trace!(
+                permits,
+                "Semaphore::add_permits -> already closed; doing nothing"
+            );
+            return;
+        }
+
         let mut drained_queue = false;
         while permits > 0 {
             // peek the last waiter in the queue to add permits to it; we may not
