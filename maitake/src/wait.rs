@@ -1,12 +1,14 @@
 //! Waiter cells and queues to allow tasks to wait for notifications.
 //!
-//! This module implements three types of structure for waiting:
+//! This module implements the following primitives for waiting:
 //!
 //! - [`WaitCell`], which stores a *single* waiting task
 //! - [`WaitQueue`], a queue of waiting tasks, which are woken in first-in,
 //!   first-out order
 //! - [`WaitMap`], a set of waiting tasks associated with keys, in which a task
 //!   can be woken by its key
+//! - [`Semaphore`]: an asynchronous [counting semaphore], for limiting the
+//!   number of tasks which may run concurrently
 pub(crate) mod cell;
 pub mod map;
 pub mod queue;
@@ -17,6 +19,8 @@ pub use self::cell::WaitCell;
 pub use self::map::WaitMap;
 #[doc(inline)]
 pub use self::queue::WaitQueue;
+#[doc(inline)]
+pub use self::semaphore::Semaphore;
 
 use core::task::Poll;
 

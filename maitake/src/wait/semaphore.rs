@@ -1,3 +1,9 @@
+//! An asynchronous [counting semaphore].
+//!
+//! A semaphore limits the number of tasks which may execute concurrently. See
+//! the [`Semaphore`] type's documentation for details.
+//!
+//! [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
 use crate::{
     loom::{
         cell::UnsafeCell,
@@ -30,10 +36,132 @@ mod loom;
 #[cfg(all(test, not(loom)))]
 mod tests;
 
+/// An asynchronous [counting semaphore].
+///
+/// A semaphore is a synchronization primitive that limits the number of tasks
+/// that may run concurrently. It consists of a count of _permits_, which tasks
+/// may [`acquire`] in order to execute in some context. When a task acquires a
+/// permit from the semaphore, the count of permits held by the semaphore is
+/// decreased. When no permits remain in the semaphore, any task that wishes to
+/// acquire a permit must (asynchronously) wait until another task has released
+/// a permit.
+///
+/// The [`Permit`] type is a RAII guard representing one or more permits
+/// acquired from a `Semaphore`. When a [`Permit`] is dropped, the permits it
+/// represents are released back to the `Semaphore`, potentially allowing a
+/// waiting task to acquire them.
+///
+/// # Fairness
+///
+/// This semaphore is _fair_: as permits become available, they are assigned to
+/// waiting tasks in the order that those tasks requested permits (first-in,
+/// first-out). This means that all tasks waiting to acquire permits will
+/// eventually be allowed to progress, and a single task cannot starve the
+/// semaphore of permits (provided that permits are eventually released). The
+/// semaphore remains fair even when a call to `acquire` requests more than one
+/// permit at a time.
+///
+/// # Examples
+///
+/// Using a semaphore to limit concurrency:
+///
+/// ```
+/// # use std as alloc;
+/// use maitake::{scheduler::Scheduler, wait::Semaphore};
+/// use alloc::sync::Arc;
+///
+/// let scheduler = Scheduler::new();
+/// // Allow 4 tasks to run concurrently at a time.
+/// let semaphore = Arc::new(Semaphore::new(4));
+///
+/// for _ in 0..8 {
+///     // Clone the `Arc` around the semaphore.
+///     let semaphore = semaphore.clone();
+///     scheduler.spawn(async move {
+///         // Acquire a permit from the semaphore, returning a RAII guard that
+///         // releases the permit back to the semaphore when dropped.
+///         //
+///         // If all 4 permits have been acquired, the calling task will yield,
+///         // and it will be woken when another task releases a permit.
+///         let _permit = semaphore
+///             .acquire(1)
+///             .await
+///             .expect("semaphore will not be closed");
+///
+///         // do some work...
+///     });
+/// }
+///
+/// scheduler.tick();
+/// ```
+///
+/// A semaphore may also be used to cause a task to run once all of a set of
+/// tasks have completed. If we want some task _B_ to run only after a fixed
+/// number _n_ of tasks _A_ have run, we can have task _B_ try to acquire _n_
+/// permits from a semaphore with 0 permits, and have each task _A_ add one
+/// permit to the semaphore when it completes.
+///
+/// For example:
+///
+/// ```
+/// # use std as alloc;
+/// use maitake::{scheduler::Scheduler, wait::Semaphore};
+/// use alloc::sync::Arc;
+///
+/// // How many tasks will we be waiting for the completion of?
+/// const TASKS: usize = 4;
+///
+/// let scheduler = Scheduler::new();
+///
+/// // Create the semaphore with 0 permits.
+/// let semaphore = Arc::new(Semaphore::new(0));
+///
+/// // Spawn the "B" task that will wait for the 4 "A" tasks to complete.
+/// scheduler.spawn({
+///     let semaphore = semaphore.clone();
+///     async move {
+///         println!("Task B starting...");
+///
+///         // Since the semaphore is created with 0 permits, this will
+///         // wait until all 4 "A" tasks have completed.
+///        let _permit = semaphore
+///             .acquire(TASKS)
+///             .await
+///             .expect("semaphore will not be closed");
+///
+///         // ... do some work ...
+///
+///         println!("Task B done!");
+///     }
+/// });
+///
+/// for i in 0..TASKS {
+///     let semaphore = semaphore.clone();
+///     scheduler.spawn(async move {
+///         println!("Task A {i} starting...");
+///
+///         // Add a single permit to the semaphore. Once all 4 tasks have
+///         // completed, the semaphore will have the 4 permits required to
+///         // wake the "B" task.
+///         semaphore.add_permits(1);
+///
+///         // ... do some work ...
+///
+///         println!("Task A {i} done");
+///     });
+/// }
+///
+/// scheduler.tick();
+/// ```
+///
+/// [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
+/// [`acquire`]: Semaphore::acquire
 #[derive(Debug)]
 pub struct Semaphore {
-    /// The number of permits in the semaphore (or a flag indicating that it is closed).
+    /// The number of permits in the semaphore (or [`usize::MAX] if the
+    /// semaphore is closed.
     permits: CachePadded<AtomicUsize>,
+
     /// The queue of tasks waiting to acquire permits.
     ///
     /// A spinlock (from `mycelium_util`) is used here, in order to support
@@ -43,12 +171,24 @@ pub struct Semaphore {
     waiters: Mutex<SemQueue>,
 }
 
+/// A [RAII guard] representing one or more permits acquired from a
+/// [`Semaphore`].
+///
+/// When the `Permit` is dropped, the permits it represents are released back to
+/// the [`Semaphore`], potentially waking another task.
+///
+/// This type is returned by the [`Semaphore::acquire`] and
+/// [`Semaphore::try_acquire`] methods.
+///
+/// [RAII guard]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
 #[derive(Debug)]
+#[must_use = "dropping a `Permit` releases the acquired permits back to the `Semaphore`"]
 pub struct Permit<'sem> {
     permits: usize,
     semaphore: &'sem Semaphore,
 }
 
+/// The future returned by the [`Semaphore::acquire`] method.
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
@@ -62,7 +202,7 @@ pub struct Acquire<'sem> {
 
 /// Errors returned by [`Semaphore::try_acquire`].
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum TryAcquireError {
     /// The semaphore has been [closed], so additional permits cannot be
     /// acquired.
@@ -128,10 +268,19 @@ struct Node {
 // === impl Semaphore ===
 
 impl Semaphore {
-    pub const MAX_PERMITS: usize = usize::MAX >> 2;
+    /// The maximum number of permits a `Semaphore` may contain.
+    pub const MAX_PERMITS: usize = usize::MAX - 1;
+
     const CLOSED: usize = usize::MAX;
 
     loom_const_fn! {
+        /// Returns a new `Semaphore` with `permits` permits available.
+        ///
+        /// # Panics
+        ///
+        /// If `permits` is less than [`MAX_PERMITS`] ([`usize::MAX`] - 1).
+        ///
+        /// [`MAX_PERMITS`]: Self::MAX_PERMITS
         #[must_use]
         pub fn new(permits: usize) -> Self {
             assert!(
@@ -148,6 +297,10 @@ impl Semaphore {
         }
     }
 
+    /// Returns the number of permits currently available in this semaphore, or
+    /// 0 if the semaphore is [closed].
+    ///
+    /// [closed]: Semaphore::close
     pub fn available_permits(&self) -> usize {
         let permits = self.permits.load(Acquire);
         if permits == Self::CLOSED {
@@ -157,6 +310,23 @@ impl Semaphore {
         permits
     }
 
+    /// Acquire `permits` permits from the `Semaphore`, waiting asynchronously
+    /// if there are insufficient permits currently available.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(`[`Permit`]`)` with the requested number of permits, if the
+    ///   permits were acquired.
+    /// - `Err(`[`Closed`]`)` if the semaphore was [closed].
+    ///
+    /// # Cancellation
+    ///
+    /// This method uses a queue to fairly distribute permits in the order they
+    /// were requested. If an [`Acquire`] future is dropped before it completes,
+    /// the task will lose its place in the queue.
+    ///
+    /// [`Closed`]: crate::wait::Closed
+    /// [closed]: Semaphore::close
     pub fn acquire(&self, permits: usize) -> Acquire<'_> {
         Acquire {
             semaphore: self,
@@ -173,6 +343,21 @@ impl Semaphore {
         }
     }
 
+    /// Add `permits` new permits to the semaphore.
+    ///
+    /// This permanently increases the number of permits available in the
+    /// semaphore. The permit count can be permanently *decreased* by calling
+    /// [`acquire`] or [`try_acquire`], and [`forget`]ting the returned [`Permit`].
+    ///
+    /// # Panics
+    ///
+    /// If adding `permits` permits would cause the permit count to overflow
+    /// [`MAX_PERMITS`] ([`usize::MAX`] - 1).
+    ///
+    /// [`acquire`]: Self::acquire
+    /// [`try_acquire`]: Self::try_acquire
+    /// [`forget`]: Permit::forget
+    /// [`MAX_PERMITS`]: Self::MAX_PERMITS
     #[inline(always)]
     pub fn add_permits(&self, permits: usize) {
         if permits == 0 {
@@ -182,6 +367,19 @@ impl Semaphore {
         self.add_permits_locked(permits, self.waiters.lock());
     }
 
+    /// Try to acquire `permits` permits from the `Semaphore`, without waiting
+    /// for additional permits to become available.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(`[`Permit`]`)` with the requested number of permits, if the
+    ///   permits were acquired.
+    /// - `Err(`[`TryAcquireError::Closed`]`)` if the semaphore was [closed].
+    /// - `Err(`[`TryAcquireError::InsufficientPermits`]`)` if the semaphore had
+    ///   fewer than `permits` permits available.
+    ///
+    /// [`Closed`]: crate::wait::Closed
+    /// [closed]: Semaphore::close
     pub fn try_acquire(&self, permits: usize) -> Result<Permit<'_>, TryAcquireError> {
         trace!(permits, "Semaphore::try_acquire");
         self.try_acquire_inner(permits).map(|_| Permit {
@@ -190,6 +388,10 @@ impl Semaphore {
         })
     }
 
+    /// Closes the semaphore.
+    ///
+    /// This wakes all tasks currently waiting on the semaphore, and prevents
+    /// new permits from being acquired.
     pub fn close(&self) {
         let mut waiters = self.waiters.lock();
         self.permits.store(Self::CLOSED, Release);
@@ -588,14 +790,53 @@ feature! {
         waiter: Waiter,
     }
 
-
+    /// An owned [RAII guard] representing one or more permits acquired from a
+    /// [`Semaphore`].
+    ///
+    /// When the `OwnedPermit` is dropped, the permits it represents are
+    /// released back to  the [`Semaphore`], potentially waking another task.
+    ///
+    /// This type is identical to the [`Permit`] type, except that it holds an
+    /// [`Arc`] clone of the [`Semaphore`], rather than borrowing it. This
+    /// allows the guard to be valid for the `'static` lifetime.
+    ///
+    /// This type is returned by the [`Semaphore::acquire_owned`] and
+    /// [`Semaphore::try_acquire_owned`] methods.
+    ///
+    /// [RAII guard]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
     #[derive(Debug)]
+    #[must_use = "dropping an `OwnedPermit` releases the acquired permits back to the `Semaphore`"]
     pub struct OwnedPermit {
         permits: usize,
         semaphore: Arc<Semaphore>,
     }
 
     impl Semaphore {
+        /// Acquire `permits` permits from the `Semaphore`, waiting asynchronously
+        /// if there are insufficient permits currently available, and returning
+        /// an [`OwnedPermit`].
+        ///
+        /// This method behaves identically to [`acquire`], except that it
+        /// requires the `Semaphore` to be wrapped in an [`Arc`], and returns an
+        /// [`OwnedPermit`] which clones the [`Arc`] rather than borrowing the
+        /// semaphore. This allows the returned [`OwnedPermit`] to be valid for
+        /// the `'static` lifetime.
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(`[`OwnedPermit`]`)` with the requested number of permits, if the
+        ///   permits were acquired.
+        /// - `Err(`[`Closed`]`)` if the semaphore was [closed].
+        ///
+        /// # Cancellation
+        ///
+        /// This method uses a queue to fairly distribute permits in the order they
+        /// were requested. If an [`AcquireOwned`] future is dropped before it
+        /// completes,   the task will lose its place in the queue.
+        ///
+        /// [`acquire`]: Semaphore::acquire
+        /// [`Closed`]: crate::wait::Closed
+        /// [closed]: Semaphore::close
         pub fn acquire_owned(self: &Arc<Self>, permits: usize) -> AcquireOwned {
             AcquireOwned {
                 semaphore: self.clone(),
@@ -605,6 +846,27 @@ feature! {
             }
         }
 
+        /// Try to acquire `permits` permits from the `Semaphore`, without waiting
+        /// for additional permits to become available, and returning an [`OwnedPermit`].
+        ///
+        /// This method behaves identically to [`try_acquire`], except that it
+        /// requires the `Semaphore` to be wrapped in an [`Arc`], and returns an
+        /// [`OwnedPermit`] which clones the [`Arc`] rather than borrowing the
+        /// semaphore. This allows the returned [`OwnedPermit`] to be valid for
+        /// the `'static` lifetime.
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(`[`OwnedPermit`]`)` with the requested number of permits, if the
+        ///   permits were acquired.
+        /// - `Err(`[`TryAcquireError::Closed`]`)` if the semaphore was [closed].
+        /// - `Err(`[`TryAcquireError::InsufficientPermits`]`)` if the semaphore
+        ///   had fewer than `permits` permits available.
+        ///
+        ///
+        /// [`try_acquire`]: Semaphore::try_acquire
+        /// [`Closed`]: crate::wait::Closed
+        /// [closed]: Semaphore::close
         pub fn try_acquire_owned(self: &Arc<Self>, permits: usize) -> Result<OwnedPermit, TryAcquireError> {
             trace!(permits, "Semaphore::try_acquire_owned");
             self.try_acquire_inner(permits).map(|_| OwnedPermit {
