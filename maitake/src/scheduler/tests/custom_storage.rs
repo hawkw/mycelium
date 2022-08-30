@@ -1,6 +1,6 @@
 use super::*;
-use core::{future::Future, ptr::NonNull};
-use maitake::task::{self, Task};
+use crate::task::{self, Task};
+use core::{ptr::NonNull, sync::atomic::AtomicBool};
 
 /// A fake custom task allocation.
 ///
@@ -32,13 +32,14 @@ where
         scheduler.spawn_allocated::<F, MyBoxStorage>(task)
     }
 }
+
 #[test]
 fn basically_works() {
     static STUB: TaskStub = TaskStub::new();
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
     static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
-    util::trace_init();
+    crate::util::trace_init();
 
     MyBoxTask::spawn(&SCHEDULER, async {
         future::yield_now().await;
@@ -61,7 +62,7 @@ fn schedule_many() {
 
     const TASKS: usize = 10;
 
-    util::trace_init();
+    crate::util::trace_init();
 
     for _ in 0..TASKS {
         MyBoxTask::spawn(&SCHEDULER, async {
@@ -84,7 +85,7 @@ fn many_yields() {
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    util::trace_init();
+    crate::util::trace_init();
     const TASKS: usize = 10;
 
     for i in 0..TASKS {
@@ -99,4 +100,59 @@ fn many_yields() {
     assert_eq!(tick.completed, TASKS);
     assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
     assert!(!tick.has_remaining);
+}
+
+#[test]
+fn notify_future() {
+    static STUB: TaskStub = TaskStub::new();
+    static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
+    static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+    crate::util::trace_init();
+    let chan = Chan::new(1);
+
+    MyBoxTask::spawn(&SCHEDULER, {
+        let chan = chan.clone();
+        async move {
+            chan.wait().await;
+            COMPLETED.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+
+    MyBoxTask::spawn(&SCHEDULER, async move {
+        future::yield_now().await;
+        chan.wake();
+    });
+
+    dbg!(SCHEDULER.tick());
+
+    assert_eq!(COMPLETED.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn notify_external() {
+    static STUB: TaskStub = TaskStub::new();
+    static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
+    static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+
+    crate::util::trace_init();
+    let chan = Chan::new(1);
+
+    MyBoxTask::spawn(&SCHEDULER, {
+        let chan = chan.clone();
+        async move {
+            chan.wait().await;
+            COMPLETED.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+
+    std::thread::spawn(move || {
+        chan.wake();
+    });
+
+    while dbg!(SCHEDULER.tick().completed) < 1 {
+        std::thread::yield_now();
+    }
+
+    assert_eq!(COMPLETED.load(Ordering::SeqCst), 1);
 }

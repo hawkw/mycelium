@@ -13,6 +13,9 @@ use core::{
 };
 use mycelium_util::{fmt, sync::CachePadded};
 
+#[cfg(all(loom, test))]
+mod loom;
+
 /// An error indicating that a [`WaitCell`] was closed or busy while
 /// attempting register a waiter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -419,36 +422,5 @@ pub(crate) mod test_util {
         fn drop(&mut self) {
             debug!(chan = ?fmt::alt(&self), "drop");
         }
-    }
-}
-
-#[cfg(all(loom, test))]
-mod loom {
-    use super::*;
-    use crate::loom::{future, sync::Arc, thread};
-
-    #[test]
-    fn basic() {
-        crate::loom::model(|| {
-            let wait = Arc::new(WaitCell::new());
-
-            let waker = wait.clone();
-            let closer = wait.clone();
-
-            thread::spawn(move || {
-                info!("waking");
-                waker.wake();
-                info!("woken");
-            });
-            thread::spawn(move || {
-                info!("closing");
-                closer.close();
-                info!("closed");
-            });
-
-            info!("waiting");
-            let _ = future::block_on(wait.wait());
-            info!("wait'd");
-        });
     }
 }

@@ -14,6 +14,9 @@ use core::{
 use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
 
+#[cfg(test)]
+mod tests;
+
 /// An asynchronous [mutual exclusion lock][mutex] for protecting shared data.
 ///
 /// The data can only be accessed through the [RAII guards] returned

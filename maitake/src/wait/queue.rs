@@ -26,8 +26,11 @@ use mycelium_util::fmt;
 use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests;
+
+#[cfg(all(test, loom))]
+mod loom;
 
 /// A queue of [`Waker`]s implemented using an [intrusive doubly-linked
 /// list][ilist].

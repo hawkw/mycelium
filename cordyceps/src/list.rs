@@ -605,7 +605,11 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     pub fn push_front(&mut self, item: T::Handle) {
         let ptr = T::into_ptr(item);
         // tracing::trace!(?self, ?ptr, "push_front");
-        assert_ne!(self.head, Some(ptr));
+        assert_ne!(
+            self.head,
+            Some(ptr),
+            "cannot push a node that is already part of a list"
+        );
         unsafe {
             T::links(ptr).as_mut().set_next(self.head);
             T::links(ptr).as_mut().set_prev(None);

@@ -9,6 +9,3 @@ pub mod mutex;
 pub use self::mutex::OwnedMutexGuard;
 #[doc(inline)]
 pub use self::mutex::{Mutex, MutexGuard};
-
-#[cfg(test)]
-mod tests;
