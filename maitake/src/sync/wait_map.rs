@@ -609,6 +609,7 @@ pub enum WakeOutcome<V> {
 ///
 /// See [`Wait::enqueue`] for more information and usage example.
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
+#[derive(Debug)]
 pub struct EnqueueWait<'a, 'b, K: PartialEq, V> {
     wait: Pin<&'a mut Wait<'b, K, V>>,
 }
