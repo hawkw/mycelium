@@ -33,8 +33,8 @@ use pin_project::{pin_project, pinned_drop};
 #[cfg(test)]
 mod tests;
 
-/// A queue of [`Waker`]s implemented using an [intrusive doubly-linked
-/// list][ilist].
+/// A queue of waiting tasks which can be [woken in first-in, first-out
+/// order][wake], or [all at once][wake_all].
 ///
 /// A `WaitQueue` allows any number of tasks to [wait] asynchronously and be
 /// woken when some event occurs, either [individually][wake] in first-in,
@@ -138,6 +138,8 @@ mod tests;
 /// ```
 ///
 /// # Implementation Notes
+///
+/// This type is implemented using an [intrusive doubly-linked list][ilist].
 ///
 /// The *[intrusive]* aspect of this list is important, as it means that it does
 /// not allocate memory. Instead, nodes in the linked list are stored in the

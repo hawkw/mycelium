@@ -16,6 +16,7 @@
 //! [mutual exclusion lock]:https://en.wikipedia.org/wiki/Mutual_exclusion
 //! [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
 //! [`Waker`]: core::task::Waker
+#![warn(missing_docs, missing_debug_implementations)]
 pub mod mutex;
 pub mod semaphore;
 pub(crate) mod wait_cell;
@@ -37,11 +38,15 @@ pub use self::wait_queue::WaitQueue;
 
 use core::task::Poll;
 
-/// An error indicating that a [`WaitCell`], [`WaitQueue`], [`WaitMap`], or
-/// [`Semaphore`] was closed while attempting to register a waiter.
+/// An error indicating that a [`WaitCell`], [`WaitQueue`] or [`Semaphore`] was
+/// closed while attempting to register a waiting task.
+///
+/// This error is returned by the [`WaitCell::wait`], [`WaitQueue::wait`] and
+/// [`Semaphore::acquire`] methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Closed(());
 
+/// The result of waiting on a [`WaitQueue`] or [`Semaphore`].
 pub type WaitResult<T> = Result<T, Closed>;
 
 pub(in crate::sync) const fn closed<T>() -> Poll<WaitResult<T>> {

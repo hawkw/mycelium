@@ -30,7 +30,7 @@ use pin_project::{pin_project, pinned_drop};
 #[cfg(test)]
 mod tests;
 
-/// An error indicating a failed wake
+/// Errors returned by [`WaitMap::wait`], indicating a failed wake.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum WaitError {
@@ -50,7 +50,7 @@ pub enum WaitError {
     Duplicate,
 }
 
-/// An indication of the result of a call to `wait()`
+/// The result of a call to [`WaitMap::wait()`].
 pub type WaitResult<T> = Result<T, WaitError>;
 
 const fn closed<T>() -> Poll<WaitResult<T>> {
@@ -73,8 +73,8 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
     Poll::Ready(Ok(data))
 }
 
-/// A map of [`Waker`]s implemented using an [intrusive doubly-linked
-/// list][ilist].
+/// A map of [`Waker`]s associated with keys, allowing tasks to be woken by
+/// their key.
 ///
 /// A `WaitMap` allows any number of tasks to [wait] asynchronously and be
 /// woken when a value with a certain key arrives. This can be used to
@@ -141,6 +141,9 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 /// ```
 ///
 /// # Implementation Notes
+///
+/// This type is currently implemented using [intrusive doubly-linked
+/// list][ilist].
 ///
 /// The *[intrusive]* aspect of this map is important, as it means that it does
 /// not allocate memory. Instead, nodes in the linked list are stored in the
@@ -586,17 +589,17 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 }
 
-/// The result of an attempted wake operation
+/// The result of an attempted [`WaitMap::wake()`] operation.
 #[derive(Debug)]
 pub enum WakeOutcome<V> {
-    /// The `Waiter` was successfully woken, and the data was provided.
+    /// The task was successfully woken, and the data was provided.
     Woke,
 
-    /// No `Waiter` matching the given key was found in the queue.
+    /// No task matching the given key was found in the queue.
     NoMatch(V),
 
     /// The queue was already closed when the wake was attempted,
-    /// and the data was not provided to any waiter.
+    /// and the data was not provided to any task.
     Closed(V),
 }
 
