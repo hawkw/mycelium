@@ -1,3 +1,7 @@
+//! A map of [`Waker`]s associated with keys, so that a task can be woken by
+//! key.
+//!
+//! See the documentation for the [`WaitMap`] type for details.
 use crate::loom::{
     cell::UnsafeCell,
     sync::{
@@ -363,7 +367,7 @@ enum State {
     /// *Note*: This *must* correspond to all state bits being set, as it's set
     /// via a [`fetch_or`].
     ///
-    /// [`Closed`]: crate::wait::Closed
+    /// [`Closed`]: crate::sync::Closed
     /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
     Closed = 0b11,
 }

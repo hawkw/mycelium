@@ -3,7 +3,7 @@
 //! See the documentation on the [`Mutex`] type for details.
 use crate::{
     loom::cell::{MutPtr, UnsafeCell},
-    wait::queue::{self, WaitQueue},
+    sync::wait_queue::{self, WaitQueue},
 };
 use core::{
     future::Future,
@@ -13,6 +13,9 @@ use core::{
 };
 use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
+
+#[cfg(all(test, loom))]
+mod loom;
 
 /// An asynchronous [mutual exclusion lock][mutex] for protecting shared data.
 ///
@@ -73,7 +76,7 @@ use pin_project::pin_project;
 /// [`mycelium_util::sync::spin::Mutex`]: https://mycelium.elizas.website/mycelium_util/sync/spin/struct.mutex
 /// [`futures-util`]: https://crates.io/crate/futures-util
 /// [`futures_util::lock::Mutex`]: https://docs.rs/futures-util/latest/futures_util/lock/struct.Mutex.html
-/// [intrusive linked list]: crate::wait::WaitQueue#implementation-notes
+/// [intrusive linked list]: crate::sync::WaitQueue#implementation-notes
 /// [poisoning]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html#poisoning
 // for some reason, intra-doc links don't work in footnotes?
 /// [storage]: ../task/trait.Storage.html
@@ -115,7 +118,7 @@ pub struct MutexGuard<'a, T: ?Sized> {
 #[pin_project]
 pub struct Lock<'a, T: ?Sized> {
     #[pin]
-    wait: queue::Wait<'a>,
+    wait: wait_queue::Wait<'a>,
     mutex: &'a Mutex<T>,
 }
 

@@ -14,7 +14,7 @@ fn permit_is_send_and_sync() {
 
 #[test]
 fn acquire_is_send_and_sync() {
-    assert_send_sync::<crate::wait::semaphore::Acquire<'_>>();
+    assert_send_sync::<crate::sync::semaphore::Acquire<'_>>();
 }
 
 #[cfg(feature = "alloc")]

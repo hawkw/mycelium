@@ -1,3 +1,7 @@
+//! A queue of waiting tasks that can be woken in first-in, first-out order (or
+//! all at once).
+//!
+//! See the [`WaitQueue`] type's documentation for details.
 use crate::{
     loom::{
         cell::UnsafeCell,
@@ -6,7 +10,7 @@ use crate::{
             spin::Mutex,
         },
     },
-    wait::{self, WaitResult},
+    sync::{self, WaitResult},
 };
 use cordyceps::{
     list::{self, List},
@@ -50,7 +54,7 @@ mod tests;
 ///
 /// ```
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
 ///
 /// const TASKS: usize = 10;
 ///
@@ -96,7 +100,7 @@ mod tests;
 ///
 /// ```
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
 ///
 /// const TASKS: usize = 10;
 ///
@@ -314,7 +318,7 @@ enum State {
     /// *Note*: This *must* correspond to all state bits being set, as it's set
     /// via a [`fetch_or`].
     ///
-    /// [`Closed`]: crate::wait::Closed
+    /// [`Closed`]: crate::sync::Closed
     /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
     Closed = 0b11,
 }
@@ -343,6 +347,8 @@ impl WaitQueue {
         /// Returns a new `WaitQueue` with a single stored wakeup.
         ///
         /// The first call to [`wait`] on this queue will immediately succeed.
+        ///
+         /// [`wait`]: Self::wait
         // TODO(eliza): should this be a public API?
         #[must_use]
         pub(crate) fn new_woken() -> Self {
@@ -365,7 +371,7 @@ impl WaitQueue {
     /// If the queue is empty, a wakeup is stored in the `WaitQueue`, and the
     /// next call to [`wait`] will complete immediately.
     ///
-    /// [`wait`]: WaitQueue::wait
+    /// [`wait`]: Self::wait
     #[inline]
     pub fn wake(&self) {
         // snapshot the queue's current state.
@@ -451,6 +457,8 @@ impl WaitQueue {
     /// This method is generally used when implementing higher-level
     /// synchronization primitives or resources: when an event makes a resource
     /// permanently unavailable, the queue can be closed.
+    ///
+    /// [`wait`]: Self::wait
     pub fn close(&self) {
         let state = self.state.fetch_or(State::Closed.into_usize(), SeqCst);
         let state = test_dbg!(QueueState::from_bits(state));
@@ -494,7 +502,7 @@ impl WaitQueue {
         }
 
         match state.get(QueueState::STATE) {
-            State::Closed => wait::closed(),
+            State::Closed => sync::closed(),
             _ if state.get(QueueState::WAKE_ALLS) > initial_wake_alls => Poll::Ready(Ok(())),
             State::Empty | State::Waiting => Poll::Pending,
             State::Woken => Poll::Ready(Ok(())),
@@ -698,7 +706,7 @@ impl Waiter {
                                 Err(actual) => queue_state = actual,
                             }
                         }
-                        State::Closed => return wait::closed(),
+                        State::Closed => return sync::closed(),
                     }
                 }
 
@@ -735,7 +743,7 @@ impl Waiter {
                         }
                         Wakeup::Closed => {
                             this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                            wait::closed()
+                            sync::closed()
                         }
                         Wakeup::Empty => unreachable!(),
                     }

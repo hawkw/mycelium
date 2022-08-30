@@ -1,6 +1,6 @@
 use super::*;
 use crate::loom::sync::atomic::{AtomicUsize, Ordering};
-use crate::{future, wait::cell::test_util::Chan};
+use crate::{future, sync::wait_cell::test_util::Chan};
 
 #[cfg(all(feature = "alloc", not(loom)))]
 mod alloc {

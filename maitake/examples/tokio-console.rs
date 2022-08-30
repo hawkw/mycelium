@@ -1,4 +1,4 @@
-use maitake::{scheduler::Scheduler, wait::WaitQueue};
+use maitake::{scheduler::Scheduler, sync::WaitQueue};
 use std::{sync::Arc, thread, time::Duration};
 
 fn main() {
