@@ -1,3 +1,7 @@
+//! A map of [`Waker`]s associated with keys, so that a task can be woken by
+//! key.
+//!
+//! See the documentation for the [`WaitMap`] type for details.
 use crate::loom::{
     cell::UnsafeCell,
     sync::{

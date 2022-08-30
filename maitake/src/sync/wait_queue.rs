@@ -1,3 +1,7 @@
+//! A queue of waiting tasks that can be woken in first-in, first-out order (or
+//! all at once).
+//!
+//! See the [`WaitQueue`] type's documentation for details.
 use crate::{
     loom::{
         cell::UnsafeCell,
