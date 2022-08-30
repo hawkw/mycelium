@@ -343,6 +343,8 @@ impl WaitQueue {
         /// Returns a new `WaitQueue` with a single stored wakeup.
         ///
         /// The first call to [`wait`] on this queue will immediately succeed.
+        ///
+         /// [`wait`]: Self::wait
         // TODO(eliza): should this be a public API?
         #[must_use]
         pub(crate) fn new_woken() -> Self {
@@ -365,7 +367,7 @@ impl WaitQueue {
     /// If the queue is empty, a wakeup is stored in the `WaitQueue`, and the
     /// next call to [`wait`] will complete immediately.
     ///
-    /// [`wait`]: WaitQueue::wait
+    /// [`wait`]: Self::wait
     #[inline]
     pub fn wake(&self) {
         // snapshot the queue's current state.
@@ -451,6 +453,8 @@ impl WaitQueue {
     /// This method is generally used when implementing higher-level
     /// synchronization primitives or resources: when an event makes a resource
     /// permanently unavailable, the queue can be closed.
+    ///
+    /// [`wait`]: Self::wait
     pub fn close(&self) {
         let state = self.state.fetch_or(State::Closed.into_usize(), SeqCst);
         let state = test_dbg!(QueueState::from_bits(state));

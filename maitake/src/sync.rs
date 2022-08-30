@@ -10,25 +10,25 @@
 //!   first-out order
 //! - [`WaitMap`], a set of waiting tasks associated with keys, in which a task
 //!   can be woken by its key
-pub(crate) mod cell;
-pub mod map;
-pub mod queue;
-pub mod semaphore;
-
+//!
 pub mod mutex;
+pub mod semaphore;
+pub(crate) mod wait_cell;
+pub mod wait_map;
+pub mod wait_queue;
+
 #[cfg(feature = "alloc")]
 #[doc(inline)]
 pub use self::mutex::OwnedMutexGuard;
 #[doc(inline)]
 pub use self::mutex::{Mutex, MutexGuard};
-
-pub use self::cell::WaitCell;
-#[doc(inline)]
-pub use self::map::WaitMap;
-#[doc(inline)]
-pub use self::queue::WaitQueue;
 #[doc(inline)]
 pub use self::semaphore::Semaphore;
+pub use self::wait_cell::WaitCell;
+#[doc(inline)]
+pub use self::wait_map::WaitMap;
+#[doc(inline)]
+pub use self::wait_queue::WaitQueue;
 
 use core::task::Poll;
 

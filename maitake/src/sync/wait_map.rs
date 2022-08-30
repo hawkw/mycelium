@@ -363,7 +363,7 @@ enum State {
     /// *Note*: This *must* correspond to all state bits being set, as it's set
     /// via a [`fetch_or`].
     ///
-    /// [`Closed`]: crate::wait::Closed
+    /// [`Closed`]: crate::sync::Closed
     /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
     Closed = 0b11,
 }
