@@ -3,7 +3,7 @@
 //! See the documentation on the [`Mutex`] type for details.
 use crate::{
     loom::cell::{MutPtr, UnsafeCell},
-    wait::queue::{self, WaitQueue},
+    sync::queue::{self, WaitQueue},
 };
 use core::{
     future::Future,
@@ -13,6 +13,9 @@ use core::{
 };
 use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
+
+#[cfg(all(test, loom))]
+mod loom;
 
 /// An asynchronous [mutual exclusion lock][mutex] for protecting shared data.
 ///

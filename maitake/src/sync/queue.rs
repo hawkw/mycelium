@@ -6,7 +6,7 @@ use crate::{
             spin::Mutex,
         },
     },
-    wait::{self, WaitResult},
+    sync::{self, WaitResult},
 };
 use cordyceps::{
     list::{self, List},
@@ -50,7 +50,7 @@ mod tests;
 ///
 /// ```
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
 ///
 /// const TASKS: usize = 10;
 ///
@@ -96,7 +96,7 @@ mod tests;
 ///
 /// ```
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::WaitQueue};
+/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
 ///
 /// const TASKS: usize = 10;
 ///
@@ -314,7 +314,7 @@ enum State {
     /// *Note*: This *must* correspond to all state bits being set, as it's set
     /// via a [`fetch_or`].
     ///
-    /// [`Closed`]: crate::wait::Closed
+    /// [`Closed`]: crate::sync::Closed
     /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
     Closed = 0b11,
 }
@@ -494,7 +494,7 @@ impl WaitQueue {
         }
 
         match state.get(QueueState::STATE) {
-            State::Closed => wait::closed(),
+            State::Closed => sync::closed(),
             _ if state.get(QueueState::WAKE_ALLS) > initial_wake_alls => Poll::Ready(Ok(())),
             State::Empty | State::Waiting => Poll::Pending,
             State::Woken => Poll::Ready(Ok(())),
@@ -698,7 +698,7 @@ impl Waiter {
                                 Err(actual) => queue_state = actual,
                             }
                         }
-                        State::Closed => return wait::closed(),
+                        State::Closed => return sync::closed(),
                     }
                 }
 
@@ -735,7 +735,7 @@ impl Waiter {
                         }
                         Wakeup::Closed => {
                             this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                            wait::closed()
+                            sync::closed()
                         }
                         Wakeup::Empty => unreachable!(),
                     }

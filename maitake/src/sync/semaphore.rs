@@ -12,7 +12,7 @@ use crate::{
             spin::{Mutex, MutexGuard},
         },
     },
-    wait::{self, WaitResult},
+    sync::{self, WaitResult},
 };
 use cordyceps::{
     list::{self, List},
@@ -67,7 +67,7 @@ mod tests;
 ///
 /// ```
 /// # use std as alloc;
-/// use maitake::{scheduler::Scheduler, wait::Semaphore};
+/// use maitake::{scheduler::Scheduler, sync::Semaphore};
 /// use alloc::sync::Arc;
 ///
 /// let scheduler = Scheduler::new();
@@ -105,7 +105,7 @@ mod tests;
 ///
 /// ```
 /// # use std as alloc;
-/// use maitake::{scheduler::Scheduler, wait::Semaphore};
+/// use maitake::{scheduler::Scheduler, sync::Semaphore};
 /// use alloc::sync::Arc;
 ///
 /// // How many tasks will we be waiting for the completion of?
@@ -325,7 +325,7 @@ impl Semaphore {
     /// were requested. If an [`Acquire`] future is dropped before it completes,
     /// the task will lose its place in the queue.
     ///
-    /// [`Closed`]: crate::wait::Closed
+    /// [`Closed`]: crate::sync::Closed
     /// [closed]: Semaphore::close
     pub fn acquire(&self, permits: usize) -> Acquire<'_> {
         Acquire {
@@ -378,7 +378,7 @@ impl Semaphore {
     /// - `Err(`[`TryAcquireError::InsufficientPermits`]`)` if the semaphore had
     ///   fewer than `permits` permits available.
     ///
-    /// [`Closed`]: crate::wait::Closed
+    /// [`Closed`]: crate::sync::Closed
     /// [closed]: Semaphore::close
     pub fn try_acquire(&self, permits: usize) -> Result<Permit<'_>, TryAcquireError> {
         trace!(permits, "Semaphore::try_acquire");
@@ -434,7 +434,7 @@ impl Semaphore {
         let mut waiters = loop {
             // semaphore has closed
             if sem_curr == Self::CLOSED {
-                return wait::closed();
+                return sync::closed();
             }
 
             // the total number of permits currently available to this waiter
@@ -522,7 +522,7 @@ impl Semaphore {
                 queued,
                 "Semaphore::poll_acquire -> semaphore closed"
             );
-            return wait::closed();
+            return sync::closed();
         }
 
         // add permits to the waiter, returning whether we added enough to wake
@@ -835,7 +835,7 @@ feature! {
         /// completes,   the task will lose its place in the queue.
         ///
         /// [`acquire`]: Semaphore::acquire
-        /// [`Closed`]: crate::wait::Closed
+        /// [`Closed`]: crate::sync::Closed
         /// [closed]: Semaphore::close
         pub fn acquire_owned(self: &Arc<Self>, permits: usize) -> AcquireOwned {
             AcquireOwned {
@@ -865,7 +865,7 @@ feature! {
         ///
         ///
         /// [`try_acquire`]: Semaphore::try_acquire
-        /// [`Closed`]: crate::wait::Closed
+        /// [`Closed`]: crate::sync::Closed
         /// [closed]: Semaphore::close
         pub fn try_acquire_owned(self: &Arc<Self>, permits: usize) -> Result<OwnedPermit, TryAcquireError> {
             trace!(permits, "Semaphore::try_acquire_owned");
