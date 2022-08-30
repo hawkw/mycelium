@@ -17,8 +17,17 @@ use mycelium_util::{fmt, sync::CachePadded};
 /// attempting register a waiter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Error {
+    /// The [`Waker`] was not registered because the [`WaitCell`] has been
+    /// [closed](WaitCell::close).
     Closed,
+
+    /// The [`Waker`] was not registered because the [`WaitCell`] was already in
+    /// the process of [waking](WaitCell::wake). The caller may choose to treat
+    /// this error as a wakeup.
     Notifying,
+
+    /// The [`Waker`] was not registered because another task was concurrently
+    /// storing its own [`Waker`] in the [`WaitCell`].
     Parking,
 }
 
@@ -40,16 +49,27 @@ const fn notifying() -> Result<(), Error> {
 
 /// An atomically registered [`Waker`].
 ///
-/// This is inspired by the [`AtomicWaker` type] used in Tokio's
+/// This cell stores the [`Waker`] of a single task. A [`Waker`] is stored in
+/// the cell either by calling [`register_wait`], or by polling a [`wait`]
+/// future. Once a task's [`Waker`] is stored in a `WaitCell`, it can be woken
+/// by calling [`wake`] on the `WaitCell`.
+///
+/// # Implementation Notes
+///
+/// This is inspired by the [`AtomicWaker`] type used in Tokio's
 /// synchronization primitives, with the following modifications:
 ///
-/// - An additional bit of state is added to allow setting a "close" bit.
+/// - An additional bit of state is added to allow [setting a "close"
+///   bit](Self::close).
 /// - A `WaitCell` is always woken by value (for now).
-/// - `WaitCell` does not handle unwinding, because mycelium kernel-mode code
-///   does not support unwinding.
+/// - `WaitCell` does not handle unwinding, because [`maitake` does not support
+///   unwinding](crate#maitake-does-not-support-unwinding)
 ///
 /// [`AtomicWaker`]: https://github.com/tokio-rs/tokio/blob/09b770c5db31a1f35631600e1d239679354da2dd/tokio/src/sync/task/atomic_waker.rs
 /// [`Waker`]: core::task::Waker
+/// [`register_wait`]: Self::register_wait
+/// [`wait`]: Self::wait
+/// [`wake`]: Self::wake
 pub struct WaitCell {
     lock: CachePadded<AtomicUsize>,
     waker: UnsafeCell<Option<Waker>>,
@@ -75,24 +95,37 @@ pub struct Wait<'a> {
 // === impl WaitCell ===
 
 impl WaitCell {
-    #[cfg(not(all(loom, test)))]
-    pub const fn new() -> Self {
-        Self {
-            lock: CachePadded::new(AtomicUsize::new(State::WAITING.0)),
-            waker: UnsafeCell::new(None),
-        }
-    }
-
-    #[cfg(all(loom, test))]
-    pub fn new() -> Self {
-        Self {
-            lock: CachePadded::new(AtomicUsize::new(State::WAITING.0)),
-            waker: UnsafeCell::new(None),
+    loom_const_fn! {
+        /// Returns a new `WaitCell`, with no [`Waker`] stored in it.
+        #[must_use]
+        pub fn new() -> Self {
+            Self {
+                lock: CachePadded::new(AtomicUsize::new(State::WAITING.0)),
+                waker: UnsafeCell::new(None),
+            }
         }
     }
 }
 
 impl WaitCell {
+    /// Register `waker` with this `WaitCell`.
+    ///
+    /// Once a [`Waker`] has been registered, a subsequent call to [`wake`] will
+    /// wake that [`Waker`].
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the [`Waker`] was registered. If this method returns
+    ///   `Ok(())`, then the registered [`Waker`] will be woken by a subsequent
+    ///   call to [`wake`].
+    /// - `Err(`[`Error::Closed`]`)` if the [`WaitCell`] has been closed.
+    /// - `Err(`[`Error::Notifying`]`)` if the [`WaitCell`] was [woken][`wake`]
+    ///   *while* the waker was being registered. The caller may choose to treat
+    ///   this as a valid wakeup.
+    /// - `Err(`[`Error::Parking`]`)` if another task was [`WaitCell`]
+    ///   concurrently registering its [`Waker`].
+    ///
+    /// [`wake`]: Self::wake
     pub fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
@@ -166,7 +199,8 @@ impl WaitCell {
 
     /// Wait to be woken up by this cell.
     ///
-    /// Note: The waiter is not registered until AFTER the first time the waiter is polled
+    /// **Note**: The calling task's [`Waker`] is not registered until AFTER the
+    /// first time the returned [`Wait`] future is polled.
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             cell: self,
@@ -174,10 +208,24 @@ impl WaitCell {
         }
     }
 
+    /// Wake the [`Waker`] stored in this cell.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if a waiting task was woken.
+    /// - `false` if no task was woken (no [`Waker`] was stored in the cell)
     pub fn wake(&self) -> bool {
         self.notify2(State::WAITING)
     }
 
+    /// Close the [`WaitCell`].
+    ///
+    /// This wakes any waiting task with an error indicating the `WaitCell` is
+    /// closed. Subsequent calls to [`wait`] or [`register_wait`] will return an
+    /// error indicating that the cell has been closed.
+    ///
+    /// [`wait`]: Self::wait
+    /// [`register_wait`]: Self::register_wait
     pub fn close(&self) {
         self.notify2(State::CLOSED);
     }
