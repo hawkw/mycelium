@@ -116,6 +116,7 @@ pub struct MutexGuard<'a, T: ?Sized> {
 /// [future]: core::future::Future
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[pin_project]
+#[derive(Debug)]
 pub struct Lock<'a, T: ?Sized> {
     #[pin]
     wait: wait_queue::Wait<'a>,
