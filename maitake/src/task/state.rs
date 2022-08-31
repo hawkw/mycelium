@@ -107,7 +107,12 @@ pub(super) enum StartPollAction {
     Poll,
 
     /// The task was canceled, and its [`JoinHandle`] waker may need to be woken.
-    Canceled { wake_join_waker: bool },
+    ///
+    /// [`JoinHandle`]: super::JoinHandle
+    Canceled {
+        /// If `true`, the task's join waker must be woken.
+        wake_join_waker: bool,
+    },
 
     /// The task is not in a valid state to start a poll. Do nothing.
     CantPoll,
