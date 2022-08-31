@@ -1,3 +1,6 @@
+//! An atomically registered [`Waker`], for waking a single task.
+//!
+//! See the documentation for the [`WaitCell`] type for details.
 use crate::loom::{
     cell::UnsafeCell,
     sync::atomic::{
