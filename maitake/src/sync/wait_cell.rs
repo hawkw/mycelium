@@ -78,22 +78,6 @@ pub struct Wait<'a> {
     registered: bool,
 }
 
-const fn closed() -> Result<(), RegisterError> {
-    Err(RegisterError::Closed)
-}
-
-const fn registering() -> Result<(), RegisterError> {
-    Err(RegisterError::Registering)
-}
-
-const fn registered() -> Result<(), RegisterError> {
-    Ok(())
-}
-
-const fn waking() -> Result<(), RegisterError> {
-    Err(RegisterError::Waking)
-}
-
 #[derive(Eq, PartialEq, Copy, Clone)]
 struct State(usize);
 
@@ -139,17 +123,17 @@ impl WaitCell {
         match test_dbg!(self.compare_exchange(State::WAITING, State::REGISTERING, Acquire)) {
             // someone else is notifying, so don't wait!
             Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
-                return closed();
+                return Err(RegisterError::Closed);
             }
             Err(actual) if test_dbg!(actual.is(State::WAKING)) => {
-                return waking();
+                return Err(RegisterError::Waking);
             }
 
             Err(actual) => {
                 debug_assert!(
                     actual == State::REGISTERING || actual == State::REGISTERING | State::WAKING
                 );
-                return registering();
+                return Err(RegisterError::Registering);
             }
             Ok(_) => {}
         }
@@ -168,7 +152,7 @@ impl WaitCell {
         }
 
         match test_dbg!(self.compare_exchange(State::REGISTERING, State::WAITING, AcqRel)) {
-            Ok(_) => registered(),
+            Ok(_) => Ok(()),
             Err(actual) => {
                 // If the `compare_exchange` fails above, this means that we were notified for one of
                 // two reasons: either the cell was awoken, or the cell was closed.
@@ -195,9 +179,9 @@ impl WaitCell {
                 // Was the `CLOSED` bit set while we were clearing other bits?
                 // If so, the cell is closed. Otherwise, we must have been notified.
                 if state.is(State::CLOSED) {
-                    closed()
+                    Err(RegisterError::Closed)
                 } else {
-                    waking()
+                    Err(RegisterError::Waking)
                 }
             }
         }
