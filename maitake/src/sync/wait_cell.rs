@@ -59,9 +59,11 @@ pub struct Wait<'a> {
 }
 
 /// An error indicating that a [`WaitCell`] was closed or busy while
-/// attempting register a waiter.
+/// attempting register a [`Waker`].
+///
+/// This error is returned by the [`WaitCell::register_wait`] method.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Error {
+pub enum RegisterError {
     /// The [`Waker`] was not registered because the [`WaitCell`] has been
     /// [closed](WaitCell::close).
     Closed,
@@ -76,20 +78,20 @@ pub enum Error {
     Parking,
 }
 
-const fn closed() -> Result<(), Error> {
-    Err(Error::Closed)
+const fn closed() -> Result<(), RegisterError> {
+    Err(RegisterError::Closed)
 }
 
-const fn parking() -> Result<(), Error> {
-    Err(Error::Parking)
+const fn parking() -> Result<(), RegisterError> {
+    Err(RegisterError::Parking)
 }
 
-const fn registered() -> Result<(), Error> {
+const fn registered() -> Result<(), RegisterError> {
     Ok(())
 }
 
-const fn notifying() -> Result<(), Error> {
-    Err(Error::Notifying)
+const fn notifying() -> Result<(), RegisterError> {
+    Err(RegisterError::Notifying)
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -121,15 +123,16 @@ impl WaitCell {
     /// - `Ok(())` if the [`Waker`] was registered. If this method returns
     ///   `Ok(())`, then the registered [`Waker`] will be woken by a subsequent
     ///   call to [`wake`].
-    /// - `Err(`[`Error::Closed`]`)` if the [`WaitCell`] has been closed.
-    /// - `Err(`[`Error::Notifying`]`)` if the [`WaitCell`] was [woken][`wake`]
-    ///   *while* the waker was being registered. The caller may choose to treat
-    ///   this as a valid wakeup.
-    /// - `Err(`[`Error::Parking`]`)` if another task was [`WaitCell`]
+    /// - `Err(`[`RegisterError::Closed`]`)` if the [`WaitCell`] has been
+    ///   closed.
+    /// - `Err(`[`RegisterError::Notifying`]`)` if the [`WaitCell`] was
+    ///   [woken][`wake`] *while* the waker was being registered. The caller may
+    ///   choose to treat this as a valid wakeup.
+    /// - `Err(`[`RegisterError::Parking`]`)` if another task was [`WaitCell`]
     ///   concurrently registering its [`Waker`].
     ///
     /// [`wake`]: Self::wake
-    pub fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
+    pub fn register_wait(&self, waker: &Waker) -> Result<(), RegisterError> {
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
@@ -316,17 +319,17 @@ impl Future for Wait<'_> {
                 self.registered = true;
                 Poll::Pending
             }
-            Err(Error::Parking) => {
+            Err(RegisterError::Parking) => {
                 // Cell was busy parking some other task, all we can do is try again later
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            Err(Error::Notifying) => {
+            Err(RegisterError::Notifying) => {
                 // Cell is waking another task RIGHT NOW, so let's ride that high all the
                 // way to the READY state.
                 Poll::Ready(Ok(()))
             }
-            Err(Error::Closed) => super::closed(),
+            Err(RegisterError::Closed) => super::closed(),
         }
     }
 }
