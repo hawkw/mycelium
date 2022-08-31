@@ -133,18 +133,18 @@ impl WaitCell {
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
-        match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
+        match test_dbg!(self.compare_exchange(State::WAITING, State::REGISTERING, Acquire)) {
             // someone else is notifying, so don't wait!
             Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
                 return closed();
             }
-            Err(actual) if test_dbg!(actual.is(State::NOTIFYING)) => {
+            Err(actual) if test_dbg!(actual.is(State::WAKING)) => {
                 return notifying();
             }
 
             Err(actual) => {
                 debug_assert!(
-                    actual == State::PARKING || actual == State::PARKING | State::NOTIFYING
+                    actual == State::REGISTERING || actual == State::REGISTERING | State::WAKING
                 );
                 return parking();
             }
@@ -164,7 +164,7 @@ impl WaitCell {
             prev_waker.wake();
         }
 
-        match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel)) {
+        match test_dbg!(self.compare_exchange(State::REGISTERING, State::WAITING, AcqRel)) {
             Ok(_) => registered(),
             Err(actual) => {
                 // If the `compare_exchange` fails above, this means that we were notified for one of
@@ -235,12 +235,12 @@ impl WaitCell {
 
     fn notify2(&self, close: State) -> bool {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
-        let bits = State::NOTIFYING | close;
+        let bits = State::WAKING | close;
         if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
             // we have the lock!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
 
-            test_dbg!(self.fetch_and(!State::NOTIFYING, AcqRel));
+            test_dbg!(self.fetch_and(!State::WAKING, AcqRel));
 
             if let Some(waker) = test_dbg!(waker) {
                 trace!(wait_cell = ?fmt::ptr(self), ?close, ?waker, "notified");
@@ -335,8 +335,8 @@ impl Future for Wait<'_> {
 
 impl State {
     const WAITING: Self = Self(0b00);
-    const PARKING: Self = Self(0b01);
-    const NOTIFYING: Self = Self(0b10);
+    const REGISTERING: Self = Self(0b01);
+    const WAKING: Self = Self(0b10);
     const CLOSED: Self = Self(0b100);
 
     fn is(self, Self(state): Self) -> bool {
@@ -364,7 +364,7 @@ impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut has_states = false;
 
-        fmt_bits!(self, f, has_states, PARKING, NOTIFYING, CLOSED);
+        fmt_bits!(self, f, has_states, REGISTERING, WAKING, CLOSED);
 
         if !has_states {
             if *self == Self::WAITING {
