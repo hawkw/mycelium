@@ -19,7 +19,7 @@
 #![warn(missing_docs, missing_debug_implementations)]
 pub mod mutex;
 pub mod semaphore;
-pub(crate) mod wait_cell;
+pub mod wait_cell;
 pub mod wait_map;
 pub mod wait_queue;
 
@@ -30,6 +30,7 @@ pub use self::mutex::OwnedMutexGuard;
 pub use self::mutex::{Mutex, MutexGuard};
 #[doc(inline)]
 pub use self::semaphore::Semaphore;
+#[doc(inline)]
 pub use self::wait_cell::WaitCell;
 #[doc(inline)]
 pub use self::wait_map::WaitMap;
