@@ -16,6 +16,48 @@ use core::{
 };
 use mycelium_util::{fmt, sync::CachePadded};
 
+/// An atomically registered [`Waker`].
+///
+/// This cell stores the [`Waker`] of a single task. A [`Waker`] is stored in
+/// the cell either by calling [`register_wait`], or by polling a [`wait`]
+/// future. Once a task's [`Waker`] is stored in a `WaitCell`, it can be woken
+/// by calling [`wake`] on the `WaitCell`.
+///
+/// # Implementation Notes
+///
+/// This is inspired by the [`AtomicWaker`] type used in Tokio's
+/// synchronization primitives, with the following modifications:
+///
+/// - An additional bit of state is added to allow [setting a "close"
+///   bit](Self::close).
+/// - A `WaitCell` is always woken by value (for now).
+/// - `WaitCell` does not handle unwinding, because [`maitake` does not support
+///   unwinding](crate#maitake-does-not-support-unwinding)
+///
+/// [`AtomicWaker`]: https://github.com/tokio-rs/tokio/blob/09b770c5db31a1f35631600e1d239679354da2dd/tokio/src/sync/task/atomic_waker.rs
+/// [`Waker`]: core::task::Waker
+/// [`register_wait`]: Self::register_wait
+/// [`wait`]: Self::wait
+/// [`wake`]: Self::wake
+pub struct WaitCell {
+    lock: CachePadded<AtomicUsize>,
+    waker: UnsafeCell<Option<Waker>>,
+}
+
+/// Future returned from [`WaitCell::wait()`].
+///
+/// This future is fused, so once it has completed, any future calls to poll
+/// will immediately return [`Poll::Ready`].
+#[derive(Debug)]
+#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
+pub struct Wait<'a> {
+    /// The [`WaitCell`] being waited on.
+    cell: &'a WaitCell,
+
+    /// Whether we have already polled once
+    registered: bool,
+}
+
 /// An error indicating that a [`WaitCell`] was closed or busy while
 /// attempting register a waiter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -50,50 +92,8 @@ const fn notifying() -> Result<(), Error> {
     Err(Error::Notifying)
 }
 
-/// An atomically registered [`Waker`].
-///
-/// This cell stores the [`Waker`] of a single task. A [`Waker`] is stored in
-/// the cell either by calling [`register_wait`], or by polling a [`wait`]
-/// future. Once a task's [`Waker`] is stored in a `WaitCell`, it can be woken
-/// by calling [`wake`] on the `WaitCell`.
-///
-/// # Implementation Notes
-///
-/// This is inspired by the [`AtomicWaker`] type used in Tokio's
-/// synchronization primitives, with the following modifications:
-///
-/// - An additional bit of state is added to allow [setting a "close"
-///   bit](Self::close).
-/// - A `WaitCell` is always woken by value (for now).
-/// - `WaitCell` does not handle unwinding, because [`maitake` does not support
-///   unwinding](crate#maitake-does-not-support-unwinding)
-///
-/// [`AtomicWaker`]: https://github.com/tokio-rs/tokio/blob/09b770c5db31a1f35631600e1d239679354da2dd/tokio/src/sync/task/atomic_waker.rs
-/// [`Waker`]: core::task::Waker
-/// [`register_wait`]: Self::register_wait
-/// [`wait`]: Self::wait
-/// [`wake`]: Self::wake
-pub struct WaitCell {
-    lock: CachePadded<AtomicUsize>,
-    waker: UnsafeCell<Option<Waker>>,
-}
-
 #[derive(Eq, PartialEq, Copy, Clone)]
 struct State(usize);
-
-/// Future returned from [`WaitCell::wait()`].
-///
-/// This future is fused, so once it has completed, any future calls to poll
-/// will immediately return [`Poll::Ready`].
-#[derive(Debug)]
-#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a> {
-    /// The [`WaitCell`] being waited on.
-    cell: &'a WaitCell,
-
-    /// Whether we have already polled once
-    registered: bool,
-}
 
 // === impl WaitCell ===
 
