@@ -90,7 +90,10 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 ///
 /// ```
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, wait::map::{WaitMap, WakeOutcome}};
+/// use maitake::{
+///     scheduler::Scheduler,
+///     sync::wait_map::{WaitMap, WakeOutcome},
+/// };
 ///
 /// const TASKS: usize = 10;
 ///
@@ -233,7 +236,10 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use maitake::{scheduler::Scheduler, wait::map::{WaitMap, WakeOutcome}};
+    /// use maitake::{
+    ///     scheduler::Scheduler,
+    ///     sync::wait_map::{WaitMap, WakeOutcome},
+    /// };
     /// use futures_util::pin_mut;
     ///
     /// let scheduler = Scheduler::new();
