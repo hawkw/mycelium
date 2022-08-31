@@ -890,6 +890,13 @@ impl TaskRef {
 
     /// Forcibly cancel the task.
     ///
+    /// Canceling a task sets a flag indicating that it has been canceled and
+    /// should terminate. The next time a canceled task is polled by the
+    /// scheduler, it will terminate instead of polling the inner [`Future`]. If
+    /// the task has a [`JoinHandle`], that [`JoinHandle`] will complete with a
+    /// [`JoinError`]. The task then will be deallocated once all
+    /// [`JoinHandle`]s and [`TaskRef`]s referencing it have been dropped.
+    ///
     /// This method returns `true` if the task was canceled successfully, and
     /// `false` if the task could not be canceled (i.e., it has already completed,
     /// has already been canceled, cancel culture has gone TOO FAR, et cetera).
