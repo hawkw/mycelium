@@ -4,6 +4,9 @@
 //!
 //! - [`Mutex`]: a fairly queued, asynchronous [mutual exclusion lock], for
 //!       protecting shared data
+//! - [`RwLock`]: a fairly queued, asynchronous [readers-writer lock], which
+//!       allows concurrent read access to shared data while ensuring write
+//!       access is exclusive
 //! - [`Semaphore`]: an asynchronous [counting semaphore], for limiting the
 //!       number of tasks which may run concurrently
 //! - [`WaitCell`], a cell that stores a *single* waiting task's [`Waker`], so
@@ -13,11 +16,13 @@
 //! - [`WaitMap`], a set of waiting tasks associated with keys, in which a task
 //!       can be woken by its key
 //!
-//! [mutual exclusion lock]:https://en.wikipedia.org/wiki/Mutual_exclusion
+//! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
+//! [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 //! [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
 //! [`Waker`]: core::task::Waker
 #![warn(missing_docs, missing_debug_implementations)]
 pub mod mutex;
+pub mod rwlock;
 pub mod semaphore;
 pub mod wait_cell;
 pub mod wait_map;
@@ -28,6 +33,8 @@ pub mod wait_queue;
 pub use self::mutex::OwnedMutexGuard;
 #[doc(inline)]
 pub use self::mutex::{Mutex, MutexGuard};
+#[doc(inline)]
+pub use self::rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 #[doc(inline)]
 pub use self::semaphore::Semaphore;
 #[doc(inline)]

@@ -1,6 +1,8 @@
-//! An asynchronous mutual exclusion lock.
+//! An asynchronous [mutual exclusion lock][mutex].
 //!
 //! See the documentation on the [`Mutex`] type for details.
+//!
+/// [mutex]: https://en.wikipedia.org/wiki/Mutual_exclusion
 use crate::{
     loom::cell::{MutPtr, UnsafeCell},
     sync::wait_queue::{self, WaitQueue},

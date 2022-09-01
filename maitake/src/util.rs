@@ -105,10 +105,22 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 }
 
 #[cfg(all(test, not(loom)))]
-pub(crate) fn trace_init() {
-    use tracing_subscriber::filter::LevelFilter;
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(LevelFilter::TRACE)
-        .with_test_writer()
-        .try_init();
+pub(crate) use self::test::trace_init;
+
+#[cfg(all(test, not(loom)))]
+pub(crate) mod test {
+    pub(crate) fn trace_init() {
+        use tracing_subscriber::filter::LevelFilter;
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(LevelFilter::TRACE)
+            .with_test_writer()
+            .try_init();
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn assert_send<T: Send>() {}
+
+    #[allow(dead_code)]
+    pub(crate) fn assert_sync<T: Sync>() {}
+    pub(crate) fn assert_send_sync<T: Send + Sync>() {}
 }

@@ -1,20 +1,19 @@
 use super::*;
-
-fn assert_send_sync<T: Send + Sync>() {}
+use crate::util;
 
 #[test]
 fn semaphore_is_send_and_sync() {
-    assert_send_sync::<Semaphore>();
+    util::test::assert_send_sync::<Semaphore>();
 }
 
 #[test]
 fn permit_is_send_and_sync() {
-    assert_send_sync::<Permit<'_>>();
+    util::test::assert_send_sync::<Permit<'_>>();
 }
 
 #[test]
 fn acquire_is_send_and_sync() {
-    assert_send_sync::<crate::sync::semaphore::Acquire<'_>>();
+    util::test::assert_send_sync::<crate::sync::semaphore::Acquire<'_>>();
 }
 
 #[cfg(feature = "alloc")]
@@ -26,12 +25,12 @@ mod alloc {
 
     #[test]
     fn owned_permit_is_send_and_sync() {
-        assert_send_sync::<OwnedPermit>();
+        util::test::assert_send_sync::<OwnedPermit>();
     }
 
     #[test]
     fn acquire_owned_is_send_and_sync() {
-        assert_send_sync::<AcquireOwned>();
+        util::test::assert_send_sync::<AcquireOwned>();
     }
 
     #[test]
