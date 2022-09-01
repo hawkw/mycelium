@@ -1,5 +1,5 @@
 use super::*;
-use crate::loom::{self, thread, future, sync::Arc};
+use crate::loom::{self, future, sync::Arc, thread};
 
 #[test]
 fn write() {
@@ -7,10 +7,12 @@ fn write() {
 
     loom::model(|| {
         let lock = Arc::new(RwLock::<usize>::new(0));
-        let threads = (0..WRITERS).map(|_| {
-            let lock = lock.clone();
-            thread::spawn(writer(lock))
-        }).collect::<Vec<_>>();
+        let threads = (0..WRITERS)
+            .map(|_| {
+                let lock = lock.clone();
+                thread::spawn(writer(lock))
+            })
+            .collect::<Vec<_>>();
 
         for thread in threads {
             thread.join().expect("writer thread mustn't panic");
@@ -27,10 +29,12 @@ fn read_write() {
 
     loom::model(|| {
         let lock = Arc::new(RwLock::<usize>::new(0));
-        let w_threads = (0..WRITERS).map(|_| {
-            let lock = lock.clone();
-            thread::spawn(writer(lock))
-        }).collect::<Vec<_>>();
+        let w_threads = (0..WRITERS)
+            .map(|_| {
+                let lock = lock.clone();
+                thread::spawn(writer(lock))
+            })
+            .collect::<Vec<_>>();
 
         {
             let guard = future::block_on(lock.read());
@@ -47,8 +51,10 @@ fn read_write() {
 }
 
 fn writer(lock: Arc<RwLock<usize>>) -> impl FnOnce() {
-    move || future::block_on(async {
-        let mut guard = lock.write().await;
-        *guard += 1;
-    })
+    move || {
+        future::block_on(async {
+            let mut guard = lock.write().await;
+            *guard += 1;
+        })
+    }
 }
