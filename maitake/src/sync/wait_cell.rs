@@ -44,6 +44,26 @@ pub struct WaitCell {
     waker: UnsafeCell<Option<Waker>>,
 }
 
+/// An error indicating that a [`WaitCell`] was closed or busy while
+/// attempting register a [`Waker`].
+///
+/// This error is returned by the [`WaitCell::register_wait`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RegisterError {
+    /// The [`Waker`] was not registered because the [`WaitCell`] has been
+    /// [closed](WaitCell::close).
+    Closed,
+
+    /// The [`Waker`] was not registered because the [`WaitCell`] was already in
+    /// the process of [waking](WaitCell::wake). The caller may choose to treat
+    /// this error as a wakeup.
+    Waking,
+
+    /// The [`Waker`] was not registered because another task was concurrently
+    /// storing its own [`Waker`] in the [`WaitCell`].
+    Registering,
+}
+
 /// Future returned from [`WaitCell::wait()`].
 ///
 /// This future is fused, so once it has completed, any future calls to poll
@@ -58,40 +78,20 @@ pub struct Wait<'a> {
     registered: bool,
 }
 
-/// An error indicating that a [`WaitCell`] was closed or busy while
-/// attempting register a [`Waker`].
-///
-/// This error is returned by the [`WaitCell::register_wait`] method.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum RegisterError {
-    /// The [`Waker`] was not registered because the [`WaitCell`] has been
-    /// [closed](WaitCell::close).
-    Closed,
-
-    /// The [`Waker`] was not registered because the [`WaitCell`] was already in
-    /// the process of [waking](WaitCell::wake). The caller may choose to treat
-    /// this error as a wakeup.
-    Notifying,
-
-    /// The [`Waker`] was not registered because another task was concurrently
-    /// storing its own [`Waker`] in the [`WaitCell`].
-    Parking,
-}
-
 const fn closed() -> Result<(), RegisterError> {
     Err(RegisterError::Closed)
 }
 
-const fn parking() -> Result<(), RegisterError> {
-    Err(RegisterError::Parking)
+const fn registering() -> Result<(), RegisterError> {
+    Err(RegisterError::Registering)
 }
 
 const fn registered() -> Result<(), RegisterError> {
     Ok(())
 }
 
-const fn notifying() -> Result<(), RegisterError> {
-    Err(RegisterError::Notifying)
+const fn waking() -> Result<(), RegisterError> {
+    Err(RegisterError::Waking)
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -125,11 +125,11 @@ impl WaitCell {
     ///   call to [`wake`].
     /// - `Err(`[`RegisterError::Closed`]`)` if the [`WaitCell`] has been
     ///   closed.
-    /// - `Err(`[`RegisterError::Notifying`]`)` if the [`WaitCell`] was
+    /// - `Err(`[`RegisterError::Waking`]`)` if the [`WaitCell`] was
     ///   [woken][`wake`] *while* the waker was being registered. The caller may
     ///   choose to treat this as a valid wakeup.
-    /// - `Err(`[`RegisterError::Parking`]`)` if another task was [`WaitCell`]
-    ///   concurrently registering its [`Waker`].
+    /// - `Err(`[`RegisterError::Registering`]`)` if another task was
+    ///   [`WaitCell`] concurrently registering its [`Waker`].
     ///
     /// [`wake`]: Self::wake
     pub fn register_wait(&self, waker: &Waker) -> Result<(), RegisterError> {
@@ -142,14 +142,14 @@ impl WaitCell {
                 return closed();
             }
             Err(actual) if test_dbg!(actual.is(State::WAKING)) => {
-                return notifying();
+                return waking();
             }
 
             Err(actual) => {
                 debug_assert!(
                     actual == State::REGISTERING || actual == State::REGISTERING | State::WAKING
                 );
-                return parking();
+                return registering();
             }
             Ok(_) => {}
         }
@@ -197,7 +197,7 @@ impl WaitCell {
                 if state.is(State::CLOSED) {
                     closed()
                 } else {
-                    notifying()
+                    waking()
                 }
             }
         }
@@ -319,12 +319,12 @@ impl Future for Wait<'_> {
                 self.registered = true;
                 Poll::Pending
             }
-            Err(RegisterError::Parking) => {
+            Err(RegisterError::Registering) => {
                 // Cell was busy parking some other task, all we can do is try again later
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            Err(RegisterError::Notifying) => {
+            Err(RegisterError::Waking) => {
                 // Cell is waking another task RIGHT NOW, so let's ride that high all the
                 // way to the READY state.
                 Poll::Ready(Ok(()))
