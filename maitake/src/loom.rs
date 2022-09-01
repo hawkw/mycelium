@@ -142,8 +142,31 @@ mod inner {
             }
 
             #[inline(always)]
+            pub(crate) fn get(&self) -> ConstPtr<T> {
+                ConstPtr(self.0.get())
+            }
+
+            #[inline(always)]
             pub(crate) fn get_mut(&self) -> MutPtr<T> {
                 MutPtr(self.0.get())
+            }
+        }
+
+        #[derive(Debug)]
+        pub(crate) struct ConstPtr<T: ?Sized>(*const T);
+
+        impl<T: ?Sized> ConstPtr<T> {
+            #[inline(always)]
+            pub(crate) unsafe fn deref(&self) -> &T {
+                &*self.0
+            }
+
+            #[inline(always)]
+            pub fn with<F, R>(&self, f: F) -> R
+            where
+                F: FnOnce(*const T) -> R,
+            {
+                f(self.0)
             }
         }
 
