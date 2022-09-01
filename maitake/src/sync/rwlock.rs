@@ -23,10 +23,11 @@ mod tests;
 /// is being written, but multiple threads can read the shared data when it is
 /// not being mutated.
 ///
-/// This is in contrast to a [`Mutex`](super::Mutex), which only ever allows a
-/// single core/thread to access the shared data at any point in time. In some
-/// cases, such as when a large number of readers need to access the shared data
-/// without modifying it, using a `RwLock` can be more efficient than a [`Mutex`].
+/// This is in contrast to a [`Mutex`], which only ever allows a single
+/// core/thread to access the shared data at any point in time. In some cases,
+/// such as when a large number of readers need to access the shared data
+/// without modifying it, using a `RwLock` can be more efficient than a
+/// [`Mutex`].
 ///
 /// # Usage
 ///
@@ -87,6 +88,7 @@ mod tests;
 /// # scheduler.tick();
 /// ```
 ///
+/// [`Mutex`]: crate::sync::Mutex
 /// [`read`]: Self::read
 /// [`write`]: Self::write
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
