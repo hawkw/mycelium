@@ -16,40 +16,6 @@ use core::{
 };
 use mycelium_util::{fmt, sync::CachePadded};
 
-/// An error indicating that a [`WaitCell`] was closed or busy while
-/// attempting register a waiter.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Error {
-    /// The [`Waker`] was not registered because the [`WaitCell`] has been
-    /// [closed](WaitCell::close).
-    Closed,
-
-    /// The [`Waker`] was not registered because the [`WaitCell`] was already in
-    /// the process of [waking](WaitCell::wake). The caller may choose to treat
-    /// this error as a wakeup.
-    Notifying,
-
-    /// The [`Waker`] was not registered because another task was concurrently
-    /// storing its own [`Waker`] in the [`WaitCell`].
-    Parking,
-}
-
-const fn closed() -> Result<(), Error> {
-    Err(Error::Closed)
-}
-
-const fn parking() -> Result<(), Error> {
-    Err(Error::Parking)
-}
-
-const fn registered() -> Result<(), Error> {
-    Ok(())
-}
-
-const fn notifying() -> Result<(), Error> {
-    Err(Error::Notifying)
-}
-
 /// An atomically registered [`Waker`].
 ///
 /// This cell stores the [`Waker`] of a single task. A [`Waker`] is stored in
@@ -78,8 +44,25 @@ pub struct WaitCell {
     waker: UnsafeCell<Option<Waker>>,
 }
 
-#[derive(Eq, PartialEq, Copy, Clone)]
-struct State(usize);
+/// An error indicating that a [`WaitCell`] was closed or busy while
+/// attempting register a [`Waker`].
+///
+/// This error is returned by the [`WaitCell::register_wait`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RegisterError {
+    /// The [`Waker`] was not registered because the [`WaitCell`] has been
+    /// [closed](WaitCell::close).
+    Closed,
+
+    /// The [`Waker`] was not registered because the [`WaitCell`] was already in
+    /// the process of [waking](WaitCell::wake). The caller may choose to treat
+    /// this error as a wakeup.
+    Waking,
+
+    /// The [`Waker`] was not registered because another task was concurrently
+    /// storing its own [`Waker`] in the [`WaitCell`].
+    Registering,
+}
 
 /// Future returned from [`WaitCell::wait()`].
 ///
@@ -94,6 +77,9 @@ pub struct Wait<'a> {
     /// Whether we have already polled once
     registered: bool,
 }
+
+#[derive(Eq, PartialEq, Copy, Clone)]
+struct State(usize);
 
 // === impl WaitCell ===
 
@@ -121,32 +107,33 @@ impl WaitCell {
     /// - `Ok(())` if the [`Waker`] was registered. If this method returns
     ///   `Ok(())`, then the registered [`Waker`] will be woken by a subsequent
     ///   call to [`wake`].
-    /// - `Err(`[`Error::Closed`]`)` if the [`WaitCell`] has been closed.
-    /// - `Err(`[`Error::Notifying`]`)` if the [`WaitCell`] was [woken][`wake`]
-    ///   *while* the waker was being registered. The caller may choose to treat
-    ///   this as a valid wakeup.
-    /// - `Err(`[`Error::Parking`]`)` if another task was [`WaitCell`]
-    ///   concurrently registering its [`Waker`].
+    /// - `Err(`[`RegisterError::Closed`]`)` if the [`WaitCell`] has been
+    ///   closed.
+    /// - `Err(`[`RegisterError::Waking`]`)` if the [`WaitCell`] was
+    ///   [woken][`wake`] *while* the waker was being registered. The caller may
+    ///   choose to treat this as a valid wakeup.
+    /// - `Err(`[`RegisterError::Registering`]`)` if another task was
+    ///   [`WaitCell`] concurrently registering its [`Waker`].
     ///
     /// [`wake`]: Self::wake
-    pub fn register_wait(&self, waker: &Waker) -> Result<(), Error> {
+    pub fn register_wait(&self, waker: &Waker) -> Result<(), RegisterError> {
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
-        match test_dbg!(self.compare_exchange(State::WAITING, State::PARKING, Acquire)) {
+        match test_dbg!(self.compare_exchange(State::WAITING, State::REGISTERING, Acquire)) {
             // someone else is notifying, so don't wait!
             Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
-                return closed();
+                return Err(RegisterError::Closed);
             }
-            Err(actual) if test_dbg!(actual.is(State::NOTIFYING)) => {
-                return notifying();
+            Err(actual) if test_dbg!(actual.is(State::WAKING)) => {
+                return Err(RegisterError::Waking);
             }
 
             Err(actual) => {
                 debug_assert!(
-                    actual == State::PARKING || actual == State::PARKING | State::NOTIFYING
+                    actual == State::REGISTERING || actual == State::REGISTERING | State::WAKING
                 );
-                return parking();
+                return Err(RegisterError::Registering);
             }
             Ok(_) => {}
         }
@@ -164,8 +151,8 @@ impl WaitCell {
             prev_waker.wake();
         }
 
-        match test_dbg!(self.compare_exchange(State::PARKING, State::WAITING, AcqRel)) {
-            Ok(_) => registered(),
+        match test_dbg!(self.compare_exchange(State::REGISTERING, State::WAITING, AcqRel)) {
+            Ok(_) => Ok(()),
             Err(actual) => {
                 // If the `compare_exchange` fails above, this means that we were notified for one of
                 // two reasons: either the cell was awoken, or the cell was closed.
@@ -192,9 +179,9 @@ impl WaitCell {
                 // Was the `CLOSED` bit set while we were clearing other bits?
                 // If so, the cell is closed. Otherwise, we must have been notified.
                 if state.is(State::CLOSED) {
-                    closed()
+                    Err(RegisterError::Closed)
                 } else {
-                    notifying()
+                    Err(RegisterError::Waking)
                 }
             }
         }
@@ -235,12 +222,12 @@ impl WaitCell {
 
     fn notify2(&self, close: State) -> bool {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
-        let bits = State::NOTIFYING | close;
+        let bits = State::WAKING | close;
         if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
             // we have the lock!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
 
-            test_dbg!(self.fetch_and(!State::NOTIFYING, AcqRel));
+            test_dbg!(self.fetch_and(!State::WAKING, AcqRel));
 
             if let Some(waker) = test_dbg!(waker) {
                 trace!(wait_cell = ?fmt::ptr(self), ?close, ?waker, "notified");
@@ -316,17 +303,17 @@ impl Future for Wait<'_> {
                 self.registered = true;
                 Poll::Pending
             }
-            Err(Error::Parking) => {
+            Err(RegisterError::Registering) => {
                 // Cell was busy parking some other task, all we can do is try again later
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            Err(Error::Notifying) => {
+            Err(RegisterError::Waking) => {
                 // Cell is waking another task RIGHT NOW, so let's ride that high all the
                 // way to the READY state.
                 Poll::Ready(Ok(()))
             }
-            Err(Error::Closed) => super::closed(),
+            Err(RegisterError::Closed) => super::closed(),
         }
     }
 }
@@ -335,8 +322,8 @@ impl Future for Wait<'_> {
 
 impl State {
     const WAITING: Self = Self(0b00);
-    const PARKING: Self = Self(0b01);
-    const NOTIFYING: Self = Self(0b10);
+    const REGISTERING: Self = Self(0b01);
+    const WAKING: Self = Self(0b10);
     const CLOSED: Self = Self(0b100);
 
     fn is(self, Self(state): Self) -> bool {
@@ -364,7 +351,7 @@ impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut has_states = false;
 
-        fmt_bits!(self, f, has_states, PARKING, NOTIFYING, CLOSED);
+        fmt_bits!(self, f, has_states, REGISTERING, WAKING, CLOSED);
 
         if !has_states {
             if *self == Self::WAITING {
