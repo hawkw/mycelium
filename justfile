@@ -62,10 +62,20 @@ test-docs crate='':
         {{ _fmt }}
 
 # run lints (clippy, rustfmt, and docs checks) for `crate`
-lint crate='': && (check-docs crate)
-    {{ _cargo }} clippy {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }}
-    {{ _cargo }} clippy-x64 {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }}
-    {{ _cargo }} fmt --check {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }}
+lint crate='': (clippy crate) (check-fmt crate) (check-docs crate)
+
+# run clippy lints for `crate`
+clippy crate='':
+    {{ _cargo }} clippy \
+        {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }} \
+        {{ _fmt }}
+    {{ if crate == '' { _clippy-x64 } else if crate == 'mycelium-kernel' { _clippy-x64 } else { '' } }}
+
+# check rustfmt for `crate`
+check-fmt crate='':
+    {{ _cargo }} fmt --check \
+        {{ if crate == '' { '--all' } else { '-p' } }} {{ crate }} \
+        {{ _fmt }}
 
 # check documentation links and test docs for `crate` (or the whole workspace)
 check-docs crate='': (build-docs crate '--cfg docsrs -Dwarnings') (test-docs crate)
@@ -155,6 +165,8 @@ _testcmd := if no-nextest == '' {
     } else {
         'test'
     }
+
+_clippy-x64 := _cargo + " clippy-x64 -p mycelium-kernel " + _fmt
 
 _get-nextest:
     #!/usr/bin/env bash
