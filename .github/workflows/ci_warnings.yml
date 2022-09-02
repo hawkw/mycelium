@@ -45,9 +45,9 @@ jobs:
           paths: '["**/*.rs", "**/Cargo.toml", "Cargo.lock", ".github/workflows/ci_warnings.yml"]'
           do_not_skip: '["workflow_dispatch", "push"]'
 
-  # are there any annoying clippy lints we ought to clean up (host build)?
-  clippy-host:
-    name: cargo clippy (host)
+  # are there any annoying clippy lints we ought to clean up?
+  clippy:
+    name: clippy
     needs: is_enabled
     if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
@@ -55,27 +55,8 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - name: run clippy
-      uses: actions-rs/clippy-check@v1.0.5
-      with:
-        name: clippy-host
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-features
-
-  # are there any annoying clippy lints we ought to clean up (x86-64 cross
-  # build)?
-  clippy-x64:
-    name: cargo clippy (cross x64)
-    needs: is_enabled
-    if: ${{ needs.is_enabled.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-    - name: install rust toolchain
-      run: rustup show
-    - uses: actions/checkout@v2
-    - name: run cargo clippy
-      uses: actions-rs/clippy-check@v1.0.5
-      with:
-        name: clippy-x64
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: -Z build-std=core,alloc --target=x86_64-mycelium.json --all-features
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: cargo clippy
+      run: just clippy
