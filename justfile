@@ -16,6 +16,16 @@ _cargo := "cargo" + if toolchain != "" { " +" + toolchain } else { "" }
 
 _rustflags := env_var_or_default("RUSTFLAGS", "")
 
+# If we're running in Github Actions and cargo-action-fmt is installed, then add
+# a command suffix that formats errors.
+_fmt := if env_var_or_default("GITHUB_ACTIONS", "") != "true" { "" } else {
+    ```
+    if command -v cargo-action-fmt >/dev/null 2>&1; then
+        echo "--message-format=json | cargo-action-fmt"
+    fi
+    ```
+}
+
 # default recipe to display help information
 default:
     @echo "justfile for Mycelium"
@@ -26,12 +36,15 @@ default:
 # run all tests and checks for `crate` (or for the whole workspace)
 preflight crate='': (lint crate) (test crate)
 
-# run all tests (normal tests), loom, and miri) for `crate` or for the whole workspace.
+# run all tests (normal tests, loom, and miri) for `crate` or for the whole workspace.
 test crate='': (test-host crate) (loom crate) (miri crate) (test-docs crate)
-    if crate == '' { cargo inoculate test } else { }
+    if crate == '' { _cargo inoculate test } else { }
 
 # run host tests for `crate` (or for the whole workspace).
 test-host crate='': _get-nextest
+    {{ _cargo }} build --tests --all-features \
+        {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
+        {{ _fmt }}
     {{ _cargo }} {{ _testcmd }} \
         {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
         {{ _test-profile }} \
@@ -45,7 +58,8 @@ test-kernel:
 test-docs crate='':
     {{ _cargo }} test --doc \
         {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
-        --all-features
+        --all-features \
+        {{ _fmt }}
 
 # run lints (clippy, rustfmt, and docs checks) for `crate`
 lint crate='': && (check-docs crate)
@@ -66,7 +80,8 @@ docs crate='': (build-docs)
 # build RustDoc documentation for the workspace.
 build-docs crate='' $RUSTDOCFLAGS='--cfg docsrs':
     {{ _cargo }} doc --no-deps --all-features --document-private-items \
-        {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }}
+        {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
+        {{ _fmt }}
 
 # run Miri, either for `crate` or for all crates with miri tests.
 miri crate='' $MIRIFLAGS='-Zmiri-strict-provenance -Zmiri-disable-isolation' $PROPTEST_CASES='10' $RUSTFLAGS="-Zrandomize-layout": _get-nextest
