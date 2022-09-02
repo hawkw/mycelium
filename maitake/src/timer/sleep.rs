@@ -9,15 +9,16 @@ use crate::{
 use cordyceps::{list, Linked};
 use core::{
     future::Future,
-    marker::PhantomPin,
+    marker::PhantomPinned,
     pin::Pin,
     task::{Context, Poll, Waker},
 };
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 
 #[pin_project(PinnedDrop)]
-pub struct Sleep {
+pub struct Sleep<'timer> {
     registered: bool,
+    timer: &'timer Mutex<Core>,
     #[pin]
     entry: Entry,
 }
@@ -39,22 +40,22 @@ pub(super) struct Entry {
 
 // === impl Sleep ===
 
-impl Future for Sleep {
+impl Future for Sleep<'_> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.registered {
-            // We made it to "once", and got polled again, we must be ready!
-            return Poll::Ready(Ok(()));
+        let this = self.project();
+        if *this.registered {
+            return Poll::Ready(());
         }
 
-        match self.waker.register_wait(cx.waker()) {
+        match this.entry.waker.register_wait(cx.waker()) {
             Ok(_) => {
-                self.registered = true;
+                this.registered = true;
                 Poll::Pending
             }
             // timer firing while we were trying to register!
-            Err(wait_cell::RegisterError::Waking) => Poll::Ready(Ok(())),
+            Err(wait_cell::RegisterError::Waking) => Poll::Ready(()),
             // these ones don't happen
             Err(wait_cell::RegisterError::Registering) => {
                 unreachable!("a sleep should only be polled by one task!")
@@ -67,9 +68,9 @@ impl Future for Sleep {
 }
 
 #[pinned_drop]
-impl PinnedDrop for Sleep {
+impl PinnedDrop for Sleep<'_> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
-        this.waiter.release(this.queue);
+        this.timer.lock().cancel_sleep(this.entry);
     }
 }
