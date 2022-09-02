@@ -58,8 +58,7 @@ test-kernel:
 test-docs crate='':
     {{ _cargo }} test --doc \
         {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
-        --all-features \
-        {{ _fmt }}
+        --all-features
 
 # run lints (clippy, rustfmt, and docs checks) for `crate`
 lint crate='': (clippy crate) (check-fmt crate) (check-docs crate)
