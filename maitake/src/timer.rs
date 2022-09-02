@@ -54,7 +54,7 @@ impl Timer {
         // instead, if the timer wheel is busy (e.g. the timer ISR was called on
         // another core, or if a `Sleep` future is currently canceling itself),
         // we just add to a counter of pending ticks, and bail.
-        if let Some(core) = self.core.try_lock() {
+        if let Some(mut core) = self.core.try_lock() {
             // take any pending ticks.
             let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
             // we do two separate `advance` calls here instead of advancing once
