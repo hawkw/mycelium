@@ -5,8 +5,10 @@ use crate::loom::{
 };
 use core::pin::Pin;
 mod sleep;
+mod wheel;
 
 pub use self::sleep::Sleep;
+use self::wheel::Wheel;
 
 pub type Ticks = u64;
 
@@ -17,9 +19,28 @@ pub struct Timer {
 
 struct Core {
     // ... this will be the actual timer wheel ...
+    wheels: [Wheel; 6],
 }
 
 impl Timer {
+    loom_const_fn! {
+        pub fn new() -> Self {
+            Self {
+                pending_ticks: AtomicUsize::new(0),
+                core: Mutex::new(Core {
+                    wheels: [
+                        Wheel::new(0),
+                        Wheel::new(1),
+                        Wheel::new(2),
+                        Wheel::new(3),
+                        Wheel::new(4),
+                        Wheel::new(5),
+                    ],
+                }),
+            }
+        }
+    }
+
     /// Returns a future that will complete in `ticks` timer ticks.
     pub fn sleep(&self, ticks: Ticks) -> Sleep<'_> {
         todo!("eliza")
@@ -55,6 +76,19 @@ impl Timer {
 // === impl Core ===
 
 impl Core {
+    pub const fn new() -> Self {
+        Self {
+            wheels: [
+                Wheel::new(0),
+                Wheel::new(1),
+                Wheel::new(2),
+                Wheel::new(3),
+                Wheel::new(4),
+                Wheel::new(5),
+            ],
+        }
+    }
+
     #[inline(never)]
     fn advance(&mut self, ticks: Ticks) -> usize {
         todo!("actually advance the timer wheel")
