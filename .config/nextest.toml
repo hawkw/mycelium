@@ -5,7 +5,8 @@ slow-timeout = { period = "1m", terminate-after = 2 }
 # of the run (for easy scrollability). A lot of our tests, especially in
 # `maitake` will print a bunch of logs on failure, so it's helpful to have the
 # complete list of failing tests printed *after* all the logs.
-failure-output = "immediate-final"
+failure-output = "immediate"
+final-status-level = "fail"
 
 [profile.loom]
 # loom tests might take a long time; don't have `nextest` print "slow" messages.
@@ -15,9 +16,11 @@ slow-timeout = { period = "10m" }
 # Do not cancel the test run on the first failure.
 fail-fast = false
 retries = 2
+final-status-level = "skip"
 
 [profile.loom-ci]
 # loom tests might take a long time; don't have `nextest` print "slow" messages.
 slow-timeout = { period = "10m" }
 # Do not cancel the test run on the first failure.
 fail-fast = false
+final-status-level = "skip"
