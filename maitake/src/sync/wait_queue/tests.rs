@@ -112,7 +112,14 @@ mod alloc {
 #[cfg(loom)]
 mod loom {
     use super::*;
-    use crate::loom::{self, future, sync::Arc, thread};
+    use crate::loom::{
+        self, future,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        thread,
+    };
 
     #[test]
     fn wake_one() {
@@ -158,21 +165,64 @@ mod loom {
     #[test]
     fn wake_all_concurrent() {
         use alloc::sync::Arc;
+        // must be higher than the number of threads in a `WakeSet`, but below
+        // Loom's min thread count.
+        const THREADS: usize = 3;
 
         loom::model(|| {
             let q = Arc::new(WaitQueue::new());
-            let wait1 = q.wait_owned();
-            let wait2 = q.wait_owned();
+            let mut waits = (0..THREADS)
+                .map(|_| q.clone().wait_owned())
+                .collect::<Vec<_>>();
 
-            let thread1 =
-                thread::spawn(move || future::block_on(wait1).expect("wait1 must not fail"));
-            let thread2 =
-                thread::spawn(move || future::block_on(wait2).expect("wait2 must not fail"));
+            let threads = waits.drain(..).map(|wait| {
+                thread::spawn(move || future::block_on(wait).expect("wait must not fail"))
+            });
 
             q.wake_all();
 
-            thread1.join().unwrap();
-            thread2.join().unwrap();
+            for thread in threads {
+                thread.join().unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn wake_all_reregistering() {
+        use alloc::sync::Arc;
+        const THREADS: usize = 2;
+
+        fn run_thread(q: Arc<(WaitQueue, AtomicUsize)>) -> impl FnOnce() {
+            move || {
+                future::block_on(async move {
+                    let (ref q, ref done) = &*q;
+                    q.wait().await.expect("queue must not close");
+                    q.wait().await.expect("queue must not close");
+                    done.fetch_add(1, Ordering::SeqCst);
+                })
+            }
+        }
+
+        let mut builder = loom::model::Builder::new();
+        // run with a lower preemption bound to try and make this test not take
+        // forever...
+        builder.preemption_bound = Some(2);
+        builder.check(|| {
+            let q = Arc::new((WaitQueue::new(), AtomicUsize::new(0)));
+
+            let threads = (0..THREADS)
+                .map(|_| thread::spawn(run_thread(q.clone())))
+                .collect::<Vec<_>>();
+
+            let (ref q, ref done) = &*q;
+            while test_dbg!(done.load(Ordering::SeqCst)) < THREADS {
+                q.wake_all();
+                thread::yield_now();
+            }
+
+            for thread in threads {
+                thread.join().unwrap();
+            }
         });
     }
 

@@ -8,7 +8,10 @@ pub(crate) struct WakeSet {
 
 // 16 seems like a decent size for a stack array, could make this 32 (or a const
 // generic).
-const MAX_WAKERS: usize = 16;
+//
+// when running loom tests, make the max much lower, so we can exercise behavior
+// involving multiple lock acquisitions.
+const MAX_WAKERS: usize = if cfg!(loom) { 2 } else { 16 };
 
 impl WakeSet {
     #[must_use]
