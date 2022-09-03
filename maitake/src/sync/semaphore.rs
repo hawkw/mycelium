@@ -13,7 +13,7 @@ use crate::{
         },
     },
     sync::{self, WaitResult},
-    util::WakeSet,
+    util::WakeBatch,
 };
 use cordyceps::{
     list::{self, List},
@@ -591,7 +591,7 @@ impl Semaphore {
 
         let mut drained_queue = false;
         while permits > 0 && !drained_queue {
-            let mut wakeset = WakeSet::new();
+            let mut wakeset = WakeBatch::new();
             while wakeset.can_add_waker() {
                 // peek the last waiter in the queue to add permits to it; we may not
                 // be popping it from the queue if there are not enough permits to

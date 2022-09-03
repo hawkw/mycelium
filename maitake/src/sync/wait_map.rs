@@ -10,7 +10,7 @@ use crate::{
             spin::{Mutex, MutexGuard},
         },
     },
-    util::WakeSet,
+    util::WakeBatch,
 };
 use cordyceps::{
     list::{self, List},
@@ -498,7 +498,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         }
 
         let mut queue = self.queue.lock();
-        let mut wakeset = WakeSet::new();
+        let mut wakeset = WakeBatch::new();
         while let Some(node) = queue.pop_back() {
             let waker = Waiter::wake(node, &mut queue, Wakeup::Closed);
             if wakeset.add_waker(waker) {

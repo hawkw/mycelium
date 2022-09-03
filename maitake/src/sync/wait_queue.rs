@@ -11,7 +11,7 @@ use crate::{
         },
     },
     sync::{self, WaitResult},
-    util::WakeSet,
+    util::WakeBatch,
 };
 use cordyceps::{
     list::{self, List},
@@ -434,7 +434,7 @@ impl WaitQueue {
             State::Waiting => {}
         }
 
-        let mut wakeset = WakeSet::new();
+        let mut wakeset = WakeBatch::new();
         queue = self.drain_to_wakeset(&mut wakeset, queue, Wakeup::All);
 
         // now that the queue has been drained, transition to the empty state,
@@ -467,7 +467,7 @@ impl WaitQueue {
             return;
         }
 
-        let mut wakeset = WakeSet::new();
+        let mut wakeset = WakeBatch::new();
         self.drain_to_wakeset(&mut wakeset, self.queue.lock(), Wakeup::Closed);
 
         // wake any tasks that were woken in the last iteration of the wakeset loop.
@@ -602,7 +602,7 @@ impl WaitQueue {
     /// batch of waiters.
     fn drain_to_wakeset<'q>(
         &'q self,
-        wakeset: &mut WakeSet,
+        wakeset: &mut WakeBatch,
         mut queue: MutexGuard<'q, List<Waiter>>,
         wakeup: Wakeup,
     ) -> MutexGuard<'q, List<Waiter>> {
