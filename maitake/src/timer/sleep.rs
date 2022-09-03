@@ -22,7 +22,6 @@ pub struct Sleep<'timer> {
 }
 
 #[derive(Debug)]
-#[repr(C)]
 #[pin_project]
 pub(super) struct Entry {
     /// Intrusive linked list pointers.
@@ -32,6 +31,22 @@ pub(super) struct Entry {
     pub(super) waker: WaitCell,
 
     pub(super) ticks: Ticks,
+
+    /// The wheel's elapsed timestamp when this `sleep` future was first polled.
+    ///
+    /// # Safety
+    ///
+    /// This is safe to access under the following conditions:
+    ///
+    /// * It may be written to only while holding the wheel lock, if the future
+    ///   is in the [`State::Unregistered`] state.
+    /// * It may be read at any point once the future is in the
+    ///   [`State::Registered`] state. It may never be written again after the
+    ///   state has progressed to `Registered`.
+    ///
+    /// It would be nice if this could just be an `AtomicU64` but LOLSOB WE CANT
+    /// HAVE NICE THINGS BECAUSE OF CORTEX-M.
+    pub(super) start_time: UnsafeCell<Ticks>,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
@@ -55,6 +70,7 @@ impl<'timer> Sleep<'timer> {
             entry: Entry {
                 links: UnsafeCell::new(list::Links::new()),
                 waker: WaitCell::new(),
+                start_time: UnsafeCell::new(0),
                 ticks,
                 _pin: PhantomPinned,
             },

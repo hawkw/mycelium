@@ -97,8 +97,24 @@ impl Core {
         self.wheels[wheel].remove(wheel, ticks, sleep);
     }
 
-    fn insert_sleep(&mut self, sleep: ptr::NonNull<sleep::Entry>) {
-        let ticks = unsafe { sleep.as_ref().ticks };
+    fn register_sleep(&mut self, mut sleep: ptr::NonNull<sleep::Entry>) {
+        let ticks = unsafe {
+            // safety: it's safe to access the entry's `start_time` field
+            // mutably because `insert_sleep` is only called when the entry
+            // hasn't been registered yet, and we are holding the timer lock.
+            let entry = sleep.as_mut();
+
+            // set the entry's start time to the wheel's current time.
+            entry.start_time.with_mut(|start_time| {
+                debug_assert_eq!(
+                    *start_time, 0,
+                    "sleep entry already bound to wheel! this is bad news!"
+                );
+                *start_time = self.elapsed
+            });
+
+            entry.ticks
+        };
         let wheel = self.wheel_index(ticks);
         self.wheels[wheel].insert(wheel, ticks, sleep);
     }
