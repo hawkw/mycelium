@@ -33,6 +33,9 @@ pub mod wait_queue;
 pub use self::mutex::OwnedMutexGuard;
 #[doc(inline)]
 pub use self::mutex::{Mutex, MutexGuard};
+#[cfg(feature = "alloc")]
+#[doc(inline)]
+pub use self::rwlock::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 #[doc(inline)]
 pub use self::rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 #[doc(inline)]

@@ -159,6 +159,12 @@ pub struct RwLockWriteGuard<'lock, T: ?Sized> {
     _permit: semaphore::Permit<'lock>,
 }
 
+feature! {
+    #![feature = "alloc"]
+    mod owned;
+    pub use self::owned::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
+}
+
 // === impl RwLock ===
 
 impl<T> RwLock<T> {
