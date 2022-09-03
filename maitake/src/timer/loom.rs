@@ -1,7 +1,7 @@
 use super::*;
 use crate::loom::{self, future::block_on, sync::Arc, thread};
-use core::{task::Poll, future::Future};
-use futures_util::{pin_mut, future};
+use core::{future::Future, task::Poll};
+use futures_util::{future, pin_mut};
 
 #[test]
 fn cancel_polled_sleeps() {
@@ -10,16 +10,18 @@ fn cancel_polled_sleeps() {
             let timer = timer;
             block_on(async move {
                 let sleep = timer.sleep(15);
-                let mut polled = false;
                 pin_mut!(sleep);
                 future::poll_fn(move |cx| {
-                    if polled {
-                        return Poll::Ready(());
-                    }
-
-                    polled = true;
-                    sleep.as_mut().poll(cx)
-                }).await
+                    // poll once to register the sleep with the timer wheel, and
+                    // then return `Ready` so it gets canceled.
+                    let poll = sleep.as_mut().poll(cx);
+                    tokio_test::assert_pending!(
+                        poll,
+                        "sleep should not complete, as its timer has not been advanced",
+                    );
+                    Poll::Ready(())
+                })
+                .await
             });
         }
     }
