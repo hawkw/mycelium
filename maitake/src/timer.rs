@@ -1,11 +1,17 @@
 //! Timer utilities.
-use crate::loom::{
+use crate::loom::sync::{
     atomic::{AtomicUsize, Ordering::*},
-    sync::spin::Mutex,
+    spin::Mutex,
 };
-use core::pin::Pin;
+use core::{pin::Pin, ptr};
 mod sleep;
 mod wheel;
+
+#[cfg(all(test, not(loom)))]
+mod tests;
+
+#[cfg(all(test, loom))]
+mod loom;
 
 pub use self::sleep::Sleep;
 use self::wheel::Wheel;
@@ -18,8 +24,11 @@ pub struct Timer {
 }
 
 struct Core {
-    // ... this will be the actual timer wheel ...
-    wheels: [Wheel; 6],
+    /// The total number of ticks that have elapsed since this timer started.
+    elapsed: Ticks,
+
+    /// The actual timer wheels.
+    wheels: [Wheel; Self::WHEELS],
 }
 
 impl Timer {
@@ -27,23 +36,14 @@ impl Timer {
         pub fn new() -> Self {
             Self {
                 pending_ticks: AtomicUsize::new(0),
-                core: Mutex::new(Core {
-                    wheels: [
-                        Wheel::new(0),
-                        Wheel::new(1),
-                        Wheel::new(2),
-                        Wheel::new(3),
-                        Wheel::new(4),
-                        Wheel::new(5),
-                    ],
-                }),
+                core: Mutex::new(Core::new()),
             }
         }
     }
 
     /// Returns a future that will complete in `ticks` timer ticks.
     pub fn sleep(&self, ticks: Ticks) -> Sleep<'_> {
-        todo!("eliza")
+        Sleep::new(&self.core, ticks)
     }
 
     /// Advance the timer by `ticks`, waking any `Sleep` futures that have
@@ -76,16 +76,13 @@ impl Timer {
 // === impl Core ===
 
 impl Core {
+    const WHEELS: usize = wheel::BITS;
     pub const fn new() -> Self {
+        // Used as an initializer when constructing a new `Core`.
+        const NEW_WHEEL: Wheel = Wheel::new();
         Self {
-            wheels: [
-                Wheel::new(0),
-                Wheel::new(1),
-                Wheel::new(2),
-                Wheel::new(3),
-                Wheel::new(4),
-                Wheel::new(5),
-            ],
+            elapsed: 0,
+            wheels: [NEW_WHEEL; Self::WHEELS],
         }
     }
 
@@ -95,6 +92,26 @@ impl Core {
     }
 
     fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {
-        todo!("cancel a sleep")
+        let ticks = *(sleep.as_ref().project_ref().ticks);
+        let wheel = self.wheel_index(ticks);
+        self.wheels[wheel].remove(wheel, ticks, sleep);
+    }
+
+    fn insert_sleep(&mut self, sleep: ptr::NonNull<sleep::Entry>) {
+        let ticks = unsafe { sleep.as_ref().ticks };
+        let wheel = self.wheel_index(ticks);
+        self.wheels[wheel].insert(wheel, ticks, sleep);
+    }
+
+    #[inline]
+    fn wheel_index(&self, ticks: Ticks) -> usize {
+        const WHEEL_MASK: u64 = (1 << wheel::BITS) - 1;
+
+        // mask out the bits representing the index in the wheel
+        let wheel_indices = self.elapsed ^ ticks | WHEEL_MASK;
+        let zeros = wheel_indices.leading_zeros();
+        let rest = u64::BITS - 1 - zeros;
+
+        rest as usize / Self::WHEELS
     }
 }

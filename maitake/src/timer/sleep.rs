@@ -15,7 +15,7 @@ use pin_project::{pin_project, pinned_drop};
 
 #[pin_project(PinnedDrop)]
 pub struct Sleep<'timer> {
-    registered: bool,
+    state: State,
     timer: &'timer Mutex<Core>,
     #[pin]
     entry: Entry,
@@ -28,38 +28,70 @@ pub(super) struct Entry {
     /// Intrusive linked list pointers.
     #[pin]
     links: UnsafeCell<list::Links<Entry>>,
-    waker: WaitCell,
-    ticks: Ticks,
+
+    pub(super) waker: WaitCell,
+
+    pub(super) ticks: Ticks,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
     _pin: PhantomPinned,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum State {
+    Unregistered,
+    Registered,
+    Completed,
+}
+
 // === impl Sleep ===
+
+impl<'timer> Sleep<'timer> {
+    pub(super) fn new(core: &'timer Mutex<Core>, ticks: Ticks) -> Self {
+        Self {
+            state: State::Unregistered,
+            timer: core,
+            entry: Entry {
+                links: UnsafeCell::new(list::Links::new()),
+                waker: WaitCell::new(),
+                ticks,
+                _pin: PhantomPinned,
+            },
+        }
+    }
+}
 
 impl Future for Sleep<'_> {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        if *this.registered {
-            return Poll::Ready(());
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.as_mut().project();
+        // If necessary, register the sleep
+        match test_dbg!(*this.state) {
+            State::Unregistered => {
+                let ptr =
+                    unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
+                this.timer.lock().insert_sleep(ptr);
+                *this.state = State::Registered;
+            }
+            State::Registered => {}
+            State::Completed => return Poll::Ready(()),
         }
 
         match this.entry.waker.register_wait(cx.waker()) {
-            Ok(_) => {
-                *this.registered = true;
-                Poll::Pending
+            Ok(_) => Poll::Pending,
+            // the timer has fired, so the future has now completed.
+            Err(wait_cell::RegisterError::Closed) => {
+                *this.state = State::Completed;
+                Poll::Ready(())
             }
-            // timer firing while we were trying to register!
-            Err(wait_cell::RegisterError::Waking) => Poll::Ready(()),
             // these ones don't happen
             Err(wait_cell::RegisterError::Registering) => {
                 unreachable!("a sleep should only be polled by one task!")
             }
-            Err(wait_cell::RegisterError::Closed) => {
-                unreachable!("a sleep's WaitCell does not close!")
+            Err(wait_cell::RegisterError::Waking) => {
+                unreachable!("a sleep's WaitCell should only be woken by closing")
             }
         }
     }
@@ -69,7 +101,17 @@ impl Future for Sleep<'_> {
 impl PinnedDrop for Sleep<'_> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
-        this.timer.lock().cancel_sleep(this.entry);
+
+        // we only need to remove the sleep from the timer wheel if it's
+        // currently part of a linked list --- if the future hasn't been polled
+        // yet, or it has already completed, we don't need to lock the timer to
+        // remove it.
+        if test_dbg!(*this.state) == State::Registered {
+            if this.entry.as_ref().project_ref().waker.is_closed() {
+                return;
+            }
+            this.timer.lock().cancel_sleep(this.entry);
+        }
     }
 }
 
