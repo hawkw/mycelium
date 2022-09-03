@@ -165,7 +165,7 @@ mod loom {
     #[test]
     fn wake_all_concurrent() {
         use alloc::sync::Arc;
-        // must be higher than the number of threads in a `WakeSet`, but below
+        // must be higher than the number of threads in a `WakeBatch`, but below
         // Loom's min thread count.
         const THREADS: usize = 3;
 

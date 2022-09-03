@@ -591,8 +591,8 @@ impl Semaphore {
 
         let mut drained_queue = false;
         while permits > 0 && !drained_queue {
-            let mut wakeset = WakeBatch::new();
-            while wakeset.can_add_waker() {
+            let mut batch = WakeBatch::new();
+            while batch.can_add_waker() {
                 // peek the last waiter in the queue to add permits to it; we may not
                 // be popping it from the queue if there are not enough permits to
                 // wake that waiter.
@@ -620,7 +620,7 @@ impl Semaphore {
                 let waker = Waiter::take_waker(waiter, &mut waiters.queue);
                 trace!(?waiter, ?waker, permits, "Semaphore::add_permits -> waking");
                 if let Some(waker) = waker {
-                    wakeset.add_waker(waker);
+                    batch.add_waker(waker);
                 }
             }
 
@@ -641,7 +641,7 @@ impl Semaphore {
 
             // wake set is full, drop the lock and wake everyone!
             drop(waiters);
-            wakeset.wake_all();
+            batch.wake_all();
 
             // reacquire the lock and continue waking
             waiters = self.waiters.lock();

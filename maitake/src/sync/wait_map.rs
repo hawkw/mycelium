@@ -498,25 +498,25 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         }
 
         let mut queue = self.queue.lock();
-        let mut wakeset = WakeBatch::new();
+        let mut batch = WakeBatch::new();
         while let Some(node) = queue.pop_back() {
             let waker = Waiter::wake(node, &mut queue, Wakeup::Closed);
-            if wakeset.add_waker(waker) {
+            if batch.add_waker(waker) {
                 // there's still room in the wake set, just keep adding to it.
                 continue;
             }
 
             // wake set is full, drop the lock and wake everyone!
             drop(queue);
-            wakeset.wake_all();
+            batch.wake_all();
 
             // reacquire the lock and continue waking
             queue = self.queue.lock();
         }
 
-        // drop the lock and wake the final batch of waiters in the `WakeSet`.
+        // drop the lock and wake the final batch of waiters in the `WakeBatch`.
         drop(queue);
-        wakeset.wake_all();
+        batch.wake_all();
     }
 
     /// Wait to be woken up by this queue.
