@@ -1,4 +1,5 @@
 use super::*;
+use crate::sync::Semaphore;
 use alloc::sync::Arc;
 
 /// Owned [RAII] structure used to release the shared read access of a
@@ -26,8 +27,21 @@ use alloc::sync::Arc;
 /// [`try_read_owned`]: RwLock::try_read_owned
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
 pub struct OwnedRwLockReadGuard<T: ?Sized> {
-    lock: Arc<RwLock<T>>,
+    /// /!\ WARNING: semi-load-bearing drop order /!\
+    ///
+    /// This struct's field ordering is important for Loom tests; the `ConstPtr`
+    /// must be dropped before the semaphore permit is released back to the
+    /// semaphore, as this may wake another task that wants to mutably access
+    /// the cell. However, Loom will still consider the data to be "immutably
+    /// accessed" until the ConstPtr` is dropped, so we must drop the `ConstPtr`
+    /// first.
+    ///
+    /// This isn't actually a bug in "real life", because we're not going to
+    /// actually *read* the data through the `ConstPtr` in the guard's `Drop`
+    /// impl, but Loom considers us to be "accessing" it as long as the
+    /// `ConstPtr` exists.
     data: cell::ConstPtr<T>,
+    _lock: AddPermits<1, T>,
 }
 
 /// Owned [RAII] structure used to release the exclusive write access of a
@@ -56,9 +70,28 @@ pub struct OwnedRwLockReadGuard<T: ?Sized> {
 /// [`try_read_owned`]: RwLock::try_read_owned
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
 pub struct OwnedRwLockWriteGuard<T: ?Sized> {
-    lock: Arc<RwLock<T>>,
+    /// /!\ WARNING: semi-load-bearing drop order /!\
+    ///
+    /// This struct's field ordering is important for Loom tests; the `MutPtr`
+    /// must be dropped before the semaphore permits are released back to the
+    /// semaphore, as this may wake another task that wants to access the cell.
+    /// However, Loom will still consider the data to be "mutably accessed"
+    /// until the `MutPtr` is dropped, so we must drop the `MutPtr` first.
+    ///
+    /// This isn't actually a bug in "real life", because we're not going to
+    /// actually read or write the data through the `MutPtr` in the guard's
+    /// `Drop` impl, but Loom considers us to be "accessing" it as long as the
+    /// `MutPtr` exists.
     data: cell::MutPtr<T>,
+    _lock: AddPermits<{ Semaphore::MAX_PERMITS }, T>,
 }
+
+/// A wrapper around an `RwLock` `Arc` clone that releases a fixed number of
+/// permits when it's dropped.
+///
+/// This is factored out to a separate type to ensure that it's dropped *after*
+/// the `MutPtr`/`ConstPtr`s are dropped, to placate `loom`.
+struct AddPermits<const PERMITS: usize, T: ?Sized>(Arc<RwLock<T>>);
 
 // === impl RwLock ===
 
@@ -294,7 +327,10 @@ impl<T: ?Sized> OwnedRwLockReadGuard<T> {
         // borrowed semaphore. we'll manually release the permit in
         // `OwnedRwLockReadGuard`'s `Drop` impl.
         _permit.forget();
-        Self { lock, data }
+        Self {
+            _lock: AddPermits(lock),
+            data,
+        }
     }
 }
 
@@ -317,13 +353,6 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for OwnedRwLockReadGuard<T> {
     }
 }
 
-impl<T: ?Sized> Drop for OwnedRwLockReadGuard<T> {
-    fn drop(&mut self) {
-        // release our permit.
-        self.lock.sem.add_permits(1);
-    }
-}
-
 // Safety: A read guard can be shared or sent between threads as long as `T` is
 // `Sync`. It can implement `Send` even if `T` does not implement `Send`, as
 // long as `T` is `Sync`, because the read guard only permits borrowing the `T`.
@@ -341,7 +370,10 @@ impl<T: ?Sized> OwnedRwLockWriteGuard<T> {
         // borrowed semaphore. we'll manually release the permit in
         // `OwnedRwLockWriteGuard`'s `Drop` impl.
         _permit.forget();
-        Self { lock, data }
+        Self {
+            _lock: AddPermits(lock),
+            data,
+        }
     }
 }
 
@@ -375,15 +407,17 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for OwnedRwLockWriteGuard<T> {
     }
 }
 
-impl<T: ?Sized> Drop for OwnedRwLockWriteGuard<T> {
-    fn drop(&mut self) {
-        self.lock.sem.add_permits(RwLock::<T>::MAX_READERS);
-    }
-}
-
 // Safety: Unlike the read guard, `T` must be both `Send` and `Sync` for the
 // write guard to be `Send`, because the mutable access provided by the write
 // guard can be used to `mem::replace` or `mem::take` the value, transferring
 // ownership of it across threads.
 unsafe impl<T> Send for OwnedRwLockWriteGuard<T> where T: ?Sized + Send + Sync {}
 unsafe impl<T> Sync for OwnedRwLockWriteGuard<T> where T: ?Sized + Send + Sync {}
+
+// === impl AddPermits ===
+
+impl<const PERMITS: usize, T: ?Sized> Drop for AddPermits<PERMITS, T> {
+    fn drop(&mut self) {
+        self.0.sem.add_permits(PERMITS);
+    }
+}

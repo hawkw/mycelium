@@ -1,5 +1,8 @@
 use core::ptr::NonNull;
 
+mod wake_batch;
+pub(crate) use self::wake_batch::WakeBatch;
+
 macro_rules! fmt_bits {
     ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
         $(

@@ -13,6 +13,7 @@ use crate::{
         },
     },
     sync::{self, WaitResult},
+    util::WakeBatch,
 };
 use cordyceps::{
     list::{self, List},
@@ -574,7 +575,11 @@ impl Semaphore {
     }
 
     #[inline(never)]
-    fn add_permits_locked(&self, mut permits: usize, mut waiters: MutexGuard<'_, SemQueue>) {
+    fn add_permits_locked<'sem>(
+        &'sem self,
+        mut permits: usize,
+        mut waiters: MutexGuard<'sem, SemQueue>,
+    ) {
         trace!(permits, "Semaphore::add_permits");
         if waiters.closed {
             trace!(
@@ -585,52 +590,61 @@ impl Semaphore {
         }
 
         let mut drained_queue = false;
-        while permits > 0 {
-            // peek the last waiter in the queue to add permits to it; we may not
-            // be popping it from the queue if there are not enough permits to
-            // wake that waiter.
-            match waiters.queue.back() {
-                Some(waiter) => {
-                    // try to add enough permits to wake this waiter. if we
-                    // can't, break --- we should be out of permits.
-                    if !waiter.project_ref().remaining_permits.add(&mut permits) {
-                        debug_assert_eq!(permits, 0);
+        while permits > 0 && !drained_queue {
+            let mut batch = WakeBatch::new();
+            while batch.can_add_waker() {
+                // peek the last waiter in the queue to add permits to it; we may not
+                // be popping it from the queue if there are not enough permits to
+                // wake that waiter.
+                match waiters.queue.back() {
+                    Some(waiter) => {
+                        // try to add enough permits to wake this waiter. if we
+                        // can't, break --- we should be out of permits.
+                        if !waiter.project_ref().remaining_permits.add(&mut permits) {
+                            debug_assert_eq!(permits, 0);
+                            break;
+                        }
+                    }
+                    None => {
+                        // we've emptied the queue. all done!
+                        drained_queue = true;
                         break;
                     }
-                }
-                None => {
-                    // we've emptied the queue. all done!
-                    drained_queue = true;
-                    break;
-                }
-            };
+                };
 
-            // okay, we added enough permits to wake this waiter.
-            let waiter = waiters
-                .queue
-                .pop_back()
-                .expect("if `back()` returned `Some`, `pop_back()` will also return `Some`");
-            let waker = Waiter::take_waker(waiter, &mut waiters.queue);
-            trace!(?waiter, ?waker, permits, "Semaphore::add_permits -> waking");
-            if let Some(waker) = waker {
-                // TODO(eliza): wake in batches outside the lock.
-                waker.wake();
+                // okay, we added enough permits to wake this waiter.
+                let waiter = waiters
+                    .queue
+                    .pop_back()
+                    .expect("if `back()` returned `Some`, `pop_back()` will also return `Some`");
+                let waker = Waiter::take_waker(waiter, &mut waiters.queue);
+                trace!(?waiter, ?waker, permits, "Semaphore::add_permits -> waking");
+                if let Some(waker) = waker {
+                    batch.add_waker(waker);
+                }
             }
-        }
 
-        if permits > 0 && drained_queue {
-            trace!(
-                permits,
-                "Semaphore::add_permits -> queue drained, assigning remaining permits to semaphore"
-            );
-            // we drained the queue, but there are still permits left --- add
-            // them to the semaphore.
-            let prev = self.permits.fetch_add(permits, Release);
-            assert!(
-                prev + permits <= Self::MAX_PERMITS,
-                "semaphore overflow adding {permits} permits to {prev}; max permits: {}",
-                Self::MAX_PERMITS
-            );
+            if permits > 0 && drained_queue {
+                trace!(
+                    permits,
+                    "Semaphore::add_permits -> queue drained, assigning remaining permits to semaphore"
+                );
+                // we drained the queue, but there are still permits left --- add
+                // them to the semaphore.
+                let prev = self.permits.fetch_add(permits, Release);
+                assert!(
+                    prev + permits <= Self::MAX_PERMITS,
+                    "semaphore overflow adding {permits} permits to {prev}; max permits: {}",
+                    Self::MAX_PERMITS
+                );
+            }
+
+            // wake set is full, drop the lock and wake everyone!
+            drop(waiters);
+            batch.wake_all();
+
+            // reacquire the lock and continue waking
+            waiters = self.waiters.lock();
         }
     }
 
