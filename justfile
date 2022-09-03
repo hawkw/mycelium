@@ -16,6 +16,16 @@ _cargo := "cargo" + if toolchain != "" { " +" + toolchain } else { "" }
 
 _rustflags := env_var_or_default("RUSTFLAGS", "")
 
+# If we're running in Github Actions and cargo-action-fmt is installed, then add
+# a command suffix that formats errors.
+_fmt := if env_var_or_default("GITHUB_ACTIONS", "") != "true" { "" } else {
+    ```
+    if command -v cargo-action-fmt >/dev/null 2>&1; then
+        echo "--message-format=json | cargo-action-fmt"
+    fi
+    ```
+}
+
 # default recipe to display help information
 default:
     @echo "justfile for Mycelium"
@@ -26,12 +36,15 @@ default:
 # run all tests and checks for `crate` (or for the whole workspace)
 preflight crate='': (lint crate) (test crate)
 
-# run all tests (normal tests), loom, and miri) for `crate` or for the whole workspace.
+# run all tests (normal tests, loom, and miri) for `crate` or for the whole workspace.
 test crate='': (test-host crate) (loom crate) (miri crate) (test-docs crate)
-    if crate == '' { cargo inoculate test } else { }
+    if crate == '' { _cargo inoculate test } else { }
 
 # run host tests for `crate` (or for the whole workspace).
 test-host crate='': _get-nextest
+    {{ _cargo }} build --tests --all-features \
+        {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
+        {{ _fmt }}
     {{ _cargo }} {{ _testcmd }} \
         {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
         {{ _test-profile }} \
@@ -48,10 +61,20 @@ test-docs crate='':
         --all-features
 
 # run lints (clippy, rustfmt, and docs checks) for `crate`
-lint crate='': && (check-docs crate)
-    {{ _cargo }} clippy {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }}
-    {{ _cargo }} clippy-x64 {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }}
-    {{ _cargo }} fmt --check {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }}
+lint crate='': (clippy crate) (check-fmt crate) (check-docs crate)
+
+# run clippy lints for `crate`
+clippy crate='':
+    {{ _cargo }} clippy \
+        {{ if crate == '' { '--workspace' } else { '-p' } }} {{ crate }} \
+        {{ _fmt }}
+    {{ if crate == '' { _clippy-x64 } else if crate == 'mycelium-kernel' { _clippy-x64 } else { '' } }}
+
+# check rustfmt for `crate`
+check-fmt crate='':
+    {{ _cargo }} fmt --check \
+        {{ if crate == '' { '--all' } else { '-p' } }} {{ crate }} \
+        {{ _fmt }}
 
 # check documentation links and test docs for `crate` (or the whole workspace)
 check-docs crate='': (build-docs crate '--cfg docsrs -Dwarnings') (test-docs crate)
@@ -66,7 +89,8 @@ docs crate='': (build-docs)
 # build RustDoc documentation for the workspace.
 build-docs crate='' $RUSTDOCFLAGS='--cfg docsrs':
     {{ _cargo }} doc --no-deps --all-features --document-private-items \
-        {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }}
+        {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
+        {{ _fmt }}
 
 # run Miri, either for `crate` or for all crates with miri tests.
 miri crate='' $MIRIFLAGS='-Zmiri-strict-provenance -Zmiri-disable-isolation' $PROPTEST_CASES='10' $RUSTFLAGS="-Zrandomize-layout": _get-nextest
@@ -140,6 +164,8 @@ _testcmd := if no-nextest == '' {
     } else {
         'test'
     }
+
+_clippy-x64 := _cargo + " clippy-x64 -p mycelium-kernel " + _fmt
 
 _get-nextest:
     #!/usr/bin/env bash

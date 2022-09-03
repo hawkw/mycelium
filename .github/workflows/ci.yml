@@ -101,8 +101,27 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustfmt
-      run: cargo fmt --check
+      run: just check-fmt
+
+  # are there any annoying clippy lints we ought to clean up?
+  clippy:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v2
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: cargo clippy
+      run: just clippy
+
 
   # run host tests
   #
@@ -174,17 +193,10 @@ jobs:
       run: rustup show
     - uses: actions/checkout@v2
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: install Just
+      uses: extractions/setup-just@v1
     - name: run rustdoc
-      run: |
-        cargo doc \
-          --workspace \
-          --message-format=json \
-          --no-deps \
-          --all-features \
-          --document-private-items |
-          cargo-action-fmt
-      env:
-        RUSTDOCFLAGS: "--cfg docsrs -Dwarnings"
+      run: just check-docs
 
   ### cordyceps ###
 

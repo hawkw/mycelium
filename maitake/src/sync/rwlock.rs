@@ -227,6 +227,11 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # // since we are targeting no-std, it makes more sense to use `alloc`
+    /// # // in these examples, rather than `std`...but i don't want to make
+    /// # // the tests actually `#![no_std]`...
+    /// # use std as alloc;
     /// use maitake::scheduler::Scheduler;
     /// use maitake::sync::RwLock;
     /// use alloc::sync::Arc;
@@ -251,6 +256,7 @@ impl<T: ?Sized> RwLock<T> {
     /// });
     ///
     /// scheduler.tick();
+    /// # }
     /// ```
     ///
     /// [priority policy]: Self#priority-policy
@@ -286,6 +292,11 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # // since we are targeting no-std, it makes more sense to use `alloc`
+    /// # // in these examples, rather than `std`...but i don't want to make
+    /// # // the tests actually `#![no_std]`...
+    /// # use std as alloc;
     /// use maitake::scheduler::Scheduler;
     /// use maitake::sync::RwLock;
     /// use alloc::sync::Arc;
@@ -300,6 +311,7 @@ impl<T: ?Sized> RwLock<T> {
     /// });
     ///
     /// scheduler.tick();
+    /// # }
     /// ```
     pub async fn write(&self) -> RwLockWriteGuard<'_, T> {
         let _permit = self
