@@ -11,6 +11,7 @@ use crate::{
         },
     },
     sync::{self, WaitResult},
+    util::WakeSet,
 };
 use cordyceps::{
     list::{self, List},
