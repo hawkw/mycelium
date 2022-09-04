@@ -53,6 +53,15 @@ impl SleepGroupTest {
                 count,
             },
         );
+        // eagerly poll the spawned group to ensure they are added to the wheel.
+        // XXX(eliza): is this correct behavior? or should the time start
+        // when the sleep is _created_ rather than first polled? this would mean
+        // a lock-free way to get the "current time" from the timer...
+        let tick = self.scheduler.tick();
+        assert_eq!(
+            tick.completed, 0,
+            "no tasks should complete if the timer has not advanced"
+        );
     }
 
     #[track_caller]
