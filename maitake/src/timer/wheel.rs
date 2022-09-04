@@ -68,12 +68,12 @@ impl Wheel {
     }
 
     /// Insert a sleep entry into this wheel.
-    pub(super) fn insert(&mut self, ticks: Ticks, sleep: ptr::NonNull<sleep::Entry>) {
-        let slot = self.slot_index(ticks);
+    pub(super) fn insert(&mut self, deadline: Ticks, sleep: ptr::NonNull<sleep::Entry>) {
+        let slot = self.slot_index(deadline);
         trace!(
             wheel = self.level,
             sleep.addr = ?fmt::ptr(sleep),
-            sleep.ticks = ticks,
+            sleep.deadline = deadline,
             sleep.slot = slot,
             "Wheel::insert",
         );
@@ -85,8 +85,8 @@ impl Wheel {
     }
 
     /// Remove a sleep entry from this wheel.
-    pub(super) fn remove(&mut self, ticks: Ticks, sleep: Pin<&mut sleep::Entry>) {
-        let slot = self.slot_index(ticks);
+    pub(super) fn remove(&mut self, deadline: Ticks, sleep: Pin<&mut sleep::Entry>) {
+        let slot = self.slot_index(deadline);
         let _removed = unsafe {
             // safety: we will not use the `NonNull` to violate pinning
             // invariants; it's used only to insert the sleep into the intrusive
@@ -97,7 +97,7 @@ impl Wheel {
             trace!(
                 wheel = self.level,
                 sleep.addr = ?fmt::ptr(ptr),
-                sleep.ticks = ticks,
+                sleep.deadline = deadline,
                 sleep.slot = slot,
                 "Wheel::remove",
             );
@@ -154,7 +154,7 @@ impl Wheel {
         }
 
         // which slot is indexed by the `now` timestamp?
-        let now_slot = (now / self.ticks_per_slot) as u32;
+        let now_slot = (now / self.ticks_per_slot) as u32 % SLOTS as u32;
         next_set_bit(self.occupied_slots, now_slot)
     }
 
@@ -194,7 +194,8 @@ impl fmt::Debug for Wheel {
 ///
 /// Based on
 /// <https://github.com/torvalds/linux/blob/d0e60d46bc03252b8d4ffaaaa0b371970ac16cda/include/linux/find.h#L21-L45>
-const fn next_set_bit(bitmap: u64, offset: u32) -> Option<usize> {
+fn next_set_bit(bitmap: u64, offset: u32) -> Option<usize> {
+    debug_assert!(offset < 64, "offset: {offset}");
     let shifted = bitmap >> offset;
     if shifted == 0 {
         return None;
