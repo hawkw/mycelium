@@ -119,7 +119,6 @@ impl Future for Sleep<'_> {
 impl PinnedDrop for Sleep<'_> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
-        trace!(self.addr = ?format_args!("{:p}", this.entry), "Sleep::drop");
         // we only need to remove the sleep from the timer wheel if it's
         // currently part of a linked list --- if the future hasn't been polled
         // yet, or it has already completed, we don't need to lock the timer to
