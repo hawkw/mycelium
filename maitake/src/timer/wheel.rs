@@ -68,12 +68,12 @@ impl Wheel {
     }
 
     /// Insert a sleep entry into this wheel.
-    pub(super) fn insert(&mut self, ticks: Ticks, sleep: ptr::NonNull<sleep::Entry>) {
-        let slot = self.slot_index(ticks);
+    pub(super) fn insert(&mut self, deadline: Ticks, sleep: ptr::NonNull<sleep::Entry>) {
+        let slot = self.slot_index(deadline);
         trace!(
             wheel = self.level,
             sleep.addr = ?fmt::ptr(sleep),
-            sleep.ticks = ticks,
+            sleep.deadline = deadline,
             sleep.slot = slot,
             "Wheel::insert",
         );

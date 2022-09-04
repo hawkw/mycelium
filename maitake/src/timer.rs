@@ -204,27 +204,27 @@ impl Core {
     }
 
     fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {
-        let ticks = {
+        let deadline = {
             let entry = sleep.as_ref().project_ref();
             let ticks = *entry.ticks;
-            // let start = entry.start_time.with(|start| unsafe {
-            //     // safety: this is safe because we are holding the lock on the
-            //     // wheel.
-            //     *start
-            // });
-            // let deadline = start + ticks;
+            let start = entry.start_time.with(|start| unsafe {
+                // safety: this is safe because we are holding the lock on the
+                // wheel.
+                *start
+            });
+            let deadline = start + ticks;
             trace!(
                 sleep.addr = ?format_args!("{:p}", sleep),
                 sleep.ticks = ticks,
-                // sleep.start_time = start,
-                // sleep.deadline = deadline,
+                sleep.start_time = start,
+                sleep.deadline = deadline,
                 now = self.elapsed,
                 "canceling sleep"
             );
-            ticks
+            deadline
         };
-        let wheel = self.wheel_index(ticks);
-        self.wheels[wheel].remove(ticks, sleep);
+        let wheel = self.wheel_index(deadline);
+        self.wheels[wheel].remove(deadline, sleep);
     }
 
     fn register_sleep(&mut self, mut sleep: ptr::NonNull<sleep::Entry>) {
@@ -245,15 +245,16 @@ impl Core {
 
             entry.ticks
         };
+        let deadline = ticks + self.elapsed;
         trace!(
             sleep.addr = ?sleep,
             sleep.ticks = ticks,
             sleep.start_time = self.elapsed,
-            sleep.deadline = ticks + self.elapsed,
+            sleep.deadline = deadline,
             "registering sleep"
         );
-        let wheel = self.wheel_index(ticks);
-        self.wheels[wheel].insert(ticks, sleep);
+        let wheel = self.wheel_index(deadline);
+        self.wheels[wheel].insert(deadline, sleep);
     }
 
     /// Returns the deadline and location of the next firing timer in the wheel.
