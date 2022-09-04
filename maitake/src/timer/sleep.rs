@@ -84,6 +84,7 @@ impl Future for Sleep<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut().project();
+        trace!(self.addr = ?format_args!("{:p}", this.entry), "Sleep::poll");
         // If necessary, register the sleep
         match test_dbg!(*this.state) {
             State::Unregistered => {

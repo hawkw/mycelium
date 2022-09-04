@@ -56,7 +56,7 @@ impl Wheel {
         // bitmask for masking out the indices in all lower wheels from a `now`
         // timestamp.
         let wheel_mask = !(ticks_per_wheel - 1);
-
+ 
         Self {
             level,
             ticks_per_slot,
@@ -72,7 +72,7 @@ impl Wheel {
         let slot = self.slot_index(ticks);
         trace!(
             wheel = self.level,
-            sleep = ?fmt::ptr(sleep),
+            sleep.addr = ?fmt::ptr(sleep),
             sleep.ticks = ticks,
             sleep.slot = slot,
             "Wheel::insert",
@@ -96,7 +96,7 @@ impl Wheel {
             let ptr = ptr::NonNull::from(Pin::into_inner_unchecked(sleep));
             trace!(
                 wheel = self.level,
-                sleep = ?fmt::ptr(ptr),
+                sleep.addr = ?fmt::ptr(ptr),
                 sleep.ticks = ticks,
                 sleep.slot = slot,
                 "Wheel::remove",

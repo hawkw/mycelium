@@ -113,10 +113,22 @@ pub(crate) use self::test::trace_init;
 #[cfg(all(test, not(loom)))]
 pub(crate) mod test {
     pub(crate) fn trace_init() {
-        use tracing_subscriber::filter::LevelFilter;
+        trace_init_with_default("maitake=trace");
+    }
+
+    pub(crate) fn trace_init_with_default(default: &str) {
+        use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+        let env = std::env::var("RUST_LOG").unwrap_or_default();
+        let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
+        let filter = if env.is_empty() {
+            builder.parse(default).unwrap()
+        } else {
+            builder.parse_lossy(env)
+        };
         let _ = tracing_subscriber::fmt()
-            .with_max_level(LevelFilter::TRACE)
+            .with_env_filter(filter)
             .with_test_writer()
+            .without_time()
             .try_init();
     }
 
