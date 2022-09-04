@@ -86,7 +86,7 @@ impl Future for Sleep<'_> {
         let mut this = self.as_mut().project();
         trace!(self.addr = ?format_args!("{:p}", this.entry), "Sleep::poll");
         // If necessary, register the sleep
-        match test_dbg!(*this.state) {
+        match *this.state {
             State::Unregistered => {
                 let ptr =
                     unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
@@ -119,12 +119,12 @@ impl Future for Sleep<'_> {
 impl PinnedDrop for Sleep<'_> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
-
+        trace!(self.addr = ?format_args!("{:p}", this.entry), "Sleep::drop");
         // we only need to remove the sleep from the timer wheel if it's
         // currently part of a linked list --- if the future hasn't been polled
         // yet, or it has already completed, we don't need to lock the timer to
         // remove it.
-        if test_dbg!(*this.state) == State::Registered {
+        if *this.state == State::Registered {
             if this.entry.as_ref().project_ref().waker.is_closed() {
                 return;
             }
