@@ -154,6 +154,45 @@ fn timer_basically_works() {
 }
 
 #[test]
+fn schedule_after_start() {
+    static TIMER: Timer = Timer::new();
+    let mut test = SleepGroupTest::new(&TIMER);
+
+    test.spawn_group(100, 2);
+    test.spawn_group(70_000, 3);
+
+    // first tick --- timer is still at zero
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+    test.assert();
+
+    // advance the timer by 50 ticks.
+    test.advance(50);
+
+    test.spawn_group(100, 3);
+
+    // advance the timer by 50 more ticks. the first sleep group should
+    // complete, but the second 100-tick group should not.
+    test.advance(50);
+
+    // the second 100-tick group should complete.
+    test.advance(10_000);
+
+    test.spawn_group(70_100, 4);
+
+    // the first 70,000-tick group should complete.
+    test.advance(60_000);
+
+    // no tasks should complete.
+    test.advance(30_000);
+
+    test.spawn_group(10_000, 2);
+
+    // every group should complete.
+    test.advance(40_000);
+}
+
+#[test]
 fn wheel_indices() {
     let core = Core::new();
     for ticks in 0..64 {
