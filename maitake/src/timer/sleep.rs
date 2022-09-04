@@ -11,6 +11,7 @@ use core::{
     ptr::{self, NonNull},
     task::{Context, Poll},
 };
+use mycelium_util::fmt;
 use pin_project::{pin_project, pinned_drop};
 
 #[pin_project(PinnedDrop)]
@@ -88,7 +89,7 @@ impl Future for Sleep<'_> {
             State::Unregistered => {
                 let ptr =
                     unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
-                this.timer.lock().insert_sleep(ptr);
+                this.timer.lock().register_sleep(ptr);
                 *this.state = State::Registered;
             }
             State::Registered => {}
@@ -154,5 +155,12 @@ unsafe impl Linked<list::Links<Entry>> for Entry {
             // of `new_unchecked` fine.
             NonNull::new_unchecked(links)
         })
+    }
+}
+
+impl Entry {
+    pub(super) fn fire(&self) {
+        trace!(timer.addr = ?fmt::ptr(self), "firing timer");
+        self.waker.close();
     }
 }

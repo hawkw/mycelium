@@ -851,6 +851,7 @@ dependencies = [
  "mycelium-bitfield",
  "mycelium-util",
  "pin-project",
+ "proptest",
  "tokio-test",
  "tracing 0.1.36",
  "tracing 0.2.0",

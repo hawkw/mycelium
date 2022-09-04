@@ -60,6 +60,7 @@ tokio-test = "0.4"
 tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["ansi", "fmt"] }
 tracing-02 = { package = "tracing", git = "https://github.com/tokio-rs/tracing", default-features = false }
 console-subscriber = "0.1.6"
+proptest = "1"
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.5.5", features = ["futures", "checkpoint"] }

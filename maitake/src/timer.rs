@@ -19,6 +19,18 @@ use self::wheel::Wheel;
 pub type Ticks = u64;
 
 pub struct Timer {
+    /// A count of how many timer ticks have elapsed since the last time the
+    /// timer's [`Core`] was updated.
+    ///
+    /// The timer's [`advance`] method may be called in an interrupt handler, so
+    /// it cannot spin to lock the `Core` if it is busy. Instead, it tries to
+    /// acquire the [`Core`] lock, and if it can't, it increments
+    /// `pending_ticks`. The count of pending ticks is then consumed the next
+    /// time the timer interrupt is able to lock the [`Core`].
+    ///
+    /// This strategy may result in some additional noise in when exactly a
+    /// sleep will fire, but it allows us to avoid potential deadlocks when the
+    /// timer is advanced from an interrupt handler.
     pending_ticks: AtomicUsize,
     core: Mutex<Core>,
 }
@@ -46,6 +58,23 @@ impl Timer {
         Sleep::new(&self.core, ticks)
     }
 
+    /// Add pending ticks to the timer *without* turning the wheel.
+    ///
+    /// This function will *never* acquire a lock, and will *never* notify any
+    /// waiting [`Sleep`] futures. It can be called in an interrupt handler that
+    /// cannot perform significant amounts of work.
+    ///
+    /// However, if this method is used, then [`Timer::force_advance`] must be
+    /// called frequently from outside of the interrupt handler.
+    #[inline(always)]
+    pub fn pend_ticks(&self, ticks: Ticks) {
+        debug_assert!(
+            ticks < usize::MAX as u64,
+            "cannot pend more than `usize::MAX` ticks at once!"
+        );
+        self.pending_ticks.fetch_add(ticks as usize, Release);
+    }
+
     /// Advance the timer by `ticks`, potentially waking any `Sleep` futures
     /// that have completed.
     ///
@@ -71,14 +100,14 @@ impl Timer {
         // instead, if the timer wheel is busy (e.g. the timer ISR was called on
         // another core, or if a `Sleep` future is currently canceling itself),
         // we just add to a counter of pending ticks, and bail.
-        if let Some(mut core) = self.core.try_lock() {
+        if let Some(core) = self.core.try_lock() {
             self.advance_locked(core, ticks);
         } else {
             // if the core of the timer wheel is already locked, add to the pending
             // tick count, which we will then advance the wheel by when it becomes
             // available.
             // TODO(eliza): if pending ticks overflows that's probably Bad News
-            self.pending_ticks.fetch_add(ticks as usize, Release);
+            self.pend_ticks(ticks)
         }
     }
 
@@ -100,7 +129,7 @@ impl Timer {
         self.advance_locked(self.core.lock(), ticks)
     }
 
-    fn advance_locked(&self, core: MutexGuard<'_, Core>, ticks: Ticks) {
+    fn advance_locked(&self, mut core: MutexGuard<'_, Core>, ticks: Ticks) {
         // take any pending ticks.
         let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
         // we do two separate `advance` calls here instead of advancing once
@@ -117,23 +146,67 @@ impl Timer {
 impl Core {
     const WHEELS: usize = wheel::BITS;
     pub const fn new() -> Self {
+        // Initialize the wheels.
+        // XXX(eliza): we would have to do this extremely gross thing if we
+        // wanted to support a variable number of wheels, because const fn...
+        /*
         // Used as an initializer when constructing a new `Core`.
-        const NEW_WHEEL: Wheel = Wheel::new();
+        const NEW_WHEEL: Wheel = Wheel::empty();
+
+        let mut wheels = [NEW_WHEEL; Self::WHEELS];n
+        let mut level = 0;
+        while level < Self::WHEELS {
+            wheels[level].level = level;
+            wheels[level].ticks_per_slot = wheel::ticks_per_slot(level);
+            level += 1;
+        }
+        */
+
         Self {
             elapsed: 0,
-            wheels: [NEW_WHEEL; Self::WHEELS],
+            wheels: [
+                Wheel::new(0),
+                Wheel::new(1),
+                Wheel::new(2),
+                Wheel::new(3),
+                Wheel::new(4),
+                Wheel::new(5),
+            ],
         }
     }
 
     #[inline(never)]
     fn advance(&mut self, ticks: Ticks) -> usize {
-        todo!("actually advance the timer wheel")
+        let mut now = self.elapsed;
+        self.elapsed += ticks;
+        let mut fired = 0;
+        while let Some(deadline) = self.next_deadline(now) {
+            if deadline.ticks > self.elapsed {
+                break;
+            }
+
+            now = deadline.ticks;
+
+            let mut entries = self.wheels[deadline.wheel].take(deadline.slot);
+            let firing = entries.len();
+            debug!(deadline.ticks, firing, "turning wheel to");
+            fired += firing;
+            while let Some(timer) = entries.pop_front() {
+                unsafe {
+                    // safety: this is safe because we are holding the lock on
+                    // the timer `Core`.
+                    timer.as_ref().fire();
+                }
+            }
+        }
+        debug!(now = self.elapsed, fired, "wheel turned to");
+        fired
     }
 
     fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {
         let ticks = *(sleep.as_ref().project_ref().ticks);
         let wheel = self.wheel_index(ticks);
-        self.wheels[wheel].remove(wheel, ticks, sleep);
+        self.wheels[wheel].remove(ticks, sleep);
     }
 
     fn register_sleep(&mut self, mut sleep: ptr::NonNull<sleep::Entry>) {
@@ -155,7 +228,22 @@ impl Core {
             entry.ticks
         };
         let wheel = self.wheel_index(ticks);
-        self.wheels[wheel].insert(wheel, ticks, sleep);
+        self.wheels[wheel].insert(ticks, sleep);
+    }
+
+    /// Returns the deadline and location of the next firing timer in the wheel.
+    #[inline]
+    fn next_deadline(&self, now: Ticks) -> Option<wheel::Deadline> {
+        self.wheels.iter().find_map(|wheel| {
+            let next_deadline = wheel.next_deadline(now)?;
+            trace!(
+                now,
+                next_deadline.ticks,
+                next_deadline.wheel,
+                next_deadline.slot,
+            );
+            Some(next_deadline)
+        })
     }
 
     #[inline]
