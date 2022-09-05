@@ -57,5 +57,6 @@ proptest::proptest! {
         }
 
         test.assert();
+        info!("iteration done\n\n");
     }
 }
