@@ -130,20 +130,21 @@ impl Wheel {
 
     pub(super) fn next_deadline(&self, now: u64) -> Option<Deadline> {
         let distance = self.next_slot_distance(now)?;
+        let slot = distance % SLOTS;
 
-        // does the next slot wrap this wheel around?
-        let (slot, skipped) = if distance >= SLOTS {
-            debug_assert!(distance < SLOTS * 2);
-            debug_assert!(
-                self.level == Core::WHEELS - 1,
-                "if the next expiring slot wraps around, we must be on the top level wheel\n   \
-                dist: {distance}\n  level: {}",
-                self.level,
-            );
-            (distance % SLOTS, self.ticks_per_wheel)
-        } else {
-            (distance, 0)
-        };
+        // // does the next slot wrap this wheel around?
+        // let (slot, skipped) = if distance >= SLOTS {
+        //     debug_assert!(distance < SLOTS * 2);
+        //     debug_assert!(
+        //         self.level == Core::WHEELS - 1,
+        //         "if the next expiring slot wraps around, we must be on the top level wheel\n   \
+        //         dist: {distance}\n  level: {}",
+        //         self.level,
+        //     );
+        //     (distance % SLOTS, self.ticks_per_wheel)
+        // } else {
+        //     (distance, 0)
+        // };
 
         // when did the current rotation of this wheel begin? since all wheels
         // represent a power-of-two number of ticks, we can determine the
@@ -151,7 +152,21 @@ impl Wheel {
         let rotation_start = now & self.wheel_mask;
         // the next deadline is the start of the current rotation, plus the next
         // slot's value.
-        let ticks = rotation_start + (slot as u64 * self.ticks_per_slot) + skipped;
+        let mut ticks = rotation_start + (slot as u64 * self.ticks_per_slot);
+
+        if ticks < now {
+            ticks += self.ticks_per_wheel;
+        }
+
+        test_trace!(
+            now,
+            wheel = self.level,
+            rotation_start,
+            slot,
+            // skipped,
+            ticks,
+            "Wheel::next_deadline"
+        );
 
         let deadline = Deadline {
             ticks,

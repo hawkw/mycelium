@@ -3,6 +3,7 @@ use crate::loom::sync::{
     atomic::{AtomicUsize, Ordering::*},
     spin::{Mutex, MutexGuard},
 };
+use cordyceps::List;
 use core::{pin::Pin, ptr};
 mod sleep;
 mod wheel;
@@ -60,7 +61,7 @@ impl Timer {
     #[track_caller]
     pub fn sleep(&self, ticks: Ticks) -> Sleep<'_> {
         assert!(
-            ticks < Self::MAX_SLEEP_TICKS,
+            ticks <= Self::MAX_SLEEP_TICKS,
             "cannot sleep for more than {} ticks",
             Self::MAX_SLEEP_TICKS
         );
@@ -193,28 +194,54 @@ impl Core {
 
     #[inline(never)]
     fn advance(&mut self, ticks: Ticks) -> usize {
-        let mut now = self.elapsed;
-        self.elapsed += ticks;
+        let now = self.elapsed + ticks;
         let mut fired = 0;
-        while let Some(deadline) = self.next_deadline(now) {
-            if deadline.ticks > self.elapsed {
+        let mut firing = List::<sleep::Entry>::new();
+        while let Some(deadline) = self.next_deadline() {
+            if deadline.ticks > now {
                 break;
             }
 
-            now = deadline.ticks;
-
             let mut entries = self.wheels[deadline.wheel].take(deadline.slot);
-            let firing = entries.len();
-            debug!(deadline.ticks, firing, "turning wheel to");
-            fired += firing;
-            while let Some(timer) = entries.pop_front() {
-                unsafe {
-                    // safety: this is safe because we are holding the lock on
-                    // the timer `Core`.
-                    timer.as_ref().fire();
+            debug!(deadline.ticks, entries = entries.len(), "turning wheel to");
+
+            while let Some(entry) = entries.pop_front() {
+                let entry_deadline = unsafe { entry.as_ref().deadline.with(|deadline| *deadline) };
+
+                if entry_deadline > now {
+                    // this timer was on the top-level wheel and needs to be
+                    // rescheduled on a lower-level wheel, rather than firing now.
+                    debug_assert_ne!(
+                        deadline.wheel, 0,
+                        "if a timer is being rescheduled, it must not have been on the lowest-level wheel"
+                    );
+                    let new_wheel = wheel_index(deadline.ticks, entry_deadline);
+                    trace!(
+                        sleep.addr = ?entry,
+                        sleep.deadline = entry_deadline,
+                        now = deadline.ticks,
+                        new_wheel,
+                        "rescheduling timer",
+                    );
+                    self.wheels[new_wheel].insert(entry_deadline, entry)
+                } else {
+                    // otherwise, put the entry on the list of firing timers.
+                    firing.push_front(entry);
                 }
             }
+
+            trace!(at = self.elapsed, firing = firing.len(), "firing timers");
+            fired += firing.len();
+
+            while let Some(entry) = firing.pop_front() {
+                unsafe {
+                    entry.as_ref().fire();
+                }
+            }
+
+            self.elapsed += deadline.ticks;
         }
+        self.elapsed = now;
         debug!(now = self.elapsed, fired, "wheel turned to");
         fired
     }
@@ -222,17 +249,14 @@ impl Core {
     fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {
         let deadline = {
             let entry = sleep.as_ref().project_ref();
-            let ticks = *entry.ticks;
-            let start = entry.start_time.with(|start| unsafe {
+            let deadline = entry.deadline.with(|deadline| unsafe {
                 // safety: this is safe because we are holding the lock on the
                 // wheel.
-                *start
+                *deadline
             });
-            let deadline = start + ticks;
             trace!(
                 sleep.addr = ?format_args!("{:p}", sleep),
-                sleep.ticks = ticks,
-                sleep.start_time = start,
+                sleep.ticks = *entry.ticks,
                 sleep.deadline = deadline,
                 now = self.elapsed,
                 "canceling sleep"
@@ -244,42 +268,43 @@ impl Core {
     }
 
     fn register_sleep(&mut self, mut sleep: ptr::NonNull<sleep::Entry>) {
-        let ticks = unsafe {
+        let deadline = unsafe {
             // safety: it's safe to access the entry's `start_time` field
             // mutably because `insert_sleep` is only called when the entry
             // hasn't been registered yet, and we are holding the timer lock.
             let entry = sleep.as_mut();
-
-            // set the entry's start time to the wheel's current time.
-            entry.start_time.with_mut(|start_time| {
+            let deadline = entry.ticks + self.elapsed;
+            // set the entry's deadline with the wheel's current time.
+            entry.deadline.with_mut(|entry_deadline| {
                 debug_assert_eq!(
-                    *start_time, 0,
+                    *entry_deadline, 0,
                     "sleep entry already bound to wheel! this is bad news!"
                 );
-                *start_time = self.elapsed
+                *entry_deadline = deadline
             });
 
-            entry.ticks
+            trace!(
+                sleep.addr = ?sleep,
+                sleep.ticks = entry.ticks,
+                sleep.start_time = self.elapsed,
+                sleep.deadline = deadline,
+                "registering sleep"
+            );
+
+            deadline
         };
-        let deadline = ticks + self.elapsed;
-        trace!(
-            sleep.addr = ?sleep,
-            sleep.ticks = ticks,
-            sleep.start_time = self.elapsed,
-            sleep.deadline = deadline,
-            "registering sleep"
-        );
+
         let wheel = self.wheel_index(deadline);
         self.wheels[wheel].insert(deadline, sleep);
     }
 
     /// Returns the deadline and location of the next firing timer in the wheel.
     #[inline]
-    fn next_deadline(&self, now: Ticks) -> Option<wheel::Deadline> {
+    fn next_deadline(&self) -> Option<wheel::Deadline> {
         self.wheels.iter().find_map(|wheel| {
-            let next_deadline = wheel.next_deadline(now)?;
+            let next_deadline = wheel.next_deadline(self.elapsed)?;
             trace!(
-                now,
+                now = self.elapsed,
                 next_deadline.ticks,
                 next_deadline.wheel,
                 next_deadline.slot,
@@ -290,19 +315,23 @@ impl Core {
 
     #[inline]
     fn wheel_index(&self, ticks: Ticks) -> usize {
-        const WHEEL_MASK: u64 = (1 << wheel::BITS) - 1;
-
-        // mask out the bits representing the index in the wheel
-        let mut wheel_indices = self.elapsed ^ ticks | WHEEL_MASK;
-
-        // put sleeps over the max duration in the top level wheel
-        if wheel_indices >= Timer::MAX_SLEEP_TICKS {
-            wheel_indices = Timer::MAX_SLEEP_TICKS - 1;
-        }
-
-        let zeros = wheel_indices.leading_zeros();
-        let rest = u64::BITS - 1 - zeros;
-
-        rest as usize / Self::WHEELS
+        wheel_index(self.elapsed, ticks)
     }
+}
+
+fn wheel_index(now: Ticks, ticks: Ticks) -> usize {
+    const WHEEL_MASK: u64 = (1 << wheel::BITS) - 1;
+
+    // mask out the bits representing the index in the wheel
+    let mut wheel_indices = now ^ ticks | WHEEL_MASK;
+
+    // put sleeps over the max duration in the top level wheel
+    if wheel_indices >= Timer::MAX_SLEEP_TICKS {
+        wheel_indices = Timer::MAX_SLEEP_TICKS - 1;
+    }
+
+    let zeros = wheel_indices.leading_zeros();
+    let rest = u64::BITS - 1 - zeros;
+
+    rest as usize / Core::WHEELS
 }

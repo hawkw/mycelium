@@ -13,6 +13,7 @@ struct SleepGroupTest {
     timer: &'static Timer,
     now: Ticks,
     groups: BTreeMap<Ticks, SleepGroup>,
+    next_id: usize,
 }
 
 struct SleepGroup {
@@ -20,6 +21,7 @@ struct SleepGroup {
     t_start: Ticks,
     tasks: usize,
     count: Arc<AtomicUsize>,
+    id: usize,
 }
 
 impl SleepGroupTest {
@@ -30,22 +32,29 @@ impl SleepGroupTest {
             now: 0,
             groups: BTreeMap::new(),
             timer,
+            next_id: 0,
         }
     }
 
     fn spawn_group(&mut self, duration: Ticks, tasks: usize) {
+        self.next_id += 1;
         let count = Arc::new(AtomicUsize::new(tasks));
+        let id = self.next_id;
         for i in 0..tasks {
             let count = count.clone();
             let timer = self.timer;
             self.scheduler.spawn(async move {
-                info!("sleep group task {i} sleeping for {duration} ticks");
+                info!(task.group = id, task = i, "sleeping for {duration} ticks");
                 timer.sleep(duration).await;
-                info!("sleep group task {i} slept for {duration} ticks!");
+                info!(task.group = id, task = i, "slept for {duration} ticks!");
                 count.fetch_sub(1, Ordering::SeqCst);
             });
         }
-        info!("spawned {tasks} tasks to sleep for {duration} ticks");
+        info!(
+            group = id,
+            group.tasks = tasks,
+            "spawned sleep group to sleep for {duration} ticks"
+        );
         self.groups.insert(
             self.now + duration,
             SleepGroup {
@@ -53,6 +62,7 @@ impl SleepGroupTest {
                 t_start: self.now,
                 tasks,
                 count,
+                id,
             },
         );
         // eagerly poll the spawned group to ensure they are added to the wheel.
@@ -67,6 +77,37 @@ impl SleepGroupTest {
     }
 
     #[track_caller]
+    fn assert_all_complete(&self) {
+        let t_1 = self.now;
+        for (
+            &t_done,
+            SleepGroup {
+                ref count,
+                duration,
+                tasks,
+                t_start,
+                id,
+            },
+        ) in self.groups.iter()
+        {
+            let active = count.load(Ordering::SeqCst);
+            let elapsed = t_1 - t_start;
+            assert!(t_done <= t_1);
+            assert_eq!(
+                *tasks, 0,
+                "test expected sleep group {id} to not have completed by {t_1}, \
+                but `assert_all_complete` was called"
+            );
+            assert_eq!(
+                active, 0,
+                "sleep group {id} with {tasks} tasks sleeping for {duration} \
+                starting at tick {t_start} should have completed by tick {t_1} \
+                ({elapsed} ticks have elapsed)",
+            );
+        }
+    }
+
+    #[track_caller]
     fn assert(&self) {
         let t_1 = self.now;
         for (
@@ -76,6 +117,7 @@ impl SleepGroupTest {
                 duration,
                 tasks,
                 t_start,
+                id,
             },
         ) in self.groups.iter()
         {
@@ -84,16 +126,16 @@ impl SleepGroupTest {
             if t_done <= t_1 {
                 assert_eq!(
                     active, 0,
-                    "{tasks} tasks sleeping for {duration} starting at tick \
-                    {t_start} should have completed by tick {t_1} \
+                    "sleep group {id} with {tasks} tasks sleeping for {duration} \
+                    starting at tick {t_start} should have completed by tick {t_1} \
                     ({elapsed} ticks have elapsed)",
                 );
             } else {
                 assert_eq!(
                     active, *tasks,
-                    "{tasks} tasks sleeping for {duration} starting at tick \
-                    {t_start} should not have completed by tick {t_1} \
-                    ({elapsed} ticks have elapsed)"
+                    "sleep group {id} with {tasks} tasks sleeping for {duration} \
+                    starting at tick {t_start} should *not* have completed by \
+                    tick {t_1} ({elapsed} ticks have elapsed)"
                 );
             }
         }
@@ -162,6 +204,8 @@ fn timer_basically_works() {
 
     // the last sleep group should complete
     test.advance(6_000_000);
+
+    test.assert_all_complete();
 }
 
 #[test]
@@ -201,6 +245,35 @@ fn schedule_after_start() {
 
     // every group should complete.
     test.advance(40_000);
+
+    test.assert_all_complete();
+}
+
+#[test]
+fn max_sleep() {
+    static TIMER: Timer = Timer::new();
+    let mut test = SleepGroupTest::new(&TIMER);
+
+    test.spawn_group(Timer::MAX_SLEEP_TICKS, 2);
+    test.spawn_group(100, 3);
+
+    // first tick --- timer is still at zero
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+    test.assert();
+
+    // advance the timer by 100 ticks.
+    test.advance(100);
+
+    test.advance(Timer::MAX_SLEEP_TICKS / 2);
+
+    test.spawn_group(Timer::MAX_SLEEP_TICKS, 1);
+
+    test.advance(Timer::MAX_SLEEP_TICKS / 2);
+
+    test.advance(Timer::MAX_SLEEP_TICKS);
+
+    test.assert_all_complete();
 }
 
 #[test]

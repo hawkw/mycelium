@@ -47,7 +47,7 @@ pub(super) struct Entry {
     ///
     /// It would be nice if this could just be an `AtomicU64` but LOLSOB WE CANT
     /// HAVE NICE THINGS BECAUSE OF CORTEX-M.
-    pub(super) start_time: UnsafeCell<Ticks>,
+    pub(super) deadline: UnsafeCell<Ticks>,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
@@ -71,7 +71,7 @@ impl<'timer> Sleep<'timer> {
             entry: Entry {
                 links: UnsafeCell::new(list::Links::new()),
                 waker: WaitCell::new(),
-                start_time: UnsafeCell::new(0),
+                deadline: UnsafeCell::new(0),
                 ticks,
                 _pin: PhantomPinned,
             },
