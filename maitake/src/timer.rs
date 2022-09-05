@@ -293,7 +293,13 @@ impl Core {
         const WHEEL_MASK: u64 = (1 << wheel::BITS) - 1;
 
         // mask out the bits representing the index in the wheel
-        let wheel_indices = self.elapsed ^ ticks | WHEEL_MASK;
+        let mut wheel_indices = self.elapsed ^ ticks | WHEEL_MASK;
+
+        // put sleeps over the max duration in the top level wheel
+        if wheel_indices >= Timer::MAX_SLEEP_TICKS {
+            wheel_indices = Timer::MAX_SLEEP_TICKS - 1;
+        }
+
         let zeros = wheel_indices.leading_zeros();
         let rest = u64::BITS - 1 - zeros;
 

@@ -134,10 +134,17 @@ impl Wheel {
         // does the next slot wrap this wheel around?
         let (slot, skipped) = if distance > SLOTS {
             debug_assert!(distance < SLOTS * 2);
-            (distance - SLOTS, self.ticks_per_wheel)
+            (distance % SLOTS, self.ticks_per_wheel)
         } else {
             (distance, 0)
         };
+
+        debug_assert!(
+            skipped == 0 || self.level == Core::WHEELS - 1,
+            "if the next expiring slot wraps around, we must be on the top level wheel\n   \
+            slot: {slot}\n skipped: {skipped}\n   level: {}",
+            self.level,
+        );
         // when did the current rotation of this wheel begin? since all wheels
         // represent a power-of-two number of ticks, we can determine the
         // beginning of this rotation by masking out the bits for all lower wheels.
@@ -145,6 +152,7 @@ impl Wheel {
         // the next deadline is the start of the current rotation, plus the next
         // slot's value.
         let ticks = rotation_start + (slot as u64 * self.ticks_per_slot) + skipped;
+
         let deadline = Deadline {
             ticks,
             slot,
