@@ -132,19 +132,19 @@ impl Wheel {
         let distance = self.next_slot_distance(now)?;
 
         // does the next slot wrap this wheel around?
-        let (slot, skipped) = if distance > SLOTS {
+        let (slot, skipped) = if distance >= SLOTS {
             debug_assert!(distance < SLOTS * 2);
+            debug_assert!(
+                self.level == Core::WHEELS - 1,
+                "if the next expiring slot wraps around, we must be on the top level wheel\n   \
+                dist: {distance}\n  level: {}",
+                self.level,
+            );
             (distance % SLOTS, self.ticks_per_wheel)
         } else {
             (distance, 0)
         };
 
-        debug_assert!(
-            skipped == 0 || self.level == Core::WHEELS - 1,
-            "if the next expiring slot wraps around, we must be on the top level wheel\n   \
-            slot: {slot}\n skipped: {skipped}\n   level: {}",
-            self.level,
-        );
         // when did the current rotation of this wheel begin? since all wheels
         // represent a power-of-two number of ticks, we can determine the
         // beginning of this rotation by masking out the bits for all lower wheels.
@@ -170,7 +170,9 @@ impl Wheel {
 
         // which slot is indexed by the `now` timestamp?
         let now_slot = (now / self.ticks_per_slot) as u32 % SLOTS as u32;
-        next_set_bit(self.occupied_slots, now_slot)
+        let occupied_slots = self.occupied_slots.rotate_right(now_slot);
+        let zeros = occupied_slots.trailing_zeros() as usize;
+        Some(zeros + now_slot as usize)
     }
 
     fn clear_slot(&mut self, slot_index: usize) {
