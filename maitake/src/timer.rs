@@ -53,8 +53,17 @@ impl Timer {
         }
     }
 
+    /// The maximum number of timer ticks for [`Sleep`]s supported by this timer.
+    const MAX_SLEEP_TICKS: u64 = (1 << (wheel::BITS * Core::WHEELS)) - 1;
+
     /// Returns a future that will complete in `ticks` timer ticks.
+    #[track_caller]
     pub fn sleep(&self, ticks: Ticks) -> Sleep<'_> {
+        assert!(
+            ticks < Self::MAX_SLEEP_TICKS,
+            "cannot sleep for more than {} ticks",
+            Self::MAX_SLEEP_TICKS
+        );
         Sleep::new(&self.core, ticks)
     }
 
@@ -138,6 +147,13 @@ impl Timer {
             core.advance(pending_ticks);
         }
         core.advance(ticks);
+    }
+
+    #[cfg(test)]
+    fn reset(&self) {
+        let mut core = self.core.lock();
+        *core = Core::new();
+        self.pending_ticks.store(0, Release);
     }
 }
 

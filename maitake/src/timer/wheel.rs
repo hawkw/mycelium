@@ -220,7 +220,7 @@ fn next_set_bit(bitmap: u64, offset: u32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
+    // use proptest::prelude::*;
 
     #[test]
     fn bitshift_is_correct() {

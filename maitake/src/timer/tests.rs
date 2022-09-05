@@ -6,6 +6,8 @@ use std::sync::{
     Arc,
 };
 
+mod fuzz;
+
 struct SleepGroupTest {
     scheduler: Scheduler,
     timer: &'static Timer,
