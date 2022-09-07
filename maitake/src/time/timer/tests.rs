@@ -6,7 +6,7 @@ use std::sync::{
     Arc,
 };
 
-use proptest::{collection::vec, prop_assert_eq, proptest};
+use proptest::{collection::vec, proptest};
 
 struct SleepGroupTest {
     scheduler: Scheduler,
@@ -258,7 +258,7 @@ fn max_sleep() {
     static TIMER: Timer = Timer::new();
     let mut test = SleepGroupTest::new(&TIMER);
 
-    test.spawn_group(Timer::MAX_SLEEP_TICKS, 2);
+    test.spawn_group(wheel::Core::MAX_SLEEP_TICKS, 2);
     test.spawn_group(100, 3);
 
     // first tick --- timer is still at zero
@@ -269,94 +269,15 @@ fn max_sleep() {
     // advance the timer by 100 ticks.
     test.advance(100);
 
-    test.advance(Timer::MAX_SLEEP_TICKS / 2);
+    test.advance(wheel::Core::MAX_SLEEP_TICKS / 2);
 
-    test.spawn_group(Timer::MAX_SLEEP_TICKS, 1);
+    test.spawn_group(wheel::Core::MAX_SLEEP_TICKS, 1);
 
-    test.advance(Timer::MAX_SLEEP_TICKS / 2);
+    test.advance(wheel::Core::MAX_SLEEP_TICKS / 2);
 
-    test.advance(Timer::MAX_SLEEP_TICKS);
+    test.advance(wheel::Core::MAX_SLEEP_TICKS);
 
     test.assert_all_complete();
-}
-
-#[test]
-fn wheel_indices() {
-    let core = Core::new();
-    for ticks in 0..64 {
-        assert_eq!(
-            core.wheel_index(ticks),
-            0,
-            "Core::wheel_index({ticks}) == 0"
-        )
-    }
-
-    for wheel in 1..Core::WHEELS as usize {
-        for slot in wheel..Wheel::SLOTS {
-            let ticks = (slot * usize::pow(Wheel::SLOTS, wheel as u32)) as u64;
-            assert_eq!(
-                core.wheel_index(ticks),
-                wheel,
-                "Core::wheel_index({ticks}) == {wheel}"
-            );
-
-            if slot > wheel {
-                let ticks = ticks - 1;
-                assert_eq!(
-                    core.wheel_index(ticks),
-                    wheel,
-                    "Core::wheel_index({ticks}) == {wheel}"
-                );
-            }
-
-            if slot < 64 {
-                let ticks = ticks + 1;
-                assert_eq!(
-                    core.wheel_index(ticks),
-                    wheel,
-                    "Core::wheel_index({ticks}) == {wheel}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn bitshift_is_correct() {
-    assert_eq!(1 << Wheel::BITS, Wheel::SLOTS);
-}
-
-#[test]
-fn slot_indices() {
-    let wheel = Wheel::new(0);
-    for i in 0..64 {
-        let slot_index = wheel.slot_index(i);
-        assert_eq!(i as usize, slot_index, "wheels[0].slot_index({i}) == {i}")
-    }
-
-    for level in 1..Core::WHEELS {
-        let wheel = Wheel::new(level);
-        for i in level..Wheel::SLOTS {
-            let ticks = i * usize::pow(Wheel::SLOTS, level as u32);
-            let slot_index = wheel.slot_index(ticks as u64);
-            assert_eq!(
-                i as usize, slot_index,
-                "wheels[{level}].slot_index({ticks}) == {i}"
-            )
-        }
-    }
-}
-
-#[test]
-fn test_next_set_bit() {
-    assert_eq!(dbg!(next_set_bit(0b0000_1001, 2)), Some(3));
-    assert_eq!(dbg!(next_set_bit(0b0000_1001, 3)), Some(3));
-    assert_eq!(dbg!(next_set_bit(0b0000_1001, 0)), Some(0));
-    assert_eq!(dbg!(next_set_bit(0b0000_1001, 4)), (Some(64)));
-    assert_eq!(dbg!(next_set_bit(0b0000_0000, 0)), None);
-    assert_eq!(dbg!(next_set_bit(0b0000_1000, 3)), Some(3));
-    assert_eq!(dbg!(next_set_bit(0b0000_1000, 2)), Some(3));
-    assert_eq!(dbg!(next_set_bit(0b0000_1000, 4)), Some(64 + 3));
 }
 
 use proptest::{prop_oneof, strategy::Strategy};
@@ -392,34 +313,12 @@ fn fuzz_action_strategy() -> impl Strategy<Value = FuzzAction> {
     const MAX_ADVANCE: u64 = u64::MAX / MAX_FUZZ_ACTIONS as u64;
 
     prop_oneof![
-        (MIN_SLEEP_TICKS..Timer::MAX_SLEEP_TICKS).prop_map(FuzzAction::Spawn),
+        (MIN_SLEEP_TICKS..wheel::Core::MAX_SLEEP_TICKS).prop_map(FuzzAction::Spawn),
         (0..MAX_ADVANCE).prop_map(FuzzAction::Advance),
     ]
 }
 
 proptest! {
-    #[test]
-    fn next_set_bit_works(bitmap: u64, offset in 0..64u32) {
-        println!("   bitmap: {bitmap:064b}");
-        println!("   offset: {offset}");
-        // find the next set bit the slow way.
-        let mut expected = None;
-        for distance in offset..=(offset + u64::BITS) {
-            let shift = distance % u64::BITS;
-            let bit = bitmap & (1 << shift);
-
-            if bit > 0 {
-                // found a set bit, return its distance!
-                expected = Some(distance as usize);
-                break;
-            }
-        }
-
-        println!(" expected: {expected:?}");
-        prop_assert_eq!(next_set_bit(bitmap, offset), expected);
-        println!("       ... ok!\n");
-    }
-
     #[test]
     fn fuzz_timer(actions in vec(fuzz_action_strategy(), 0..MAX_FUZZ_ACTIONS)) {
         static TIMER: Timer = Timer::new();

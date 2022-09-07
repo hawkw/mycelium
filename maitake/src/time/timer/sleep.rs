@@ -1,4 +1,4 @@
-use super::timer::{Core, Ticks};
+use super::{wheel, Ticks};
 use crate::{
     loom::{cell::UnsafeCell, sync::spin::Mutex},
     sync::wait_cell::{self, WaitCell},
@@ -17,7 +17,7 @@ use pin_project::{pin_project, pinned_drop};
 #[pin_project(PinnedDrop)]
 pub struct Sleep<'timer> {
     state: State,
-    timer: &'timer Mutex<Core>,
+    timer: &'timer Mutex<wheel::Core>,
     #[pin]
     entry: Entry,
 }
@@ -64,7 +64,7 @@ enum State {
 // === impl Sleep ===
 
 impl<'timer> Sleep<'timer> {
-    pub(super) fn new(core: &'timer Mutex<Core>, ticks: Ticks) -> Self {
+    pub(super) fn new(core: &'timer Mutex<wheel::Core>, ticks: Ticks) -> Self {
         Self {
             state: State::Unregistered,
             timer: core,
