@@ -145,6 +145,9 @@ impl SleepGroupTest {
     fn advance(&mut self, ticks: Ticks) {
         let t_0 = self.now;
         self.now += ticks;
+        info!("");
+        let _span = span!(Level::INFO, "advance", ticks, from = t_0, to = self.now).entered();
+        info!("advancing test timer to {}", self.now);
         // how many tasks are expected to complete?
         let expected_complete: usize = self
             .groups
@@ -158,7 +161,8 @@ impl SleepGroupTest {
 
         let completed = self.scheduler.tick().completed;
 
-        info!(ticks, t_0, t_1 = self.now, completed, "advancing timer");
+        info!(completed, "advanced test timer");
+        info!("");
 
         self.assert();
 

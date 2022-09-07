@@ -130,21 +130,21 @@ impl Wheel {
 
     pub(super) fn next_deadline(&self, now: u64) -> Option<Deadline> {
         let distance = self.next_slot_distance(now)?;
-        let slot = distance % SLOTS;
 
-        // // does the next slot wrap this wheel around?
-        // let (slot, skipped) = if distance >= SLOTS {
-        //     debug_assert!(distance < SLOTS * 2);
-        //     debug_assert!(
-        //         self.level == Core::WHEELS - 1,
-        //         "if the next expiring slot wraps around, we must be on the top level wheel\n   \
-        //         dist: {distance}\n  level: {}",
-        //         self.level,
-        //     );
-        //     (distance % SLOTS, self.ticks_per_wheel)
-        // } else {
-        //     (distance, 0)
-        // };
+        let slot = distance % SLOTS;
+        // does the next slot wrap this wheel around from the now slot?
+        let skipped = distance.saturating_sub(SLOTS);
+
+        debug_assert!(distance < SLOTS * 2);
+        debug_assert!(
+            skipped == 0 || self.level == Core::WHEELS - 1,
+            "if the next expiring slot wraps around, we must be on the top level wheel\
+            \n    dist: {distance}\
+            \n    slot: {slot}\
+            \n skipped: {skipped}\
+            \n   level: {}",
+            self.level,
+        );
 
         // when did the current rotation of this wheel begin? since all wheels
         // represent a power-of-two number of ticks, we can determine the
@@ -152,18 +152,17 @@ impl Wheel {
         let rotation_start = now & self.wheel_mask;
         // the next deadline is the start of the current rotation, plus the next
         // slot's value.
-        let mut ticks = rotation_start + (slot as u64 * self.ticks_per_slot);
-
-        if ticks < now {
-            ticks += self.ticks_per_wheel;
-        }
+        let ticks = {
+            let skipped_ticks = skipped as u64 * self.ticks_per_wheel;
+            rotation_start + (slot as u64 * self.ticks_per_slot) + skipped_ticks
+        };
 
         test_trace!(
             now,
             wheel = self.level,
             rotation_start,
             slot,
-            // skipped,
+            skipped,
             ticks,
             "Wheel::next_deadline"
         );
@@ -185,9 +184,15 @@ impl Wheel {
 
         // which slot is indexed by the `now` timestamp?
         let now_slot = (now / self.ticks_per_slot) as u32 % SLOTS as u32;
-        let occupied_slots = self.occupied_slots.rotate_right(now_slot);
-        let zeros = occupied_slots.trailing_zeros() as usize;
-        Some(zeros + now_slot as usize)
+        let next_dist = next_set_bit(self.occupied_slots, now_slot)?;
+
+        test_trace!(
+            now_slot,
+            next_dist,
+            occupied = ?fmt::bin(self.occupied_slots),
+            "next_slot_distance"
+        );
+        Some(next_dist)
     }
 
     fn clear_slot(&mut self, slot_index: usize) {

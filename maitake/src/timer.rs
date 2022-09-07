@@ -196,53 +196,63 @@ impl Core {
     fn advance(&mut self, ticks: Ticks) -> usize {
         let now = self.elapsed + ticks;
         let mut fired = 0;
-        let mut firing = List::<sleep::Entry>::new();
+        let mut pending_reschedule = List::<sleep::Entry>::new();
         while let Some(deadline) = self.next_deadline() {
             if deadline.ticks > now {
                 break;
             }
 
+            let mut fired_this_turn = 0;
             let mut entries = self.wheels[deadline.wheel].take(deadline.slot);
-            debug!(deadline.ticks, entries = entries.len(), "turning wheel to");
+            debug!(
+                now = self.elapsed,
+                deadline.ticks,
+                entries = entries.len(),
+                "turning wheel to"
+            );
 
             while let Some(entry) = entries.pop_front() {
                 let entry_deadline = unsafe { entry.as_ref().deadline.with(|deadline| *deadline) };
 
-                if entry_deadline > now {
+                if test_dbg!(entry_deadline) > test_dbg!(now) {
                     // this timer was on the top-level wheel and needs to be
                     // rescheduled on a lower-level wheel, rather than firing now.
                     debug_assert_ne!(
                         deadline.wheel, 0,
                         "if a timer is being rescheduled, it must not have been on the lowest-level wheel"
                     );
-                    let new_wheel = wheel_index(deadline.ticks, entry_deadline);
-                    trace!(
-                        sleep.addr = ?entry,
-                        sleep.deadline = entry_deadline,
-                        now = deadline.ticks,
-                        new_wheel,
-                        "rescheduling timer",
-                    );
-                    self.wheels[new_wheel].insert(entry_deadline, entry)
+                    // this timer will need to be rescheduled.
+                    pending_reschedule.push_front(entry);
                 } else {
-                    // otherwise, put the entry on the list of firing timers.
-                    firing.push_front(entry);
+                    // otherwise, fire the timer.
+                    unsafe {
+                        fired_this_turn += 1;
+                        entry.as_ref().fire();
+                    }
                 }
             }
 
-            trace!(at = self.elapsed, firing = firing.len(), "firing timers");
-            fired += firing.len();
+            trace!(at = self.elapsed, firing = fired_this_turn, "firing timers");
 
-            while let Some(entry) = firing.pop_front() {
-                unsafe {
-                    entry.as_ref().fire();
-                }
-            }
-
-            self.elapsed += deadline.ticks;
+            self.elapsed = deadline.ticks;
+            fired += fired_this_turn;
         }
+
         self.elapsed = now;
-        debug!(now = self.elapsed, fired, "wheel turned to");
+
+        // reschedule pending sleeps.
+        debug!(
+            now = self.elapsed,
+            fired,
+            rescheduled = pending_reschedule.len(),
+            "wheel turned to"
+        );
+        while let Some(entry) = pending_reschedule.pop_front() {
+            let deadline = unsafe { entry.as_ref().deadline.with(|deadline| *deadline) };
+            debug_assert_ne!(deadline, 0);
+            self.insert_sleep_at(deadline, entry)
+        }
+
         fired
     }
 
@@ -294,7 +304,12 @@ impl Core {
             deadline
         };
 
+        self.insert_sleep_at(deadline, sleep)
+    }
+
+    fn insert_sleep_at(&mut self, deadline: Ticks, sleep: ptr::NonNull<sleep::Entry>) {
         let wheel = self.wheel_index(deadline);
+        trace!(wheel, sleep.deadline = deadline, sleep.addr = ?sleep, "inserting sleep");
         self.wheels[wheel].insert(deadline, sleep);
     }
 
