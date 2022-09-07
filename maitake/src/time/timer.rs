@@ -62,7 +62,7 @@ impl Timer {
     /// Returns a future that will complete in `ticks` timer ticks.
     #[track_caller]
     pub fn sleep_ticks(&self, ticks: Ticks) -> Sleep<'_> {
-        Sleep::new(&self.core, ticks)
+        Sleep::new(self, ticks)
     }
 
     /// Add pending time to the timer *without* turning the wheel.
@@ -203,6 +203,10 @@ impl Timer {
             core.advance(pending_ticks);
         }
         core.advance(ticks);
+    }
+
+    fn core(&self) -> MutexGuard<'_, wheel::Core> {
+        self.core.lock()
     }
 
     #[cfg(test)]

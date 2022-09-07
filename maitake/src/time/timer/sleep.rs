@@ -1,6 +1,6 @@
-use super::{wheel, Ticks};
+use super::{Ticks, Timer};
 use crate::{
-    loom::{cell::UnsafeCell, sync::spin::Mutex},
+    loom::cell::UnsafeCell,
     sync::wait_cell::{self, WaitCell},
 };
 use cordyceps::{list, Linked};
@@ -10,6 +10,7 @@ use core::{
     pin::Pin,
     ptr::{self, NonNull},
     task::{Context, Poll},
+    time::Duration,
 };
 use mycelium_util::fmt;
 use pin_project::{pin_project, pinned_drop};
@@ -17,7 +18,7 @@ use pin_project::{pin_project, pinned_drop};
 #[pin_project(PinnedDrop)]
 pub struct Sleep<'timer> {
     state: State,
-    timer: &'timer Mutex<wheel::Core>,
+    timer: &'timer Timer,
     #[pin]
     entry: Entry,
 }
@@ -64,10 +65,10 @@ enum State {
 // === impl Sleep ===
 
 impl<'timer> Sleep<'timer> {
-    pub(super) fn new(core: &'timer Mutex<wheel::Core>, ticks: Ticks) -> Self {
+    pub(super) fn new(timer: &'timer Timer, ticks: Ticks) -> Self {
         Self {
             state: State::Unregistered,
-            timer: core,
+            timer,
             entry: Entry {
                 links: UnsafeCell::new(list::Links::new()),
                 waker: WaitCell::new(),
@@ -76,6 +77,10 @@ impl<'timer> Sleep<'timer> {
                 _pin: PhantomPinned,
             },
         }
+    }
+
+    pub fn duration(&self) -> Duration {
+        self.timer.ticks_to_dur(self.entry.ticks)
     }
 }
 
@@ -90,7 +95,7 @@ impl Future for Sleep<'_> {
             State::Unregistered => {
                 let ptr =
                     unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
-                this.timer.lock().register_sleep(ptr);
+                this.timer.core().register_sleep(ptr);
                 *this.state = State::Registered;
             }
             State::Registered => {}
@@ -127,8 +132,19 @@ impl PinnedDrop for Sleep<'_> {
             if this.entry.as_ref().project_ref().waker.is_closed() {
                 return;
             }
-            this.timer.lock().cancel_sleep(this.entry);
+            this.timer.core().cancel_sleep(this.entry);
         }
+    }
+}
+
+impl fmt::Debug for Sleep<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Sleep")
+            .field("duration", &self.duration())
+            .field("state", &self.state)
+            .field("addr", &fmt::ptr(&self.entry))
+            .field("timer", &fmt::ptr(&self.timer))
+            .finish()
     }
 }
 
