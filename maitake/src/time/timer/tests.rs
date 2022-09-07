@@ -6,7 +6,7 @@ use std::sync::{
     Arc,
 };
 
-mod fuzz;
+use proptest::{collection::vec, prop_assert_eq, proptest};
 
 struct SleepGroupTest {
     scheduler: Scheduler,
@@ -292,8 +292,8 @@ fn wheel_indices() {
     }
 
     for wheel in 1..Core::WHEELS as usize {
-        for slot in wheel..wheel::SLOTS {
-            let ticks = (slot * usize::pow(wheel::SLOTS, wheel as u32)) as u64;
+        for slot in wheel..Wheel::SLOTS {
+            let ticks = (slot * usize::pow(Wheel::SLOTS, wheel as u32)) as u64;
             assert_eq!(
                 core.wheel_index(ticks),
                 wheel,
@@ -318,5 +318,126 @@ fn wheel_indices() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn bitshift_is_correct() {
+    assert_eq!(1 << Wheel::BITS, Wheel::SLOTS);
+}
+
+#[test]
+fn slot_indices() {
+    let wheel = Wheel::new(0);
+    for i in 0..64 {
+        let slot_index = wheel.slot_index(i);
+        assert_eq!(i as usize, slot_index, "wheels[0].slot_index({i}) == {i}")
+    }
+
+    for level in 1..Core::WHEELS {
+        let wheel = Wheel::new(level);
+        for i in level..Wheel::SLOTS {
+            let ticks = i * usize::pow(Wheel::SLOTS, level as u32);
+            let slot_index = wheel.slot_index(ticks as u64);
+            assert_eq!(
+                i as usize, slot_index,
+                "wheels[{level}].slot_index({ticks}) == {i}"
+            )
+        }
+    }
+}
+
+#[test]
+fn test_next_set_bit() {
+    assert_eq!(dbg!(next_set_bit(0b0000_1001, 2)), Some(3));
+    assert_eq!(dbg!(next_set_bit(0b0000_1001, 3)), Some(3));
+    assert_eq!(dbg!(next_set_bit(0b0000_1001, 0)), Some(0));
+    assert_eq!(dbg!(next_set_bit(0b0000_1001, 4)), (Some(64)));
+    assert_eq!(dbg!(next_set_bit(0b0000_0000, 0)), None);
+    assert_eq!(dbg!(next_set_bit(0b0000_1000, 3)), Some(3));
+    assert_eq!(dbg!(next_set_bit(0b0000_1000, 2)), Some(3));
+    assert_eq!(dbg!(next_set_bit(0b0000_1000, 4)), Some(64 + 3));
+}
+
+use proptest::{prop_oneof, strategy::Strategy};
+
+#[derive(Debug)]
+enum FuzzAction {
+    Spawn(Ticks),
+    Advance(Ticks),
+    // TODO(eliza): add an action that cancels a sleep group...
+}
+/// Miri uses a significant amount of time and memory, meaning that
+/// running 256 property tests (the default test-pass count) * (0..100)
+/// vec elements (the default proptest vec length strategy) causes the
+/// CI running to OOM (I think). In local testing, this required up
+/// to 11GiB of resident memory with the default strategy, at the
+/// time of this change.
+///
+/// In the future, it may be desirable to have an "override" feature
+/// to use a larger test case set for more exhaustive local miri testing,
+/// where the time and memory limitations are less restrictive than in CI.
+#[cfg(miri)]
+const MAX_FUZZ_ACTIONS: usize = 10;
+
+/// The default range for proptest's vec strategy is 0..100.
+#[cfg(not(miri))]
+const MAX_FUZZ_ACTIONS: usize = 100;
+
+fn fuzz_action_strategy() -> impl Strategy<Value = FuzzAction> {
+    // don't spawn tasks that sleep for 0 ticks
+    const MIN_SLEEP_TICKS: u64 = 1;
+
+    // don't overflow the timer's elapsed counter
+    const MAX_ADVANCE: u64 = u64::MAX / MAX_FUZZ_ACTIONS as u64;
+
+    prop_oneof![
+        (MIN_SLEEP_TICKS..Timer::MAX_SLEEP_TICKS).prop_map(FuzzAction::Spawn),
+        (0..MAX_ADVANCE).prop_map(FuzzAction::Advance),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn next_set_bit_works(bitmap: u64, offset in 0..64u32) {
+        println!("   bitmap: {bitmap:064b}");
+        println!("   offset: {offset}");
+        // find the next set bit the slow way.
+        let mut expected = None;
+        for distance in offset..=(offset + u64::BITS) {
+            let shift = distance % u64::BITS;
+            let bit = bitmap & (1 << shift);
+
+            if bit > 0 {
+                // found a set bit, return its distance!
+                expected = Some(distance as usize);
+                break;
+            }
+        }
+
+        println!(" expected: {expected:?}");
+        prop_assert_eq!(next_set_bit(bitmap, offset), expected);
+        println!("       ... ok!\n");
+    }
+
+    #[test]
+    fn fuzz_timer(actions in vec(fuzz_action_strategy(), 0..MAX_FUZZ_ACTIONS)) {
+        static TIMER: Timer = Timer::new();
+        static FUZZ_RUNS: AtomicUsize = AtomicUsize::new(1);
+
+        TIMER.reset();
+        let mut test = SleepGroupTest::new(&TIMER);
+        let _span = span!(Level::INFO, "fuzz_timer", iteration = FUZZ_RUNS.fetch_add(1, Ordering::Relaxed)).entered();
+        info!(?actions);
+
+        for action in actions {
+            match action {
+                FuzzAction::Spawn(ticks) => test.spawn_group(ticks, 1),
+                FuzzAction::Advance(ticks) => test.advance(ticks),
+            }
+        }
+
+        test.assert();
+        info!("iteration done\n\n");
     }
 }

@@ -1,6 +1,6 @@
-use super::*;
+use super::timer::{Core, Ticks};
 use crate::{
-    loom::cell::UnsafeCell,
+    loom::{cell::UnsafeCell, sync::spin::Mutex},
     sync::wait_cell::{self, WaitCell},
 };
 use cordyceps::{list, Linked};
