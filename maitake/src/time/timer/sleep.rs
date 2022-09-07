@@ -16,6 +16,7 @@ use mycelium_util::fmt;
 use pin_project::{pin_project, pinned_drop};
 
 #[pin_project(PinnedDrop)]
+#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Sleep<'timer> {
     state: State,
     timer: &'timer Timer,
