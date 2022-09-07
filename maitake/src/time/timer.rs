@@ -10,9 +10,11 @@ mod loom;
 #[cfg(all(test, not(loom)))]
 mod tests;
 
+pub(super) mod global;
 pub(super) mod sleep;
 mod wheel;
 
+pub use self::global::{set_global_default, AlreadyInitialized};
 use self::sleep::Sleep;
 
 pub struct Timer {
