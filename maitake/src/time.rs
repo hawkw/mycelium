@@ -1,4 +1,5 @@
 //! Time utilities.
+#![warn(missing_docs, missing_debug_implementations)]
 pub mod timeout;
 pub mod timer;
 
@@ -25,6 +26,19 @@ pub fn sleep(duration: Duration) -> Sleep<'static> {
 
 /// Requires the provided [`Future`] to complete before the specified [`Duration`]
 /// has elapsed.
+///
+/// # Output
+///
+/// - [`Ok`]`(F::Output)` if the inner future completed before the specified
+///   timeout.
+/// - [`Err`]`(`[`Elapsed`]`)` if the timeout elapsed before the inner [`Future`]
+///   completed.
+///
+/// # Cancellation
+///
+/// Dropping a `Timeout` future cancels the timeout. The wrapped [`Future`] can
+/// be extracted from the `Timeout` future by calling [`Timeout::into_inner`],
+/// allowing the future to be polled without failing if the timeout elapses.
 ///
 /// # Panics
 ///
