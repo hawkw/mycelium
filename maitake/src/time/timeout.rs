@@ -33,6 +33,31 @@ impl<'timer, F: Future> Timeout<'timer, F> {
         }
     }
 
+    /// Consumes this `Timeout`, returning the inner [`Future`].
+    ///
+    /// This can be used to continue polling the inner [`Future`] without
+    /// requiring it to complete prior to the specified timeout.
+    pub fn into_inner(self) -> F {
+        self.future
+    }
+
+    /// Borrows the inner [`Future`] immutably.
+    pub fn get_ref(&self) -> &F {
+        &self.future
+    }
+
+    /// Mutably the inner [`Future`].
+    pub fn get_mut(&mut self) -> &mut F {
+        &mut self.future
+    }
+
+    /// Borrows the inner [`Future`] as a [`Pin`]ned reference, if this
+    /// `Timeout` is pinned.
+    pub fn get_pin_mut(self: Pin<&mut Self>) -> Pin<&mut F> {
+        self.project().future
+    }
+
+    /// Returns the [`Duration`] the inner [`Future`] is allowed to run for.
     pub fn duration(&self) -> Duration {
         self.duration
     }
