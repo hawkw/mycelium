@@ -250,7 +250,7 @@ fn next_set_bit(bitmap: u64, offset: u32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use proptest::prelude::*;
+    use proptest::prelude::*;
 
     #[test]
     fn bitshift_is_correct() {
@@ -290,12 +290,27 @@ mod tests {
         assert_eq!(dbg!(next_set_bit(0b0000_1000, 4)), Some(64 + 3));
     }
 
-    // proptest! {
-    //     #[test]
-    //     fn next_set_bit_works(bitmap: u64, offset in 0..64u32) {
-    //         // find the next set bit the slow way.
-    //         let expected = (offset..64).find(|i| bitmap & (1 << i) != 0).map(|idx| idx as usize);
-    //         prop_assert_eq!(next_set_bit(bitmap, offset), expected);
-    //     }
-    // }
+    proptest! {
+        #[test]
+        fn next_set_bit_works(bitmap: u64, offset in 0..64u32) {
+            println!("   bitmap: {bitmap:064b}");
+            println!("   offset: {offset}");
+            // find the next set bit the slow way.
+            let mut expected = None;
+            for distance in offset..=(offset + u64::BITS) {
+                let shift = distance % u64::BITS;
+                let bit = bitmap & (1 << shift);
+
+                if bit > 0 {
+                    // found a set bit, return its distance!
+                    expected = Some(distance as usize);
+                    break;
+                }
+            }
+
+            println!(" expected: {expected:?}");
+            prop_assert_eq!(next_set_bit(bitmap, offset), expected);
+            println!("       ... ok!\n");
+        }
+    }
 }
