@@ -10,7 +10,7 @@ use proptest::{collection::vec, proptest};
 
 struct SleepGroupTest {
     scheduler: Scheduler,
-    timer: &'static TickTimer,
+    timer: &'static Timer,
     now: Ticks,
     groups: BTreeMap<Ticks, SleepGroup>,
     next_id: usize,
@@ -25,7 +25,7 @@ struct SleepGroup {
 }
 
 impl SleepGroupTest {
-    fn new(timer: &'static TickTimer) -> Self {
+    fn new(timer: &'static Timer) -> Self {
         crate::util::test::trace_init_with_default("info,maitake::timer=trace");
         Self {
             scheduler: Scheduler::new(),
@@ -45,7 +45,7 @@ impl SleepGroupTest {
             let timer = self.timer;
             self.scheduler.spawn(async move {
                 info!(task.group = id, task = i, "sleeping for {duration} ticks");
-                timer.sleep(duration).await;
+                timer.sleep_ticks(duration).await;
                 info!(task.group = id, task = i, "slept for {duration} ticks!");
                 count.fetch_sub(1, Ordering::SeqCst);
             });
@@ -157,7 +157,7 @@ impl SleepGroupTest {
             .sum();
 
         // advance the timer.
-        self.timer.advance(ticks);
+        self.timer.advance_ticks(ticks);
 
         let completed = self.scheduler.tick().completed;
 
@@ -178,7 +178,7 @@ impl SleepGroupTest {
 
 #[test]
 fn timer_basically_works() {
-    static TIMER: TickTimer = TickTimer::new();
+    static TIMER: Timer = Timer::new(Duration::from_secs(1));
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(100, 2);
@@ -214,7 +214,7 @@ fn timer_basically_works() {
 
 #[test]
 fn schedule_after_start() {
-    static TIMER: TickTimer = TickTimer::new();
+    static TIMER: Timer = Timer::new(Duration::from_secs(1));
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(100, 2);
@@ -255,7 +255,7 @@ fn schedule_after_start() {
 
 #[test]
 fn max_sleep() {
-    static TIMER: TickTimer = TickTimer::new();
+    static TIMER: Timer = Timer::new(Duration::from_secs(1));
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(wheel::Core::MAX_SLEEP_TICKS, 2);
@@ -321,7 +321,7 @@ fn fuzz_action_strategy() -> impl Strategy<Value = FuzzAction> {
 proptest! {
     #[test]
     fn fuzz_timer(actions in vec(fuzz_action_strategy(), 0..MAX_FUZZ_ACTIONS)) {
-        static TIMER: TickTimer = TickTimer::new();
+        static TIMER: Timer = Timer::new(Duration::from_secs(1));
         static FUZZ_RUNS: AtomicUsize = AtomicUsize::new(1);
 
         TIMER.reset();
