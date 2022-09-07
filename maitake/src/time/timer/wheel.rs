@@ -6,6 +6,7 @@ use mycelium_util::fmt;
 #[cfg(test)]
 mod tests;
 
+#[derive(Debug)]
 pub(in crate::time) struct Core {
     /// The total number of ticks that have elapsed since this timer started.
     elapsed: Ticks,
@@ -15,7 +16,7 @@ pub(in crate::time) struct Core {
 }
 
 /// _The Wheel of Time_, by Robert Jordan
-pub(super) struct Wheel {
+struct Wheel {
     /// A bitmap of the slots that are occupied.
     ///
     /// See <https://lwn.net/Articles/646056/> for details on
