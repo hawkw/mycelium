@@ -1,4 +1,4 @@
-use super::{Ticks, Timer};
+use super::{wheel, Ticks, Timer};
 use crate::{
     loom::cell::UnsafeCell,
     sync::wait_cell::{self, WaitCell},
@@ -38,7 +38,8 @@ pub(super) struct Entry {
     #[pin]
     links: UnsafeCell<list::Links<Entry>>,
 
-    pub(super) waker: WaitCell,
+    /// The waker of the task awaiting this future.
+    waker: WaitCell,
 
     pub(super) ticks: Ticks,
 
@@ -53,7 +54,7 @@ pub(super) struct Entry {
     ///
     /// It would be nice if this could just be an `AtomicU64` but LOLSOB WE CANT
     /// HAVE NICE THINGS BECAUSE OF CORTEX-M.
-    pub(super) deadline: UnsafeCell<Ticks>,
+    deadline: UnsafeCell<Ticks>,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
@@ -184,5 +185,24 @@ impl Entry {
     pub(super) fn fire(&self) {
         trace!(timer.addr = ?fmt::ptr(self), "firing timer");
         self.waker.close();
+    }
+
+    pub(super) fn deadline(&self, _core: &mut wheel::Core) -> Ticks {
+        self.deadline.with(|deadline| unsafe {
+            // safety: accessing the deadline `UnsafeCell` requires that the
+            // timer wheel lock be held. because this function takes a dummy
+            // `&mut Core` argument, we can be sure that the lock is held when
+            // this is called.
+            *deadline
+        })
+    }
+    pub(super) fn set_deadline(&mut self, _core: &mut wheel::Core, new_deadline: Ticks) {
+        self.deadline.with_mut(|deadline| unsafe {
+            // safety: accessing the deadline `UnsafeCell` requires that the
+            // timer wheel lock be held. because this function takes a dummy
+            // `&mut Core` argument, we can be sure that the lock is held when
+            // this is called.
+            *deadline = new_deadline;
+        })
     }
 }

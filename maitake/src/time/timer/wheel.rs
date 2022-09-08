@@ -102,7 +102,7 @@ impl Core {
             );
 
             while let Some(entry) = entries.pop_front() {
-                let entry_deadline = unsafe { entry.as_ref().deadline.with(|deadline| *deadline) };
+                let entry_deadline = unsafe { entry.as_ref() }.deadline(self);
 
                 if test_dbg!(entry_deadline) > test_dbg!(now) {
                     // this timer was on the top-level wheel and needs to be
@@ -138,7 +138,7 @@ impl Core {
             "wheel turned to"
         );
         while let Some(entry) = pending_reschedule.pop_front() {
-            let deadline = unsafe { entry.as_ref().deadline.with(|deadline| *deadline) };
+            let deadline = unsafe { entry.as_ref() }.deadline(self);
             debug_assert_ne!(deadline, 0);
             self.insert_sleep_at(deadline, entry)
         }
@@ -147,41 +147,24 @@ impl Core {
     }
 
     pub(super) fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {
-        let deadline = {
-            let entry = sleep.as_ref().project_ref();
-            let deadline = entry.deadline.with(|deadline| unsafe {
-                // safety: this is safe because we are holding the lock on the
-                // wheel.
-                *deadline
-            });
-            trace!(
-                sleep.addr = ?format_args!("{:p}", sleep),
-                sleep.ticks = *entry.ticks,
-                sleep.deadline = deadline,
-                now = self.elapsed,
-                "canceling sleep"
-            );
-            deadline
-        };
+        let deadline = sleep.deadline(self);
+        trace!(
+            sleep.addr = ?format_args!("{:p}", sleep),
+            sleep.ticks = *sleep.as_ref().project_ref().ticks,
+            sleep.deadline = deadline,
+            now = self.elapsed,
+            "canceling sleep"
+        );
         let wheel = self.wheel_index(deadline);
         self.wheels[wheel].remove(deadline, sleep);
     }
 
     pub(super) fn register_sleep(&mut self, mut sleep: ptr::NonNull<sleep::Entry>) {
-        let deadline = unsafe {
-            // safety: it's safe to access the entry's `start_time` field
-            // mutably because `insert_sleep` is only called when the entry
-            // hasn't been registered yet, and we are holding the timer lock.
-            let entry = sleep.as_mut();
+        let deadline = {
+            let entry = unsafe { sleep.as_mut() };
             let deadline = entry.ticks + self.elapsed;
             // set the entry's deadline with the wheel's current time.
-            entry.deadline.with_mut(|entry_deadline| {
-                debug_assert_eq!(
-                    *entry_deadline, 0,
-                    "sleep entry already bound to wheel! this is bad news!"
-                );
-                *entry_deadline = deadline
-            });
+            entry.set_deadline(self, deadline);
 
             trace!(
                 sleep.addr = ?sleep,
