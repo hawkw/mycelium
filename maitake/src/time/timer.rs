@@ -1,3 +1,11 @@
+//! A [`Timer`] tracks the current time, and notifies [`Sleep`] and [`Timeout`]
+//! [future]s when they complete.
+//!
+//! See the [`Timer`] type's documentation for details.
+//!
+//! [`Sleep`]: crate::time::Sleep
+//! [`Timeout`]: crate::time::Timeout
+//! [future]: core::future::Future
 use crate::loom::sync::{
     atomic::{AtomicUsize, Ordering::*},
     spin::{Mutex, MutexGuard},
@@ -17,8 +25,81 @@ mod wheel;
 pub use self::global::{set_global_default, AlreadyInitialized};
 use self::sleep::Sleep;
 
+/// A `Timer` tracks the current time, and notifies [`Sleep`] and [`Timeout`]
+/// [future]s when they complete.
+///
+/// # Usage
+///
+/// &#x26a0;&#xfe0f; *A timer wheel at rest will remain at rest unless acted
+/// upon by an outside force!*
+///
+/// Since `maitake` is intended for bare-metal platforms without an operating
+/// system, a `Timer` instance cannot automatically advance time. Instead, it
+/// must be driven by a *time source*, which calls the [`Timer::advance`] method
+/// and/or the [`Timer::pend_duration`] and [`Timer::force_advance`] methods.
+///
+/// Depending on the hardware platform, a time source may be a timer interrupt
+/// that fires on a known interval[^1], or a timestamp that's read by reading
+/// from a special register[^2], a memory-mapped IO location, or by executing a
+/// special instruction[^3]. A combination of multiple time sources can also be
+/// used.
+///
+/// In any case, the timer must be advanced periodically by the time source.
+///
+/// ## Interrupt-Driven Timers
+///
+/// When the timer is interrupt-driven, the interrupt handler for the timer
+/// interrupt should call either the [`Timer::pend_duration`] or
+/// [`Timer::advance`] methods.
+///
+/// [`Timer::advance`] will attempt to optimistically acquire a spinlock, and
+/// advance the timer if it is acquired, or add to the pending tick counter if
+/// the timer wheel is currently locked. Therefore, it is safe to call in an
+/// interrupt handler, as it and cannot cause a deadlock.
+///
+/// However, if interrupt handlers must be extremely short, the
+/// [`Timer::pend_duration`] method can be used, instead. This method will
+/// *never* acquire a lock, and does not actually turn the timer wheel. Instead,
+/// it always performs only a single atomic add. If the time source is an
+/// interrupt handler which calls [`Timer::pend_duration`], though, the timer
+/// wheel must be turned externally. This can be done by calling the
+/// [`Timer::force_advance_ticks`] method periodically outside of the interrupt
+/// handler, with a duration of 0 ticks. In general, this should be done as some
+/// form of runtime bookkeeping action. For example, the timer can be advanced
+/// in a system's run loop every time the [`Scheduler::tick`] method completes.
+///
+/// ## Timestamp-Driven Timers
+///
+/// When the timer is advanced by reading from a time source, the
+/// [`Timer::advance`] method should generally be used to drive the timer. Prior
+/// to calling [`Timer::advance`], the time source is read to determine the
+/// duration that has elapsed since the last time [`Timer::advance`] was called,
+/// and that duration is provided when calling `advance`.
+///
+/// This should occur periodically as part of a runtime loop (as discussed in
+/// the previous section), such as every time [the scheduler is
+/// ticked][`Scheduler::tick`]. Advancing the timer more frequently will result
+/// in [`Sleep`] futures firing with a higher resolution, while less frequent
+/// calls to [`Timer::advance`] will result in more noise in when [`Sleep`]
+/// futures actually complete.
+///
+/// [^1]: Such as the [8253 PIT interrupt] on most x86 systems.
+/// [^2]: Such as the [`CCNT` register] on ARMv7.
+/// [^3]: Such as the [`rdtsc` instruction] on x86_64.
+///
+/// [`Sleep`]: crate::time::Sleep
+/// [`Timeout`]: crate::time::Timeout
+/// [future]: core::future::Future
+/// [8253 PIT interrupt]: https://en.wikipedia.org/wiki/Intel_8253#IBM_PC_programming_tips_and_hints
+/// [`CCNT` register]: https://developer.arm.com/documentation/ddi0211/h/system-control-coprocessor/system-control-processor-register-descriptions/c15--cycle-counter-register--ccnt-
+/// [`rdtsc` instruction]: https://www.felixcloutier.com/x86/rdtsc
 pub struct Timer {
+    /// The duration represented by one tick of this timer.
+    ///
+    /// This represents the timer's finest granularity; durations shorter than
+    /// this are rounded up to one tick.
     tick_duration: Duration,
+
     /// A count of how many timer ticks have elapsed since the last time the
     /// timer's [`Core`] was updated.
     ///
@@ -33,15 +114,40 @@ pub struct Timer {
     /// timer is advanced from an interrupt handler.
     pending_ticks: AtomicUsize,
 
+    /// The hierarchical timer wheel.
+    ///
+    /// This is stored inside a [`Mutex`], which must be locked in order to
+    /// register a new [`Sleep`] future, cancel a [`Sleep`] that is currently
+    /// registered, and turn the timer wheel. `pending_ticks` is outside this
+    /// lock, in order to allow incrementing the time that has advanced in an
+    /// ISR without locking. Pending ticks are then consumed by locking the
+    /// wheel and advancing the current time, which can be done either
+    /// optimistically (*try* to consume any pending ticks when the lock is not
+    /// busy), or forcefully (spin to acquire the lock and then ensure all
+    /// pending ticks are *definitely* consumed).
+    ///
+    /// XXX(eliza): would be nice if the "elapsed" counter could be moved
+    /// outside the lock so we can have a global `Instant::now()` without
+    /// locking...but that's hard to do without 64-bit atomics...
+    ///
+    /// Also, we could consider trying to make locking more granular here so
+    /// that we lock individual wheels in order to register a sleep, but that
+    /// would be Complicated...and then we'd need some way to tell a sleep
+    /// future "you are on a different wheel now, so here is what you would have
+    /// to lock if you need to cancel yourself"...
     core: Mutex<wheel::Core>,
 }
 
+/// Timer ticks are always counted by a 64-bit unsigned integer.
 pub type Ticks = u64;
 
 // === impl Timer ===
 
 impl Timer {
     loom_const_fn! {
+        /// Returns a new `Timer` with the specified `tick_duration` for a single timer
+        /// tick.
+        #[must_use]
         pub fn new(tick_duration: Duration) -> Self {
             Self {
                 tick_duration,
@@ -51,6 +157,7 @@ impl Timer {
         }
     }
 
+    /// Returns the maximum duration of [`Sleep`] futures driven by this timer.
     pub fn max_duration(&self) -> Duration {
         self.ticks_to_dur(u64::MAX)
     }

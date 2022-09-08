@@ -15,6 +15,7 @@ use core::{
 use mycelium_util::fmt;
 use pin_project::{pin_project, pinned_drop};
 
+/// A [`Future`] that completes after a specified [`Duration`].
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Sleep<'timer> {
@@ -80,6 +81,7 @@ impl<'timer> Sleep<'timer> {
         }
     }
 
+    /// Returns the [`Duration`] that this `Sleep` future will sleep for.
     pub fn duration(&self) -> Duration {
         self.timer.ticks_to_dur(self.entry.ticks)
     }

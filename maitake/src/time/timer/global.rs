@@ -6,9 +6,18 @@ use core::{
 
 static GLOBAL_TIMER: AtomicPtr<Timer> = AtomicPtr::new(ptr::null_mut());
 
+/// Errors returned by [`set_global_timer`].
 #[derive(Debug)]
 pub struct AlreadyInitialized(());
 
+/// Sets a timer as the global default timer.
+///
+/// This function must be called in order for the [`sleep`](super::sleep) and
+/// [`timeout`](super::timeout) free functions to be used.
+///
+/// The global timer can only be set a single time. Once the global timer is
+/// initialized, subsequent calls to this function will return an
+/// [`AlreadyInitialized`] error.
 pub fn set_global_default(timer: &'static Timer) -> Result<(), AlreadyInitialized> {
     GLOBAL_TIMER
         .compare_exchange(
