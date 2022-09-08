@@ -83,6 +83,14 @@ use self::sleep::Sleep;
 /// calls to [`Timer::advance`] will result in more noise in when [`Sleep`]
 /// futures actually complete.
 ///
+/// # Timer Granularity
+///
+/// TODO(eliza): write this part
+///
+/// # Setting a Global Timer
+///
+/// TODO(eliza): write this part
+///
 /// [^1]: Such as the [8253 PIT interrupt] on most x86 systems.
 /// [^2]: Such as the [`CCNT` register] on ARMv7.
 /// [^3]: Such as the [`rdtsc` instruction] on x86_64.
