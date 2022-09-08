@@ -19,7 +19,7 @@ use pin_project::pin_project;
 /// This `Future` is returned by the [`timeout`] and [`try_timeout`] functions,
 /// and by the [`Timer::timeout`] and [`Timer::try_timeout`] methods.
 ///
-/// [`timeout`]: super::timeout
+/// [`timeout`]: super::timeout()
 /// [`try_timeout`]: super::try_timeout
 ///
 /// # Output
@@ -160,6 +160,8 @@ impl Timer {
     ///
     /// For a version of this method that does not panic, use the
     /// [`Timer::try_timeout`] method instead.
+    ///
+    /// [max]: Timer::max_duration
     #[track_caller]
     pub fn timeout<F: Future>(&self, duration: Duration, future: F) -> Timeout<'_, F> {
         util::expect_display(

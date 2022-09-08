@@ -14,7 +14,7 @@
 //! they must be driven by a [`Timer`], which tracks the current time and
 //! notifies time-based futures when their deadlines are reached.
 //!
-//! ## Global Timers
+//! ### Global Timers
 //!
 //! In most cases, it is desirable to have a single global timer instance that
 //! drives all time-based futures in the system. In particular, creating new
@@ -24,8 +24,8 @@
 //!
 //! Therefore, the `maitake` timer also includes support for setting a global
 //! timer, using the [`set_global_timer`] function. Once a global timer
-//! has been initialized, the [`sleep`] and [`timeout`] free functions in this
-//! module can be used to create time-based futures without a reference to a
+//! has been initialized, the [`sleep()`] and [`timeout()`] free functions in
+//! this module can be used to create time-based futures without a reference to a
 //! [`Timer`] instance. These functions will always create futures bound to the
 //! global default timer.
 //!
@@ -41,7 +41,7 @@ use crate::util;
 
 #[doc(inline)]
 pub use self::timeout::Timeout;
-pub use self::timer::{set_global_timer, sleep::Sleep, Timer, TimerError};
+pub use self::timer::{set_global_timer, sleep::Sleep, AlreadyInitialized, Timer, TimerError};
 pub use core::time::Duration;
 
 use core::future::Future;
@@ -60,7 +60,8 @@ use core::future::Future;
 /// - If the provided duration exceeds the [maximum sleep duration][max] allowed
 ///   by the global default timer.
 ///
-/// For a version of this function that does not panic, see [`try_sleep`].
+/// For a version of this function that does not panic, see [`try_sleep()`]
+/// instead.
 ///
 /// [global]: #global-timers
 /// [max]: Timer::max_duration
@@ -91,7 +92,7 @@ pub fn sleep(duration: Duration) -> Sleep<'static> {
 /// # Panics
 ///
 /// This function does not panic. For a version of this function that panics
-/// rather than returning a [`TimerError`], use [`sleep`].
+/// rather than returning a [`TimerError`], use [`sleep()`] instead.
 ///
 /// [global]: #global-timers
 pub fn try_sleep(duration: Duration) -> Result<Sleep<'static>, TimerError> {
@@ -126,11 +127,12 @@ pub fn try_sleep(duration: Duration) -> Result<Sleep<'static>, TimerError> {
 /// - If the provided duration exceeds the [maximum sleep duration][max] allowed
 ///   by the global default timer.
 ///
-/// For a version of this function that does not panic, use the [`try_timeout`]
+/// For a version of this function that does not panic, use the [`try_timeout()`]
 /// function instead.
 ///
 /// [global]: #global-timers
 /// [max]: Timer::max_duration
+/// [`Elapsed`]: timeout::Elapsed
 #[track_caller]
 pub fn timeout<F: Future>(duration: Duration, future: F) -> Timeout<'static, F> {
     util::expect_display(
@@ -173,10 +175,10 @@ pub fn timeout<F: Future>(duration: Duration, future: F) -> Timeout<'static, F> 
 /// # Panics
 ///
 /// This function does not panic. For a version of this function that panics
-/// rather than returning a [`TimerError`], use [`timeout`].
+/// rather than returning a [`TimerError`], use [`timeout()`] instead.
 ///
 /// [global]: #global-timers
-
+/// [`Elapsed`]: timeout::Elapsed
 pub fn try_timeout<F: Future>(
     duration: Duration,
     future: F,

@@ -31,7 +31,29 @@ use self::sleep::Sleep;
 /// A `Timer` tracks the current time, and notifies [`Sleep`] and [`Timeout`]
 /// [future]s when they complete.
 ///
-/// # Usage
+/// # Creating Futures
+///
+/// A `Timer` instance is necessary to create [`Sleep`] and [`Timeout`] futures.
+/// Once a [`Sleep`] or [`Timeout`] future is created by a `Timer`, they are
+/// *bound* to that `Timer` instance, and will be woken by the `Timer` once it
+/// advances past the deadline for that future.
+///
+/// The [`Timer::sleep`] and [`Timer::timeout`] methods create [`Sleep`] and
+/// [`Timeout`] futures, respectively. In addition, fallible
+/// [`Timer::try_sleep`] and [`Timer::try_timeout`] methods are available, which
+/// do not panic on invalid durations. These methods may be used in systems
+/// where panicking must be avoided.
+///
+/// ### Setting a Global Timer
+///
+/// In addition to creating [`Sleep`] and [`Timeout`] futures using methods on a
+/// `Timer` instance, a timer may also be set as a [global default timer]. This
+/// allows the use of the free functions [`sleep`], [`timeout`],
+/// [`try_sleep`], and [`try_timeout`], which do not require a reference to a
+/// `Timer` to be passed in. See [the documentation on global timers][global]
+/// for details.
+///
+/// # Driving Timers
 ///
 /// &#x26a0;&#xfe0f; *A timer wheel at rest will remain at rest unless acted
 /// upon by an outside force!*
@@ -49,7 +71,13 @@ use self::sleep::Sleep;
 ///
 /// In any case, the timer must be advanced periodically by the time source.
 ///
-/// ## Interrupt-Driven Timers
+/// [^1]: Such as the [8253 PIT interrupt] on most x86 systems.
+///
+/// [^2]: Such as the [`CCNT` register] on ARMv7.
+///
+/// [^3]: Such as the [`rdtsc` instruction] on x86_64.
+///
+/// ### Interrupt-Driven Timers
 ///
 /// When the timer is interrupt-driven, the interrupt handler for the timer
 /// interrupt should call either the [`Timer::pend_duration`] or
@@ -71,7 +99,7 @@ use self::sleep::Sleep;
 /// form of runtime bookkeeping action. For example, the timer can be advanced
 /// in a system's run loop every time the [`Scheduler::tick`] method completes.
 ///
-/// ## Timestamp-Driven Timers
+/// ### Timestamp-Driven Timers
 ///
 /// When the timer is advanced by reading from a time source, the
 /// [`Timer::advance`] method should generally be used to drive the timer. Prior
@@ -90,13 +118,6 @@ use self::sleep::Sleep;
 ///
 /// TODO(eliza): write this part
 ///
-/// # Setting a Global Timer
-///
-/// TODO(eliza): write this part
-///
-/// [^1]: Such as the [8253 PIT interrupt] on most x86 systems.
-/// [^2]: Such as the [`CCNT` register] on ARMv7.
-/// [^3]: Such as the [`rdtsc` instruction] on x86_64.
 ///
 /// [`Sleep`]: crate::time::Sleep
 /// [`Timeout`]: crate::time::Timeout
@@ -104,6 +125,12 @@ use self::sleep::Sleep;
 /// [8253 PIT interrupt]: https://en.wikipedia.org/wiki/Intel_8253#IBM_PC_programming_tips_and_hints
 /// [`CCNT` register]: https://developer.arm.com/documentation/ddi0211/h/system-control-coprocessor/system-control-processor-register-descriptions/c15--cycle-counter-register--ccnt-
 /// [`rdtsc` instruction]: https://www.felixcloutier.com/x86/rdtsc
+/// [`Scheduler::tick`]: crate::scheduler::Scheduler::tick
+/// [`sleep`]: crate::time::sleep()
+/// [`timeout`]: crate::time::timeout()
+/// [`try_sleep`]: crate::time::try_sleep()
+/// [`try_timeout`]: crate::time::try_timeout()
+/// [global]: crate::time#global-timers
 pub struct Timer {
     /// The duration represented by one tick of this timer.
     ///
@@ -114,15 +141,18 @@ pub struct Timer {
     /// A count of how many timer ticks have elapsed since the last time the
     /// timer's [`Core`] was updated.
     ///
-    /// The timer's [`advance`] method may be called in an interrupt handler, so
-    /// it cannot spin to lock the `Core` if it is busy. Instead, it tries to
-    /// acquire the [`Core`] lock, and if it can't, it increments
+    /// The timer's [`advance`] method may be called in an interrupt
+    /// handler, so it cannot spin to lock the `Core` if it is busy. Instead, it
+    /// tries to acquire the [`Core`] lock, and if it can't, it increments
     /// `pending_ticks`. The count of pending ticks is then consumed the next
     /// time the timer interrupt is able to lock the [`Core`].
     ///
     /// This strategy may result in some additional noise in when exactly a
     /// sleep will fire, but it allows us to avoid potential deadlocks when the
     /// timer is advanced from an interrupt handler.
+    ///
+    /// [`Core`]: wheel::Core
+    /// [`advance`]: Timer::advance
     pending_ticks: AtomicUsize,
 
     /// The hierarchical timer wheel.
@@ -154,6 +184,9 @@ pub type Ticks = u64;
 
 /// Errors returned by [`Timer::try_sleep`], [`Timer::try_timeout`], and the
 /// global [`try_sleep`] and [`try_timeout`] functions.
+///
+/// [`try_sleep`]: super::try_sleep
+/// [`try_timeout`]: super::try_timeout
 #[derive(Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TimerError {
@@ -173,9 +206,12 @@ pub enum TimerError {
     ///
     /// [`try_sleep`]: super::try_sleep
     /// [`try_timeout`]: super::try_timeout
+    /// [max]: Timer::max_duration
     DurationTooLong {
         /// The duration that was requested for a [`Sleep`] or [`Timeout`]
         /// future.
+        ///
+        /// [`Timeout`]: crate::time::Timeout
         requested: Duration,
         /// The [maximum duration][max] supported by this [`Timer`] instance.
         ///
@@ -258,6 +294,8 @@ impl Timer {
     ///
     /// The returned [`Sleep`] future will be driven by this timer, and will
     /// complete once this timer has advanced by at least `ticks` timer ticks.
+    ///
+    /// [`Future`]: core::future::Future
     #[track_caller]
     pub fn sleep_ticks(&self, ticks: Ticks) -> Sleep<'_> {
         Sleep::new(self, ticks)
@@ -298,7 +336,7 @@ impl Timer {
         self.pending_ticks.fetch_add(ticks as usize, Release);
     }
 
-    /// Advance the timer by `duration`, potentially waking any `Sleep` futures
+    /// Advance the timer by `duration`, potentially waking any [`Sleep`] futures
     /// that have completed.
     ///
     /// # Interrupt Safety
@@ -317,13 +355,15 @@ impl Timer {
     /// *outside* of an interrupt handler (i.e., as as part of an occasional
     /// runtime bookkeeping process). This ensures that any pending ticks are
     /// observed by the timer in a relatively timely manner.
+    ///
+    /// [`force_advance`]: Timer::force_advance
     #[inline]
     pub fn advance(&self, duration: Duration) {
         let ticks = expect_display(self.dur_to_ticks(duration), "cannot advance timer");
         self.advance_ticks(ticks)
     }
 
-    /// Advance the timer by `ticks` timer ticks, potentially waking any `Sleep`
+    /// Advance the timer by `ticks` timer ticks, potentially waking any [`Sleep`]
     /// futures that have completed.
     ///
     /// # Interrupt Safety
@@ -333,7 +373,7 @@ impl Timer {
     /// immediately. Therefore, it is safe to call this method in an interrupt
     /// handler, as it will never acquire a lock that may already be locked.
     ///
-    /// The [`force_advance`] method will spin to lock the timer wheel lock if
+    /// The [`force_advance_ticks`] method will spin to lock the timer wheel lock if
     /// it is currently held, *ensuring* that any pending wakeups are processed.
     /// That method should never be called in an interrupt handler.
     ///
@@ -342,6 +382,8 @@ impl Timer {
     /// *outside* of an interrupt handler (i.e., as as part of an occasional
     /// runtime bookkeeping process). This ensures that any pending ticks are
     /// observed by the timer in a relatively timely manner.
+    ///
+    /// [`force_advance_ticks`]: Timer::force_advance_ticks
     #[inline]
     pub fn advance_ticks(&self, ticks: Ticks) {
         // `advance` may be called in an ISR, so it can never actually spin.
@@ -373,6 +415,8 @@ impl Timer {
     /// [`advance`], it may be desirable to occasionally call `force_advance`
     /// outside an interrupt handler, to ensure that pending ticks are drained
     /// frequently.
+    ///
+    /// [`advance`]: Timer::advance
     #[inline]
     pub fn force_advance(&self, duration: Duration) {
         let ticks = expect_display(self.dur_to_ticks(duration), "cannot advance timer");
@@ -393,6 +437,8 @@ impl Timer {
     /// [`advance_ticks`], it may be desirable to occasionally call `force_advance`
     /// outside an interrupt handler, to ensure that pending ticks are drained
     /// frequently.
+    ///
+    /// [`advance_ticks`]: Timer::advance_ticks
     #[inline]
     pub fn force_advance_ticks(&self, ticks: Ticks) {
         self.advance_locked(self.core.lock(), ticks)

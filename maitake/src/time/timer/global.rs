@@ -10,14 +10,18 @@ static GLOBAL_TIMER: AtomicPtr<Timer> = AtomicPtr::new(ptr::null_mut());
 #[derive(Debug)]
 pub struct AlreadyInitialized(());
 
-/// Sets a timer as the global default timer.
+/// Sets a [`Timer`] as the [global default timer].
 ///
-/// This function must be called in order for the [`sleep`](super::sleep) and
-/// [`timeout`](super::timeout) free functions to be used.
+/// This function must be called in order for the [`sleep`] and [`timeout`] free
+/// functions to be used.
 ///
 /// The global timer can only be set a single time. Once the global timer is
 /// initialized, subsequent calls to this function will return an
 /// [`AlreadyInitialized`] error.
+///
+/// [`sleep`]: crate::time::sleep()
+/// [`timeout`]: crate::time::timeout()
+/// [global default timer]: crate::time#global-timers
 pub fn set_global_timer(timer: &'static Timer) -> Result<(), AlreadyInitialized> {
     GLOBAL_TIMER
         .compare_exchange(

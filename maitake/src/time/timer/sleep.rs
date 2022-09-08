@@ -20,8 +20,8 @@ use pin_project::{pin_project, pinned_drop};
 /// This `Future` is returned by the [`sleep`] and [`try_sleep`] functions,
 /// and by the [`Timer::sleep`] and [`Timer::try_sleep`] methods.
 ///
-/// [`timeout`]: crate::time::sleep
-/// [`try_sleep`]: super::try_sleep
+/// [`sleep`]: crate::time::sleep
+/// [`try_sleep`]: crate::time::try_sleep
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Sleep<'timer> {
@@ -46,13 +46,10 @@ pub(super) struct Entry {
     ///
     /// # Safety
     ///
-    /// This is safe to access under the following conditions:
-    ///
-    /// * It may be written to only while holding the wheel lock, if the future
-    ///   is in the [`State::Unregistered`] state.
-    /// * It may be read at any point once the future is in the
-    ///   [`State::Registered`] state. It may never be written again after the
-    ///   state has progressed to `Registered`.
+    /// This field is safe to access *only* while holding the lock on the timer
+    /// core. Typically, it is accessed by the timer wheel itself, and not by
+    /// the future, but it may be accessed by the future if the timer wheel lock
+    /// is held.
     ///
     /// It would be nice if this could just be an `AtomicU64` but LOLSOB WE CANT
     /// HAVE NICE THINGS BECAUSE OF CORTEX-M.
