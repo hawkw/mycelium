@@ -1,4 +1,21 @@
-//! Time utilities.
+//! Utilities for tracking time and constructing system timers.
+//!
+//! # Futures
+//!
+//! This module contains the following [`Future`]s:
+//!
+//! - [`Sleep`], a future which completes after a specified duration,
+//! - [`Timeout`], which wraps another [`Future`] to limit the duration it can
+//!   run for.
+//!
+//! # Timers
+//!
+//! In order to use the [`Sleep`] and [`Timeout`] futures, they must be driven
+//! by a system [`Timer`], which tracks the current time and notifies
+//! time-based futures when their deadlines are reached.
+//!
+//! TODO(eliza): finish this part
+//!
 #![warn(missing_docs, missing_debug_implementations)]
 pub mod timeout;
 pub mod timer;
