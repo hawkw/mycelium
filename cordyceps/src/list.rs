@@ -1247,6 +1247,8 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'list, T>
     }
 }
 
+impl<'list, T: Linked<Links<T>> + ?Sized> iter::FusedIterator for Iter<'list, T> {}
+
 // === impl IterMut ====
 
 impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for IterMut<'list, T> {
@@ -1314,6 +1316,8 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
     }
 }
 
+impl<'list, T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterMut<'list, T> {}
+
 // === impl IntoIter ===
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for IntoIter<T> {
@@ -1349,6 +1353,8 @@ impl<T: Linked<Links<T>> + ?Sized> ExactSizeIterator for IntoIter<T> {
         self.list.len
     }
 }
+
+impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IntoIter<T> {}
 
 // === impl DrainFilter ===
 
