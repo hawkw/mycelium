@@ -110,6 +110,13 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 #[cfg(all(test, not(loom)))]
 pub(crate) use self::test::trace_init;
 
+pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg: &str) -> T {
+    match result {
+        Ok(t) => t,
+        Err(error) => panic!("{msg}: {error}"),
+    }
+}
+
 #[cfg(all(test, not(loom)))]
 pub(crate) mod test {
     pub(crate) fn trace_init() {

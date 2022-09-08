@@ -2,7 +2,8 @@
 //! it completes.
 //!
 //! See the documentation for the [`Timeout`] type for details.
-use super::{Sleep, Timer};
+use super::{timer::TimerError, Sleep, Timer};
+use crate::util;
 use core::{
     fmt,
     future::Future,
@@ -15,8 +16,11 @@ use pin_project::pin_project;
 /// A [`Future`] that requires an inner [`Future`] to complete within a
 /// specified [`Duration`].
 ///
-/// This `Future` is returned by the [`timeout`](super::timeout) function, and
-/// by [`Timeout::new`].
+/// This `Future` is returned by the [`timeout`] and [`try_timeout`] functions,
+/// and by the [`Timer::timeout`] and [`Timer::try_timeout`] methods.
+///
+/// [`timeout`]: super::timeout
+/// [`try_timeout`]: super::try_timeout
 ///
 /// # Output
 ///
@@ -55,9 +59,10 @@ impl<'timer, F: Future> Timeout<'timer, F> {
     /// The timeout will be driven by the specified `timer`.
     ///
     /// See the documentation for the [`Timeout`] future for details.
-    pub fn new(timer: &'timer Timer, future: F, duration: Duration) -> Self {
+    fn new(sleep: Sleep<'timer>, future: F) -> Self {
+        let duration = sleep.duration();
         Self {
-            sleep: timer.sleep(duration),
+            sleep,
             future,
             duration,
         }
@@ -124,5 +129,82 @@ impl From<Elapsed> for Duration {
 impl fmt::Display for Elapsed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "timed out after {:?}", self.0)
+    }
+}
+
+// === impl Timer ===
+
+impl Timer {
+    /// Returns a new [`Timeout`] future that fails if `future` does not
+    /// complete within the specified `duration`.
+    ///
+    /// The timeout will be driven by this timer.
+    ///
+    /// # Output
+    ///
+    /// - [`Ok`]`(F::Output)` if the inner future completed before the specified
+    ///   timeout.
+    /// - [`Err`]`(`[`Elapsed`]`)` if the timeout elapsed before the inner [`Future`]
+    ///   completed.
+    ///
+    /// # Cancellation
+    ///
+    /// Dropping a `Timeout` future cancels the timeout. The wrapped [`Future`] can
+    /// be extracted from the `Timeout` future by calling [`Timeout::into_inner`],
+    /// allowing the future to be polled without failing if the timeout elapses.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if the provided duration exceeds the [maximum sleep
+    /// duration][max] allowed this timer.
+    ///
+    /// For a version of this method that does not panic, use the
+    /// [`Timer::try_timeout`] method instead.
+    #[track_caller]
+    pub fn timeout<F: Future>(&self, duration: Duration, future: F) -> Timeout<'_, F> {
+        util::expect_display(
+            self.try_timeout(duration, future),
+            "cannot create `Timeout` future",
+        )
+    }
+
+    /// Returns a new [`Timeout`] future that fails if `future` does not
+    /// complete within the specified `duration`.
+    ///
+    /// The timeout will be driven by this timer.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`Timeout`]`)` if a new [`Timeout`] future was created
+    ///   successfully.
+    /// - [`Err`]`(`[`TimerError::DurationTooLong`]`)` if the requested timeout
+    ///   duration exceeds this timer's [maximum sleep
+    ///   duration](Timer::max_duration`).
+    ///
+    /// # Output
+    ///
+    /// - [`Ok`]`(F::Output)` if the inner future completed before the specified
+    ///   timeout.
+    /// - [`Err`]`(`[`Elapsed`]`)` if the timeout elapsed before the inner [`Future`]
+    ///   completed.
+    ///
+    /// # Cancellation
+    ///
+    /// Dropping a `Timeout` future cancels the timeout. The wrapped [`Future`] can
+    /// be extracted from the `Timeout` future by calling [`Timeout::into_inner`],
+    /// allowing the future to be polled without failing if the timeout elapses.
+    ///
+    /// # Panics
+    ///
+    /// This method does not panic. For a version of this methodthat panics
+    /// rather than returning a [`TimerError`], use [`Timer::timeout`].
+    ///
+    pub fn try_timeout<F: Future>(
+        &self,
+        duration: Duration,
+        future: F,
+    ) -> Result<Timeout<'_, F>, TimerError> {
+        let sleep = self.try_sleep(duration)?;
+        Ok(Timeout::new(sleep, future))
     }
 }

@@ -16,6 +16,12 @@ use mycelium_util::fmt;
 use pin_project::{pin_project, pinned_drop};
 
 /// A [`Future`] that completes after a specified [`Duration`].
+///
+/// This `Future` is returned by the [`sleep`] and [`try_sleep`] functions,
+/// and by the [`Timer::sleep`] and [`Timer::try_sleep`] methods.
+///
+/// [`timeout`]: crate::time::sleep
+/// [`try_sleep`]: super::try_sleep
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Sleep<'timer> {

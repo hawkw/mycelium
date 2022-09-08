@@ -6,9 +6,12 @@
 //! [`Sleep`]: crate::time::Sleep
 //! [`Timeout`]: crate::time::Timeout
 //! [future]: core::future::Future
-use crate::loom::sync::{
-    atomic::{AtomicUsize, Ordering::*},
-    spin::{Mutex, MutexGuard},
+use crate::{
+    loom::sync::{
+        atomic::{AtomicUsize, Ordering::*},
+        spin::{Mutex, MutexGuard},
+    },
+    util::expect_display,
 };
 use core::time::Duration;
 use mycelium_util::fmt;
@@ -22,7 +25,7 @@ pub(super) mod global;
 pub(super) mod sleep;
 mod wheel;
 
-pub use self::global::{set_global_default, AlreadyInitialized};
+pub use self::global::{set_global_timer, AlreadyInitialized};
 use self::sleep::Sleep;
 
 /// A `Timer` tracks the current time, and notifies [`Sleep`] and [`Timeout`]
@@ -149,6 +152,38 @@ pub struct Timer {
 /// Timer ticks are always counted by a 64-bit unsigned integer.
 pub type Ticks = u64;
 
+/// Errors returned by [`Timer::try_sleep`], [`Timer::try_timeout`], and the
+/// global [`try_sleep`] and [`try_timeout`] functions.
+#[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TimerError {
+    /// No [global default timer][global] has been set.
+    ///
+    /// This error is returned by the [`try_sleep`] and [`try_timeout`]
+    /// functions only.
+    ///
+    /// [global]: super#global-timers
+    /// [`try_sleep`]: super::try_sleep
+    /// [`try_timeout`]: super::try_timeout
+    NoGlobalTimer,
+    /// The requested [`Duration`] exceeds the [timer's maximum duration][max].
+    ///
+    /// This error is returned by [`Timer::try_sleep`], [`Timer::try_timeout`],
+    /// and the global [`try_sleep`] and [`try_timeout`] functions.
+    ///
+    /// [`try_sleep`]: super::try_sleep
+    /// [`try_timeout`]: super::try_timeout
+    DurationTooLong {
+        /// The duration that was requested for a [`Sleep`] or [`Timeout`]
+        /// future.
+        requested: Duration,
+        /// The [maximum duration][max] supported by this [`Timer`] instance.
+        ///
+        /// [max]: Timer::max_duration
+        max: Duration,
+    },
+}
+
 // === impl Timer ===
 
 impl Timer {
@@ -170,13 +205,59 @@ impl Timer {
         self.ticks_to_dur(u64::MAX)
     }
 
-    /// Returns a future that will complete in `duration`.
+    /// Returns a [`Future`] that will complete in `duration`.
+    ///
+    /// # Returns
+    ///
+    /// The returned [`Sleep`] future will be driven by this timer, and will
+    /// complete once this timer has advanced by at least `duration`.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if the provided duration exceeds the [maximum sleep
+    /// duration][max] allowed by this timer.
+    ///
+    /// For a version of this function that does not panic, see
+    /// [`Timer::try_sleep`].
+    ///
+    /// [global]: #global-timers
+    /// [max]: Timer::max_duration
+    /// [`Future`]: core::future::Future
     #[track_caller]
     pub fn sleep(&self, duration: Duration) -> Sleep<'_> {
-        self.sleep_ticks(self.dur_to_ticks(duration))
+        expect_display(self.try_sleep(duration), "cannot create `Sleep` future")
     }
 
-    /// Returns a future that will complete in `ticks` timer ticks.
+    /// Returns a [`Future`] that will complete in `duration`.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`Sleep`]`)` if a new [`Sleep`] future was created
+    ///   successfully.
+    /// - [`Err`]`(`[`TimerError::DurationTooLong`]`)` if the requested sleep
+    ///   duration exceeds this timer's [maximum sleep
+    ///   duration](Timer::max_duration`).
+    ///
+    /// The returned [`Sleep`] future will be driven by this timer, and will
+    /// complete once this timer has advanced by at least `duration`.
+    ///
+    /// # Panics
+    ///
+    /// This method does not panic. For a version of this method that panics
+    /// rather than returning an error, see [`Timer::sleep`].
+    ///
+    /// [`Future`]: core::future::Future
+    pub fn try_sleep(&self, duration: Duration) -> Result<Sleep<'_>, TimerError> {
+        let ticks = self.dur_to_ticks(duration)?;
+        Ok(self.sleep_ticks(ticks))
+    }
+
+    /// Returns a [`Future`] that will complete in `ticks` timer ticks.
+    ///
+    /// # Returns
+    ///
+    /// The returned [`Sleep`] future will be driven by this timer, and will
+    /// complete once this timer has advanced by at least `ticks` timer ticks.
     #[track_caller]
     pub fn sleep_ticks(&self, ticks: Ticks) -> Sleep<'_> {
         Sleep::new(self, ticks)
@@ -192,7 +273,11 @@ impl Timer {
     /// called frequently from outside of the interrupt handler.
     #[inline(always)]
     pub fn pend_duration(&self, duration: Duration) {
-        self.pend_ticks(self.dur_to_ticks(duration))
+        let ticks = expect_display(
+            self.dur_to_ticks(duration),
+            "cannot add to pending duration",
+        );
+        self.pend_ticks(ticks)
     }
 
     /// Add pending ticks to the timer *without* turning the wheel.
@@ -234,7 +319,8 @@ impl Timer {
     /// observed by the timer in a relatively timely manner.
     #[inline]
     pub fn advance(&self, duration: Duration) {
-        self.advance_ticks(self.dur_to_ticks(duration))
+        let ticks = expect_display(self.dur_to_ticks(duration), "cannot advance timer");
+        self.advance_ticks(ticks)
     }
 
     /// Advance the timer by `ticks` timer ticks, potentially waking any `Sleep`
@@ -289,7 +375,8 @@ impl Timer {
     /// frequently.
     #[inline]
     pub fn force_advance(&self, duration: Duration) {
-        self.force_advance_ticks(self.dur_to_ticks(duration))
+        let ticks = expect_display(self.dur_to_ticks(duration), "cannot advance timer");
+        self.force_advance_ticks(ticks)
     }
 
     /// Advance the timer by `ticks` timer ticks, ensuring any `Sleep` futures
@@ -334,14 +421,13 @@ impl Timer {
     }
 
     #[track_caller]
-    fn dur_to_ticks(&self, dur: Duration) -> Ticks {
-        match (dur.as_nanos() / self.tick_duration.as_nanos()).try_into() {
-            Ok(ticks) => ticks,
-            Err(_) => panic!(
-                "duration {dur:?} is too large to convert into timer ticks (this timer's max duration is {:?})",
-                self.max_duration()
-            ),
-        }
+    fn dur_to_ticks(&self, dur: Duration) -> Result<Ticks, TimerError> {
+        (dur.as_nanos() / self.tick_duration.as_nanos())
+            .try_into()
+            .map_err(|_| TimerError::DurationTooLong {
+                requested: dur,
+                max: self.max_duration(),
+            })
     }
 
     #[track_caller]
@@ -359,5 +445,24 @@ impl fmt::Debug for Timer {
             .field("pending_ticks", &self.pending_ticks.load(Acquire))
             .field("core", &fmt::opt(&self.core.try_lock()).or_else("<locked>"))
             .finish()
+    }
+}
+
+// === impl TimerError ====
+
+impl fmt::Display for TimerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TimerError::NoGlobalTimer => f.pad(
+                "no global timer has been initialized! \
+                `set_global_timer` must be called before calling \
+                this function.",
+            ),
+            TimerError::DurationTooLong { requested, max } => write!(
+                f,
+                "requested duration {requested:?} exceeds this timer's \
+                maximum duration ({max:?}."
+            ),
+        }
     }
 }
