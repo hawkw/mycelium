@@ -86,6 +86,10 @@ impl Core {
     pub(super) fn advance(&mut self, ticks: Ticks) -> usize {
         let now = self.elapsed + ticks;
         let mut fired = 0;
+        // sleeps that need to be rescheduled on lower-level wheels need to be
+        // processed after we have finished turning the wheel, to avoid looping
+        // infinitely.
+
         let mut pending_reschedule = List::<sleep::Entry>::new();
         while let Some(deadline) = self.next_deadline() {
             if deadline.ticks > now {
@@ -93,7 +97,7 @@ impl Core {
             }
 
             let mut fired_this_turn = 0;
-            let mut entries = self.wheels[deadline.wheel].take(deadline.slot);
+            let entries = self.wheels[deadline.wheel].take(deadline.slot);
             debug!(
                 now = self.elapsed,
                 deadline.ticks,
@@ -101,7 +105,7 @@ impl Core {
                 "turning wheel to"
             );
 
-            while let Some(entry) = entries.pop_front() {
+            for entry in entries {
                 let entry_deadline = unsafe { entry.as_ref() }.deadline(self);
 
                 if test_dbg!(entry_deadline) > test_dbg!(now) {
@@ -137,7 +141,7 @@ impl Core {
             rescheduled = pending_reschedule.len(),
             "wheel turned to"
         );
-        while let Some(entry) = pending_reschedule.pop_front() {
+        for entry in pending_reschedule {
             let deadline = unsafe { entry.as_ref() }.deadline(self);
             debug_assert_ne!(deadline, 0);
             self.insert_sleep_at(deadline, entry)
