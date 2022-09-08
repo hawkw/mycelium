@@ -259,6 +259,17 @@ pub struct IterMut<'list, T: Linked<Links<T>> + ?Sized> {
     len: usize,
 }
 
+/// An owning iterator over the elements of a [`List`].
+///
+/// This `struct` is created by the [`into_iter`] method on [`List`]
+/// (provided by the [`IntoIterator`] trait). See its documentation for more.
+///
+/// [`into_iter`]: List::into_iter
+/// [`IntoIterator`]: core::iter::IntoIterator
+pub struct IntoIter<T: Linked<Links<T>> + ?Sized> {
+    list: List<T>,
+}
+
 /// An iterator returned by [`List::drain_filter`].
 pub struct DrainFilter<'list, T, F>
 where
@@ -1030,6 +1041,16 @@ impl<'list, T: Linked<Links<T>> + ?Sized> IntoIterator for &'list mut List<T> {
     }
 }
 
+impl<T: Linked<Links<T>> + ?Sized> IntoIterator for List<T> {
+    type Item = T::Handle;
+    type IntoIter = IntoIter<T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter { list: self }
+    }
+}
+
 impl<T: Linked<Links<T>> + ?Sized> Drop for List<T> {
     fn drop(&mut self) {
         while let Some(node) = self.pop_front() {
@@ -1290,6 +1311,42 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
             let pin = Pin::new_unchecked(curr.as_mut());
             Some(pin)
         }
+    }
+}
+
+// === impl IntoIter ===
+
+impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for IntoIter<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("IntoIter").field(&self.list).finish()
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> Iterator for IntoIter<T> {
+    type Item = T::Handle;
+
+    #[inline]
+    fn next(&mut self) -> Option<T::Handle> {
+        self.list.pop_front()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.list.len, Some(self.list.len))
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IntoIter<T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<T::Handle> {
+        self.list.pop_back()
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> ExactSizeIterator for IntoIter<T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.list.len
     }
 }
 
