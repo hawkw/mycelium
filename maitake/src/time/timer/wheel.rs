@@ -8,8 +8,8 @@ mod tests;
 
 #[derive(Debug)]
 pub(in crate::time) struct Core {
-    /// The total number of ticks that have elapsed since this timer started.
-    elapsed: Ticks,
+    /// The total number of ticks that have now since this timer started.
+    now: Ticks,
 
     /// The actual timer wheels.
     wheels: [Wheel; Self::WHEELS],
@@ -70,7 +70,7 @@ impl Core {
         */
 
         Self {
-            elapsed: 0,
+            now: 0,
             wheels: [
                 Wheel::new(0),
                 Wheel::new(1),
@@ -84,7 +84,7 @@ impl Core {
 
     #[inline(never)]
     pub(super) fn advance(&mut self, ticks: Ticks) -> usize {
-        let now = self.elapsed + ticks;
+        let now = self.now + ticks;
         let mut fired = 0;
         // sleeps that need to be rescheduled on lower-level wheels need to be
         // processed after we have finished turning the wheel, to avoid looping
@@ -99,7 +99,7 @@ impl Core {
             let mut fired_this_turn = 0;
             let entries = self.wheels[deadline.wheel].take(deadline.slot);
             debug!(
-                now = self.elapsed,
+                now = self.now,
                 deadline.ticks,
                 entries = entries.len(),
                 "turning wheel to"
@@ -126,17 +126,17 @@ impl Core {
                 }
             }
 
-            trace!(at = self.elapsed, firing = fired_this_turn, "firing timers");
+            trace!(at = self.now, firing = fired_this_turn, "firing timers");
 
-            self.elapsed = deadline.ticks;
+            self.now = deadline.ticks;
             fired += fired_this_turn;
         }
 
-        self.elapsed = now;
+        self.now = now;
 
         // reschedule pending sleeps.
         debug!(
-            now = self.elapsed,
+            now = self.now,
             fired,
             rescheduled = pending_reschedule.len(),
             "wheel turned to"
@@ -156,7 +156,7 @@ impl Core {
             sleep.addr = ?format_args!("{:p}", sleep),
             sleep.ticks = *sleep.as_ref().project_ref().ticks,
             sleep.deadline = deadline,
-            now = self.elapsed,
+            now = self.now,
             "canceling sleep"
         );
         let wheel = self.wheel_index(deadline);
@@ -166,14 +166,14 @@ impl Core {
     pub(super) fn register_sleep(&mut self, mut sleep: ptr::NonNull<sleep::Entry>) {
         let deadline = {
             let entry = unsafe { sleep.as_mut() };
-            let deadline = entry.ticks + self.elapsed;
+            let deadline = entry.ticks + self.now;
             // set the entry's deadline with the wheel's current time.
             entry.set_deadline(self, deadline);
 
             trace!(
                 sleep.addr = ?sleep,
                 sleep.ticks = entry.ticks,
-                sleep.start_time = self.elapsed,
+                sleep.start_time = self.now,
                 sleep.deadline = deadline,
                 "registering sleep"
             );
@@ -194,9 +194,9 @@ impl Core {
     #[inline]
     fn next_deadline(&self) -> Option<Deadline> {
         self.wheels.iter().find_map(|wheel| {
-            let next_deadline = wheel.next_deadline(self.elapsed)?;
+            let next_deadline = wheel.next_deadline(self.now)?;
             trace!(
-                now = self.elapsed,
+                now = self.now,
                 next_deadline.ticks,
                 next_deadline.wheel,
                 next_deadline.slot,
@@ -207,7 +207,7 @@ impl Core {
 
     #[inline]
     fn wheel_index(&self, ticks: Ticks) -> usize {
-        wheel_index(self.elapsed, ticks)
+        wheel_index(self.now, ticks)
     }
 }
 
