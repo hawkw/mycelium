@@ -16,9 +16,7 @@ use crate::{
 use core::time::Duration;
 use mycelium_util::fmt;
 
-#[cfg(all(test, loom))]
-mod loom;
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 mod tests;
 
 pub(super) mod global;
