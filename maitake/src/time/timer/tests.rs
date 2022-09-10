@@ -2,7 +2,10 @@
 use super::*;
 
 #[cfg(all(feature = "alloc", not(loom)))]
-mod alloc;
+mod wheel_tests;
+
+#[cfg(feature = "alloc")]
+mod concurrent;
 
 #[cfg(loom)]
 mod loom;
