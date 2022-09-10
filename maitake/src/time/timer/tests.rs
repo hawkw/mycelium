@@ -1,5 +1,5 @@
 use super::*;
-use crate::scheduler::Scheduler;
+use crate::scheduler::{self, StaticScheduler};
 use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -9,7 +9,7 @@ use std::sync::{
 use proptest::{collection::vec, proptest};
 
 struct SleepGroupTest {
-    scheduler: Scheduler,
+    scheduler: &'static StaticScheduler,
     timer: &'static Timer,
     now: Ticks,
     groups: BTreeMap<Ticks, SleepGroup>,
@@ -25,10 +25,10 @@ struct SleepGroup {
 }
 
 impl SleepGroupTest {
-    fn new(timer: &'static Timer) -> Self {
+    fn new(scheduler: &'static StaticScheduler, timer: &'static Timer) -> Self {
         crate::util::test::trace_init_with_default("info,maitake::timer=trace");
         Self {
-            scheduler: Scheduler::new(),
+            scheduler,
             now: 0,
             groups: BTreeMap::new(),
             timer,
@@ -178,8 +178,12 @@ impl SleepGroupTest {
 
 #[test]
 fn timer_basically_works() {
+    static SCHEDULER: StaticScheduler = {
+        static STUB: scheduler::TaskStub = scheduler::TaskStub::new();
+        unsafe { StaticScheduler::new_with_static_stub(&STUB) }
+    };
     static TIMER: Timer = Timer::new(Duration::from_secs(1));
-    let mut test = SleepGroupTest::new(&TIMER);
+    let mut test = SleepGroupTest::new(&SCHEDULER, &TIMER);
 
     test.spawn_group(100, 2);
     test.spawn_group(65535, 3);
