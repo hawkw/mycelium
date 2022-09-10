@@ -457,13 +457,6 @@ impl Timer {
         self.core.lock()
     }
 
-    #[cfg(test)]
-    fn reset(&self) {
-        let mut core = self.core.lock();
-        *core = wheel::Core::new();
-        self.pending_ticks.store(0, Release);
-    }
-
     #[track_caller]
     fn dur_to_ticks(&self, dur: Duration) -> Result<Ticks, TimerError> {
         (dur.as_nanos() / self.tick_duration.as_nanos())
