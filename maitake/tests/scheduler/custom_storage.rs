@@ -1,5 +1,6 @@
 use super::*;
 use core::{future::Future, ptr::NonNull};
+use maitake::scheduler;
 use maitake::task::{self, Task};
 
 /// A fake custom task allocation.
@@ -32,10 +33,31 @@ where
         scheduler.spawn_allocated::<F, MyBoxStorage>(task)
     }
 }
+
 #[test]
 fn basically_works() {
     static STUB: TaskStub = TaskStub::new();
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
+    static IT_WORKED: AtomicBool = AtomicBool::new(false);
+
+    util::trace_init();
+
+    MyBoxTask::spawn(&SCHEDULER, async {
+        future::yield_now().await;
+        IT_WORKED.store(true, Ordering::Release);
+    });
+
+    let tick = SCHEDULER.tick();
+
+    assert!(IT_WORKED.load(Ordering::Acquire));
+    assert_eq!(tick.completed, 1);
+    assert!(!tick.has_remaining);
+    assert_eq!(tick.polled, 2)
+}
+
+#[test]
+fn static_scheduler_macro() {
+    static SCHEDULER: StaticScheduler = scheduler::new_static!();
     static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
     util::trace_init();
