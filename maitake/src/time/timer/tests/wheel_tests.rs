@@ -10,7 +10,7 @@ use proptest::{collection::vec, proptest};
 
 struct SleepGroupTest {
     scheduler: Scheduler,
-    timer: Arc<Timer>,
+    timer: &'static Timer,
     now: Ticks,
     groups: BTreeMap<Ticks, SleepGroup>,
     next_id: usize,
@@ -25,11 +25,11 @@ struct SleepGroup {
 }
 
 impl SleepGroupTest {
-    fn new() -> Self {
-        crate::util::test::trace_init_with_default("info,maitake::timer=trace");
+    fn new(timer: &'static Timer) -> Self {
+        crate::util::test::trace_init_with_default("info,maitake::time=trace");
         Self {
             scheduler: Scheduler::new(),
-            timer: Arc::new(Timer::new(Duration::from_secs(1))),
+            timer,
             now: 0,
             groups: BTreeMap::new(),
             next_id: 0,
@@ -42,10 +42,10 @@ impl SleepGroupTest {
         let id = self.next_id;
         for i in 0..tasks {
             let count = count.clone();
-            let timer = self.timer.clone();
+            let sleep = self.timer.sleep_ticks(duration);
             self.scheduler.spawn(async move {
                 info!(task.group = id, task = i, "sleeping for {duration} ticks");
-                timer.sleep_ticks(duration).await;
+                sleep.await;
                 info!(task.group = id, task = i, "slept for {duration} ticks!");
                 count.fetch_sub(1, Ordering::SeqCst);
             });
@@ -65,6 +65,7 @@ impl SleepGroupTest {
                 id,
             },
         );
+        /*
         // eagerly poll the spawned group to ensure they are added to the wheel.
         // XXX(eliza): is this correct behavior? or should the time start
         // when the sleep is _created_ rather than first polled? this would mean
@@ -74,6 +75,7 @@ impl SleepGroupTest {
             tick.completed, 0,
             "no tasks should complete if the timer has not advanced"
         );
+        */
     }
 
     #[track_caller]
@@ -178,7 +180,8 @@ impl SleepGroupTest {
 
 #[test]
 fn timer_basically_works() {
-    let mut test = SleepGroupTest::new();
+    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(100, 2);
     test.spawn_group(65535, 3);
@@ -213,7 +216,8 @@ fn timer_basically_works() {
 
 #[test]
 fn schedule_after_start() {
-    let mut test = SleepGroupTest::new();
+    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(100, 2);
     test.spawn_group(70_000, 3);
@@ -253,7 +257,8 @@ fn schedule_after_start() {
 
 #[test]
 fn max_sleep() {
-    let mut test = SleepGroupTest::new();
+    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(wheel::Core::MAX_SLEEP_TICKS, 2);
     test.spawn_group(100, 3);
@@ -319,8 +324,10 @@ proptest! {
     #[test]
     fn fuzz_timer(actions in vec(fuzz_action_strategy(), 0..MAX_FUZZ_ACTIONS)) {
         static FUZZ_RUNS: AtomicUsize = AtomicUsize::new(1);
+        static TIMER: Timer = Timer::new(Duration::from_millis(1));
 
-        let mut test = SleepGroupTest::new();
+        TIMER.reset();
+        let mut test = SleepGroupTest::new(&TIMER);
         let _span = span!(Level::INFO, "fuzz_timer", iteration = FUZZ_RUNS.fetch_add(1, Ordering::Relaxed)).entered();
         info!(?actions);
 

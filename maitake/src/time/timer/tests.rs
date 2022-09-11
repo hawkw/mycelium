@@ -6,6 +6,3 @@ mod wheel_tests;
 
 #[cfg(feature = "alloc")]
 mod concurrent;
-
-#[cfg(loom)]
-mod loom;

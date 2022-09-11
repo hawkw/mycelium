@@ -389,8 +389,10 @@ impl Timer {
         // another core, or if a `Sleep` future is currently canceling itself),
         // we just add to a counter of pending ticks, and bail.
         if let Some(core) = self.core.try_lock() {
+            trace!(ticks, "locked timer wheel; advancing");
             self.advance_locked(core, ticks);
         } else {
+            trace!(ticks, "could not lock timer wheel; pending");
             // if the core of the timer wheel is already locked, add to the pending
             // tick count, which we will then advance the wheel by when it becomes
             // available.
@@ -472,6 +474,13 @@ impl Timer {
         let nanos = self.tick_duration.subsec_nanos() as u64 * ticks;
         let secs = self.tick_duration.as_secs() * ticks;
         Duration::new(secs, nanos as u32)
+    }
+
+    #[cfg(test)]
+    fn reset(&self) {
+        let mut core = self.core();
+        *core = wheel::Core::new();
+        self.pending_ticks.store(0, Release);
     }
 }
 
