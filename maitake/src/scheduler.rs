@@ -88,6 +88,7 @@ pub struct TaskStub {
 /// ```rust
 /// use maitake::scheduler;
 ///
+/// // look ma, no `unsafe`!
 /// static SCHEDULER: scheduler::StaticScheduler = scheduler::new_static!();
 /// ```
 ///
@@ -106,6 +107,7 @@ pub struct TaskStub {
 ///
 /// This macro expands to the following code:
 /// ```rust
+/// # static SCHEDULER: maitake::scheduler::StaticScheduler =
 /// {
 ///     static STUB_TASK: maitake::scheduler::TaskStub = maitake::scheduler::TaskStub::new();
 ///     unsafe {
@@ -118,6 +120,7 @@ pub struct TaskStub {
 ///         maitake::scheduler::StaticScheduler::new_with_static_stub(&STUB_TASK)
 ///     }
 /// }
+/// # ;
 /// ```
 ///
 /// [`new_with_static_stub`]: StaticScheduler::new_with_static_stub
