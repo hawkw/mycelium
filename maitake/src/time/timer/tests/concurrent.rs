@@ -42,7 +42,7 @@ fn one_sleep() {
 }
 
 #[test]
-fn two_sleeps() {
+fn two_sleeps_parallel() {
     model(|| {
         let timer = Arc::new(Timer::new(Duration::from_millis(1)));
         let thread1 = thread::spawn({
@@ -67,6 +67,29 @@ fn two_sleeps() {
 
         thread1.join().unwrap();
         thread2.join().unwrap();
+    })
+}
+
+#[test]
+fn two_sleeps_sequential() {
+    model(|| {
+        let timer = Arc::new(Timer::new(Duration::from_millis(1)));
+        let thread = thread::spawn({
+            let timer = timer.clone();
+            move || {
+                block_on(async move {
+                    timer.sleep(Duration::from_secs(1)).await;
+                    timer.sleep(Duration::from_secs(1)).await;
+                })
+            }
+        });
+
+        for _ in 0..10 {
+            timer.advance(Duration::from_secs(1));
+            thread::yield_now();
+        }
+
+        thread.join().unwrap();
     })
 }
 
