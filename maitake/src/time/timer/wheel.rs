@@ -1,9 +1,10 @@
 use super::{sleep, Ticks};
+use crate::loom::sync::atomic::Ordering::*;
 use cordyceps::List;
 use core::{pin::Pin, ptr, task::Poll};
 use mycelium_util::fmt;
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests;
 
 #[derive(Debug)]
@@ -185,6 +186,11 @@ impl Core {
                 return Poll::Ready(());
             }
 
+            let _did_link = sleep.linked.compare_exchange(false, true, AcqRel, Acquire);
+            debug_assert!(
+                _did_link.is_ok(),
+                "tried to register a sleep that was already registered"
+            );
             sleep.deadline
         };
 
@@ -289,7 +295,7 @@ impl Wheel {
     /// Remove a sleep entry from this wheel.
     fn remove(&mut self, deadline: Ticks, sleep: Pin<&mut sleep::Entry>) {
         let slot = self.slot_index(deadline);
-        let _removed = unsafe {
+        unsafe {
             // safety: we will not use the `NonNull` to violate pinning
             // invariants; it's used only to insert the sleep into the intrusive
             // list. It's safe to remove the sleep from the linked list because
@@ -304,10 +310,17 @@ impl Wheel {
                 "Wheel::remove",
             );
 
-            self.slots[slot].remove(ptr).is_some()
+            if let Some(sleep) = self.slots[slot].remove(ptr) {
+                let _did_unlink = sleep
+                    .as_ref()
+                    .linked
+                    .compare_exchange(true, false, AcqRel, Acquire);
+                debug_assert!(
+                    _did_unlink.is_ok(),
+                    "removed a sleep whose linked bit was already unset, this is potentially real bad"
+                );
+            }
         };
-
-        debug_assert!(_removed);
 
         if self.slots[slot].is_empty() {
             // if that was the only sleep in that slot's linked list, clear the

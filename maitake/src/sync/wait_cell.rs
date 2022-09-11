@@ -220,11 +220,6 @@ impl WaitCell {
         self.notify2(State::CLOSED);
     }
 
-    /// Returns `true` if this `WaitCell` is [closed](Self::close).
-    pub(crate) fn is_closed(&self) -> bool {
-        self.current_state() == State::CLOSED
-    }
-
     fn notify2(&self, close: State) -> bool {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
         let bits = State::WAKING | close;

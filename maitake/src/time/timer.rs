@@ -476,7 +476,7 @@ impl Timer {
         Duration::new(secs, nanos as u32)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(loom)))]
     fn reset(&self) {
         let mut core = self.core();
         *core = wheel::Core::new();
