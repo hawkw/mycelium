@@ -179,13 +179,14 @@ impl Core {
                 "registering sleep"
             );
 
+            if sleep.deadline <= self.now {
+                trace!("sleep already completed, firing immediately");
+                sleep.fire();
+                return Poll::Ready(());
+            }
+
             sleep.deadline
         };
-
-        if deadline <= self.now {
-            trace!("-> sleep deadline has already elapsed");
-            return Poll::Ready(());
-        }
 
         self.insert_sleep_at(deadline, ptr);
         Poll::Pending

@@ -1,4 +1,4 @@
-use super::{wheel, Ticks, Timer};
+use super::{Ticks, Timer};
 use crate::{
     loom::cell::UnsafeCell,
     sync::wait_cell::{self, WaitCell},
@@ -69,7 +69,7 @@ impl<'timer> Sleep<'timer> {
             entry: Entry {
                 links: UnsafeCell::new(list::Links::new()),
                 waker: WaitCell::new(),
-                deadline: test_dbg!(deadline),
+                deadline,
                 ticks,
                 _pin: PhantomPinned,
             },
@@ -181,7 +181,7 @@ unsafe impl Linked<list::Links<Entry>> for Entry {
 
 impl Entry {
     pub(super) fn fire(&self) {
-        trace!(timer.addr = ?fmt::ptr(self), "firing timer");
+        trace!(sleep.addr = ?fmt::ptr(self), "firing sleep");
         self.waker.close();
     }
 }
