@@ -1,6 +1,6 @@
 use super::{sleep, Ticks};
 use cordyceps::List;
-use core::{pin::Pin, ptr};
+use core::{pin::Pin, ptr, task::Poll};
 use mycelium_util::fmt;
 
 #[cfg(test)]
@@ -82,6 +82,10 @@ impl Core {
         }
     }
 
+    pub(super) fn now(&self) -> Ticks {
+        self.now
+    }
+
     #[inline(never)]
     pub(super) fn advance(&mut self, ticks: Ticks) -> usize {
         let now = self.now + ticks;
@@ -106,7 +110,7 @@ impl Core {
             );
 
             for entry in entries {
-                let entry_deadline = unsafe { entry.as_ref() }.deadline(self);
+                let entry_deadline = unsafe { entry.as_ref().deadline };
 
                 if test_dbg!(entry_deadline) > test_dbg!(now) {
                     // this timer was on the top-level wheel and needs to be
@@ -142,7 +146,7 @@ impl Core {
             "wheel turned to"
         );
         for entry in pending_reschedule {
-            let deadline = unsafe { entry.as_ref() }.deadline(self);
+            let deadline = unsafe { entry.as_ref().deadline };
             debug_assert_ne!(deadline, 0);
             self.insert_sleep_at(deadline, entry)
         }
@@ -151,7 +155,7 @@ impl Core {
     }
 
     pub(super) fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {
-        let deadline = sleep.deadline(self);
+        let deadline = sleep.deadline;
         trace!(
             sleep.addr = ?format_args!("{:p}", sleep),
             sleep.ticks = *sleep.as_ref().project_ref().ticks,
@@ -163,25 +167,28 @@ impl Core {
         self.wheels[wheel].remove(deadline, sleep);
     }
 
-    pub(super) fn register_sleep(&mut self, mut sleep: ptr::NonNull<sleep::Entry>) {
+    pub(super) fn register_sleep(&mut self, ptr: ptr::NonNull<sleep::Entry>) -> Poll<()> {
         let deadline = {
-            let entry = unsafe { sleep.as_mut() };
-            let deadline = entry.ticks + self.now;
-            // set the entry's deadline with the wheel's current time.
-            entry.set_deadline(self, deadline);
+            let sleep = unsafe { ptr.as_ref() };
 
             trace!(
-                sleep.addr = ?sleep,
-                sleep.ticks = entry.ticks,
-                sleep.start_time = self.now,
-                sleep.deadline = deadline,
+                sleep.addr = ?ptr,
+                sleep.ticks,
+                sleep.deadline,
+                now = self.now,
                 "registering sleep"
             );
 
-            deadline
+            sleep.deadline
         };
 
-        self.insert_sleep_at(deadline, sleep)
+        if deadline <= self.now {
+            trace!("-> sleep deadline has already elapsed");
+            return Poll::Ready(());
+        }
+
+        self.insert_sleep_at(deadline, ptr);
+        Poll::Pending
     }
 
     fn insert_sleep_at(&mut self, deadline: Ticks, sleep: ptr::NonNull<sleep::Entry>) {

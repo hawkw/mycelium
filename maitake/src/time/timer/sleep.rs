@@ -41,20 +41,10 @@ pub(super) struct Entry {
     /// The waker of the task awaiting this future.
     waker: WaitCell,
 
-    pub(super) ticks: Ticks,
-
     /// The wheel's elapsed timestamp when this `sleep` future was first polled.
-    ///
-    /// # Safety
-    ///
-    /// This field is safe to access *only* while holding the lock on the timer
-    /// core. Typically, it is accessed by the timer wheel itself, and not by
-    /// the future, but it may be accessed by the future if the timer wheel lock
-    /// is held.
-    ///
-    /// It would be nice if this could just be an `AtomicU64` but LOLSOB WE CANT
-    /// HAVE NICE THINGS BECAUSE OF CORTEX-M.
-    deadline: UnsafeCell<Ticks>,
+    pub(super) deadline: Ticks,
+
+    pub(super) ticks: Ticks,
 
     // This type is !Unpin due to the heuristic from:
     // <https://github.com/rust-lang/rust/pull/82834>
@@ -72,13 +62,14 @@ enum State {
 
 impl<'timer> Sleep<'timer> {
     pub(super) fn new(timer: &'timer Timer, ticks: Ticks) -> Self {
+        let deadline = timer.core().now() + ticks;
         Self {
             state: State::Unregistered,
             timer,
             entry: Entry {
                 links: UnsafeCell::new(list::Links::new()),
                 waker: WaitCell::new(),
-                deadline: UnsafeCell::new(0),
+                deadline: test_dbg!(deadline),
                 ticks,
                 _pin: PhantomPinned,
             },
@@ -102,8 +93,15 @@ impl Future for Sleep<'_> {
             State::Unregistered => {
                 let ptr =
                     unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
-                this.timer.core().register_sleep(ptr);
-                *this.state = State::Registered;
+                match this.timer.core().register_sleep(ptr) {
+                    Poll::Ready(()) => {
+                        *this.state = State::Completed;
+                        return Poll::Ready(());
+                    }
+                    Poll::Pending => {
+                        *this.state = State::Registered;
+                    }
+                }
             }
             State::Registered => {}
             State::Completed => return Poll::Ready(()),
@@ -185,24 +183,5 @@ impl Entry {
     pub(super) fn fire(&self) {
         trace!(timer.addr = ?fmt::ptr(self), "firing timer");
         self.waker.close();
-    }
-
-    pub(super) fn deadline(&self, _core: &mut wheel::Core) -> Ticks {
-        self.deadline.with(|deadline| unsafe {
-            // safety: accessing the deadline `UnsafeCell` requires that the
-            // timer wheel lock be held. because this function takes a dummy
-            // `&mut Core` argument, we can be sure that the lock is held when
-            // this is called.
-            *deadline
-        })
-    }
-    pub(super) fn set_deadline(&mut self, _core: &mut wheel::Core, new_deadline: Ticks) {
-        self.deadline.with_mut(|deadline| unsafe {
-            // safety: accessing the deadline `UnsafeCell` requires that the
-            // timer wheel lock be held. because this function takes a dummy
-            // `&mut Core` argument, we can be sure that the lock is held when
-            // this is called.
-            *deadline = new_deadline;
-        })
     }
 }
