@@ -255,7 +255,7 @@ fn schedule_after_start() {
 fn max_sleep() {
     let mut test = SleepGroupTest::new();
 
-    test.spawn_group(wheel_tests::Core::MAX_SLEEP_TICKS, 2);
+    test.spawn_group(wheel::Core::MAX_SLEEP_TICKS, 2);
     test.spawn_group(100, 3);
 
     // first tick --- timer is still at zero
@@ -266,13 +266,13 @@ fn max_sleep() {
     // advance the timer by 100 ticks.
     test.advance(100);
 
-    test.advance(wheel_tests::Core::MAX_SLEEP_TICKS / 2);
+    test.advance(wheel::Core::MAX_SLEEP_TICKS / 2);
 
-    test.spawn_group(wheel_tests::Core::MAX_SLEEP_TICKS, 1);
+    test.spawn_group(wheel::Core::MAX_SLEEP_TICKS, 1);
 
-    test.advance(wheel_tests::Core::MAX_SLEEP_TICKS / 2);
+    test.advance(wheel::Core::MAX_SLEEP_TICKS / 2);
 
-    test.advance(wheel_tests::Core::MAX_SLEEP_TICKS);
+    test.advance(wheel::Core::MAX_SLEEP_TICKS);
 
     test.assert_all_complete();
 }
@@ -310,7 +310,7 @@ fn fuzz_action_strategy() -> impl Strategy<Value = FuzzAction> {
     const MAX_ADVANCE: u64 = u64::MAX / MAX_FUZZ_ACTIONS as u64;
 
     prop_oneof![
-        (MIN_SLEEP_TICKS..wheel_tests::Core::MAX_SLEEP_TICKS).prop_map(FuzzAction::Spawn),
+        (MIN_SLEEP_TICKS..wheel::Core::MAX_SLEEP_TICKS).prop_map(FuzzAction::Spawn),
         (0..MAX_ADVANCE).prop_map(FuzzAction::Advance),
     ]
 }
