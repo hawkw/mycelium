@@ -21,6 +21,7 @@ fn model(f: impl Fn() + Send + Sync + 'static) {
 }
 
 #[test]
+#[cfg_attr(not(loom), ignore)]
 fn one_sleep() {
     model(|| {
         let timer = Arc::new(Timer::new(Duration::from_millis(1)));
@@ -42,6 +43,7 @@ fn one_sleep() {
 }
 
 #[test]
+#[cfg_attr(not(loom), ignore)]
 fn two_sleeps_parallel() {
     model(|| {
         let timer = Arc::new(Timer::new(Duration::from_millis(1)));
@@ -71,6 +73,7 @@ fn two_sleeps_parallel() {
 }
 
 #[test]
+#[cfg_attr(not(loom), ignore)]
 fn two_sleeps_sequential() {
     model(|| {
         let timer = Arc::new(Timer::new(Duration::from_millis(1)));
