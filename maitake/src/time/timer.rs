@@ -29,6 +29,9 @@ use self::sleep::Sleep;
 /// A `Timer` tracks the current time, and notifies [`Sleep`] and [`Timeout`]
 /// [future]s when they complete.
 ///
+/// This timer implementation uses a [hierarchical timer wheel][wheel] to track
+/// large numbers of `Sleep` futures efficiently.
+///
 /// # Creating Futures
 ///
 /// A `Timer` instance is necessary to create [`Sleep`] and [`Timeout`] futures.
@@ -114,12 +117,37 @@ use self::sleep::Sleep;
 ///
 /// # Timer Granularity
 ///
-/// TODO(eliza): write this part
+/// Within the timer wheel, the duration of a [`Sleep`] future is represented as
+/// a number of abstract "timer ticks". The actual duration in real life time
+/// that's represented by a number of ticks depends on the timer's _granularity.
 ///
+/// When constructing a `Timer` (e.g. by calling [`Timer::new`]), the minimum
+/// granularity of the timer is selected by providing the [`Duration`]
+/// represented by a single timer tick. The selected tick duration influences
+/// both the resolution of the timer (i.e. the minimum difference in duration
+/// between two `Sleep` futures that can be distinguished by the timer), and
+/// the maximum duration that can be represented by a `Sleep` future (which is
+/// limited by the size of a 64-bit integer).
+///
+/// A longer tick duration will allow represented longer sleeps, as the maximum
+/// allowable sleep is the timer's granularity multiplied by [`u64::MAX`]. A
+/// shorter tick duration will allow for more precise sleeps at the expense of
+/// reducing the maximum allowed sleep.
+///
+/// When using an [interrupt-driven time source](#interrupt-driven-timers), the
+/// tick duration should generally be the interval that the timer interrupt
+/// fires at. A finer resolution won't have any benefit, as the timer only fires
+/// at that frequency, and all sleeps that complete between two timer interrupts
+/// will be woken at the same time anyway.
+///
+/// When using a [timestamp-driven time source](#timestamp-driven-timers),
+/// selecting the resolution of the timestamp counter as the timer's tick
+/// duration is probably a good choice.
 ///
 /// [`Sleep`]: crate::time::Sleep
 /// [`Timeout`]: crate::time::Timeout
 /// [future]: core::future::Future
+/// [wheel]: http://www.cs.columbia.edu/~nahum/w6998/papers/sosp87-timing-wheels.pdf
 /// [8253 PIT interrupt]: https://en.wikipedia.org/wiki/Intel_8253#IBM_PC_programming_tips_and_hints
 /// [`CCNT` register]: https://developer.arm.com/documentation/ddi0211/h/system-control-coprocessor/system-control-processor-register-descriptions/c15--cycle-counter-register--ccnt-
 /// [`rdtsc` instruction]: https://www.felixcloutier.com/x86/rdtsc
