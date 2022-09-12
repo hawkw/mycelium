@@ -80,6 +80,75 @@ pub struct TaskStub {
     hdr: Header,
 }
 
+/// Safely constructs a new [`StaticScheduler`] instance in a `static`
+/// initializer.
+///
+/// This macro is intended to be used as a `static` initializer:
+///
+/// ```rust
+/// use maitake::scheduler;
+///
+/// // look ma, no `unsafe`!
+/// static SCHEDULER: scheduler::StaticScheduler = scheduler::new_static!();
+/// ```
+///
+/// Note that this macro is re-exported in the [`scheduler`] module as
+/// [`scheduler::new_static!`], which feels somewhat more idiomatic than using
+/// it at the crate-level; however, it is also available at the crate-level as
+/// [`new_static_scheduler!`].
+///
+/// The [`StaticScheduler::new_with_static_stub`] constructor is unsafe to call,
+/// because it requires that the [`TaskStub`] passed to the scheduler not be
+/// used by other scheduler instances. This macro is a safe alternative to
+/// manually initializing a [`StaticScheduler`] instance using
+/// [`new_with_static_stub`], as it creates the stub task inside a scope,
+/// ensuring that it cannot be referenceed by other [`StaticScheduler`]
+/// instances.
+///
+/// This macro expands to the following code:
+/// ```rust
+/// # static SCHEDULER: maitake::scheduler::StaticScheduler =
+/// {
+///     static STUB_TASK: maitake::scheduler::TaskStub = maitake::scheduler::TaskStub::new();
+///     unsafe {
+///         // safety: `StaticScheduler::new_with_static_stub` is unsafe because
+///         // the stub task must not be shared with any other `StaticScheduler`
+///         // instance. because the `new_static` macro creates the stub task
+///         // inside the scope of the static initializer, it is guaranteed that
+///         // no other `StaticScheduler` instance can reference the `STUB_TASK`
+///         // static, so this is always safe.
+///         maitake::scheduler::StaticScheduler::new_with_static_stub(&STUB_TASK)
+///     }
+/// }
+/// # ;
+/// ```
+///
+/// [`new_with_static_stub`]: StaticScheduler::new_with_static_stub
+/// [`scheduler`]: crate::scheduler
+/// [`scheduler::new_static!`]: crate::scheduler::new_static!
+/// [`new_static_scheduler!`]: crate::new_static_scheduler!
+#[cfg(not(loom))]
+#[macro_export]
+macro_rules! new_static_scheduler {
+    () => {{
+        static STUB_TASK: $crate::scheduler::TaskStub = $crate::scheduler::TaskStub::new();
+        unsafe {
+            // safety: `StaticScheduler::new_with_static_stub` is unsafe because
+            // the stub task must not be shared with any other `StaticScheduler`
+            // instance. because the `new_static` macro creates the stub task
+            // inside the scope of the static initializer, it is guaranteed that
+            // no other `StaticScheduler` instance can reference the `STUB_TASK`
+            // static, so this is always safe.
+            $crate::scheduler::StaticScheduler::new_with_static_stub(&STUB_TASK)
+        }
+    }};
+}
+
+#[cfg(not(loom))]
+pub use new_static_scheduler as new_static;
+
+// === impl TaskStub ===
+
 impl TaskStub {
     /// Create a new unique stub [`Task`].
     #[cfg(not(loom))]
@@ -106,6 +175,9 @@ impl StaticScheduler {
     ///
     /// The "stub" provided must ONLY EVER be used for a single StaticScheduler.
     /// Re-using the stub for multiple schedulers may lead to undefined behavior.
+    ///
+    /// For a safe alternative, consider using the [`new_static!`] macro to
+    /// initialize a `StaticScheduler` in a `static` variable.
     #[cfg(not(loom))]
     pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
         StaticScheduler(Core::new_with_static_stub(&stub.hdr))
