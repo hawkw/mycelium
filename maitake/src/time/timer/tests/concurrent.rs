@@ -133,6 +133,7 @@ fn cancel_polled_sleeps() {
 }
 
 #[test]
+#[cfg_attr(not(loom), ignore)]
 fn reregister_waker() {
     model(|| {
         let timer = Arc::new(Timer::new(Duration::from_millis(1)));
