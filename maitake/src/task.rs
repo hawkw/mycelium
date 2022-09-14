@@ -461,6 +461,38 @@ where
     }
 }
 
+impl<STO> Task<Stub, Stub, STO>
+where
+    STO: Storage<Stub, Stub>,
+{
+    const HEAP_STUB_VTABLE: Vtable = Vtable {
+        poll: _maitake_header_nop,
+        poll_join: _maitake_header_nop_poll_join,
+        deallocate: Self::deallocate,
+    };
+
+    loom_const_fn! {
+        /// Create a new stub task.
+        pub(crate) fn new_stub() -> Self {
+            Task {
+                schedulable: Schedulable {
+                    header: Header {
+                        run_queue: mpsc_queue::Links::new(),
+                        vtable: &Self::HEAP_STUB_VTABLE,
+                        state: StateCell::new(),
+                        id: TaskId::stub(),
+                        span: crate::trace::Span::none(),
+                    },
+                    scheduler: Stub,
+                },
+                inner: UnsafeCell::new(Cell::Pending(Stub)),
+                join_waker: UnsafeCell::new(CheckedMaybeUninit::uninit()),
+                storage: PhantomData,
+            }
+        }
+    }
+}
+
 impl<S, F, STO> Task<S, F, STO>
 where
     S: Schedule,
@@ -871,17 +903,18 @@ impl TaskRef {
         // attach the task span, if tracing is enabled.
         #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
         {
-            let loc = builder
-                .location
-                .as_ref()
-                .unwrap_or_else(|| core::panic::Location::caller());
+            let loc = match builder.location {
+                Some(ref loc) => loc,
+                None => core::panic::Location::caller(),
+            };
+            let header = &mut unsafe { ptr.as_mut() }.schedulable.header;
             let span = trace_span!(
                 "runtime.spawn",
                 kind = %builder.kind,
                 // XXX(eliza): would be nice to not use emptystring here but
                 // `tracing` 0.2 is missing `Option` value support :(
                 task.name = builder.name.unwrap_or(""),
-                task.tid = unsafe { ptr.as_ref() }.schedulable.header.id.as_u64(),
+                task.tid = header.id.as_u64(),
                 task.addr = ?ptr,
                 task.output = %type_name::<F::Output>(),
                 task.storage = %type_name::<STO>(),
@@ -889,20 +922,21 @@ impl TaskRef {
                 loc.line = loc.line(),
                 loc.col = loc.column(),
             );
-            unsafe {
-                ptr.as_mut().schedulable.header.span = span;
-            };
+
+            header.span = span;
+
+            trace!(
+            task.name = builder.name.unwrap_or(""),
+            task.addr = ?ptr,
+            task.tid = header.id.as_u64(),
+                task.kind = %builder.kind,
+            task.spawn_location = %loc,
+                "Task<..., Output = {}>::new",
+                type_name::<F::Output>()
+            );
         }
 
         let ptr = ptr.cast::<Header>();
-        trace!(
-            task.name = builder.name.unwrap_or(""),
-            task.addr = ?ptr,
-            task.tid = unsafe { ptr.as_ref() }.id.as_u64(),
-            task.kind = %builder.kind,
-            "Task<..., Output = {}>::new",
-            type_name::<F::Output>()
-        );
 
         #[cfg(not(any(feature = "tracing-01", feature = "tracing-02", test)))]
         let _ = builder;
@@ -1029,20 +1063,21 @@ unsafe fn _maitake_header_nop_poll_join(
 }
 
 impl Header {
-    #[cfg(not(loom))]
-    pub(crate) const fn new_stub() -> Self {
-        const STUB_VTABLE: Vtable = Vtable {
-            poll: _maitake_header_nop,
-            poll_join: _maitake_header_nop_poll_join,
-            deallocate: _maitake_header_nop_deallocate,
-        };
+    const STATIC_STUB_VTABLE: Vtable = Vtable {
+        poll: _maitake_header_nop,
+        poll_join: _maitake_header_nop_poll_join,
+        deallocate: _maitake_header_nop_deallocate,
+    };
 
-        Self {
-            run_queue: mpsc_queue::Links::new_stub(),
-            state: StateCell::new(),
-            vtable: &STUB_VTABLE,
-            span: trace::Span::none(),
-            id: TaskId::stub(),
+    loom_const_fn! {
+        pub(crate) fn new_static_stub() -> Self {
+            Self {
+                run_queue: mpsc_queue::Links::new_stub(),
+                state: StateCell::new(),
+                vtable: &Self::STATIC_STUB_VTABLE,
+                span: trace::Span::none(),
+                id: TaskId::stub(),
+            }
         }
     }
 
@@ -1160,4 +1195,24 @@ feature! {
         }
     }
 
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct Stub;
+
+impl Future for Stub {
+    type Output = ();
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        unreachable!("the stub task should never be polled!")
+    }
+}
+
+impl Schedule for Stub {
+    fn schedule(&self, _: TaskRef) {
+        unimplemented!("stub task should never be woken!")
+    }
+
+    fn current_task(&self) -> Option<TaskRef> {
+        None
+    }
 }

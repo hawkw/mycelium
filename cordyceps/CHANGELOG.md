@@ -3,9 +3,29 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## cordyceps-v0.3.1 - (2022-09-08)
+
+[62b7ee5](https://github.com/hawkw/mycelium/62b7ee5f7080d7843a0785be73977124590be526)...[06179e2](https://github.com/hawkw/mycelium/06179e2855e9b91c7abbe2c15fe319ecbce1af36)
+
+
+### Added
+
+- Assert list is nonempty in remove ([#247](https://github.com/hawkw/mycelium/issues/247)) ([d697b8e](https://github.com/hawkw/mycelium/d697b8e3d91321a21cc7058c6b59ec78f05e4951))
+- Add by-value `IntoIterator` impl for `List` ([#314](https://github.com/hawkw/mycelium/issues/314)) ([a0c5fb8](https://github.com/hawkw/mycelium/a0c5fb8d438f4250f00b449ebff231bab262d8d9))
+- Add `FusedIterator` impls for `List` iterators ([#315](https://github.com/hawkw/mycelium/issues/315)) ([06179e2](https://github.com/hawkw/mycelium/06179e2855e9b91c7abbe2c15fe319ecbce1af36))
+
+### Documented
+
+- Use `ptr::addr_of_mut!` instead of casts ([#258](https://github.com/hawkw/mycelium/issues/258)) ([6e2a04c](https://github.com/hawkw/mycelium/6e2a04cdc4996b9b896583c7d4c12fa4fe1b190c))
+
+### Fixed
+
+- Make assertion less aggressive ([c336a47](https://github.com/hawkw/mycelium/c336a47b4787395516535841baaec6898155670a))
+- Correctly cfg-gate debug assertions ([23db951](https://github.com/hawkw/mycelium/23db951d19cf410e07ed4c2c47ead20d2b592d21))
+
 ## cordyceps-v0.3.0 - (2022-06-25)
 
-[f956111](https://github.com/hawkw/mycelium/f9561111fceead952261355594fa46e9027ca8dd)...[2a7ce9c](https://github.com/hawkw/mycelium/2a7ce9cc2fcda1808f327253092a5e8309aa882a)
+[f956111](https://github.com/hawkw/mycelium/f9561111fceead952261355594fa46e9027ca8dd)...[62b7ee5](https://github.com/hawkw/mycelium/62b7ee5f7080d7843a0785be73977124590be526)
 
 ### <a id = "cordyceps-v0.3.0-breaking"></a>Breaking Changes
 - **Remove deprecated `Cursor` type alias ([#239](https://github.com/hawkw/mycelium/issues/239))** ([b4fcb16](b4fcb160214b2d44b5c740e4eb3c666fcd8dec3d))<br />This removes the `Cursor` type from `cordyceps::list`.
