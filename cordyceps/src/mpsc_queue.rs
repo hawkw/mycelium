@@ -164,7 +164,6 @@ use core::{
 /// # };
 /// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
-/// # #[repr(C)]
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: mpsc_queue::Links<Entry>,
@@ -238,7 +237,6 @@ use core::{
 /// # };
 /// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
-/// # #[repr(C)]
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: mpsc_queue::Links<Entry>,
@@ -408,10 +406,12 @@ pub enum TryDequeueError {
     /// No element was dequeued because the queue was empty.
     Empty,
 
-    /// The queue is currently in an inconsistent state.
+    /// The queue is currently in an [inconsistent state].
     ///
     /// Since inconsistent states are very short-lived, the caller may want to
     /// try dequeueing a second time.
+    ///
+    /// [inconsistent state]: MpscQueue#inconsistent-states
     Inconsistent,
 
     /// Another thread is currently calling [`MpscQueue::try_dequeue`]  or
@@ -467,16 +467,17 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///
     /// # Usage notes
     ///
-    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub` item will NOT be
-    /// dropped when the `MpscQueue` is dropped. This is fine if you are
-    /// ALSO statically creating the `stub`, however if it is necessary to
-    /// recover that memory after the `MpscQueue` has been dropped, that will
-    /// need to be done by the user manually.
+    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub`
+    /// item will NOT be dropped when the `MpscQueue` is dropped. This is fine
+    /// if you are ALSO statically creating the `stub`. However, if it is
+    /// necessary to recover that memory after the `MpscQueue` has been dropped,
+    /// that will need to be done by the user manually.
     ///
     /// # Safety
     ///
-    /// The "stub" provided must ONLY EVER be used for a single MpscQueue. Re-using
-    /// the stub for multiple queues may lead to undefined behavior.
+    /// The `stub` provided must ONLY EVER be used for a single `MpscQueue`
+    /// instance. Re-using the stub for multiple queues may lead to undefined
+    /// behavior.
     ///
     /// ## Example usage
     ///
@@ -491,7 +492,6 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///
     /// // This is our same `Entry` from the parent examples. It has implemented
     /// // the `Links` trait as above.
-    /// #[repr(C)]
     /// #[derive(Debug, Default)]
     /// struct Entry {
     ///    links: mpsc_queue::Links<Entry>,
