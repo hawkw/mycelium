@@ -228,7 +228,6 @@ impl<T> fmt::Debug for JoinHandle<T> {
 
 impl JoinError<()> {
     #[inline]
-    #[must_use]
     pub(super) fn canceled(completed: bool, id: TaskId) -> Poll<Result<(), Self>> {
         Poll::Ready(Err(Self {
             kind: JoinErrorKind::Canceled { completed },
@@ -247,6 +246,7 @@ impl JoinError<()> {
         }
     }
 
+    #[must_use]
     pub(super) fn with_output<T>(self, output: Option<T>) -> JoinError<T> {
         JoinError {
             kind: self.kind,
