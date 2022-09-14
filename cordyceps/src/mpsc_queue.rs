@@ -408,10 +408,12 @@ pub enum TryDequeueError {
     /// No element was dequeued because the queue was empty.
     Empty,
 
-    /// The queue is currently in an inconsistent state.
+    /// The queue is currently in an [inconsistent state].
     ///
     /// Since inconsistent states are very short-lived, the caller may want to
     /// try dequeueing a second time.
+    ///
+    /// [inconsistent state]: MpscQueue#inconsistent-states
     Inconsistent,
 
     /// Another thread is currently calling [`MpscQueue::try_dequeue`]  or
