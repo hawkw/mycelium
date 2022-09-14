@@ -469,16 +469,17 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///
     /// # Usage notes
     ///
-    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub` item will NOT be
-    /// dropped when the `MpscQueue` is dropped. This is fine if you are
-    /// ALSO statically creating the `stub`, however if it is necessary to
-    /// recover that memory after the `MpscQueue` has been dropped, that will
-    /// need to be done by the user manually.
+    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub`
+    /// item will NOT be dropped when the `MpscQueue` is dropped. This is fine
+    /// if you are ALSO statically creating the `stub`. However, if it is
+    /// necessary to recover that memory after the `MpscQueue` has been dropped,
+    /// that will need to be done by the user manually.
     ///
     /// # Safety
     ///
-    /// The "stub" provided must ONLY EVER be used for a single MpscQueue. Re-using
-    /// the stub for multiple queues may lead to undefined behavior.
+    /// The `stub` provided must ONLY EVER be used for a single `MpscQueue`
+    /// instance. Re-using the stub for multiple queues may lead to undefined
+    /// behavior.
     ///
     /// ## Example usage
     ///
