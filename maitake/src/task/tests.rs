@@ -13,8 +13,9 @@ impl Schedule for NopSchedule {
     }
 }
 
-#[cfg(loom)]
+#[cfg(any(loom, feature = "alloc"))]
 mod loom {
+    #![allow(clippy::drop_non_drop)]
     use super::*;
     use crate::{
         loom::{
@@ -39,6 +40,15 @@ mod loom {
             // if the task is not deallocated by dropping the `TaskRef`, the
             // `Track` will be leaked.
             drop(task);
+        });
+    }
+
+    #[test]
+    #[should_panic]
+    fn do_leaks_work() {
+        loom::model(|| {
+            let track = Track::new(());
+            std::mem::forget(track);
         });
     }
 
