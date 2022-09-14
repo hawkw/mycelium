@@ -190,6 +190,7 @@ use core::ptr::NonNull;
 ///     miscompiles, but it is rejected by tools like Miri as being unsound.
 ///     Like all undefined behavior, there is no guarantee that future Rust
 ///     compilers will not miscompile code like this, with disastrous results.
+///
 /// [^2]: And two different fields cannot both be the first field at the same
 ///      time...by definition.
 ///
