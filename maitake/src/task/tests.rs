@@ -162,6 +162,33 @@ mod loom {
     }
 
     #[test]
+    fn task_self_cancels() {
+        loom::model(|| {
+            let scheduler = Scheduler::new();
+            let join = scheduler.spawn({
+                let scheduler = scheduler.clone();
+                TrackFuture::new(async move {
+                    future::yield_now().await;
+                    scheduler
+                        .current_task()
+                        .expect("task must be set as current")
+                        .cancel();
+                    future::yield_now().await;
+                })
+            });
+
+            let scheduler_thread = loom::thread::spawn(move || {
+                scheduler.tick();
+            });
+
+            scheduler_thread.join().unwrap();
+
+            let err = loom::future::block_on(join).unwrap_err();
+            assert!(err.is_canceled());
+        })
+    }
+
+    #[test]
     fn join_handle_cancels_between_polls() {
         loom::model(|| {
             let scheduler = Scheduler::new();
