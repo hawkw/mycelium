@@ -226,6 +226,7 @@ mod inner {
             }
         }
     }
+
     pub(crate) mod alloc {
         use core::{
             future::Future,
@@ -239,8 +240,10 @@ mod inner {
         pub(in crate::loom) mod track {
             use std::{
                 cell::RefCell,
-                collections::HashMap,
-                sync::{Arc, Mutex, Weak},
+                sync::{
+                    atomic::{AtomicBool, Ordering},
+                    Arc, Mutex, Weak,
+                },
             };
 
             #[derive(Clone, Debug, Default)]
@@ -248,15 +251,16 @@ mod inner {
 
             #[derive(Debug, Default)]
             struct RegistryInner {
-                tracks: HashMap<usize, TrackData>,
+                tracks: Vec<Weak<TrackData>>,
                 next_id: usize,
             }
 
             #[derive(Debug)]
-            struct TrackData {
+            pub(super) struct TrackData {
+                was_leaked: AtomicBool,
                 type_name: &'static str,
-                loc: &'static core::panic::Location<'static>,
-                weak: Weak<()>,
+                location: &'static core::panic::Location<'static>,
+                id: usize,
             }
 
             thread_local! {
@@ -286,7 +290,7 @@ mod inner {
                 }
 
                 #[track_caller]
-                pub(super) fn start_tracking<T>() -> Option<Arc<()>> {
+                pub(super) fn start_tracking<T>() -> Option<Arc<TrackData>> {
                     match Self::current() {
                         Some(registry) => Some(registry.insert::<T>()),
                         _ => None,
@@ -294,23 +298,22 @@ mod inner {
                 }
 
                 #[track_caller]
-                pub(super) fn insert<T>(&self) -> Arc<()> {
+                pub(super) fn insert<T>(&self) -> Arc<TrackData> {
                     let mut inner = self.0.lock().unwrap();
                     let id = inner.next_id;
                     inner.next_id += 1;
-                    let loc = core::panic::Location::caller();
+                    let location = core::panic::Location::caller();
                     let type_name = std::any::type_name::<T>();
-                    let arc = Arc::new(());
-                    let weak = Arc::downgrade(&arc);
-                    inner.tracks.insert(
+                    let data = Arc::new(TrackData {
+                        type_name,
+                        location,
                         id,
-                        TrackData {
-                            type_name,
-                            loc,
-                            weak,
-                        },
-                    );
-                    arc
+                        was_leaked: AtomicBool::new(false),
+                    });
+                    let weak = Arc::downgrade(&data);
+                    trace!(id, "type" = %type_name, %location, "started tracking allocation");
+                    inner.tracks.push(weak);
+                    data
                 }
 
                 pub(in crate::loom) fn check(&self) {
@@ -320,23 +323,31 @@ mod inner {
                         .unwrap()
                         .tracks
                         .iter()
-                        .filter_map(
-                            |(
-                                id,
-                                TrackData {
-                                    type_name,
-                                    weak,
-                                    loc,
-                                },
-                            )| {
-                                weak.upgrade()?;
-                                Some(format!(" - {type_name} allocated at {loc} (id {id})"))
-                            },
-                        )
+                        .filter_map(|weak| {
+                            let data = weak.upgrade()?;
+                            data.was_leaked.store(true, Ordering::SeqCst);
+                            Some(format!(
+                                " - id {}, {} allocated at {}",
+                                data.id, data.type_name, data.location
+                            ))
+                        })
                         .collect::<Vec<_>>();
                     if !leaked.is_empty() {
                         let leaked = leaked.join("\n  ");
                         panic!("the following allocations were leaked:\n  {leaked}");
+                    }
+                }
+            }
+
+            impl Drop for TrackData {
+                fn drop(&mut self) {
+                    if !self.was_leaked.load(Ordering::SeqCst) {
+                        trace!(
+                            id = self.id,
+                            "type" = %self.type_name,
+                            location = %self.location,
+                            "dropped all references to a tracked allocation",
+                        );
                     }
                 }
             }
@@ -348,7 +359,7 @@ mod inner {
         pub(crate) struct TrackFuture<F> {
             #[pin]
             inner: F,
-            track: Option<Arc<()>>,
+            track: Option<Arc<track::TrackData>>,
         }
 
         #[cfg(test)]
@@ -399,7 +410,7 @@ mod inner {
             value: T,
 
             #[cfg(test)]
-            track: Option<Arc<()>>,
+            track: Option<Arc<track::TrackData>>,
         }
 
         impl<T> Track<T> {

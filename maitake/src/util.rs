@@ -132,6 +132,8 @@ pub(crate) mod test {
         } else {
             builder.parse_lossy(env)
         };
+        // enable traces from alloc leak checking.
+        let filter = filter.add_directive("maitake::loom=trace".parse().unwrap());
         let _ = tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_test_writer()
