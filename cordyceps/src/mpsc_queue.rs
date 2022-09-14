@@ -164,7 +164,6 @@ use core::{
 /// # };
 /// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
-/// # #[repr(C)]
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: mpsc_queue::Links<Entry>,
@@ -238,7 +237,6 @@ use core::{
 /// # };
 /// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
-/// # #[repr(C)]
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: mpsc_queue::Links<Entry>,
@@ -494,7 +492,6 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///
     /// // This is our same `Entry` from the parent examples. It has implemented
     /// // the `Links` trait as above.
-    /// #[repr(C)]
     /// #[derive(Debug, Default)]
     /// struct Entry {
     ///    links: mpsc_queue::Links<Entry>,
