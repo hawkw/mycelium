@@ -83,12 +83,12 @@ impl BootInfo for RustbootBootInfo {
             Subscriber,
         };
 
-        static COLLECTOR: InitOnce<
-            Subscriber<
-                writer::WithMaxLevel<MakeTextWriter<FramebufWriter>>,
-                Option<&'static serial::Port>,
-            >,
-        > = InitOnce::uninitialized();
+        type FilteredFramebuf = writer::WithMaxLevel<MakeTextWriter<FramebufWriter>>;
+        type FilteredSerial =
+            writer::WithFilter<&'static serial::Port, fn(&tracing::Metadata<'_>) -> bool>;
+
+        static COLLECTOR: InitOnce<Subscriber<FilteredFramebuf, Option<FilteredSerial>>> =
+            InitOnce::uninitialized();
 
         if !self.has_framebuffer {
             // TODO(eliza): we should probably write to just the serial port if
@@ -96,10 +96,24 @@ impl BootInfo for RustbootBootInfo {
             return None;
         }
 
+        fn serial_filter(meta: &tracing::Metadata<'_>) -> bool {
+            // disable really noisy traces from maitake
+            // TODO(eliza): it would be nice if this was configured by
+            // non-arch-specific OS code...
+            const DISABLED_TARGETS: &[&str] =
+                &["maitake::time::timer::wheel", "maitake::scheduler"];
+            DISABLED_TARGETS
+                .iter()
+                .all(|target| !meta.target().starts_with(target))
+        }
+
         let collector = COLLECTOR.get_or_else(|| {
             let display_writer = MakeTextWriter::new(|| unsafe { framebuf::mk_framebuf() })
                 .with_max_level(tracing::Level::INFO);
-            Subscriber::display_only(display_writer).with_serial(serial::com1())
+            let serial = serial::com1().map(|com1| {
+                com1.with_filter(serial_filter as for<'a, 'b> fn(&'a tracing::Metadata<'b>) -> bool)
+            });
+            Subscriber::display_only(display_writer).with_serial(serial)
         });
 
         Some(tracing::Dispatch::from_static(collector))
