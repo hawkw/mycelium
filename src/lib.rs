@@ -15,6 +15,7 @@ pub mod wasm;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
+use maitake::scheduler::{self, StaticScheduler};
 use mycelium_alloc::buddy;
 
 #[cfg(test)]
@@ -22,8 +23,9 @@ mod tests;
 
 #[cfg_attr(target_os = "none", global_allocator)]
 static ALLOC: buddy::Alloc<32> = buddy::Alloc::new(32);
+static SCHEDULER: StaticScheduler = scheduler::new_static!();
 
-pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
+pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
         writer,
@@ -147,13 +149,39 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
     #[cfg(test)]
     arch::run_tests();
 
-    // if this function returns we would boot loop. Hang, instead, so the debug
-    // output can be read.
-    //
-    // eventually we'll call into a kernel main loop here...
-    #[allow(clippy::empty_loop)]
-    #[allow(unreachable_code)]
-    loop {}
+    kernel_main();
+}
+
+fn kernel_main() -> ! {
+    tracing::info!("started kernel main loop");
+    SCHEDULER.spawn(async move {
+        use maitake::time;
+        let duration = time::Duration::from_secs(5);
+        loop {
+            time::sleep(duration).await;
+            tracing::info!(?duration, "slept");
+        }
+    });
+
+    tracing::info!("spawned sleep task");
+    loop {
+        // drive the task scheduler
+        let tick = SCHEDULER.tick();
+        if tick.polled > 0 {
+            tracing::trace!(
+                tick.polled,
+                tick.completed,
+                tick.spawned,
+                tick.woken_external,
+                tick.woken_internal,
+                tick.has_remaining,
+            );
+        }
+
+        // turn the timer wheel if it wasn't turned recently, to ensure any
+        // pending ticks are consumed.
+        arch::tick_timer();
+    }
 }
 
 #[cfg_attr(target_os = "none", alloc_error_handler)]

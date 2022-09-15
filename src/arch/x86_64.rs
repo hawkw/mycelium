@@ -1,7 +1,6 @@
 use bootloader::boot_info;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
-use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
+use hal_x86_64::{cpu, serial, vga};
 pub use hal_x86_64::{mm, NAME};
 use mycelium_util::sync::InitOnce;
 
@@ -15,13 +14,10 @@ use self::framebuf::FramebufWriter;
 
 pub type MinPageSize = mm::size::Size4Kb;
 
-#[tracing::instrument]
-pub fn init_interrupts() {
-    interrupt::init_gdt();
-    tracing::info!("GDT initialized!");
+pub use self::interrupt::init_interrupts;
 
-    interrupt::init::<InterruptHandlers>();
-    tracing::info!("IDT initialized!");
+pub fn tick_timer() {
+    interrupt::TIMER.force_advance_ticks(0);
 }
 
 #[derive(Debug)]
@@ -138,72 +134,6 @@ impl RustbootBootInfo {
     }
 }
 
-static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
-
-pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
-pub(crate) struct InterruptHandlers;
-
-/// Forcibly unlock the IOs we write to in an oops (VGA buffer and COM1 serial
-/// port) to prevent deadlocks if the oops occured while either was locked.
-///
-/// # Safety
-///
-///  /!\ only call this when oopsing!!! /!\
-impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
-    fn page_fault<C>(cx: C)
-    where
-        C: hal_core::interrupt::Context<Registers = X64Registers>
-            + hal_core::interrupt::ctx::PageFault,
-    {
-        oops(Oops::fault(&cx, "PAGE FAULT"))
-    }
-
-    fn code_fault<C>(cx: C)
-    where
-        C: hal_core::interrupt::Context<Registers = X64Registers>
-            + hal_core::interrupt::ctx::CodeFault,
-    {
-        let fault = match cx.details() {
-            Some(deets) => Oops::fault_with_details(&cx, cx.fault_kind(), deets),
-            None => Oops::fault(&cx, cx.fault_kind()),
-        };
-        oops(fault)
-    }
-
-    fn double_fault<C>(cx: C)
-    where
-        C: hal_core::interrupt::Context<Registers = X64Registers>,
-    {
-        oops(Oops::fault(&cx, "DOUBLE FAULT"))
-    }
-
-    fn timer_tick() {
-        TIMER.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn keyboard_controller() {
-        // load-bearing read - if we don't read from the keyboard controller it won't
-        // send another interrupt on later keystrokes.
-        //
-        // 0x60 is a magic PC/AT number.
-        let scancode = unsafe { hal_x86_64::cpu::Port::at(0x60).readb() };
-        tracing::info!(
-            // for now
-            "got scancode {}. the time is now: {}",
-            scancode,
-            TIMER.load(Ordering::Relaxed)
-        );
-    }
-
-    fn test_interrupt<C>(cx: C)
-    where
-        C: hal_core::interrupt::ctx::Context<Registers = X64Registers>,
-    {
-        let fired = TEST_INTERRUPT_WAS_FIRED.fetch_add(1, Ordering::Release) + 1;
-        tracing::info!(registers = ?cx.registers(), fired, "lol im in ur test interrupt");
-    }
-}
-
 #[cfg(target_os = "none")]
 bootloader::entry_point!(arch_entry);
 
@@ -222,7 +152,7 @@ pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
     } */
 
     let boot_info = RustbootBootInfo::from_bootloader(info);
-    crate::kernel_main(&boot_info);
+    crate::kernel_start(&boot_info);
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be
@@ -256,24 +186,6 @@ pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
 
         // If the previous line didn't immediately trigger shutdown, hang.
         cpu::halt()
-    }
-}
-
-mycotest::decl_test! {
-    fn interrupts_work() -> mycotest::TestResult {
-        let test_interrupt_fires = TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire);
-
-        tracing::debug!("testing interrupts...");
-        interrupt::fire_test_interrupt();
-        tracing::debug!("it worked");
-
-        mycotest::assert_eq!(
-            test_interrupt_fires + 1,
-            TEST_INTERRUPT_WAS_FIRED.load(Ordering::Acquire),
-            "test interrupt wasn't fired!",
-        );
-
-        Ok(())
     }
 }
 
