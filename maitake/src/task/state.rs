@@ -25,6 +25,9 @@ mycelium_bitfield::bitfield! {
         /// [`Poll::Ready`]: core::task::Poll::Ready
         pub(crate) const COMPLETED: bool;
 
+        /// If set, this task has been canceled.
+        pub(crate) const CANCELED: bool;
+
         /// If set, this task has a [`JoinHandle`] awaiting its completion.
         ///
         /// If the `JoinHandle` is dropped, this flag is unset.
@@ -74,6 +77,12 @@ pub(super) enum JoinAction {
     /// It's safe to take the task's output!
     TakeOutput,
 
+    /// The task was canceled, it cannot be joined.
+    Canceled {
+        /// If `true`, the task completed successfully before it was cancelled.
+        completed: bool,
+    },
+
     /// Register the *first* join waker; there is no previous join waker and the
     /// slot is not initialized.
     Register,
@@ -90,6 +99,23 @@ pub(super) enum OrDrop<T> {
 
     /// The task should be deallocated.
     Drop,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum StartPollAction {
+    /// It's okay to poll the task.
+    Poll,
+
+    /// The task was canceled, and its [`JoinHandle`] waker may need to be woken.
+    ///
+    /// [`JoinHandle`]: super::JoinHandle
+    Canceled {
+        /// If `true`, the task's join waker must be woken.
+        wake_join_waker: bool,
+    },
+
+    /// The task is not in a valid state to start a poll. Do nothing.
+    CantPoll,
 }
 
 pub(super) type WakeAction = OrDrop<ScheduleAction>;
@@ -127,6 +153,38 @@ enum JoinWakerState {
 
 // === impl StateCell ===
 
+impl State {
+    fn has_join_waker(&mut self, should_wait: &mut bool) -> bool {
+        match self.get(State::JOIN_WAKER) {
+            JoinWakerState::Empty => false,
+            JoinWakerState::Registering => {
+                *should_wait = true;
+                debug_assert!(
+                    self.get(State::HAS_JOIN_HANDLE),
+                    "a task cannot register a join waker if it does not have a join handle!",
+                );
+                true
+            }
+            JoinWakerState::Waiting => {
+                debug_assert!(
+                    self.get(State::HAS_JOIN_HANDLE),
+                    "a task cannot have a join waker if it does not have a join handle!",
+                );
+                *should_wait = false;
+                self.set(State::JOIN_WAKER, JoinWakerState::Empty);
+                true
+            }
+            JoinWakerState::Woken => {
+                debug_assert!(
+                    false,
+                    "join waker should not be woken until task has completed, wtf"
+                );
+                false
+            }
+        }
+    }
+}
+
 impl StateCell {
     #[cfg(not(loom))]
     pub const fn new() -> Self {
@@ -138,27 +196,35 @@ impl StateCell {
         Self(AtomicUsize::new(REF_ONE))
     }
 
-    pub(super) fn start_poll(&self) -> Result<State, State> {
-        self.transition(|state| {
-            // Cannot start polling a task which is being polled on another
-            // thread.
-            if test_dbg!(state.get(State::POLLING)) {
-                return Err(*state);
+    pub(super) fn start_poll(&self) -> StartPollAction {
+        let mut should_wait_for_join_waker = false;
+        let action = self.transition(|state| {
+            // cannot start polling a task which is being polled on another
+            // thread, or a task which has completed
+            if test_dbg!(state.get(State::POLLING)) || test_dbg!(state.get(State::COMPLETED)) {
+                return StartPollAction::CantPoll;
             }
 
-            // Cannot start polling a completed task.
-            if test_dbg!(state.get(State::COMPLETED)) {
-                return Err(*state);
+            // if the task has been canceled, don't poll it.
+            if test_dbg!(state.get(State::CANCELED)) {
+                let wake_join_waker = state.has_join_waker(&mut should_wait_for_join_waker);
+                return StartPollAction::Canceled { wake_join_waker };
             }
 
-            let new_state = state
-                // The task is now being polled.
-                .with(State::POLLING, true)
-                // If the task was woken, consume the wakeup.
-                .with(State::WOKEN, false);
-            *state = new_state;
-            Ok(new_state)
-        })
+            state
+                // the task is now being polled.
+                .set(State::POLLING, true)
+                // if the task was woken, consume the wakeup.
+                .set(State::WOKEN, false);
+            StartPollAction::Poll
+        });
+
+        if should_wait_for_join_waker {
+            debug_assert!(matches!(action, StartPollAction::Canceled { .. }));
+            self.wait_for_join_waker(self.load(Acquire));
+        }
+
+        action
     }
 
     pub(super) fn end_poll(&self, completed: bool) -> PollResult {
@@ -172,53 +238,23 @@ impl StateCell {
                 "cannot poll a task that has zero references, what is happening!"
             );
 
-            let mut next_state = state
-                .with(State::POLLING, false)
-                .with(State::COMPLETED, completed);
+            state
+                .set(State::POLLING, false)
+                .set(State::COMPLETED, completed);
 
             // Was the task woken during the poll?
             if !test_dbg!(completed) && test_dbg!(state.get(State::WOKEN)) {
-                *state = test_dbg!(next_state);
                 return PollResult::PendingSchedule;
             }
 
             let had_join_waker = if test_dbg!(completed) {
                 // set the output flag so that the joinhandle knows it is now
                 // safe to read the task's output.
-                next_state.set(State::HAS_OUTPUT, true);
-                match state.get(State::JOIN_WAKER) {
-                    JoinWakerState::Empty => false,
-                    JoinWakerState::Registering => {
-                        should_wait_for_join_waker = true;
-                        debug_assert!(
-                            state.get(State::HAS_JOIN_HANDLE),
-                            "a task cannot register a join waker if it does not have a join handle!",
-                        );
-                        true
-                    }
-                    JoinWakerState::Waiting => {
-                        debug_assert!(
-                            state.get(State::HAS_JOIN_HANDLE),
-                            "a task cannot have a join waker if it does not have a join handle!",
-                        );
-                        should_wait_for_join_waker = false;
-                        next_state.set(State::JOIN_WAKER, JoinWakerState::Empty);
-                        true
-                    }
-                    JoinWakerState::Woken => {
-                        debug_assert!(
-                            false,
-                            "join waker should not be woken until task has completed, wtf"
-                        );
-                        false
-                    }
-                }
+                state.set(State::HAS_OUTPUT, true);
+                state.has_join_waker(&mut should_wait_for_join_waker)
             } else {
                 false
             };
-
-
-            *state = next_state;
 
             if had_join_waker {
                 PollResult::ReadyJoined
@@ -341,6 +377,27 @@ impl StateCell {
         true
     }
 
+    /// Cancel the task.
+    ///
+    /// Returns `true` if the task was successfully canceled.
+    pub(super) fn cancel(&self) -> bool {
+        test_debug!("StateCell::cancel");
+        // XXX(eliza): this *could* probably just be a `fetch_or`, instead of a
+        // whole `transition`...
+        self.transition(|state| {
+            // you can't cancel a task that has already been canceled, that doesn't make sense.
+            if state.get(State::CANCELED) {
+                return false;
+            }
+
+            // this task is CANCELED! can't believe some of you are still
+            // following it, smh...
+            state.set(State::CANCELED, true).set(State::WOKEN, true);
+
+            true
+        })
+    }
+
     #[inline]
     pub(super) fn create_join_handle(&self) {
         test_debug!("StateCell::create_join_handle");
@@ -387,13 +444,21 @@ impl StateCell {
         }
 
         self.transition(|state| {
+            let has_output = test_dbg!(state.get(State::HAS_OUTPUT));
+
+            if test_dbg!(state.get(State::CANCELED)) {
+                return JoinAction::Canceled {
+                    completed: has_output,
+                };
+            }
+
             // If the task has not completed, we can't take its join output.
             if test_dbg!(!state.get(State::COMPLETED)) {
                 return should_register(state);
             }
 
             // If the task does not have output, we cannot take it.
-            if test_dbg!(!state.get(State::HAS_OUTPUT)) {
+            if !has_output {
                 return should_register(state);
             }
 

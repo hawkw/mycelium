@@ -120,7 +120,7 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
 #[cfg(all(test, not(loom)))]
 pub(crate) mod test {
     pub(crate) fn trace_init() {
-        trace_init_with_default("maitake=trace");
+        trace_init_with_default("maitake=debug,cordyceps=debug");
     }
 
     pub(crate) fn trace_init_with_default(default: &str) {
@@ -132,6 +132,8 @@ pub(crate) mod test {
         } else {
             builder.parse_lossy(env)
         };
+        // enable traces from alloc leak checking.
+        let filter = filter.add_directive("maitake::loom=trace".parse().unwrap());
         let _ = tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_test_writer()

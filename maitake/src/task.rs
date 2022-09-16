@@ -40,7 +40,7 @@ use core::{
 
 use self::{
     builder::Settings,
-    state::{JoinAction, OrDrop, ScheduleAction, StateCell},
+    state::{JoinAction, OrDrop, ScheduleAction, StartPollAction, StateCell},
 };
 use cordyceps::{mpsc_queue, Linked};
 use mycelium_util::{fmt, mem::CheckedMaybeUninit};
@@ -398,11 +398,20 @@ struct Vtable {
     // Splitting this up into type aliases just makes it *harder* to understand
     // IMO...
     #[allow(clippy::type_complexity)]
-    poll_join:
-        unsafe fn(NonNull<Header>, NonNull<()>, &mut Context<'_>) -> Poll<Result<(), JoinError>>,
+    poll_join: unsafe fn(
+        NonNull<Header>,
+        NonNull<()>,
+        &mut Context<'_>,
+    ) -> Poll<Result<(), JoinError<()>>>,
 
     /// Drops the task and deallocates its memory.
     deallocate: unsafe fn(NonNull<Header>),
+
+    /// The `wake_by_ref` function from the task's [`RawWakerVTable`].
+    ///
+    /// This is duplicated here as it's used to wake canceled tasks when a task
+    /// is canceled by a [`TaskRef`] or [`JoinHandle`].
+    wake_by_ref: unsafe fn(*const ()),
 }
 
 // === impl Task ===
@@ -465,10 +474,15 @@ impl<STO> Task<Stub, Stub, STO>
 where
     STO: Storage<Stub, Stub>,
 {
+    /// The stub task's vtable is mostly nops, as it should never be polled,
+    /// joined, or woken.
     const HEAP_STUB_VTABLE: Vtable = Vtable {
         poll: _maitake_header_nop,
         poll_join: _maitake_header_nop_poll_join,
+        // Heap allocated stub tasks *will* need to be deallocated, since the
+        // scheduler will deallocate its stub task if it's dropped.
         deallocate: Self::deallocate,
+        wake_by_ref: _maitake_header_nop_wake_by_ref,
     };
 
     loom_const_fn! {
@@ -503,6 +517,7 @@ where
         poll: Self::poll,
         poll_join: Self::poll_join,
         deallocate: Self::deallocate,
+        wake_by_ref: Schedulable::<S>::wake_by_ref,
     };
 
     /// Create a new (non-heap-allocated) Task.
@@ -553,13 +568,20 @@ where
         let state = &this.as_ref().state();
         match test_dbg!(state.start_poll()) {
             // transitioned successfully!
-            Ok(_) => {}
-            Err(_state) => {
-                // TODO(eliza): could run the dealloc glue here instead of going
-                // through a ref cycle?
-                return PollResult::Ready;
+            StartPollAction::Poll => {}
+            // cancel culture has gone too far!
+            StartPollAction::Canceled { wake_join_waker } => {
+                trace!(task.addr = ?ptr, wake_join_waker, "task canceled!");
+                if wake_join_waker {
+                    this.as_ref().wake_join_waker();
+                    return PollResult::ReadyJoined;
+                } else {
+                    return PollResult::Ready;
+                }
             }
-        }
+            // can't poll this task for some reason...
+            StartPollAction::CantPoll => return PollResult::Ready,
+        };
 
         // wrap the waker in `ManuallyDrop` because we're converting it from an
         // existing task ref, rather than incrementing the task ref count. if
@@ -583,11 +605,7 @@ where
         // if the task is ready and has a `JoinHandle` to wake, wake the join
         // waker now.
         if result == PollResult::ReadyJoined {
-            this.as_ref().join_waker.with_mut(|join_waker| unsafe {
-                let join_waker = (*join_waker).assume_init_read();
-                test_debug!(?join_waker, "waking");
-                join_waker.wake();
-            });
+            this.as_ref().wake_join_waker()
         }
 
         result
@@ -605,11 +623,11 @@ where
     }
 
     unsafe fn poll_join(
-        task: NonNull<Header>,
+        ptr: NonNull<Header>,
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<(), JoinError>> {
-        let task = task.cast::<Self>().as_ref();
+    ) -> Poll<Result<(), JoinError<()>>> {
+        let task = ptr.cast::<Self>().as_ref();
         trace!(
             task.addr = ?task,
             task.output = %type_name::<<F>::Output>(),
@@ -617,14 +635,16 @@ where
             "Task::poll_join"
         );
         match test_dbg!(task.state().try_join()) {
+            JoinAction::Canceled { completed } => {
+                // if the task has completed before it was canceled, also try to
+                // read the output, so that it can be returned in the `JoinError`.
+                if completed {
+                    task.take_output(outptr);
+                }
+                return JoinError::canceled(completed, task.id());
+            }
             JoinAction::TakeOutput => {
-                task.inner.with_mut(|cell| {
-                    match mem::replace(&mut *cell, Cell::Joined) {
-                        Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
-                        state => unreachable!("attempted to take join output on a task that has not completed! task: {task:?}; state: {state:?}"),
-                    }
-                });
-
+                task.take_output(outptr);
                 return Poll::Ready(Ok(()));
             }
             JoinAction::Register => {
@@ -670,6 +690,23 @@ where
             }
         })
     }
+
+    unsafe fn wake_join_waker(&self) {
+        self.join_waker.with_mut(|join_waker| unsafe {
+            let join_waker = (*join_waker).assume_init_read();
+            test_debug!(?join_waker, "waking");
+            join_waker.wake();
+        })
+    }
+
+    unsafe fn take_output(&self, outptr: NonNull<()>) {
+        self.inner.with_mut(|cell| {
+            match mem::replace(&mut *cell, Cell::Joined) {
+                Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
+                state => unreachable!("attempted to take join output on a task that has not completed! task: {self:?}; state: {state:?}"),
+            }
+        });
+    }
 }
 
 unsafe impl<S, F, STO> Send for Task<S, F, STO>
@@ -705,6 +742,7 @@ where
     F: Future,
 {
     fn drop(&mut self) {
+        test_debug!(task.tid = self.header().id.as_u64(), "Task::drop");
         // if there's a join waker, ensure that its destructor runs when the
         // task is dropped.
         // NOTE: this *should* never happen; we don't ever expect to deallocate
@@ -850,6 +888,33 @@ impl TaskRef {
         self.header().id
     }
 
+    /// Forcibly cancel the task.
+    ///
+    /// Canceling a task sets a flag indicating that it has been canceled and
+    /// should terminate. The next time a canceled task is polled by the
+    /// scheduler, it will terminate instead of polling the inner [`Future`]. If
+    /// the task has a [`JoinHandle`], that [`JoinHandle`] will complete with a
+    /// [`JoinError`]. The task then will be deallocated once all
+    /// [`JoinHandle`]s and [`TaskRef`]s referencing it have been dropped.
+    ///
+    /// This method returns `true` if the task was canceled successfully, and
+    /// `false` if the task could not be canceled (i.e., it has already completed,
+    /// has already been canceled, cancel culture has gone TOO FAR, et cetera).
+    pub fn cancel(&self) -> bool {
+        // try to set the canceled bit.
+        let canceled = self.state().cancel();
+
+        // if the task was successfully canceled, wake it so that it can clean
+        // up after itself.
+        if canceled {
+            test_debug!("woke canceled task");
+            let wake_by_ref = self.header().vtable.wake_by_ref;
+            unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
+        }
+
+        canceled
+    }
+
     #[track_caller]
     pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> (Self, JoinHandle<F::Output>)
     where
@@ -957,7 +1022,7 @@ impl TaskRef {
     /// # Safety
     ///
     /// `T` *must* be the task's actual output type!
-    unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError>> {
+    unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError<T>>> {
         let poll_join_fn = self.header().vtable.poll_join;
         // NOTE: we can't use `CheckedMaybeUninit` here, since the vtable method
         // will cast this to a `MaybeUninit` and write to it; this would ignore
@@ -973,7 +1038,16 @@ impl TaskRef {
                 // output!
                 Poll::Ready(Ok(slot.assume_init_read()))
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Ready(Err(e)) => {
+                // if the task completed before being canceled, we can still
+                // take its output.
+                let output = if e.is_completed() {
+                    Some(slot.assume_init_read())
+                } else {
+                    None
+                };
+                Poll::Ready(Err(e.with_output(output)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -1054,7 +1128,7 @@ unsafe fn _maitake_header_nop_poll_join(
     _ptr: NonNull<Header>,
     _: NonNull<()>,
     _: &mut Context<'_>,
-) -> Poll<Result<(), JoinError>> {
+) -> Poll<Result<(), JoinError<()>>> {
     debug_assert!(_ptr.as_ref().id.is_stub());
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
@@ -1062,11 +1136,20 @@ unsafe fn _maitake_header_nop_poll_join(
     Poll::Ready(Err(JoinError::stub()))
 }
 
+// See https://github.com/rust-lang/rust/issues/97708 for why
+// this is necessary
+#[no_mangle]
+unsafe fn _maitake_header_nop_wake_by_ref(_ptr: *const ()) {
+    #[cfg(debug_assertions)]
+    unreachable!("stub task ({_ptr:?}) should never be woken!");
+}
+
 impl Header {
     const STATIC_STUB_VTABLE: Vtable = Vtable {
         poll: _maitake_header_nop,
         poll_join: _maitake_header_nop_poll_join,
         deallocate: _maitake_header_nop_deallocate,
+        wake_by_ref: _maitake_header_nop_wake_by_ref,
     };
 
     loom_const_fn! {
