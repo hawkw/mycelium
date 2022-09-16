@@ -79,7 +79,7 @@ fn wake_all_reregistering() {
                 let (ref q, ref done) = &*q;
                 q.wait().await.expect("queue must not close");
                 q.wait().await.expect("queue must not close");
-                done.fetch_add(1, Ordering::SeqCst);
+                done.fetch_add(1, SeqCst);
             })
         }
     }
@@ -96,7 +96,7 @@ fn wake_all_reregistering() {
             .collect::<Vec<_>>();
 
         let (ref q, ref done) = &*q;
-        while test_dbg!(done.load(Ordering::SeqCst)) < THREADS {
+        while test_dbg!(done.load(SeqCst)) < THREADS {
             q.wake_all();
             thread::yield_now();
         }
