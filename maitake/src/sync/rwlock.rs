@@ -8,10 +8,7 @@ use crate::loom::cell::{self, UnsafeCell};
 use core::ops::{Deref, DerefMut};
 use mycelium_util::fmt;
 
-#[cfg(all(test, loom))]
-mod loom;
-
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 mod tests;
 
 /// An asynchronous [readers-writer lock].

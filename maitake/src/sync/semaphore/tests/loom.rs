@@ -15,7 +15,7 @@ fn basically_works() {
     async fn task((ref sem, ref count): &(Semaphore, AtomicUsize)) {
         let permit = sem.acquire(1).await.unwrap();
         let actual = count.fetch_add(1, SeqCst);
-        assert!(actual <= TASKS - 1);
+        assert!(actual < TASKS);
 
         let actual = count.fetch_sub(1, SeqCst);
         assert!(actual <= TASKS);

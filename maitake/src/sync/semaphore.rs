@@ -32,9 +32,7 @@ use mycelium_util::fmt;
 use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
 
-#[cfg(all(test, loom))]
-mod loom;
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 mod tests;
 
 /// An asynchronous [counting semaphore].

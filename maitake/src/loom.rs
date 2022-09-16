@@ -121,10 +121,7 @@ mod inner {
         {
             let track = super::alloc::track::Registry::current();
             std::thread::spawn(move || {
-                let _tracking = match track {
-                    Some(track) => Some(track.set_default()),
-                    None => None,
-                };
+                let _tracking = track.map(|track| track.set_default());
                 f()
             })
         }
@@ -228,6 +225,7 @@ mod inner {
     }
 
     pub(crate) mod alloc {
+        #[cfg(test)]
         use core::{
             future::Future,
             pin::Pin,
@@ -291,6 +289,11 @@ mod inner {
 
                 #[track_caller]
                 pub(super) fn start_tracking<T>() -> Option<Arc<TrackData>> {
+                    // we don't use `Option::map` here because it creates a
+                    // closure, which breaks `#[track_caller]`, since the caller
+                    // of `insert` becomes the closure, which cannot have a
+                    // `#[track_caller]` attribute on it.
+                    #[allow(clippy::manual_map)]
                     match Self::current() {
                         Some(registry) => Some(registry.insert::<T>()),
                         _ => None,

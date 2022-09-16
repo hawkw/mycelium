@@ -117,12 +117,14 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
     }
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 pub(crate) mod test {
+    #[cfg(not(loom))]
     pub(crate) fn trace_init() {
         trace_init_with_default("maitake=debug,cordyceps=debug");
     }
 
+    #[cfg(not(loom))]
     pub(crate) fn trace_init_with_default(default: &str) {
         use tracing_subscriber::filter::{EnvFilter, LevelFilter};
         let env = std::env::var("RUST_LOG").unwrap_or_default();

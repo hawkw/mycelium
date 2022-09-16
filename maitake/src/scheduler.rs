@@ -5,6 +5,8 @@ use crate::{
 use core::{future::Future, ptr};
 
 use cordyceps::mpsc_queue::MpscQueue;
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "alloc", derive(Default))]
@@ -512,6 +514,3 @@ feature! {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;
