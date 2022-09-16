@@ -205,7 +205,12 @@ impl WaitCell {
     /// - `true` if a waiting task was woken.
     /// - `false` if no task was woken (no [`Waker`] was stored in the cell)
     pub fn wake(&self) -> bool {
-        self.notify2(State::WAITING)
+        if let Some(waker) = self.take_waker(false) {
+            waker.wake();
+            true
+        } else {
+            false
+        }
     }
 
     /// Close the [`WaitCell`].
@@ -216,13 +221,31 @@ impl WaitCell {
     ///
     /// [`wait`]: Self::wait
     /// [`register_wait`]: Self::register_wait
-    pub fn close(&self) {
-        self.notify2(State::CLOSED);
+    pub fn close(&self) -> bool {
+        if let Some(waker) = self.take_waker(true) {
+            waker.wake();
+            true
+        } else {
+            false
+        }
     }
 
-    fn notify2(&self, close: State) -> bool {
+    // TODO(eliza): is this an API we want to have?
+    /*
+    /// Returns `true` if this `WaitCell` is [closed](Self::close).
+     pub(crate) fn is_closed(&self) -> bool {
+       self.current_state() == State::CLOSED
+    }
+    */
+
+    /// Takes this `WaitCell`'s waker.
+    // TODO(eliza): could probably be made a public API...
+    pub(crate) fn take_waker(&self, close: bool) -> Option<Waker> {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
-        let bits = State::WAKING | close;
+        let mut bits = State::WAKING;
+        if close {
+            bits.0 |= State::CLOSED.0;
+        }
         if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
             // we have the lock!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
@@ -231,11 +254,10 @@ impl WaitCell {
 
             if let Some(waker) = test_dbg!(waker) {
                 trace!(wait_cell = ?fmt::ptr(self), ?close, ?waker, "notified");
-                waker.wake();
-                return true;
+                return Some(waker);
             }
         }
-        false
+        None
     }
 }
 

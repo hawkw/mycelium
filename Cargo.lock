@@ -851,6 +851,7 @@ dependencies = [
  "mycelium-bitfield",
  "mycelium-util",
  "pin-project",
+ "proptest",
  "tokio-test",
  "tracing 0.1.36",
  "tracing 0.2.0",
@@ -1764,9 +1765,13 @@ version = "0.3.0"
 source = "git+https://github.com/tokio-rs/tracing#1b2a0546991521c35f23cf2bbaee824c65f1ffd7"
 dependencies = [
  "ansi_term",
+ "matchers",
+ "once_cell",
+ "regex",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "tracing 0.2.0",
  "tracing-core 0.2.0",
  "tracing-log 0.2.0",
 ]
