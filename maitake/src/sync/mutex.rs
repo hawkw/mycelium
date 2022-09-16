@@ -16,8 +16,8 @@ use core::{
 use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
 
-#[cfg(all(test, loom))]
-mod loom;
+#[cfg(test)]
+mod tests;
 
 /// An asynchronous [mutual exclusion lock][mutex] for protecting shared data.
 ///

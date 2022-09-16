@@ -1,4 +1,4 @@
-use crate::loom::{self, future, sync::Arc, thread};
+use crate::loom::{self, future};
 use crate::sync::Mutex;
 
 #[test]
@@ -27,7 +27,9 @@ fn basic_single_threaded() {
 }
 
 #[test]
+#[cfg(any(loom, feature = "alloc"))]
 fn basic_multi_threaded() {
+    use crate::loom::{sync::Arc, thread};
     fn incr(lock: &Arc<Mutex<i32>>) -> thread::JoinHandle<()> {
         let lock = lock.clone();
         thread::spawn(move || {
