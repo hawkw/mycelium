@@ -11,6 +11,7 @@ extern crate alloc;
 extern crate rlibc;
 
 pub mod arch;
+pub mod rt;
 pub mod wasm;
 
 use core::fmt::Write;
@@ -153,7 +154,6 @@ pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
 }
 
 fn kernel_main() -> ! {
-    tracing::info!("started kernel main loop");
     SCHEDULER.spawn(async move {
         use maitake::time;
         let duration = time::Duration::from_secs(5);
@@ -163,24 +163,10 @@ fn kernel_main() -> ! {
         }
     });
 
-    tracing::info!("spawned sleep task");
+    let core = rt::Core::new(&SCHEDULER);
     loop {
-        // drive the task scheduler
-        let tick = SCHEDULER.tick();
-        if tick.polled > 0 {
-            tracing::trace!(
-                tick.polled,
-                tick.completed,
-                tick.spawned,
-                tick.woken_external,
-                tick.woken_internal,
-                tick.has_remaining,
-            );
-        }
-
-        // turn the timer wheel if it wasn't turned recently, to ensure any
-        // pending ticks are consumed.
-        arch::tick_timer();
+        core.run();
+        tracing::warn!("someone stopped CPU 0's core! restarting it...");
     }
 }
 

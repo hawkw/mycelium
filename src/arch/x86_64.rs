@@ -17,7 +17,7 @@ pub type MinPageSize = mm::size::Size4Kb;
 pub use self::interrupt::init_interrupts;
 
 pub fn tick_timer() {
-    interrupt::TIMER.force_advance_ticks(0);
+    interrupt::TIMER.advance_ticks(0);
 }
 
 #[derive(Debug)]
