@@ -206,9 +206,9 @@ fn workstealing() {
                         let tick = scheduler.tick();
                         let stolen = distributor.try_steal(&scheduler);
                         info!(worker, ?tick, ?stolen);
-                        if tick.has_remaining
+                        if !tick.has_remaining
                             && stolen.is_err()
-                            && !all_spawned.load(Ordering::SeqCst)
+                            && all_spawned.load(Ordering::SeqCst)
                         {
                             break;
                         }

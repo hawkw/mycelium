@@ -47,6 +47,7 @@ impl<S: Schedule> Distributor<S> {
     pub fn try_steal(&self, scheduler: &S) -> Result<usize, TryStealError> {
         let mut stolen = 0;
         let tasks = self.queue.try_consume().ok_or(TryStealError::Busy)?;
+
         for task in tasks {
             // TODO(eliza): probably handle cancelation by throwing out canceled
             // tasks here before binding them?
@@ -56,7 +57,12 @@ impl<S: Schedule> Distributor<S> {
             scheduler.schedule(task);
             stolen += 1;
         }
-        Ok(stolen)
+
+        if stolen > 0 {
+            Ok(stolen)
+        } else {
+            Err(TryStealError::Empty)
+        }
     }
 }
 
