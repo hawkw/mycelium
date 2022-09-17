@@ -131,6 +131,7 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
 
 #[cfg(test)]
 pub(crate) mod test {
+
     #[cfg(not(loom))]
     pub(crate) fn trace_init() {
         trace_init_with_default("maitake=debug,cordyceps=debug");

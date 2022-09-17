@@ -45,6 +45,7 @@ rlibc = "1.0"
 bootloader = { version = "0.10.13" }
 embedded-graphics = "0.7"
 mycotest = { path = "mycotest" }
+futures-util = { version = "0.3", default-features = false, features = ["async-await", "async-await-macro"] }
 # we don't depend on this directly, but we need to ensure that `tracing` uses a
 # Miri-compatible version of `once_cell`.
 once_cell = { version = "1.15.0", default-features = false }

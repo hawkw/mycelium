@@ -1,5 +1,9 @@
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*};
-use maitake::scheduler::StaticScheduler;
+use core::{
+    future::Future,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
+};
+use maitake::scheduler::{self, StaticScheduler};
+pub use maitake::task::JoinHandle;
 
 /// A kernel runtime for a single core.
 pub struct Core {
@@ -16,6 +20,21 @@ pub struct Core {
 
     /// Set to `false` if this core should shut down.
     running: AtomicBool,
+}
+
+/// Work-stealing distributor queue.
+static DISTRIBUTOR: scheduler::Distributor<&'static StaticScheduler> = {
+    static STUB_TASK: scheduler::TaskStub = scheduler::TaskStub::new();
+    unsafe { scheduler::Distributor::new_with_static_stub(&STUB_TASK) }
+};
+
+/// Spawn a task on Mycelium's global runtime.
+pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    DISTRIBUTOR.spawn(future)
 }
 
 impl Core {
@@ -39,7 +58,17 @@ impl Core {
         // holding a lock, ensuring any pending timer ticks are consumed.
         crate::arch::tick_timer();
 
-        if tick.polled > 0 {
+        // if there are no tasks remaining in this core's run queue, try to
+        // steal new tasks from the distributor queue.
+        // TODO(eliza): add a "check distributor first interval" of some kind to
+        // ensure new tasks are eventually spawned on a core...
+        let stolen = if !tick.has_remaining {
+            DISTRIBUTOR.try_steal(&self.scheduler).unwrap_or(0)
+        } else {
+            0
+        };
+
+        if tick.polled > 0 || stolen > 0 {
             tracing::trace!(
                 core = self.id,
                 tick.polled,
@@ -48,10 +77,9 @@ impl Core {
                 tick.woken_external,
                 tick.woken_internal,
                 tick.has_remaining,
+                tick.stolen = stolen,
             );
         }
-
-        // TODO(eliza): workstealing goes here eventually
     }
 
     /// Returns `true` if this core is currently running.

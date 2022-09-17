@@ -949,6 +949,7 @@ version = "0.0.1"
 dependencies = [
  "bootloader",
  "embedded-graphics",
+ "futures-util",
  "hal-core",
  "hal-x86_64",
  "maitake",
