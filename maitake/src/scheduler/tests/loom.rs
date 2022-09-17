@@ -186,3 +186,58 @@ fn cross_thread_spawn() {
         assert!(!tick.has_remaining);
     })
 }
+
+#[test]
+fn workstealing() {
+    const TASKS: usize = 10;
+    const THREADS: usize = 3;
+    loom::model(|| {
+        let distributor = Arc::new(steal::Distributor::new());
+        let completed = Arc::new(AtomicUsize::new(0));
+        let all_spawned = Arc::new(AtomicBool::new(false));
+        let threads = (1..=THREADS)
+            .map(|worker| {
+                let distributor = distributor.clone();
+                let all_spawned = all_spawned.clone();
+                let thread = thread::spawn(move || {
+                    let scheduler = Scheduler::new();
+                    info!(worker, "started");
+                    loop {
+                        let tick = scheduler.tick();
+                        let stolen = distributor.try_steal(&scheduler);
+                        info!(worker, ?tick, ?stolen);
+                        if tick.has_remaining
+                            && stolen.is_err()
+                            && !all_spawned.load(Ordering::SeqCst)
+                        {
+                            break;
+                        }
+                        thread::yield_now();
+                    }
+
+                    info!(worker, "done");
+                });
+                info!(worker, "spawned worker thread");
+                thread
+            })
+            .collect::<Vec<_>>();
+
+        for _ in 0..TASKS {
+            distributor.spawn({
+                let completed = completed.clone();
+                track_future(async move {
+                    future::yield_now().await;
+                    completed.fetch_add(1, Ordering::SeqCst);
+                })
+            });
+        }
+
+        all_spawned.store(true, Ordering::SeqCst);
+
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        assert_eq!(TASKS, completed.load(Ordering::SeqCst));
+    })
+}

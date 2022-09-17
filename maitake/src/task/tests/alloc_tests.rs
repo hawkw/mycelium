@@ -11,7 +11,7 @@ use tokio_test::{assert_pending, assert_ready_err, assert_ready_ok};
 /// vtable methods are valid.
 #[test]
 fn task_is_valid_for_casts() {
-    let task = Box::new(Task::<_, _, BoxStorage>::new(NopSchedule, async {
+    let task = Box::new(Task::<NopSchedule, _, BoxStorage>::new(async {
         unimplemented!("this task should never be polled")
     }));
 

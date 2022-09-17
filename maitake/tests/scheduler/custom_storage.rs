@@ -29,7 +29,7 @@ where
     F::Output: 'static,
 {
     fn spawn(scheduler: &'static StaticScheduler, future: F) -> task::JoinHandle<F::Output> {
-        let task = MyBoxTask(Box::new(Task::new(scheduler, future)));
+        let task = MyBoxTask(Box::new(Task::new(future)));
         scheduler.spawn_allocated::<F, MyBoxStorage>(task)
     }
 }

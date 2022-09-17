@@ -23,7 +23,7 @@ pub(crate) struct Settings<'a> {
     pub(super) location: Option<Location<'a>>,
 }
 
-impl<'a, S: Schedule> Builder<'a, S> {
+impl<'a, S: Schedule + 'static> Builder<'a, S> {
     pub(crate) const fn new(scheduler: S) -> Self {
         Self {
             scheduler,
@@ -126,7 +126,8 @@ impl<'a, S: Schedule> Builder<'a, S> {
             use alloc::boxed::Box;
             use super::{BoxStorage, Task};
 
-            let task = Box::new(Task::<S, _, BoxStorage>::new(self.scheduler.clone(), future));
+            let mut task = Box::new(Task::<S, _, BoxStorage>::new(future));
+            task.bind( self.scheduler.clone());
             let (task, join) = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
             self.scheduler.schedule(task);
             join

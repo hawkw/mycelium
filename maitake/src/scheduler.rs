@@ -7,8 +7,11 @@ use core::{future::Future, ptr};
 use cordyceps::mpsc_queue::MpscQueue;
 use mycelium_util::fmt;
 
+mod steal;
 #[cfg(test)]
 mod tests;
+
+pub use self::steal::Distributor;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "alloc", derive(Default))]
@@ -52,7 +55,7 @@ pub struct Tick {
     pub woken_internal: usize,
 }
 
-pub trait Schedule: Sized + Clone {
+pub trait Schedule: Sized + Clone + 'static {
     fn schedule(&self, task: TaskRef);
 
     /// Returns a [`TaskRef`] referencing the task currently being polled by
@@ -206,7 +209,7 @@ impl StaticScheduler {
         F::Output: 'static,
         STO: Storage<&'static Self, F>,
     {
-        let (task, join) = TaskRef::new_allocated::<&'static Self, F, STO>(task);
+        let (task, join) = TaskRef::new_allocated::<&'static Self, F, STO>(self, task);
         self.schedule(task);
         join
     }
@@ -449,7 +452,7 @@ feature! {
             F: Future + 'static,
             F::Output: 'static,
         {
-            let (task, join) = TaskRef::new_allocated::<Self, F, BoxStorage>(task);
+            let (task, join) = TaskRef::new_allocated::<Self, F, BoxStorage>(self.clone(), task);
             self.0.spawn_inner(task);
             join
         }
@@ -505,7 +508,7 @@ feature! {
     impl Core {
         fn new() -> Self {
             let stub_task = Box::new(Task::new_stub());
-            let (stub_task, _) = TaskRef::new_allocated::<task::Stub, task::Stub, BoxStorage>(stub_task);
+            let (stub_task, _) = TaskRef::new_allocated::<task::Stub, task::Stub, BoxStorage>(task::Stub, stub_task);
             Self {
                 run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
                 current_task: AtomicPtr::new(ptr::null_mut()),
