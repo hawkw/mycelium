@@ -157,24 +157,22 @@ fn kernel_main() -> ! {
     use maitake::{task, time};
 
     fn spawn_sleep(duration: time::Duration) -> task::JoinHandle<()> {
-        let join = rt::spawn(async move {
+        tracing::info!(?duration, "spawning a sleep");
+
+        rt::spawn(async move {
             tracing::info!(?duration, "sleeping");
             time::sleep(duration).await;
             tracing::info!(?duration, "slept");
-        });
-        tracing::info!(?duration, "spawned a sleep");
-        join
+        })
     }
 
     rt::spawn(async move {
-        // loop {
         let result = futures_util::try_join! {
             spawn_sleep(time::Duration::from_secs(2)),
             spawn_sleep(time::Duration::from_secs(5)),
             spawn_sleep(time::Duration::from_secs(10)),
         };
         tracing::info!(?result);
-        // }
     });
 
     let core = rt::Core::new(&SCHEDULER);
