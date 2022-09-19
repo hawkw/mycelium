@@ -1,18 +1,17 @@
 use core::{
+    cmp,
     future::Future,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
 };
 use maitake::scheduler::{self, StaticScheduler};
 pub use maitake::task::JoinHandle;
+use mycelium_util::sync::InitOnce;
 
 /// A kernel runtime for a single core.
 pub struct Core {
     /// The task scheduler for this core.
     scheduler: &'static StaticScheduler,
-    /*
-    /// A reference to the global system timer.
-    timer: &'static Timer,
-    */
+
     /// This core's ID.
     ///
     /// ID 0 is the first CPU core started when the system boots.
@@ -22,10 +21,24 @@ pub struct Core {
     running: AtomicBool,
 }
 
-/// Global injector queue for spawning tasks on any `Core` instance.
-static INJECTOR: scheduler::Injector<&'static StaticScheduler> = {
-    static STUB_TASK: scheduler::TaskStub = scheduler::TaskStub::new();
-    unsafe { scheduler::Injector::new_with_static_stub(&STUB_TASK) }
+struct Runtime {
+    cores: [InitOnce<StaticScheduler>; MAX_CORES],
+
+    /// Global injector queue for spawning tasks on any `Core` instance.
+    injector: Injector<&'static StaticScheduler>,
+    initialized: AtomicUsize,
+}
+
+/// 512 CPU cores ought to be enough for anybody...
+pub const MAX_CORES: usize = 512;
+
+static RUNTIME: Runtime = Runtime {
+    cores: [InitOnce::uninitialized(); MAX_CORES],
+    initialized: AtomicUsize::new(0),
+    injector: {
+        static STUB_TASK: scheduler::TaskStub = scheduler::TaskStub::new();
+        unsafe { scheduler::Injector::new_with_static_stub(&STUB_TASK) }
+    },
 };
 
 /// Spawn a task on Mycelium's global runtime.
@@ -34,19 +47,15 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    INJECTOR.spawn(future)
+    RUNTIME.injector.spawn(future)
 }
 
 impl Core {
-    // chosen arbitrarily!
-    const MAX_STOLEN_PER_TICK: usize = 256;
-
-    pub fn new(scheduler: &'static StaticScheduler /* timer: &'static Timer */) -> Self {
-        static CORE_IDS: AtomicUsize = AtomicUsize::new(0);
-        let id = CORE_IDS.fetch_add(1, Relaxed);
+    pub fn new() -> Self {
+        let (id, scheduler) = RUNTIME.new_scheduler();
+        tracing::info!(core = id, "initialized task scheduler");
         Self {
             scheduler,
-            // timer,
             id,
             running: AtomicBool::new(false),
         }
@@ -66,11 +75,7 @@ impl Core {
         // TODO(eliza): add a "check distributor first interval" of some kind to
         // ensure new tasks are eventually spawned on a core...
         let stolen = if !tick.has_remaining {
-            INJECTOR
-                .try_steal()
-                .map(|stealer| stealer.spawn_n(&self.scheduler, Self::MAX_STOLEN_PER_TICK))
-                // TODO(eliza): this is where we would try to steal from other workers
-                .unwrap_or(0)
+            RUNTIME.try_steal(self)
         } else {
             0
         };
@@ -129,5 +134,54 @@ impl Core {
         }
 
         tracing::info!("stop signal received, shutting down");
+    }
+}
+
+// === impl Schedulers ===
+
+impl Runtime {
+    fn try_steal(&'static self, core: &Core) -> usize {
+        // chosen arbitrarily!
+        const MAX_STOLEN_PER_TICK: usize = 256;
+
+        // first, try to steal from the injector queue.
+        if let Some(stealer) = self.injector.try_steal() {
+            return stealer.spawn_n(&core.scheduler, MAX_STOLEN_PER_TICK);
+        }
+
+        // if the injector queue is empty or someone else is stealing from it,
+        // try to find another worker to steal from.
+        self.schedulers()
+            .find_map(|(id, worker)| {
+                // we can't steal tasks from ourself!
+                if id == core.id {
+                    return None;
+                }
+                // is this worker's run queue free?
+                worker.try_steal().ok()
+            })
+            .map(|stealer| {
+                // steal up to half of the tasks in the target worker's run queue,
+                // or `MAX_STOLEN_PER_TICK` if the target run queue has more than
+                // that many tasks in it.
+                let max_stolen = cmp::min(MAX_STOLEN_PER_TICK, worker.initial_task_count() / 2);
+                return stealer.spawn_n(max_stolen, self.scheduler);
+            })
+            .unwrap_or(0)
+    }
+
+    fn new_scheduler<'a>(&'a self) -> (usize, &'a StaticScheduler) {
+        let next = self.initialized.fetch_add(1, AcqRel);
+        assert!(next < MAX_CORES);
+        let scheduler = self.cores[next].init(StaticScheduler::new);
+        (next, scheduler)
+    }
+
+    fn schedulers<'a>(&'a self) -> impl Iterator<Item = (usize, &'a StaticScheduler)> + 'a {
+        let initialized = self.initialized.load(Acquire);
+        self.cores[..initialized]
+            .iter()
+            .enumerate()
+            .filter_map(InitOnce::try_get)
     }
 }
