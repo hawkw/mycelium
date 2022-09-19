@@ -38,6 +38,9 @@ where
 }
 
 impl Core {
+    // chosen arbitrarily!
+    const MAX_STOLEN_PER_TICK: usize = 256;
+
     pub fn new(scheduler: &'static StaticScheduler /* timer: &'static Timer */) -> Self {
         static CORE_IDS: AtomicUsize = AtomicUsize::new(0);
         let id = CORE_IDS.fetch_add(1, Relaxed);
@@ -63,7 +66,11 @@ impl Core {
         // TODO(eliza): add a "check distributor first interval" of some kind to
         // ensure new tasks are eventually spawned on a core...
         let stolen = if !tick.has_remaining {
-            INJECTOR.try_steal(&self.scheduler).unwrap_or(0)
+            INJECTOR
+                .try_steal()
+                .map(|stealer| stealer.spawn_n(&self.scheduler, Self::MAX_STOLEN_PER_TICK))
+                // TODO(eliza): this is where we would try to steal from other workers
+                .unwrap_or(0)
         } else {
             0
         };

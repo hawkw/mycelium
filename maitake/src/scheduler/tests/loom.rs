@@ -188,27 +188,28 @@ fn cross_thread_spawn() {
 }
 
 #[test]
-fn workstealing() {
+fn injector() {
     const TASKS: usize = 10;
     const THREADS: usize = 3;
     loom::model(|| {
-        let distributor = Arc::new(steal::Injector::new());
+        let injector = Arc::new(steal::Injector::new());
         let completed = Arc::new(AtomicUsize::new(0));
         let all_spawned = Arc::new(AtomicBool::new(false));
         let threads = (1..=THREADS)
             .map(|worker| {
-                let distributor = distributor.clone();
+                let injector = injector.clone();
                 let all_spawned = all_spawned.clone();
                 let thread = thread::spawn(move || {
                     let scheduler = Scheduler::new();
                     info!(worker, "started");
                     loop {
                         let tick = scheduler.tick();
-                        let stolen = distributor.try_steal(&scheduler);
+                        let stolen = injector
+                            .try_steal()
+                            .map(|stealer| stealer.spawn_n(&scheduler, usize::MAX))
+                            .unwrap_or(0);
                         info!(worker, ?tick, ?stolen);
-                        if !tick.has_remaining
-                            && stolen.is_err()
-                            && all_spawned.load(Ordering::SeqCst)
+                        if !tick.has_remaining && stolen == 0 && all_spawned.load(Ordering::SeqCst)
                         {
                             break;
                         }
@@ -223,7 +224,7 @@ fn workstealing() {
             .collect::<Vec<_>>();
 
         for _ in 0..TASKS {
-            distributor.spawn({
+            injector.spawn({
                 let completed = completed.clone();
                 track_future(async move {
                     future::yield_now().await;

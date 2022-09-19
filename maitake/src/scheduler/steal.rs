@@ -1,6 +1,6 @@
 use super::*;
 // use crate::loom::sync::atomic::{AtomicUsize, Ordering::*};
-use cordyceps::mpsc_queue::MpscQueue;
+use cordyceps::mpsc_queue::{self, MpscQueue};
 use core::marker::PhantomData;
 
 /// An injector queue for spawning tasks on multiple [`Scheduler`] instances.
@@ -10,11 +10,13 @@ pub struct Injector<S> {
     _scheduler_type: PhantomData<fn(S)>,
 }
 
-#[non_exhaustive]
-#[derive(Debug)]
-pub enum TryStealError {
-    Empty,
-    Busy,
+/// A handle for stealing tasks from a [`Scheduler`]'s run queue, or an
+/// [`Injector`] queue.
+///
+/// While this handle exists, no other worker can steal tasks from the queue.
+pub struct Stealer<'worker, S> {
+    queue: mpsc_queue::Consumer<'worker, Header>,
+    _scheduler_type: PhantomData<fn(S)>,
 }
 
 impl<S: Schedule> Injector<S> {
@@ -44,25 +46,52 @@ impl<S: Schedule> Injector<S> {
         join
     }
 
-    pub fn try_steal(&self, scheduler: &S) -> Result<usize, TryStealError> {
-        let mut stolen = 0;
-        let tasks = self.queue.try_consume().ok_or(TryStealError::Busy)?;
+    pub fn try_steal(&self) -> Option<Stealer<'_, S>> {
+        let queue = self.queue.try_consume()?;
+        Some(Stealer {
+            queue,
+            _scheduler_type: PhantomData,
+        })
+    }
+}
 
-        for task in tasks {
-            // TODO(eliza): probably handle cancelation by throwing out canceled
-            // tasks here before binding them?
-            unsafe {
-                task.bind_scheduler(scheduler.clone());
-            }
-            scheduler.schedule(task);
+impl<S: Schedule> Stealer<'_, S> {
+    /// Steal one task from the targeted queue and spawn it on the provided
+    /// `scheduler`.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if a task was successfully stolen.
+    /// - `false` if the targeted queue is empty.
+    pub fn spawn_one(&self, scheduler: &S) -> bool {
+        let task = match self.queue.dequeue() {
+            Some(task) => task,
+            None => return false,
+        };
+
+        // TODO(eliza): probably handle cancelation by throwing out canceled
+        // tasks here before binding them?
+        unsafe {
+            task.bind_scheduler(scheduler.clone());
+        }
+        scheduler.schedule(task);
+        true
+    }
+
+    /// Steal up to `max` tasks from the targeted queue and spawn them on the
+    /// provided scheduler.
+    ///
+    /// # Returns
+    ///
+    /// The number of tasks stolen. This may be less than `max` if the targeted
+    /// queue contained fewer tasks than `max`.
+    pub fn spawn_n(&self, scheduler: &S, max: usize) -> usize {
+        let mut stolen = 0;
+        while stolen <= max && self.spawn_one(scheduler) {
             stolen += 1;
         }
 
-        if stolen > 0 {
-            Ok(stolen)
-        } else {
-            Err(TryStealError::Empty)
-        }
+        stolen
     }
 }
 
