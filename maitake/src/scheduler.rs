@@ -22,6 +22,9 @@ struct Core {
     run_queue: MpscQueue<Header>,
     current_task: AtomicPtr<Header>,
 
+    /// A counter of how many tasks are in the scheduler's run queue.
+    queued: AtomicUsize,
+
     /// A counter of how many tasks were spawned since the last scheduler tick.
     spawned: AtomicUsize,
 
@@ -247,6 +250,7 @@ impl Core {
         Self {
             run_queue: MpscQueue::new_with_static_stub(stub),
             current_task: AtomicPtr::new(ptr::null_mut()),
+            queued: AtomicUsize::new(0),
             spawned: AtomicUsize::new(0),
             woken_external: AtomicUsize::new(0),
         }
@@ -262,12 +266,14 @@ impl Core {
     #[inline(always)]
     fn schedule(&self, task: TaskRef) {
         self.woken_external.fetch_add(1, Relaxed);
+        self.queued.fetch_add(1, Relaxed);
         self.run_queue.enqueue(task);
     }
 
     #[inline(always)]
     fn spawn_inner(&self, task: TaskRef) {
         self.spawned.fetch_add(1, Relaxed);
+        self.queued.fetch_add(1, Relaxed);
         self.run_queue.enqueue(task);
     }
 
@@ -284,6 +290,7 @@ impl Core {
         };
 
         for task in self.run_queue.consume() {
+            let queued = self.queued.fetch_sub(1, Relaxed);
             let _span = debug_span!(
                 "poll",
                 task.addr = ?fmt::ptr(&task),
@@ -313,9 +320,9 @@ impl Core {
             }
 
             debug!(poll = ?poll_result, tick.polled, tick.completed);
-            if tick.polled == n {
+            if queued > n {
                 // we haven't drained the current run queue.
-                tick.has_remaining = false;
+                tick.has_remaining = true;
                 break;
             }
         }
