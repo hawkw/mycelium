@@ -95,6 +95,17 @@ impl<S: Schedule> Stealer<'_, S> {
     }
 }
 
+impl StaticScheduler {
+    /// Attempt to steal tasks from this scheduler's run queue.
+    pub fn try_steal(&self) -> Option<Stealer<'_, &'static StaticScheduler>> {
+        let queue = self.0.run_queue.try_consume()?;
+        Some(Stealer {
+            queue,
+            _scheduler_type: PhantomData,
+        })
+    }
+}
+
 feature! {
     #![feature = "alloc"]
 
@@ -135,4 +146,17 @@ feature! {
             Self::new()
         }
     }
+
+
+    impl Scheduler {
+        /// Attempt to steal tasks from this scheduler's run queue.
+        pub fn try_steal(&self) -> Option<Stealer<'_, Scheduler>> {
+            let queue = self.0.run_queue.try_consume()?;
+            Some(Stealer {
+                queue,
+                _scheduler_type: PhantomData,
+            })
+        }
+    }
+
 }
