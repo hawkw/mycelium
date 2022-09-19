@@ -192,7 +192,7 @@ fn workstealing() {
     const TASKS: usize = 10;
     const THREADS: usize = 3;
     loom::model(|| {
-        let distributor = Arc::new(steal::Distributor::new());
+        let distributor = Arc::new(steal::Injector::new());
         let completed = Arc::new(AtomicUsize::new(0));
         let all_spawned = Arc::new(AtomicBool::new(false));
         let threads = (1..=THREADS)

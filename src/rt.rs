@@ -22,10 +22,10 @@ pub struct Core {
     running: AtomicBool,
 }
 
-/// Work-stealing distributor queue.
-static DISTRIBUTOR: scheduler::Distributor<&'static StaticScheduler> = {
+/// Global injector queue for spawning tasks on any `Core` instance.
+static INJECTOR: scheduler::Injector<&'static StaticScheduler> = {
     static STUB_TASK: scheduler::TaskStub = scheduler::TaskStub::new();
-    unsafe { scheduler::Distributor::new_with_static_stub(&STUB_TASK) }
+    unsafe { scheduler::Injector::new_with_static_stub(&STUB_TASK) }
 };
 
 /// Spawn a task on Mycelium's global runtime.
@@ -34,7 +34,7 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    DISTRIBUTOR.spawn(future)
+    INJECTOR.spawn(future)
 }
 
 impl Core {
@@ -63,7 +63,7 @@ impl Core {
         // TODO(eliza): add a "check distributor first interval" of some kind to
         // ensure new tasks are eventually spawned on a core...
         let stolen = if !tick.has_remaining {
-            DISTRIBUTOR.try_steal(&self.scheduler).unwrap_or(0)
+            INJECTOR.try_steal(&self.scheduler).unwrap_or(0)
         } else {
             0
         };

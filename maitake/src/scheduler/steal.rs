@@ -3,8 +3,8 @@ use super::*;
 use cordyceps::mpsc_queue::MpscQueue;
 use core::marker::PhantomData;
 
-/// A work-stealing distributor queue.
-pub struct Distributor<S> {
+/// An injector queue for spawning tasks on multiple [`Scheduler`] instances.
+pub struct Injector<S> {
     queue: MpscQueue<Header>,
     // tasks: AtomicUsize,
     _scheduler_type: PhantomData<fn(S)>,
@@ -17,7 +17,7 @@ pub enum TryStealError {
     Busy,
 }
 
-impl<S: Schedule> Distributor<S> {
+impl<S: Schedule> Injector<S> {
     loom_const_fn! {
         /// # Safety
         ///
@@ -72,7 +72,7 @@ feature! {
     use alloc::boxed::Box;
     use super::{BoxStorage, Task};
 
-    impl<S: Schedule> Distributor<S> {
+    impl<S: Schedule> Injector<S> {
         pub fn new() -> Self {
             let stub_task = Box::new(Task::new_stub());
             let (stub_task, _) =
@@ -101,7 +101,7 @@ feature! {
         }
     }
 
-    impl<S: Schedule> Default for Distributor<S> {
+    impl<S: Schedule> Default for Injector<S> {
         fn default() -> Self {
             Self::new()
         }
