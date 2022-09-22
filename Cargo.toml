@@ -45,6 +45,9 @@ rlibc = "1.0"
 bootloader = { version = "0.10.13" }
 embedded-graphics = "0.7"
 mycotest = { path = "mycotest" }
+# we don't depend on this directly, but we need to ensure that `tracing` uses a
+# Miri-compatible version of `once_cell`.
+once_cell = { version = "1.15.0", default-features = false }
 
 [dev-dependencies]
 mycotest = { path = "mycotest", features = ["runner"] }
@@ -82,11 +85,6 @@ map-framebuffer = true
 # use `tracing` 0.2 from git
 tracing = { git = "https://github.com/tokio-rs/tracing" }
 tracing-core = { git = "https://github.com/tokio-rs/tracing" }
-# patch `once_cell` to use https://github.com/matklad/once_cell/pull/185 so that
-# Miri doesn't reject `tracing`'s use of `once_cell`.
-#
-# remove this patch once once_cell#185 is merged.
-once_cell = { git = "https://github.com/hawkw/once_cell", branch = "eliza/saethlin/provenance" }
 
 # Custom profile for Loom tests: enable release optimizations so that the loom
 # tests are less slow, but don't disable debug assertions.
