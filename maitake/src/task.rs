@@ -947,7 +947,7 @@ impl TaskRef {
     ///
     /// This must be called when enqueueing a spawned task for the first time.
     pub(crate) fn set_woken(&self) {
-        self.state().wake_by_ref();
+        self.state().set_woken();
     }
 
     #[track_caller]
@@ -1133,7 +1133,6 @@ impl fmt::Debug for TaskRef {
 }
 
 impl fmt::Pointer for TaskRef {
-
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Pointer::fmt(&self.0, f)
@@ -1147,6 +1146,7 @@ impl Clone for TaskRef {
         test_debug!(
             task.addr = ?self.0,
             task.tid = self.id().as_u64(),
+            location = %core::panic::Location::caller(),
             "TaskRef::clone",
         );
         self.state().clone_ref();
