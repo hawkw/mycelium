@@ -154,6 +154,10 @@ impl Runtime {
 
         // if the injector queue is empty or someone else is stealing from it,
         // try to find another worker to steal from.
+        // TODO(eliza): we should probably not start from the first core every
+        // time, this unfairly victimizes core 0. we should either pick a random
+        // core to steal from (which, ugh...we need some kind of RNG), or pick
+        // the core after the stealing core...
         self.schedulers()
             .find_map(|(id, worker)| {
                 // we can't steal tasks from ourself!
