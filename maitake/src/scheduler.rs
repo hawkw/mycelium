@@ -208,8 +208,8 @@ impl StaticScheduler {
     #[track_caller]
     pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask) -> JoinHandle<F::Output>
     where
-        F: Future + 'static,
-        F::Output: 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
         STO: Storage<&'static Self, F>,
     {
         let (task, join) = TaskRef::new_allocated::<&'static Self, F, STO>(self, task);
@@ -435,8 +435,8 @@ feature! {
         #[track_caller]
         pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
         where
-            F: Future + 'static,
-            F::Output: 'static,
+            F: Future + Send + 'static,
+            F::Output: Send + 'static,
         {
             let (task, join) = TaskRef::new(self.clone(), future);
             self.0.spawn_inner(task);
@@ -458,8 +458,8 @@ feature! {
         #[track_caller]
         pub fn spawn_allocated<F>(&'static self, task: Box<Task<Self, F, BoxStorage>>) -> JoinHandle<F::Output>
         where
-            F: Future + 'static,
-            F::Output: 'static,
+            F: Future + Send + 'static,
+            F::Output: Send + 'static,
         {
             let (task, join) = TaskRef::new_allocated::<Self, F, BoxStorage>(self.clone(), task);
             self.0.spawn_inner(task);
@@ -505,8 +505,8 @@ feature! {
         #[track_caller]
         pub fn spawn<F>(&'static self, future: F) -> JoinHandle<F::Output>
         where
-            F: Future + 'static,
-            F::Output: 'static,
+            F: Future + Send + 'static,
+            F::Output: Send + 'static,
         {
             let (task, join) = TaskRef::new(self, future);
             self.0.spawn_inner(task);

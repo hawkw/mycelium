@@ -32,13 +32,16 @@ struct Runtime {
 /// 512 CPU cores ought to be enough for anybody...
 pub const MAX_CORES: usize = 512;
 
-static RUNTIME: Runtime = Runtime {
-    cores: [InitOnce::uninitialized(); MAX_CORES],
-    initialized: AtomicUsize::new(0),
-    injector: {
-        static STUB_TASK: scheduler::TaskStub = scheduler::TaskStub::new();
-        unsafe { scheduler::Injector::new_with_static_stub(&STUB_TASK) }
-    },
+static RUNTIME: Runtime = {
+    const UNINIT_SCHEDULER: InitOnce = InitOnce::uninitialized();
+    Runtime {
+        cores: [UNINIT_SCHEDULER; MAX_CORES],
+        initialized: AtomicUsize::new(0),
+        injector: {
+            static STUB_TASK: scheduler::TaskStub = scheduler::TaskStub::new();
+            unsafe { scheduler::Injector::new_with_static_stub(&STUB_TASK) }
+        },
+    }
 };
 
 /// Spawn a task on Mycelium's global runtime.
