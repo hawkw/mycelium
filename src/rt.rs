@@ -25,7 +25,7 @@ struct Runtime {
     cores: [InitOnce<StaticScheduler>; MAX_CORES],
 
     /// Global injector queue for spawning tasks on any `Core` instance.
-    injector: Injector<&'static StaticScheduler>,
+    injector: scheduler::Injector<&'static StaticScheduler>,
     initialized: AtomicUsize,
 }
 
@@ -33,7 +33,7 @@ struct Runtime {
 pub const MAX_CORES: usize = 512;
 
 static RUNTIME: Runtime = {
-    const UNINIT_SCHEDULER: InitOnce = InitOnce::uninitialized();
+    const UNINIT_SCHEDULER: InitOnce<StaticScheduler> = InitOnce::uninitialized();
     Runtime {
         cores: [UNINIT_SCHEDULER; MAX_CORES],
         initialized: AtomicUsize::new(0),
@@ -148,7 +148,7 @@ impl Runtime {
         const MAX_STOLEN_PER_TICK: usize = 256;
 
         // first, try to steal from the injector queue.
-        if let Some(stealer) = self.injector.try_steal() {
+        if let Ok(stealer) = self.injector.try_steal() {
             return stealer.spawn_n(&core.scheduler, MAX_STOLEN_PER_TICK);
         }
 
@@ -167,8 +167,8 @@ impl Runtime {
                 // steal up to half of the tasks in the target worker's run queue,
                 // or `MAX_STOLEN_PER_TICK` if the target run queue has more than
                 // that many tasks in it.
-                let max_stolen = cmp::min(MAX_STOLEN_PER_TICK, worker.initial_task_count() / 2);
-                return stealer.spawn_n(max_stolen, self.scheduler);
+                let max_stolen = cmp::min(MAX_STOLEN_PER_TICK, stealer.initial_task_count() / 2);
+                return stealer.spawn_n(&core.scheduler, max_stolen);
             })
             .unwrap_or(0)
     }
@@ -176,7 +176,7 @@ impl Runtime {
     fn new_scheduler<'a>(&'a self) -> (usize, &'a StaticScheduler) {
         let next = self.initialized.fetch_add(1, AcqRel);
         assert!(next < MAX_CORES);
-        let scheduler = self.cores[next].init(StaticScheduler::new);
+        let scheduler = self.cores[next].init(StaticScheduler::new());
         (next, scheduler)
     }
 
@@ -185,6 +185,6 @@ impl Runtime {
         self.cores[..initialized]
             .iter()
             .enumerate()
-            .filter_map(InitOnce::try_get)
+            .filter_map(|(idx, core)| Some((idx, core.try_get()?)))
     }
 }
