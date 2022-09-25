@@ -243,7 +243,7 @@ fn steal_while_waking() {
                     if let Ok(stealer) = test_dbg!(scheduler1.try_steal()) {
                         test_dbg!(stealer.spawn_one(&scheduler2));
                     }
-                    test_dbg!(scheduler1.tick());
+                    test_dbg!(scheduler2.tick());
                     thread::yield_now();
                 }
             }
