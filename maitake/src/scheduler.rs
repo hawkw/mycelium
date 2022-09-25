@@ -518,6 +518,7 @@ feature! {
             let (stub_task, _) = TaskRef::new_allocated::<task::Stub, task::Stub, BoxStorage>(task::Stub, stub_task);
             Self {
                 run_queue: MpscQueue::new_with_stub(test_dbg!(stub_task)),
+                queued: AtomicUsize::new(0),
                 current_task: AtomicPtr::new(ptr::null_mut()),
                 spawned: AtomicUsize::new(0),
                 woken_external: AtomicUsize::new(0),
