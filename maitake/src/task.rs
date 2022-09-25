@@ -861,7 +861,7 @@ impl<S: Schedule> Schedulable<S> {
         trace_waker_op!(ptr, wake_by_ref);
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
-        if this.as_ref().state().wake_by_ref() == ScheduleAction::Enqueue {
+        if test_dbg!(this.as_ref().state().wake_by_ref()) == ScheduleAction::Enqueue {
             Self::schedule(TaskRef(this.cast::<Header>()));
         }
     }

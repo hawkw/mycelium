@@ -244,6 +244,14 @@ fn steal_while_waking() {
                 test_dbg!(scheduler2.tick());
                 thread::yield_now();
             }
+            info!("stealer thread done\nscheduler1={scheduler1:#?}\nscheduler2={scheduler2:#?}");
+            info!("dropping scheduler1");
+            drop(scheduler1);
+            info!("dropped scheduler1\n");
+
+            info!("dropping scheduler2");
+            drop(scheduler2);
+            info!("dropped scheduler2\n");
         });
 
         task.task_ref().wake_by_ref();

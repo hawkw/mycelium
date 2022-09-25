@@ -111,6 +111,8 @@ impl<'worker, S: Schedule> Stealer<'worker, S> {
             Some(task) => task,
             None => return false,
         };
+        test_trace!(?task, "stole");
+
         // decrement the target queue's task count
         self.tasks.fetch_sub(1, Release);
 
