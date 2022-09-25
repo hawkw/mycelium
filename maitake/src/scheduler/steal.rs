@@ -1,7 +1,8 @@
 use super::*;
-use crate::loom::sync::atomic::{AtomicUsize, Ordering::*};
+use crate::loom::sync::atomic::AtomicUsize;
 use cordyceps::mpsc_queue::{self, MpscQueue};
 use core::marker::PhantomData;
+use mycelium_util::fmt;
 
 /// An injector queue for spawning tasks on multiple [`Scheduler`] instances.
 pub struct Injector<S> {
@@ -29,18 +30,17 @@ pub enum TryStealError {
 }
 
 impl<S: Schedule> Injector<S> {
-    loom_const_fn! {
-        /// # Safety
-        ///
-        /// The "stub" provided must ONLY EVER be used for a single
-        /// `Distributor` instance. Re-using the stub for multiple distributors
-        /// or schedulers may lead to undefined behavior.
-        pub unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
-            Self {
-                queue: MpscQueue::new_with_static_stub(&stub.hdr),
-                tasks: AtomicUsize::new(0),
-                _scheduler_type: PhantomData,
-            }
+    /// # Safety
+    ///
+    /// The "stub" provided must ONLY EVER be used for a single
+    /// `Distributor` instance. Re-using the stub for multiple distributors
+    /// or schedulers may lead to undefined behavior.
+    #[cfg(not(loom))]
+    pub unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
+        Self {
+            queue: MpscQueue::new_with_static_stub(&stub.hdr),
+            tasks: AtomicUsize::new(0),
+            _scheduler_type: PhantomData,
         }
     }
 
@@ -61,8 +61,13 @@ impl<S: Schedule> Injector<S> {
     }
 }
 
-impl<S: Schedule> Stealer<'_, S> {
-    fn try_new(queue: &MpscQueue<Header>, tasks: &AtomicUsize) -> Result<Self, TryStealError> {
+// === impl Stealer ===
+
+impl<'worker, S: Schedule> Stealer<'worker, S> {
+    fn try_new(
+        queue: &'worker MpscQueue<Header>,
+        tasks: &'worker AtomicUsize,
+    ) -> Result<Self, TryStealError> {
         let snapshot = tasks.load(Acquire);
         if snapshot == 0 {
             return Err(TryStealError::Empty);
@@ -153,6 +158,33 @@ impl<S: Schedule> Stealer<'_, S> {
         self.spawn_n(scheduler, self.initial_task_count() / 2)
     }
 }
+
+impl<S> fmt::Debug for Stealer<'_, S> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // determine if alt-mode is enabled *before* constructing the
+        // `DebugStruct`, because that mutably borrows the formatter.
+        let alt = f.alternate();
+
+        let mut debug = f.debug_struct("Stealer");
+        debug
+            .field("queue", &self.queue)
+            .field("snapshot", &self.snapshot)
+            .field("tasks", &self.tasks.load(Relaxed));
+
+        // only include the kind of wordy type name field if alt-mode
+        // (multi-line) formatting is enabled.
+        if alt {
+            debug.field(
+                "scheduler",
+                &format_args!("PhantomData<{}>", core::any::type_name::<S>()),
+            );
+        }
+
+        debug.finish()
+    }
+}
+
+// === impls on Scheduler types ===
 
 impl StaticScheduler {
     /// Attempt to steal tasks from this scheduler's run queue.

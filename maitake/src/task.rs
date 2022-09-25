@@ -927,11 +927,20 @@ impl TaskRef {
         // up after itself.
         if canceled {
             test_debug!("woke canceled task");
-            let wake_by_ref = self.header().vtable.wake_by_ref;
-            unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
+            self.wake_by_ref();
         }
 
         canceled
+    }
+
+    /// Wakes the task.
+    ///
+    /// TODO(eliza): would this be better if we just added an `Into<Waker>` impl
+    /// for `TaskRef` or something? Should this be a public API?
+    pub(crate) fn wake_by_ref(&self) {
+        test_debug!(?self, "TaskRef::wake_by_ref");
+        let wake_by_ref = self.header().vtable.wake_by_ref;
+        unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
     }
 
     #[track_caller]

@@ -8,6 +8,7 @@ use crate::{
             atomic::{AtomicBool, Ordering},
             Arc,
         },
+        thread,
     },
     scheduler::Scheduler,
 };
@@ -219,4 +220,38 @@ fn drop_join_handle() {
         thread.join().unwrap();
         assert!(completed.load(Ordering::Relaxed))
     })
+}
+
+#[test]
+fn steal_while_waking() {
+    loom::model(|| {
+        let completed = Arc::new(AtomicBool::new(false));
+        let scheduler1 = Scheduler::new();
+        let task = scheduler1.spawn({
+            let completed = completed.clone();
+            TrackFuture::new(async move {
+                future::yield_now().await;
+                completed.store(true, Ordering::SeqCst);
+            })
+        });
+
+        let stealer_thread = thread::spawn({
+            let scheduler1 = scheduler1.clone();
+            move || {
+                let scheduler2 = Scheduler::new();
+                while !completed.load(Ordering::SeqCst) {
+                    if let Ok(stealer) = test_dbg!(scheduler1.try_steal()) {
+                        test_dbg!(stealer.spawn_one(&scheduler2));
+                    }
+                    test_dbg!(scheduler1.tick());
+                    thread::yield_now();
+                }
+            }
+        });
+
+        test_dbg!(scheduler1.tick());
+        task.task_ref().wake_by_ref();
+
+        stealer_thread.join().unwrap();
+    });
 }
