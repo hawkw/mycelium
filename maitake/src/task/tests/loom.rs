@@ -235,23 +235,20 @@ fn steal_while_waking() {
             })
         });
 
-        let stealer_thread = thread::spawn({
-            let scheduler1 = scheduler1.clone();
-            move || {
-                let scheduler2 = Scheduler::new();
-                while !completed.load(Ordering::SeqCst) {
-                    if let Ok(stealer) = test_dbg!(scheduler1.try_steal()) {
-                        test_dbg!(stealer.spawn_one(&scheduler2));
-                    }
-                    test_dbg!(scheduler2.tick());
-                    thread::yield_now();
+        let stealer_thread = thread::spawn(move || {
+            let scheduler2 = Scheduler::new();
+            while !completed.load(Ordering::SeqCst) {
+                if let Ok(stealer) = test_dbg!(scheduler1.try_steal()) {
+                    test_dbg!(stealer.spawn_one(&scheduler2));
                 }
+                test_dbg!(scheduler2.tick());
+                thread::yield_now();
             }
         });
 
-        test_dbg!(scheduler1.tick());
         task.task_ref().wake_by_ref();
 
         stealer_thread.join().unwrap();
+        info!("stealer thread joined");
     });
 }
