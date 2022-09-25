@@ -111,6 +111,8 @@ impl<'worker, S: Schedule> Stealer<'worker, S> {
             Some(task) => task,
             None => return false,
         };
+        // decrement the target queue's task count
+        self.tasks.fetch_sub(1, Release);
 
         // TODO(eliza): probably handle cancelation by throwing out canceled
         // tasks here before binding them?
