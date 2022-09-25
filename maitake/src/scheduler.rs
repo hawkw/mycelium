@@ -272,6 +272,8 @@ impl Core {
 
     #[inline(always)]
     fn spawn_inner(&self, task: TaskRef) {
+        // ensure the woken bit is set when spawning so the task won't be queued twice.
+        task.set_woken();
         self.spawned.fetch_add(1, Relaxed);
         self.queued.fetch_add(1, Relaxed);
         self.run_queue.enqueue(task);

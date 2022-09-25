@@ -943,6 +943,13 @@ impl TaskRef {
         unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
     }
 
+    /// Sets the task's `WOKEN` bit.
+    ///
+    /// This must be called when enqueueing a spawned task for the first time.
+    pub(crate) fn set_woken(&self) {
+        self.state().wake_by_ref();
+    }
+
     #[track_caller]
     pub(crate) fn new_allocated<S, F, STO>(
         scheduler: S,
