@@ -1,5 +1,9 @@
 use super::DtablePtr;
 use core::arch::asm;
+pub use core::arch::x86_64::{
+    _rdrand16_step as rdrand16_step, _rdrand32_step as rdrand32_step,
+    _rdrand64_step as rdrand64_step, _rdtsc as rdtsc,
+};
 
 /// Perform one x86 `hlt` instruction.
 ///

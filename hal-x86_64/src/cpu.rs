@@ -1,7 +1,10 @@
 use core::{arch::asm, convert::Infallible, fmt, mem};
 use mycelium_util::bits;
 
+pub mod entropy;
 pub mod intrinsics;
+mod tsc;
+pub use self::tsc::Rdtsc;
 
 #[repr(transparent)]
 pub struct Port {
@@ -48,6 +51,11 @@ pub(crate) struct DtablePtr {
     limit: u16,
     base: *const (),
 }
+
+/// An error indicating that a given CPU feature source is not supported on this
+/// CPU.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct FeatureNotSupported(&'static str);
 
 /// Halt the CPU.
 ///
@@ -211,5 +219,23 @@ impl fmt::Debug for DtablePtr {
             .field("base", &format_args!("{:0p}", base))
             .field("limit", &limit)
             .finish()
+    }
+}
+
+// === impl FeatureNotSupported ===
+
+impl fmt::Display for FeatureNotSupported {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "this CPU does not support {}", self.0)
+    }
+}
+
+impl FeatureNotSupported {
+    pub fn feature_name(&self) -> &'static str {
+        self.0
+    }
+
+    pub(in crate::cpu) fn new(feature_name: &'static str) -> Self {
+        Self(feature_name)
     }
 }
