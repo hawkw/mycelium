@@ -25,8 +25,8 @@ impl<S, F: Future> task::Storage<S, F> for MyBoxStorage {
 
 impl<F> MyBoxTask<&'static StaticScheduler, F>
 where
-    F: Future + 'static,
-    F::Output: 'static,
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
 {
     fn spawn(scheduler: &'static StaticScheduler, future: F) -> task::JoinHandle<F::Output> {
         let task = MyBoxTask(Box::new(Task::new(future)));
