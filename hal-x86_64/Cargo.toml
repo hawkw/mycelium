@@ -13,6 +13,8 @@ hal-core = { path = "../hal-core" }
 mycelium-util = { path = "../util" }
 mycelium-trace = { path = "../trace" }
 mycotest = { path = "../mycotest"}
+rand_core = { version = "0.6.4", default_features = false, optional = true }
+raw-cpuid = "10.6.0"
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }
 volatile = { version = "0.4.5", features = ["unstable"] }
 
