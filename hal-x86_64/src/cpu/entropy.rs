@@ -79,7 +79,7 @@ impl Rdrand {
 
     /// Returns `true` if the CPU supports the `rdrand` instruction.
     ///
-    /// This is determined using the [`cpuid`](intrinsics::cpuid) instruction.
+    /// This is determined using the `cpuid` instruction.
     pub fn is_supported() -> bool {
         CpuId::new()
             .get_feature_info()
