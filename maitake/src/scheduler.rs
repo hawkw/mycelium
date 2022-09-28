@@ -11,7 +11,7 @@ mod steal;
 #[cfg(test)]
 mod tests;
 
-pub use self::steal::Injector;
+pub use self::steal::*;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "alloc", derive(Default))]

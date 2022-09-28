@@ -16,7 +16,6 @@ pub mod wasm;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
-use maitake::scheduler::{self, StaticScheduler};
 use mycelium_alloc::buddy;
 
 #[cfg(test)]
@@ -24,7 +23,6 @@ mod tests;
 
 #[cfg_attr(target_os = "none", global_allocator)]
 static ALLOC: buddy::Alloc<32> = buddy::Alloc::new(32);
-static SCHEDULER: StaticScheduler = scheduler::new_static!();
 
 pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -175,7 +173,7 @@ fn kernel_main() -> ! {
         tracing::info!(?result);
     });
 
-    let core = rt::Core::new(&SCHEDULER);
+    let mut core = rt::Core::new();
     loop {
         core.run();
         tracing::warn!("someone stopped CPU 0's core! restarting it...");

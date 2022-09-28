@@ -38,6 +38,8 @@ mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
 maitake = { path = "maitake", features = ["tracing-02"] }
 mycelium-util = { path = "util" }
 mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
+rand_xoshiro = "0.6"
+rand = { version = "0.8", default_features = false }
 rlibc = "1.0"
 # NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`
@@ -54,7 +56,7 @@ once_cell = { version = "1.15.0", default-features = false }
 mycotest = { path = "mycotest", features = ["runner"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-hal-x86_64 = { path = "hal-x86_64" }
+hal-x86_64 = { path = "hal-x86_64", features = ["rand_core"] }
 yaxpeax-x86 = { version = "1.0.0", default-features = false, features = ["fmt"] }
 yaxpeax-arch = { version = "0.2.0", default-features = false }
 

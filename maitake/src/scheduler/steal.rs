@@ -36,7 +36,7 @@ impl<S: Schedule> Injector<S> {
     /// `Distributor` instance. Re-using the stub for multiple distributors
     /// or schedulers may lead to undefined behavior.
     #[cfg(not(loom))]
-    pub unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
+    pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
         Self {
             queue: MpscQueue::new_with_static_stub(&stub.hdr),
             tasks: AtomicUsize::new(0),

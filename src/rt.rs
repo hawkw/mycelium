@@ -3,9 +3,11 @@ use core::{
     future::Future,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
 };
-use maitake::scheduler::{self, StaticScheduler};
-pub use maitake::task::JoinHandle;
+use maitake::scheduler::{self, StaticScheduler, Stealer};
 use mycelium_util::sync::InitOnce;
+use rand::Rng;
+
+pub use maitake::task::JoinHandle;
 
 /// A kernel runtime for a single core.
 pub struct Core {
@@ -19,6 +21,19 @@ pub struct Core {
 
     /// Set to `false` if this core should shut down.
     running: AtomicBool,
+
+    /// Used to select the index of the next core to steal work from.
+    ///
+    /// Selecting a random core index when work-stealing helps ensure we don't
+    /// have a situation where all idle steal from the first available worker,
+    /// resulting in other cores ending up with huge queues of idle tasks while
+    /// the first core's queue is always empty.
+    ///
+    /// This is *not* a cryptographically secure random number generator, since
+    /// randomness of this value is not required for security. Instead, it just
+    /// helps ensure a good distribution of load. Therefore, we use a fast,
+    /// non-cryptographic RNG.
+    rng: rand_xoshiro::Xoroshiro128PlusPlus,
 }
 
 struct Runtime {
@@ -33,7 +48,13 @@ struct Runtime {
 pub const MAX_CORES: usize = 512;
 
 static RUNTIME: Runtime = {
+    // This constant is used as an array initializer; the clippy warning that it
+    // contains interior mutability is not actually a problem here, since we
+    // *want* a new instance of the value for each array element created using
+    // the `const`.
+    #[allow(clippy::declare_interior_mutable_const)]
     const UNINIT_SCHEDULER: InitOnce<StaticScheduler> = InitOnce::uninitialized();
+
     Runtime {
         cores: [UNINIT_SCHEDULER; MAX_CORES],
         initialized: AtomicUsize::new(0),
@@ -54,18 +75,20 @@ where
 }
 
 impl Core {
+    #[must_use]
     pub fn new() -> Self {
         let (id, scheduler) = RUNTIME.new_scheduler();
         tracing::info!(core = id, "initialized task scheduler");
         Self {
             scheduler,
             id,
+            rng: crate::arch::seed_rng(),
             running: AtomicBool::new(false),
         }
     }
 
     /// Runs one tick of the kernel main loop on this core.
-    pub fn tick(&self) {
+    pub fn tick(&mut self) {
         // drive the task scheduler
         let tick = self.scheduler.tick();
 
@@ -78,7 +101,7 @@ impl Core {
         // TODO(eliza): add a "check distributor first interval" of some kind to
         // ensure new tasks are eventually spawned on a core...
         let stolen = if !tick.has_remaining {
-            RUNTIME.try_steal(self)
+            self.try_steal()
         } else {
             0
         };
@@ -119,7 +142,7 @@ impl Core {
     }
 
     /// Run this core until [`Core::stop`] is called.
-    pub fn run(&self) {
+    pub fn run(&mut self) {
         let _span = tracing::info_span!("core", id = self.id).entered();
         if self
             .running
@@ -138,57 +161,81 @@ impl Core {
 
         tracing::info!("stop signal received, shutting down");
     }
+
+    fn try_steal(&mut self) -> usize {
+        // don't try stealing work infinitely many times if all potential
+        // victims' queues are empty or busy.
+        const MAX_STEAL_ATTEMPTS: usize = 16;
+        // chosen arbitrarily!
+        const MAX_STOLEN_PER_TICK: usize = 256;
+
+        // first, try to steal from the injector queue.
+        if let Ok(injector) = RUNTIME.injector.try_steal() {
+            return injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK);
+        }
+
+        // if the injector queue is empty or someone else is stealing from it,
+        // try to find another worker to steal from.
+        let mut attempts = 0;
+        while attempts < MAX_STEAL_ATTEMPTS {
+            let active_cores = RUNTIME.active_cores();
+
+            // if the stealing core is the only active core, there's no one else
+            // to steal from, so bail.
+            if active_cores <= 1 {
+                break;
+            }
+
+            // randomly pick a potential victim core to steal from.
+            let victim_idx = self.rng.gen_range(0..active_cores);
+
+            // we can't steal tasks from ourself.
+            if victim_idx == self.id {
+                continue;
+            }
+
+            // found a core to steal from
+            if let Some(victim) = RUNTIME.try_steal_from(victim_idx) {
+                let num_steal = cmp::min(victim.initial_task_count() / 2, MAX_STOLEN_PER_TICK);
+                return victim.spawn_n(&self.scheduler, num_steal);
+            } else {
+                attempts += 1;
+            }
+        }
+
+        // try the injector queue again if we couldn't find anything else
+        if let Ok(injector) = RUNTIME.injector.try_steal() {
+            injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK)
+        } else {
+            0
+        }
+    }
+}
+
+impl Default for Core {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // === impl Schedulers ===
 
 impl Runtime {
-    fn try_steal(&'static self, core: &Core) -> usize {
-        // chosen arbitrarily!
-        const MAX_STOLEN_PER_TICK: usize = 256;
-
-        // first, try to steal from the injector queue.
-        if let Ok(stealer) = self.injector.try_steal() {
-            return stealer.spawn_n(&core.scheduler, MAX_STOLEN_PER_TICK);
-        }
-
-        // if the injector queue is empty or someone else is stealing from it,
-        // try to find another worker to steal from.
-        // TODO(eliza): we should probably not start from the first core every
-        // time, this unfairly victimizes core 0. we should either pick a random
-        // core to steal from (which, ugh...we need some kind of RNG), or pick
-        // the core after the stealing core...
-        self.schedulers()
-            .find_map(|(id, worker)| {
-                // we can't steal tasks from ourself!
-                if id == core.id {
-                    return None;
-                }
-                // is this worker's run queue free?
-                worker.try_steal().ok()
-            })
-            .map(|stealer| {
-                // steal up to half of the tasks in the target worker's run queue,
-                // or `MAX_STOLEN_PER_TICK` if the target run queue has more than
-                // that many tasks in it.
-                let max_stolen = cmp::min(MAX_STOLEN_PER_TICK, stealer.initial_task_count() / 2);
-                return stealer.spawn_n(&core.scheduler, max_stolen);
-            })
-            .unwrap_or(0)
+    fn active_cores(&self) -> usize {
+        self.initialized.load(Acquire)
     }
 
-    fn new_scheduler<'a>(&'a self) -> (usize, &'a StaticScheduler) {
+    fn new_scheduler(&self) -> (usize, &StaticScheduler) {
         let next = self.initialized.fetch_add(1, AcqRel);
         assert!(next < MAX_CORES);
         let scheduler = self.cores[next].init(StaticScheduler::new());
         (next, scheduler)
     }
 
-    fn schedulers<'a>(&'a self) -> impl Iterator<Item = (usize, &'a StaticScheduler)> + 'a {
-        let initialized = self.initialized.load(Acquire);
-        self.cores[..initialized]
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, core)| Some((idx, core.try_get()?)))
+    fn try_steal_from(
+        &'static self,
+        idx: usize,
+    ) -> Option<Stealer<'static, &'static StaticScheduler>> {
+        self.cores[idx].try_get()?.try_steal().ok()
     }
 }

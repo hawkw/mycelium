@@ -1,10 +1,9 @@
 use bootloader::boot_info;
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, serial, vga};
-pub use hal_x86_64::{mm, NAME};
+pub use hal_x86_64::{cpu::entropy::seed_rng, mm, NAME};
 use mycelium_util::sync::InitOnce;
 
-pub mod entropy;
 mod framebuf;
 pub mod interrupt;
 mod oops;
