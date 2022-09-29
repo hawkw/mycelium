@@ -1072,6 +1072,14 @@ impl fmt::Debug for TaskRef {
     }
 }
 
+impl fmt::Pointer for TaskRef {
+
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Pointer::fmt(&self.0, f)
+    }
+}
+
 impl Clone for TaskRef {
     #[inline]
     #[track_caller]
