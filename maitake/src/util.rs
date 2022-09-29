@@ -136,11 +136,12 @@ pub(crate) mod test {
         };
         // enable traces from alloc leak checking.
         let filter = filter.add_directive("maitake::alloc=trace".parse().unwrap());
-        let _ = tracing_subscriber::fmt()
+        let collector = tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_test_writer()
             .without_time()
-            .try_init();
+            .finish();
+        let _ = tracing_02::collect::set_global_default(collector);
     }
 
     #[allow(dead_code)]
