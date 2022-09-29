@@ -28,8 +28,8 @@ struct Core {
     /// A counter of how many tasks were spawned since the last scheduler tick.
     spawned: AtomicUsize,
 
-    /// A counter of how many tasks were woken while not ticking the scheduler.
-    woken_external: AtomicUsize,
+    /// A counter of how many tasks were woken while not being polled.
+    woken: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -252,7 +252,7 @@ impl Core {
             current_task: AtomicPtr::new(ptr::null_mut()),
             queued: AtomicUsize::new(0),
             spawned: AtomicUsize::new(0),
-            woken_external: AtomicUsize::new(0),
+            woken: AtomicUsize::new(0),
         }
     }
 
@@ -266,7 +266,7 @@ impl Core {
     /// Wake `task`, adding it to the scheduler's run queue.
     #[inline(always)]
     fn wake(&self, task: TaskRef) {
-        self.woken_external.fetch_add(1, Relaxed);
+        self.woken.fetch_add(1, Relaxed);
         self.schedule(task)
     }
 
@@ -331,7 +331,7 @@ impl Core {
         }
 
         tick.spawned = self.spawned.swap(0, Relaxed);
-        tick.woken_external = self.woken_external.swap(0, Relaxed);
+        tick.woken_external = self.woken.swap(0, Relaxed);
 
         // are there still tasks in the queue? if so, we have more tasks to poll.
         if test_dbg!(self.queued.load(Relaxed)) > 0 {
@@ -343,8 +343,9 @@ impl Core {
             tick.polled,
             tick.completed,
             tick.spawned,
-            tick.woken_external,
-            tick.woken_internal,
+            tick.woken = tick.woken(),
+            tick.woken.external = tick.woken_external,
+            tick.woken.internal = tick.woken_internal,
             tick.has_remaining
         );
 
@@ -360,6 +361,13 @@ impl Schedule for &'static StaticScheduler {
     #[must_use]
     fn current_task(&self) -> Option<TaskRef> {
         self.0.current_task()
+    }
+}
+
+impl Tick {
+    /// Returns the total number of tasks woken since the last poll.
+    pub fn woken(&self) -> usize {
+        self.woken_external + self.woken_internal
     }
 }
 
@@ -529,7 +537,7 @@ feature! {
                 queued: AtomicUsize::new(0),
                 current_task: AtomicPtr::new(ptr::null_mut()),
                 spawned: AtomicUsize::new(0),
-                woken_external: AtomicUsize::new(0),
+                woken: AtomicUsize::new(0),
             }
         }
     }
