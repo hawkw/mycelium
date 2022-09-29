@@ -54,7 +54,7 @@ use mycelium_util::{fmt, mem::CheckedMaybeUninit};
 ///
 /// `TaskRef`s are reference-counted, and the task will be deallocated when the
 /// last `TaskRef` pointing to it is dropped.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct TaskRef(NonNull<Header>);
 
 /// A task.
@@ -1063,6 +1063,15 @@ impl TaskRef {
     }
 }
 
+impl fmt::Debug for TaskRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TaskRef")
+            .field("id", &self.id())
+            .field("addr", &self.0)
+            .finish()
+    }
+}
+
 impl Clone for TaskRef {
     #[inline]
     #[track_caller]
@@ -1070,7 +1079,7 @@ impl Clone for TaskRef {
         test_debug!(
             task.addr = ?self.0,
             task.tid = self.id().as_u64(),
-            "clone TaskRef",
+            "TaskRef::clone",
         );
         self.state().clone_ref();
         Self(self.0)
@@ -1084,7 +1093,7 @@ impl Drop for TaskRef {
         test_debug!(
             task.addr = ?self.0,
             task.tid = self.id().as_u64(),
-            "drop TaskRef",
+            "TaskRef::drop",
         );
         if !self.state().drop_ref() {
             return;
