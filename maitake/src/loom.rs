@@ -314,7 +314,13 @@ mod inner {
                         was_leaked: AtomicBool::new(false),
                     });
                     let weak = Arc::downgrade(&data);
-                    trace!(id, "type" = %type_name, %location, "started tracking allocation");
+                    trace!(
+                        target: "maitake::alloc",
+                        id,
+                        "type" = %type_name,
+                        %location,
+                        "started tracking allocation",
+                    );
                     inner.tracks.push(weak);
                     data
                 }
@@ -346,6 +352,7 @@ mod inner {
                 fn drop(&mut self) {
                     if !self.was_leaked.load(Ordering::SeqCst) {
                         trace!(
+                            target: "maitake::alloc",
                             id = self.id,
                             "type" = %self.type_name,
                             location = %self.location,
