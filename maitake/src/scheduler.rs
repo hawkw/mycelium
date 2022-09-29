@@ -263,9 +263,16 @@ impl Core {
         Some(TaskRef::clone_from_raw(ptr))
     }
 
+    /// Wake `task`, adding it to the scheduler's run queue.
     #[inline(always)]
-    fn schedule(&self, task: TaskRef) {
+    fn wake(&self, task: TaskRef) {
         self.woken_external.fetch_add(1, Relaxed);
+        self.schedule(task)
+    }
+
+    /// Schedule `task` for execution, adding it to this scheduler's run queue.
+    #[inline]
+    fn schedule(&self, task: TaskRef) {
         self.queued.fetch_add(1, Relaxed);
         self.run_queue.enqueue(task);
     }
@@ -275,8 +282,7 @@ impl Core {
         // ensure the woken bit is set when spawning so the task won't be queued twice.
         task.set_woken();
         self.spawned.fetch_add(1, Relaxed);
-        self.queued.fetch_add(1, Relaxed);
-        self.run_queue.enqueue(task);
+        self.schedule(task);
     }
 
     fn tick_n(&self, n: usize) -> Tick {
@@ -315,18 +321,13 @@ impl Core {
             match poll_result {
                 PollResult::Ready | PollResult::ReadyJoined => tick.completed += 1,
                 PollResult::PendingSchedule => {
-                    self.run_queue.enqueue(task);
+                    self.schedule(task);
                     tick.woken_internal += 1;
                 }
                 PollResult::Pending => {}
             }
 
             debug!(poll = ?poll_result, tick.polled, tick.completed);
-            if queued > n {
-                // we haven't drained the current run queue.
-                tick.has_remaining = true;
-                break;
-            }
         }
 
         tick.spawned = self.spawned.swap(0, Relaxed);
@@ -353,7 +354,7 @@ impl Core {
 
 impl Schedule for &'static StaticScheduler {
     fn schedule(&self, task: TaskRef) {
-        self.0.schedule(task)
+        self.0.wake(task)
     }
 
     #[must_use]
@@ -487,7 +488,7 @@ feature! {
 
     impl Schedule for Scheduler {
         fn schedule(&self, task: TaskRef) {
-            self.0.schedule(task)
+            self.0.wake(task)
         }
 
         #[must_use]
