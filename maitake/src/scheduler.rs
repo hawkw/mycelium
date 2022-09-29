@@ -5,6 +5,8 @@ use crate::{
 use core::{future::Future, ptr};
 
 use cordyceps::mpsc_queue::MpscQueue;
+use mycelium_util::fmt;
+
 #[cfg(test)]
 mod tests;
 
@@ -279,7 +281,12 @@ impl Core {
         };
 
         for task in self.run_queue.consume() {
-            let _span = debug_span!("poll", ?task, task.tid = %task.id()).entered();
+            let _span = debug_span!(
+                "poll",
+                task.addr = ?fmt::ptr(&task),
+                task.tid = task.id().as_u64(),
+            )
+            .entered();
             // store the currently polled task in the `current_task` pointer.
             // using `TaskRef::as_ptr` is safe here, since we will clear the
             // `current_task` pointer before dropping the `TaskRef`.
