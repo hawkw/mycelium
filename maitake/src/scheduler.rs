@@ -291,8 +291,8 @@ impl Core {
             has_remaining: false,
         };
 
-        for task in self.run_queue.consume() {
-            let queued = self.queued.fetch_sub(1, Relaxed);
+        for task in self.run_queue.consume().take(n) {
+            self.queued.fetch_sub(1, Relaxed);
             let _span = debug_span!(
                 "poll",
                 task.addr = ?fmt::ptr(&task),
@@ -331,6 +331,11 @@ impl Core {
 
         tick.spawned = self.spawned.swap(0, Relaxed);
         tick.woken_external = self.woken_external.swap(0, Relaxed);
+
+        // are there still tasks in the queue? if so, we have more tasks to poll.
+        if test_dbg!(self.queued.load(Relaxed)) > 0 {
+            tick.has_remaining = true;
+        }
 
         // log scheduler metrics.
         debug!(
