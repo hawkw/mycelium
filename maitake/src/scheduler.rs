@@ -299,7 +299,7 @@ impl Core {
 
         for task in self.run_queue.consume().take(n) {
             self.queued.fetch_sub(1, Relaxed);
-            let _span = debug_span!(
+            let _span = trace_span!(
                 "poll",
                 task.addr = ?fmt::ptr(&task),
                 task.tid = task.id().as_u64(),
@@ -327,7 +327,7 @@ impl Core {
                 PollResult::Pending => {}
             }
 
-            debug!(poll = ?poll_result, tick.polled, tick.completed);
+            trace!(poll = ?poll_result, tick.polled, tick.completed);
         }
 
         tick.spawned = self.spawned.swap(0, Relaxed);
@@ -338,16 +338,18 @@ impl Core {
             tick.has_remaining = true;
         }
 
-        // log scheduler metrics.
-        debug!(
-            tick.polled,
-            tick.completed,
-            tick.spawned,
-            tick.woken = tick.woken(),
-            tick.woken.external = tick.woken_external,
-            tick.woken.internal = tick.woken_internal,
-            tick.has_remaining
-        );
+        if tick.polled > 0 {
+            // log scheduler metrics.
+            debug!(
+                tick.polled,
+                tick.completed,
+                tick.spawned,
+                tick.woken = tick.woken(),
+                tick.woken.external = tick.woken_external,
+                tick.woken.internal = tick.woken_internal,
+                tick.has_remaining
+            );
+        }
 
         tick
     }

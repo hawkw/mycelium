@@ -100,23 +100,11 @@ impl Core {
         // steal new tasks from the distributor queue.
         // TODO(eliza): add a "check distributor first interval" of some kind to
         // ensure new tasks are eventually spawned on a core...
-        let stolen = if !tick.has_remaining {
-            self.try_steal()
-        } else {
-            0
-        };
-
-        if tick.polled > 0 || stolen > 0 {
-            tracing::trace!(
-                core = self.id,
-                tick.polled,
-                tick.completed,
-                tick.spawned,
-                tick.woken_external,
-                tick.woken_internal,
-                tick.has_remaining,
-                tick.stolen = stolen,
-            );
+        if !tick.has_remaining {
+            let stolen = self.try_steal();
+            if stolen > 0 {
+                tracing::debug!(tick.stolen = stolen)
+            }
         }
     }
 
