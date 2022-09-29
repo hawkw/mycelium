@@ -629,7 +629,7 @@ where
     ) -> Poll<Result<(), JoinError<()>>> {
         let task = ptr.cast::<Self>().as_ref();
         trace!(
-            task.addr = ?task,
+            task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
             task.tid = task.id().as_u64(),
             "Task::poll_join"
