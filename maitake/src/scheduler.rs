@@ -1,3 +1,4 @@
+#![warn(missing_docs, missing_debug_implementations)]
 use crate::{
     loom::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::*},
     task::{self, Header, JoinHandle, Storage, TaskRef},
