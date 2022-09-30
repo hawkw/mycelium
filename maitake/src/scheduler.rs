@@ -1,3 +1,34 @@
+//! Schedulers for executing [tasks][task].
+//!
+//! In order to execute [asynchronous tasks][task], a system must have one or
+//! more _schedulers_. A scheduler (also sometimes referred to as an
+//! _executor_) is a component responsible for tracking which tasks have been
+//! [woken], and [polling] them when they are ready to make progress.
+//!
+//! This module contains scheduler implementations for use with the [`maitake`
+//! task system][task].
+//!
+//! # Using Schedulers
+//!
+//! This module provides two types which can be used as schedulers. These types
+//! differ based on how the core data of the scheduler is shared with tasks
+//! spawned on that scheduler:
+//!
+//! - [`Scheduler`]: a reference-counted single-core scheduler (requires the
+//!       "alloc" feature). A [`Scheduler`] is internally implemented using an
+//!       [`Arc`], and each task spawned on a [`Scheduler`] holds an `Arc` clone
+//!       of the scheduler core.
+//! - [`StaticScheduler`]: a single-core scheduler stored in a `static`
+//!       variable. A [`StaticScheduler`] is referenced by tasks spawned on it
+//!       as an `&'static StaticScheduler` reference. Therefore, it can be used
+//!       without requiring `alloc`, and avoids atomic reference count
+//!       increments when spawning tasks. However, in order to be used, a
+//!       [`StaticScheduler`] *must* be stored in a `'static`, which can limit
+//!       its usage in some cases.
+//!
+//! [woken]: crate::task::Waker::wake
+//! [polling]: core::future::Future::poll
+//! [task]: crate::task
 #![warn(missing_docs, missing_debug_implementations)]
 use crate::{
     loom::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::*},
@@ -6,27 +37,34 @@ use crate::{
 use core::{future::Future, ptr};
 
 use cordyceps::mpsc_queue::MpscQueue;
+
+#[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
 use mycelium_util::fmt;
 
 #[cfg(test)]
 mod tests;
 
+/// A statically-initialized scheduler implementation.
 #[derive(Debug)]
 #[cfg_attr(feature = "alloc", derive(Default))]
 pub struct StaticScheduler(Core);
 
-#[derive(Debug)]
-struct Core {
-    run_queue: MpscQueue<Header>,
-    current_task: AtomicPtr<Header>,
-
-    /// A counter of how many tasks were spawned since the last scheduler tick.
-    spawned: AtomicUsize,
-
-    /// A counter of how many tasks were woken while not ticking the scheduler.
-    woken_external: AtomicUsize,
-}
-
+/// Metrics recorded during a scheduler tick.
+///
+/// This type is returned by the [`Scheduler::tick`] and
+/// [`StaticScheduler::tick`] methods.
+///
+/// This type bundles together a number of values describing what occurred
+/// during a scheduler tick, such as how many tasks were polled, how many of
+/// those tasks completed, and how many new tasks were spawned since the last
+/// tick.
+///
+/// Most of these values are primarily useful as performance and debugging
+/// metrics. However, in some cases, they may also drive system behavior. For
+/// example, the `has_remaining` field on this type indicates whether or not
+/// more tasks are left in the scheduler's run queue after the tick. This can be
+/// used to determine whether or not the system should continue ticking the
+/// scheduler, or should perform other work before ticking again.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Tick {
@@ -48,12 +86,22 @@ pub struct Tick {
     /// calls since the last tick.
     pub woken_external: usize,
 
-    /// The number of tasks that were woken from within their own poll calls
+    /// The number of tasks that were woken from within their own `poll` calls
     /// during this tick.
     pub woken_internal: usize,
 }
 
+/// Trait implemented by schedulers.
+///
+/// This trait is implemented by the [`Scheduler`] and [`StaticScheduler`]
+/// types. It is not intended to be publicly implemented by user-defined types,
+/// but can be used to abstract over `static` and reference-counted schedulers.
 pub trait Schedule: Sized + Clone {
+    /// Schedule a task on this scheduler.
+    ///
+    /// This method is called by the task's [`Waker`] when a task is woken.
+    ///
+    /// [`Waker`]: core::task::Waker
     fn schedule(&self, task: TaskRef);
 
     /// Returns a [`TaskRef`] referencing the task currently being polled by
@@ -71,7 +119,7 @@ pub trait Schedule: Sized + Clone {
     }
 }
 
-/// A stub [`Task`],
+/// A stub [`Task`].
 ///
 /// This represents a [`Task`] that will never actually be executed.
 /// It is used exclusively for initializing a [`StaticScheduler`],
@@ -81,6 +129,7 @@ pub trait Schedule: Sized + Clone {
 /// [`new_with_static_stub()`]: crate::scheduler::StaticScheduler::new_with_static_stub
 #[repr(transparent)]
 #[cfg_attr(loom, allow(dead_code))]
+#[derive(Debug)]
 pub struct TaskStub {
     hdr: Header,
 }
@@ -152,6 +201,42 @@ macro_rules! new_static_scheduler {
 #[cfg(not(loom))]
 pub use new_static_scheduler as new_static;
 
+/// Core implementation of a scheduler, used by both the [`Scheduler`] and
+/// [`StaticScheduler`] types.
+///
+/// Each scheduler instance (which must implement `Clone`) must own a
+/// single instance of a `Core`, which is shared across clones of that scheduler.
+#[derive(Debug)]
+struct Core {
+    /// The scheduler's run queue.
+    ///
+    /// This is an [atomic multi-producer, single-consumer queue][mpsc] of
+    /// [`TaskRef`s]. When a task is [scheduled], it is pushed to this queue.
+    /// When the scheduler polls tasks, they are dequeued from the queue
+    /// and polled. If a task is woken during its poll, the scheduler
+    /// will push it back to this queue. Otherwise, if the task doesn't
+    /// self-wake, it will be pushed to the queue again if its [`Waker`]
+    /// is woken.
+    ///
+    /// [mpsc]: cordyceps::MpscQueue
+    /// [scheduled]: Schedule::schedule
+    /// [`Waker`]: core::task::Waker
+    run_queue: MpscQueue<Header>,
+
+    /// The task currently being polled by this scheduler, if it is currently
+    /// polling a task.
+    ///
+    /// If no task is currently being polled, this will be [`ptr::null_mut`].
+    current_task: AtomicPtr<Header>,
+
+    /// A counter of how many tasks were spawned since the last scheduler tick.
+    spawned: AtomicUsize,
+
+    /// A counter of how many tasks were woken from outside their own `poll`
+    /// methods.
+    woken_external: AtomicUsize,
+}
+
 // === impl TaskStub ===
 
 impl TaskStub {
@@ -168,7 +253,7 @@ impl TaskStub {
 // === impl StaticScheduler ===
 
 impl StaticScheduler {
-    /// How many tasks are polled per call to `StaticScheduler::tick`.
+    /// How many tasks are polled per call to [`StaticScheduler::tick`].
     ///
     /// Chosen by fair dice roll, guaranteed to be random.
     pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
@@ -229,13 +314,15 @@ impl StaticScheduler {
         self.0.current_task()
     }
 
+    /// Tick this scheduler, polling up to [`DEFAULT_TICK_SIZE`] tasks from the
+    /// scheduler's run queue.
     pub fn tick(&'static self) -> Tick {
         self.0.tick_n(Self::DEFAULT_TICK_SIZE)
     }
 }
 
 impl Core {
-    /// How many tasks are polled per call to `StaticScheduler::tick`.
+    /// How many tasks are polled per call to [`Core::tick`].
     ///
     /// Chosen by fair dice roll, guaranteed to be random.
     const DEFAULT_TICK_SIZE: usize = 256;
@@ -464,6 +551,8 @@ feature! {
             self.0.current_task()
         }
 
+        /// Tick this scheduler, polling up to [`DEFAULT_TICK_SIZE`] tasks from the
+        /// scheduler's run queue.
         pub fn tick(&self) -> Tick {
             self.0.tick_n(Self::DEFAULT_TICK_SIZE)
         }
