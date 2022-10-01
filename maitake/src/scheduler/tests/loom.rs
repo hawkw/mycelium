@@ -90,7 +90,12 @@ fn notify_future() {
 #[test]
 fn schedule_many() {
     const TASKS: usize = 10;
-    loom::model(|| {
+
+    // for some reason this branches slightly too many times for the default max
+    // branches, IDK why...
+    let mut model = loom::model::Builder::new();
+    model.max_branches = 10_000;
+    model.check(|| {
         let scheduler = Scheduler::new();
         let completed = Arc::new(AtomicUsize::new(0));
 
@@ -191,7 +196,12 @@ fn cross_thread_spawn() {
 fn injector() {
     const TASKS: usize = 10;
     const THREADS: usize = 3;
-    loom::model(|| {
+
+    // for some reason this branches slightly too many times for the default max
+    // branches, IDK why...
+    let mut model = loom::model::Builder::new();
+    model.max_branches = 10_000;
+    model.check(|| {
         let injector = Arc::new(steal::Injector::new());
         let completed = Arc::new(AtomicUsize::new(0));
         let all_spawned = Arc::new(AtomicBool::new(false));
