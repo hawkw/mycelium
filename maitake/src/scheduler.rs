@@ -778,7 +778,7 @@ feature! {
             task::Builder::new(self.clone())
         }
 
-        /// Spawn a task.
+        /// Spawn a [task].
         ///
         /// This method returns a [`JoinHandle`] that can be used to await the
         /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
@@ -792,6 +792,7 @@ feature! {
         /// # Examples
         ///
         /// Spawning a task and awaiting its output:
+        ///
         /// ```
         /// use maitake::scheduler::Scheduler;
         ///
@@ -820,7 +821,7 @@ feature! {
         ///
         /// ```
         /// use maitake::scheduler::Scheduler;
-        /// # async fn docs() {
+        ///
         /// let scheduler = Scheduler::new();
         ///
         /// // dropping the `JoinHandle` allows the task to run in the background
@@ -833,6 +834,7 @@ feature! {
         /// while scheduler.tick().has_remaining {}
         /// ```
         ///
+        /// [task]: crate::task
         /// [run-loops]: crate::scheduler#executing-tasks
         #[inline]
         #[track_caller]
@@ -945,7 +947,7 @@ feature! {
             Self::default()
         }
 
-        /// Spawn a task.
+        /// Spawn a [task].
         ///
         /// This method returns a [`JoinHandle`] that can be used to await the
         /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
@@ -959,6 +961,7 @@ feature! {
         /// # Examples
         ///
         /// Spawning a task and awaiting its output:
+        ///
         /// ```
         /// use maitake::scheduler::{self, StaticScheduler};
         /// static SCHEDULER: StaticScheduler = scheduler::new_static!();
@@ -979,6 +982,7 @@ feature! {
         ///
         /// // run the scheduler, driving the spawned tasks to completion.
         /// while SCHEDULER.tick().has_remaining {}
+        /// ```
         ///
         /// Spawning a task to run in the background, without awaiting its
         /// output:
@@ -987,7 +991,6 @@ feature! {
         /// use maitake::scheduler::{self, StaticScheduler};
         /// static SCHEDULER: StaticScheduler = scheduler::new_static!();
         ///
-        /// # async fn docs() {
         /// // dropping the `JoinHandle` allows the task to run in the background
         /// // without awaiting its output.
         /// SCHEDULER.spawn(async move {
@@ -998,6 +1001,7 @@ feature! {
         /// while SCHEDULER.tick().has_remaining {}
         /// ```
         ///
+        /// [task]: crate::task
         /// [run-loops]: crate::scheduler#executing-tasks
         #[inline]
         #[track_caller]
