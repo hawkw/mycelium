@@ -760,10 +760,11 @@ unsafe impl Linked<list::Links<Self>> for Free {
 
 impl fmt::Debug for Free {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { magic, links, meta } = self;
         f.debug_struct("Free")
-            .field("magic", &fmt::hex(&self.magic))
-            .field("links", &self.links)
-            .field("meta", &self.meta)
+            .field("magic", &fmt::hex(magic))
+            .field("links", links)
+            .field("meta", meta)
             .finish()
     }
 }

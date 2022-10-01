@@ -106,9 +106,11 @@ where
     B: Deref<Target = [u8]>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { cfg, len, buf: _ } = self;
         f.debug_struct("Framebuffer")
-            .field("len", &self.len)
-            .field("cfg", &self.cfg)
+            .field("len", len)
+            .field("cfg", cfg)
+            // don't print every pixel value in the entire framebuffer...
             .field("buf", &format_args!("[..]"))
             .finish()
     }

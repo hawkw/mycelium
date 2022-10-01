@@ -446,10 +446,13 @@ impl<'list, T: Linked<Links<T>> + ?Sized> CursorMut<'list, T> {
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for CursorMut<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            core: CursorCore { list, curr, index },
+        } = self;
         f.debug_struct("CursorMut")
-            .field("curr", &FmtOption::new(&self.core.curr))
-            .field("list", &self.core.list)
-            .field("index", &self.core.index)
+            .field("curr", &FmtOption::new(curr))
+            .field("list", list)
+            .field("index", index)
             .finish()
     }
 }
@@ -556,10 +559,13 @@ impl<'list, T: Linked<Links<T>> + ?Sized> Cursor<'list, T> {
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for Cursor<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            core: CursorCore { list, curr, index },
+        } = self;
         f.debug_struct("Cursor")
-            .field("curr", &FmtOption::new(&self.core.curr))
-            .field("list", &self.core.list)
-            .field("index", &self.core.index)
+            .field("curr", &FmtOption::new(curr))
+            .field("list", list)
+            .field("index", index)
             .finish()
     }
 }

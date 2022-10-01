@@ -741,8 +741,18 @@ where
     F: Future,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            schedulable:
+                Schedulable {
+                    header,
+                    scheduler: _,
+                },
+            inner: _,
+            join_waker: _,
+            storage: _,
+        } = self;
         f.debug_struct("Task")
-            .field("header", &self.header())
+            .field("header", header)
             .field("inner", &format_args!("UnsafeCell(<{}>)", type_name::<F>()))
             .field("join_waker", &format_args!("UnsafeCell(<Waker>)"))
             .field("scheduler", &fmt::display(type_name::<S>()))
@@ -884,8 +894,12 @@ impl<S: Schedule> Schedulable<S> {
 
 impl<S> fmt::Debug for Schedulable<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            header,
+            scheduler: _,
+        } = self;
         f.debug_struct("Schedulable")
-            .field("header", &self.header)
+            .field("header", header)
             .field("scheduler", &fmt::display(type_name::<S>()))
             .finish()
     }
@@ -1329,10 +1343,17 @@ impl<F: Future> fmt::Debug for Cell<F> {
 
 impl fmt::Debug for Vtable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self {
+            poll,
+            poll_join,
+            deallocate,
+            wake_by_ref,
+        } = self;
         f.debug_struct("Vtable")
-            .field("poll", &fmt::ptr(self.poll))
-            .field("poll_join", &fmt::ptr(self.poll_join as *const ()))
-            .field("deallocate", &fmt::ptr(self.deallocate))
+            .field("poll", &fmt::ptr(poll))
+            .field("poll_join", &fmt::ptr(poll_join as *const ()))
+            .field("deallocate", &fmt::ptr(deallocate))
+            .field("wake_by_ref", &fmt::ptr(wake_by_ref))
             .finish()
     }
 }

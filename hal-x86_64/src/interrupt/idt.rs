@@ -183,7 +183,8 @@ impl Idt {
 
 impl fmt::Debug for Idt {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_list().entries(self.descriptors[..].iter()).finish()
+        let Self { descriptors } = self;
+        f.debug_list().entries(descriptors[..].iter()).finish()
     }
 }
 
@@ -191,13 +192,22 @@ impl fmt::Debug for Idt {
 
 impl fmt::Debug for Descriptor {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let Self {
+            offset_low,
+            segment,
+            ist_offset,
+            attrs,
+            offset_mid,
+            offset_hi,
+            _zero: _,
+        } = self;
         f.debug_struct("Descriptor")
-            .field("offset_low", &format_args!("{:#x}", self.offset_low))
-            .field("segment", &self.segment)
-            .field("ist_offset", &format_args!("{:#x}", self.ist_offset))
-            .field("attrs", &self.attrs)
-            .field("offset_mid", &format_args!("{:#x}", self.offset_mid))
-            .field("offset_high", &format_args!("{:#x}", self.offset_hi))
+            .field("offset_low", &format_args!("{offset_low:#x}"))
+            .field("segment", segment)
+            .field("ist_offset", &format_args!("{ist_offset:#x}"))
+            .field("attrs", attrs)
+            .field("offset_mid", &format_args!("{offset_mid:#x}"))
+            .field("offset_high", &format_args!("{offset_hi:#x}"))
             .finish()
     }
 }

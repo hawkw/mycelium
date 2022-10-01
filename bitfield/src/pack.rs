@@ -714,9 +714,10 @@ macro_rules! make_packers {
 
             impl<T, F> fmt::Debug for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { mask, shift, _dst_ty } = self;
                     f.debug_struct(stringify!($Pack))
-                        .field("mask", &format_args!("{:#b}", self.mask))
-                        .field("shift", &self.shift)
+                        .field("mask", &format_args!("{:#b}", mask))
+                        .field("shift", shift)
                         .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
@@ -724,9 +725,10 @@ macro_rules! make_packers {
 
             impl<T, F> fmt::UpperHex for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { mask, shift, _dst_ty } = self;
                     f.debug_struct(stringify!($Pack))
-                        .field("mask", &format_args!("{:#X}", self.mask))
-                        .field("shift", &self.shift)
+                        .field("mask", &format_args!("{:#X}", mask))
+                        .field("shift", shift)
                         .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
@@ -734,9 +736,10 @@ macro_rules! make_packers {
 
             impl<T, F> fmt::LowerHex for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { mask, shift, _dst_ty } = self;
                     f.debug_struct(stringify!($Pack))
-                        .field("mask", &format_args!("{:#x}", self.mask))
-                        .field("shift", &self.shift)
+                        .field("mask", &format_args!("{:#x}", mask))
+                        .field("shift", shift)
                         .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
@@ -744,9 +747,10 @@ macro_rules! make_packers {
 
             impl<T, F> fmt::Binary for $Pack<T, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { mask, shift, _dst_ty } = self;
                     f.debug_struct(stringify!($Pack))
-                        .field("mask", &format_args!("{:#b}", self.mask))
-                        .field("shift", &self.shift)
+                        .field("mask", &format_args!("{:#b}", mask))
+                        .field("shift", shift)
                         .field("dst_type", &format_args!("{}", type_name::<T>()))
                         .finish()
                 }
@@ -1000,44 +1004,48 @@ macro_rules! make_packers {
 
             impl<T> fmt::Debug for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { src, dst, dst_shl, dst_shr } = self;
                     f.debug_struct(stringify!($Pair))
-                        .field("src", &self.src)
-                        .field("dst", &self.dst)
-                        .field("dst_shl", &self.dst_shl)
-                        .field("dst_shr", &self.dst_shr)
+                        .field("src", src)
+                        .field("dst", dst)
+                        .field("dst_shl", dst_shl)
+                        .field("dst_shr", dst_shr)
                         .finish()
                 }
             }
 
             impl<T> fmt::UpperHex for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { src, dst, dst_shl, dst_shr } = self;
                     f.debug_struct(stringify!($Pair))
-                        .field("src", &self.src)
-                        .field("dst", &self.dst)
-                        .field("dst_shl", &self.dst_shl)
-                        .field("dst_shr", &self.dst_shr)
+                        .field("src", src)
+                        .field("dst", dst)
+                        .field("dst_shl", dst_shl)
+                        .field("dst_shr", dst_shr)
                         .finish()
                 }
             }
 
             impl<T> fmt::LowerHex for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { src, dst, dst_shl, dst_shr } = self;
                     f.debug_struct(stringify!($Pair))
-                        .field("src", &self.src)
-                        .field("dst", &self.dst)
-                        .field("dst_shl", &self.dst_shl)
-                        .field("dst_shr", &self.dst_shr)
+                        .field("src", src)
+                        .field("dst", dst)
+                        .field("dst_shl", dst_shl)
+                        .field("dst_shr", dst_shr)
                         .finish()
                 }
             }
 
             impl<T> fmt::Binary for $Pair<T> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let Self { src, dst, dst_shl, dst_shr } = self;
                     f.debug_struct(stringify!($Pair))
-                        .field("src", &self.src)
-                        .field("dst", &self.dst)
-                        .field("dst_shl", &self.dst_shl)
-                        .field("dst_shr", &self.dst_shr)
+                        .field("src", src)
+                        .field("dst", dst)
+                        .field("dst_shl", dst_shl)
+                        .field("dst_shr", dst_shr)
                         .finish()
                 }
             }
