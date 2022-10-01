@@ -80,7 +80,7 @@ check-fmt crate='':
 check-docs crate='': (build-docs crate '--cfg docsrs -Dwarnings') (test-docs crate)
 
 # open RustDoc documentation for `crate` (or for the whole workspace).
-docs crate='': (build-docs)
+docs crate='' $RUSTDOCFLAGS='--cfg docsrs': (build-docs crate RUSTDOCFLAGS)
     {{ _cargo }} doc \
         {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
         --no-deps --all-features \
