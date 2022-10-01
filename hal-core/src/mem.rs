@@ -156,10 +156,11 @@ where
     A: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { base, size, kind } = self;
         f.debug_struct("Region")
-            .field("base", &self.base)
-            .field("size", &self.size)
-            .field("kind", &self.kind)
+            .field("base", base)
+            .field("size", size)
+            .field("kind", kind)
             .finish()
     }
 }

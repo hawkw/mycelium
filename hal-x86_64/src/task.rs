@@ -67,16 +67,19 @@ impl Default for StateSegment {
 
 impl fmt::Debug for StateSegment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            privilege_stacks,
+            interrupt_stacks,
+            iomap_offset,
+            _reserved_1: _,
+            _reserved_2: _,
+            _reserved_3: _,
+            _reserved_4: _,
+        } = *self;
         f.debug_struct("task::StateSegment")
-            .field(
-                "privilege_stacks",
-                &format_args!("{:?}", &{ self.privilege_stacks }),
-            )
-            .field(
-                "interrupt_stacks",
-                &format_args!("{:?}", &{ self.interrupt_stacks }),
-            )
-            .field("iomap_offset", &fmt::hex(self.iomap_offset))
+            .field("privilege_stacks", &privilege_stacks)
+            .field("interrupt_stacks", &interrupt_stacks)
+            .field("iomap_offset", &fmt::hex(iomap_offset))
             .field("iomap_addr", &self.iomap_addr())
             .finish()
     }

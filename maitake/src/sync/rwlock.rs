@@ -405,8 +405,9 @@ impl<T: ?Sized> RwLock<T> {
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLock<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { sem, data: _ } = self;
         f.debug_struct("RwLock")
-            .field("sem", &self.sem)
+            .field("sem", sem)
             .field("data", &fmt::opt(&self.try_read()).or_else("<locked>"))
             .finish()
     }

@@ -381,12 +381,21 @@ impl hal_core::interrupt::Control for Idt {
 
 impl fmt::Debug for Registers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            instruction_ptr,
+            code_segment,
+            stack_ptr,
+            stack_segment,
+            _pad: _,
+            cpu_flags,
+            _pad2: _,
+        } = self;
         f.debug_struct("Registers")
-            .field("instruction_ptr", &self.instruction_ptr)
-            .field("code_segment", &self.code_segment)
-            .field("cpu_flags", &format_args!("{:#b}", self.cpu_flags))
-            .field("stack_ptr", &self.stack_ptr)
-            .field("stack_segment", &self.stack_segment)
+            .field("instruction_ptr", instruction_ptr)
+            .field("code_segment", code_segment)
+            .field("cpu_flags", &format_args!("{cpu_flags:#b}"))
+            .field("stack_ptr", stack_ptr)
+            .field("stack_segment", stack_segment)
             .finish()
     }
 }

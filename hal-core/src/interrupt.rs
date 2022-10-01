@@ -129,8 +129,9 @@ impl RegistrationError {
 
 impl fmt::Debug for RegistrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { kind } = self;
         f.debug_struct("RegistrationError")
-            .field("kind", &self.kind)
+            .field("kind", kind)
             .finish()
     }
 }

@@ -131,16 +131,18 @@ impl<S: Ord> cmp::Ord for TestName<'_, S> {
 // Custom impl to skip `PhantomData` field.
 impl<S: fmt::Debug> fmt::Debug for TestName<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { name, module, _lt } = self;
         f.debug_struct("Test")
-            .field("name", &self.name)
-            .field("module", &self.module)
+            .field("name", name)
+            .field("module", module)
             .finish()
     }
 }
 
 impl<S: fmt::Display> fmt::Display for TestName<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}::{}", self.module, self.name)
+        let Self { name, module, _lt } = self;
+        write!(f, "{module}::{name}")
     }
 }
 

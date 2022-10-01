@@ -430,12 +430,13 @@ impl Wheel {
 
 impl fmt::Debug for Wheel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { level, ticks_per_slot, ticks_per_wheel, wheel_mask, occupied_slots, slots: _ } = self;
         f.debug_struct("Wheel")
-            .field("level", &self.level)
-            .field("ticks_per_slot", &self.ticks_per_slot)
-            .field("ticks_per_wheel", &self.ticks_per_wheel)
-            .field("wheel_mask", &fmt::bin(self.wheel_mask))
-            .field("occupied_slots", &fmt::bin(&self.occupied_slots))
+            .field("level", level)
+            .field("ticks_per_slot", ticks_per_slot)
+            .field("ticks_per_wheel", ticks_per_wheel)
+            .field("wheel_mask", &fmt::bin(wheel_mask))
+            .field("occupied_slots", &fmt::bin(occupied_slots))
             .field("slots", &format_args!("[...]"))
             .finish()
     }

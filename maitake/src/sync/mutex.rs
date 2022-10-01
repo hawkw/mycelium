@@ -242,9 +242,10 @@ impl<T: ?Sized> Mutex<T> {
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { data: _, wait } = self;
         f.debug_struct("Mutex")
             .field("data", &fmt::opt(&self.try_lock()).or_else("<locked>"))
-            .field("wait", &self.wait)
+            .field("wait", wait)
             .finish()
     }
 }

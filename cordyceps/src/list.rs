@@ -1013,10 +1013,11 @@ unsafe impl<T: Linked<Links<T>> + ?Sized> Sync for List<T> where T: Sync {}
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { head, tail, len } = self;
         f.debug_struct("List")
-            .field("head", &FmtOption::new(&self.head))
-            .field("tail", &FmtOption::new(&self.tail))
-            .field("len", &self.len())
+            .field("head", &FmtOption::new(head))
+            .field("tail", &FmtOption::new(tail))
+            .field("len", len)
             .finish()
     }
 }
@@ -1322,7 +1323,8 @@ impl<'list, T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterMut<'list,
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for IntoIter<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("IntoIter").field(&self.list).finish()
+        let Self { list } = self;
+        f.debug_tuple("IntoIter").field(list).finish()
     }
 }
 
@@ -1381,8 +1383,9 @@ where
     T: Linked<Links<T>> + ?Sized,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { cursor, pred: _ } = self;
         f.debug_struct("DrainFilter")
-            .field("cursor", &self.cursor)
+            .field("cursor", cursor)
             .field("pred", &format_args!("..."))
             .finish()
     }
