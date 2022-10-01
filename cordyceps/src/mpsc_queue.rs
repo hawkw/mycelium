@@ -829,9 +829,6 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 let links = links(node);
                 let next = links.next.load(Relaxed);
 
-                #[cfg(loom)]
-                tracing::info!(?node, ?links, next = ?format_args!("{next:p}"), "dropping");
-
                 // Skip dropping the stub node; it is owned by the queue and
                 // will be dropped when the queue is dropped. If we dropped it
                 // here, that would cause a double free!
