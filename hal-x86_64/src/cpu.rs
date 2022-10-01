@@ -80,8 +80,9 @@ pub fn halt() -> ! {
 
 impl fmt::Debug for Port {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { num } = self;
         f.debug_struct("Port")
-            .field("num", &format_args!("{:#02x}", self.num))
+            .field("num", &format_args!("{num:#02x}"))
             .finish()
     }
 }
@@ -213,10 +214,9 @@ impl fmt::Debug for DtablePtr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // avoid creating misaligned references by moving these i guess? idk why
         // rustc is okay with this but i'll trust it.
-        let limit = self.limit;
-        let base = self.base;
+        let Self { limit, base } = *self;
         f.debug_struct("DtablePtr")
-            .field("base", &format_args!("{:0p}", base))
+            .field("base", &format_args!("{base:0p}",))
             .field("limit", &limit)
             .finish()
     }

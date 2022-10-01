@@ -531,9 +531,10 @@ impl<A: Address, S: StaticSize> cmp::Ord for Page<A, S> {
 
 impl<A: fmt::Debug, S: Size + fmt::Display> fmt::Debug for Page<A, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { base, size } = self;
         f.debug_struct("Page")
-            .field("base", &self.base)
-            .field("size", &format_args!("{}", self.size))
+            .field("base", base)
+            .field("size", &format_args!("{size}"))
             .finish()
     }
 }
@@ -635,9 +636,10 @@ where
     S: Size + fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { start, end } = self;
         f.debug_struct("PageRange")
-            .field("start", &self.start)
-            .field("end", &self.end)
+            .field("start", start)
+            .field("end", end)
             .finish()
     }
 }
@@ -656,8 +658,9 @@ unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
 
 impl<S: Size + fmt::Display> fmt::Debug for NotAligned<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { size } = self;
         f.debug_struct("NotAligned")
-            .field("size", &format_args!("{}", self.size))
+            .field("size", &format_args!("{size}"))
             .finish()
     }
 }

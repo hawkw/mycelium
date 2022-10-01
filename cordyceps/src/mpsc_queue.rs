@@ -861,16 +861,24 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            head,
+            tail: _,
+            has_consumer,
+            stub,
+            stub_is_static,
+        } = self;
         f.debug_struct("MpscQueue")
-            .field("head", &format_args!("{:p}", self.head.load(Acquire)))
+            .field("head", &format_args!("{:p}", head.load(Acquire)))
             // only the consumer can load the tail; trying to print it here
             // could be racy.
             // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
             // and then it would be okay to print the tail...but then we would
             // lose loom checking for tail accesses...
             .field("tail", &format_args!("..."))
-            .field("has_consumer", &self.has_consumer.load(Acquire))
-            .field("stub", &self.stub)
+            .field("has_consumer", &has_consumer.load(Acquire))
+            .field("stub", stub)
+            .field("stub_is_static", stub_is_static)
             .finish()
     }
 }
@@ -969,20 +977,15 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let tail = self.q.tail.with(|tail| unsafe {
+        let Self { q } = self;
+        let tail = q.tail.with(|tail| unsafe {
             // Safety: it's okay for the consumer to access the tail cell, since
             // we have exclusive access to it.
             *tail
         });
         f.debug_struct("Consumer")
-            .field("head", &format_args!("{:p}", tail))
-            // only the consumer can load the tail; trying to print it here
-            // could be racy.
-            // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
-            // and then it would be okay to print the tail...but then we would
-            // lose loom checking for tail accesses...
+            .field("q", &q)
             .field("tail", &tail)
-            .field("has_consumer", &self.q.has_consumer.load(Acquire))
             .finish()
     }
 }
@@ -1180,20 +1183,15 @@ feature! {
 
     impl<T: Linked<Links<T>>> fmt::Debug for OwnedConsumer<T> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let tail = self.q.tail.with(|tail| unsafe {
+            let Self { q } = self;
+            let tail = q.tail.with(|tail| unsafe {
                 // Safety: it's okay for the consumer to access the tail cell, since
                 // we have exclusive access to it.
-               *tail
+                *tail
             });
             f.debug_struct("OwnedConsumer")
-                .field("head", &self.q.head.load(Acquire))
-                // only the consumer can load the tail; trying to print it here
-                // could be racy.
-                // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
-                // and then it would be okay to print the tail...but then we would
-                // lose loom checking for tail accesses...
+                .field("q", &q)
                 .field("tail", &tail)
-                .field("has_consumer", &self.q.has_consumer.load(Acquire))
                 .finish()
         }
     }
@@ -1533,9 +1531,11 @@ mod test_util {
 
     impl fmt::Debug for Entry {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let Self { links, val, _track } = self;
             f.debug_struct("Entry")
-                .field("links", &self.links)
-                .field("val", &self.val)
+                .field("links", links)
+                .field("val", val)
+                .field("_track", _track)
                 .finish()
         }
     }
