@@ -199,6 +199,7 @@ fn injector() {
     const TASKS: usize = if cfg!(loom) { THREADS } else { 10 };
     const THREADS: usize = 3;
 
+    crate::util::trace_init();
     // for some reason this branches slightly too many times for the default max
     // branches, IDK why...
     let mut model = loom::model::Builder::new();
@@ -215,16 +216,19 @@ fn injector() {
                     let scheduler = Scheduler::new();
                     info!(worker, "started");
                     loop {
-                        let tick = scheduler.tick();
                         let stolen = injector
                             .try_steal()
-                            .map(|stealer| stealer.spawn_n(&scheduler, usize::MAX))
-                            .unwrap_or(0);
+                            .map(|stealer| stealer.spawn_n(&scheduler, usize::MAX));
+                        let tick = scheduler.tick();
                         info!(worker, ?tick, ?stolen);
-                        if !tick.has_remaining && stolen == 0 && all_spawned.load(Ordering::SeqCst)
+                        if test_dbg!(!tick.has_remaining)
+                            && test_dbg!(stolen == Err(TryStealError::Empty))
+                            && test_dbg!(all_spawned.load(Ordering::SeqCst))
                         {
+                            info!(worker, "finishing");
                             break;
                         }
+                        info!(worker, "continuing");
                         thread::yield_now();
                     }
 
@@ -235,12 +239,14 @@ fn injector() {
             })
             .collect::<Vec<_>>();
 
-        for _ in 0..TASKS {
+        for task in 0..TASKS {
             injector.spawn({
                 let completed = completed.clone();
                 track_future(async move {
+                    info!(task, "started");
                     future::yield_now().await;
                     completed.fetch_add(1, Ordering::SeqCst);
+                    info!(task, "completed");
                 })
             });
         }

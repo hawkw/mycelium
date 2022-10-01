@@ -119,7 +119,7 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
     NonNull::new_unchecked(ptr)
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 pub(crate) use self::test::trace_init;
 
 pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg: &str) -> T {
@@ -132,7 +132,6 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
 #[cfg(test)]
 pub(crate) mod test {
 
-    #[cfg(not(loom))]
     pub(crate) fn trace_init() {
         trace_init_with_default("maitake=debug,cordyceps=debug");
     }
@@ -155,6 +154,27 @@ pub(crate) mod test {
             .without_time()
             .finish();
         let _ = tracing_02::collect::set_global_default(collector);
+    }
+
+    #[cfg(loom)]
+    pub(crate) fn trace_init_with_default(default: &str) {
+        use tracing_subscriber_03::filter::{EnvFilter, LevelFilter};
+        let env = std::env::var("RUST_LOG").unwrap_or_default();
+        let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
+        let filter = if env.is_empty() {
+            builder
+                .parse(default)
+                .unwrap()
+                .add_directive("loom=debug".parse().unwrap())
+        } else {
+            builder.parse_lossy(env)
+        };
+        let collector = tracing_subscriber_03::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .without_time()
+            .finish();
+        let _ = tracing_01::subscriber::set_global_default(collector);
     }
 
     #[allow(dead_code)]
