@@ -577,7 +577,7 @@ impl StaticScheduler {
     /// A [`Tick`] struct with data describing what occurred during the
     /// scheduler tick.
     ///
-    /// [run-loops]: crate::scheduler::#executing-tasks
+    /// [run-loops]: crate::scheduler#executing-tasks
     pub fn tick(&'static self) -> Tick {
         self.0.tick_n(Self::DEFAULT_TICK_SIZE)
     }
@@ -913,7 +913,7 @@ feature! {
     /// A [`Tick`] struct with data describing what occurred during the
     /// scheduler tick.
     ///
-    /// [run-loops]: crate::scheduler::#executing-tasks
+    /// [run-loops]: crate::scheduler#executing-tasks
         pub fn tick(&self) -> Tick {
             self.0.tick_n(Self::DEFAULT_TICK_SIZE)
         }
