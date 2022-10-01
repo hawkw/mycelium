@@ -194,7 +194,9 @@ fn cross_thread_spawn() {
 
 #[test]
 fn injector() {
-    const TASKS: usize = 10;
+    // when running in loom, don't spawn all ten tasks, because that makes this
+    // test run F O R E V E R.
+    const TASKS: usize = if cfg!(loom) { THREADS } else { 10 };
     const THREADS: usize = 3;
 
     // for some reason this branches slightly too many times for the default max
