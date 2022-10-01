@@ -61,6 +61,35 @@ impl<S: Schedule> Injector<S> {
     }
 }
 
+impl<S> fmt::Debug for Injector<S> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // determine if alt-mode is enabled *before* constructing the
+        // `DebugStruct`, because that mutably borrows the formatter.
+        let alt = f.alternate();
+
+        let Self {
+            queue,
+            tasks,
+            _scheduler_type,
+        } = self;
+        let mut debug = f.debug_struct("Injector");
+        debug
+            .field("queue", queue)
+            .field("tasks", &tasks.load(Relaxed));
+
+        // only include the kind of wordy type name field if alt-mode
+        // (multi-line) formatting is enabled.
+        if alt {
+            debug.field(
+                "scheduler",
+                &format_args!("PhantomData<{}>", core::any::type_name::<S>()),
+            );
+        }
+
+        debug.finish()
+    }
+}
+
 // === impl Stealer ===
 
 impl<'worker, S: Schedule> Stealer<'worker, S> {
@@ -169,11 +198,17 @@ impl<S> fmt::Debug for Stealer<'_, S> {
         // `DebugStruct`, because that mutably borrows the formatter.
         let alt = f.alternate();
 
+        let Self {
+            queue,
+            snapshot,
+            tasks,
+            _scheduler_type,
+        } = self;
         let mut debug = f.debug_struct("Stealer");
         debug
-            .field("queue", &self.queue)
-            .field("snapshot", &self.snapshot)
-            .field("tasks", &self.tasks.load(Relaxed));
+            .field("queue", queue)
+            .field("snapshot", snapshot)
+            .field("tasks", &tasks.load(Relaxed));
 
         // only include the kind of wordy type name field if alt-mode
         // (multi-line) formatting is enabled.

@@ -196,8 +196,8 @@ fn cross_thread_spawn() {
 fn injector() {
     // when running in loom, don't spawn all ten tasks, because that makes this
     // test run F O R E V E R.
-    const TASKS: usize = if cfg!(loom) { THREADS } else { 10 };
-    const THREADS: usize = 3;
+    const TASKS: usize = 10;
+    const THREADS: usize = if cfg!(loom) { 2 } else { 5 };
 
     crate::util::trace_init();
     // for some reason this branches slightly too many times for the default max
