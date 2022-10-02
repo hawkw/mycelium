@@ -193,11 +193,14 @@ fn cross_thread_spawn() {
 }
 
 #[test]
+// this gets OOMkilled when running under loom, probably due to buffering too
+// much tracing data across a huge number of iterations. skip it for now.
+#[cfg_attr(loom, ignore)]
 fn injector() {
     // when running in loom, don't spawn all ten tasks, because that makes this
-    // test run F O R E V E R.
-    const TASKS: usize = if cfg!(loom) { 4 } else { 10 };
-    const THREADS: usize = TASKS / 2;
+    // test run F O R E V E R
+    const TASKS: usize = if cfg!(loom) { 2 } else { 10 };
+    const THREADS: usize = if cfg!(loom) { 2 } else { 5 };
 
     crate::util::trace_init();
     // for some reason this branches slightly too many times for the default max
