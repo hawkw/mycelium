@@ -9,6 +9,8 @@ pub use core::sync::atomic;
 pub mod cell;
 pub mod once;
 pub mod spin;
+pub mod tearable;
+
 #[doc(inline)]
 pub use self::once::{InitOnce, Lazy};
 

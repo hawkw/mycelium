@@ -10,6 +10,14 @@ mod inner {
 mod inner {
     #![allow(dead_code)]
 
+    #[cfg(test)]
+    pub(crate) use std::thread;
+
+    #[cfg(test)]
+    pub(crate) fn model(f: impl Fn()) {
+        f()
+    }
+
     pub(crate) mod alloc {
         /// Track allocations, detecting leaks
         #[derive(Debug, Default)]

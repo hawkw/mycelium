@@ -50,7 +50,17 @@ impl Backoff {
     #[inline(always)]
     pub fn spin(&mut self) {
         // Issue 2^exp pause instructions.
+        #[cfg(not(loom))]
         for _ in 0..(1 << self.exp) {
+            hint::spin_loop();
+        }
+
+        #[cfg(loom)]
+        {
+            // when `loom` is in use, we only issue the hint once, because
+            // otherwise, loom will do a bunch of meaningless thread switches.
+            // Issue 2^exp pause instructions.
+            test_dbg!(1 << self.exp);
             hint::spin_loop();
         }
 
