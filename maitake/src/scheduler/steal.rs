@@ -6,8 +6,15 @@ use mycelium_util::fmt;
 
 /// An injector queue for spawning tasks on multiple [`Scheduler`] instances.
 pub struct Injector<S> {
+    /// The queue.
     queue: MpscQueue<Header>,
+
+    /// The number of tasks in the queue.
     tasks: AtomicUsize,
+
+    /// An `Injector` can only be used with [`Schedule`] implementations that
+    /// are the same type, because the task allocation is sized based on the
+    /// scheduler value.
     _scheduler_type: PhantomData<fn(S)>,
 }
 
@@ -17,15 +24,30 @@ pub struct Injector<S> {
 /// While this handle exists, no other worker can steal tasks from the queue.
 pub struct Stealer<'worker, S> {
     queue: mpsc_queue::Consumer<'worker, Header>,
+
+    /// The initial task count in the target queue when this `Stealer` was created.
     snapshot: usize,
+
+    /// A reference to the target queue's current task count. This is used to
+    /// decrement the task count when stealing.
     tasks: &'worker AtomicUsize,
+
+    /// The type of the [`Schedule`] implementation that tasks are being stolen
+    /// from.
+    ///
+    /// This must be the same type as the scheduler that is stealing tasks, as
+    /// the size of the scheduler value stored in the task must be the same.
     _scheduler_type: PhantomData<fn(S)>,
 }
 
+/// Errors returned by [`Stealer::try_steal`].
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TryStealError {
+    /// Tasks could not be stolen because the targeted queue already has a
+    /// consumer.
     Busy,
+    /// No tasks were available to steal.
     Empty,
 }
 
@@ -239,6 +261,9 @@ feature! {
     use super::{BoxStorage, Task};
 
     impl<S: Schedule> Injector<S> {
+        /// Returns a new `Injector` queue with a dynamically heap-allocated
+        /// [`TaskStub`].
+        #[must_use]
         pub fn new() -> Self {
             let stub_task = Box::new(Task::new_stub());
             let (stub_task, _) =
