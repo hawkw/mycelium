@@ -14,6 +14,13 @@
 //! they must be driven by a [`Timer`], which tracks the current time and
 //! notifies time-based futures when their deadlines are reached.
 //!
+//! The [`Timer`] struct implements a [hierarchical timer wheel][wheel], a data
+//! structure for tracking large numbers of timers efficiently. It is used to
+//! create [`Sleep`]s and [`Timeout`]s, and notify them when their deadlines
+//! complete. In order to be used, a [`Timer`] must be driven by a hardware time
+//! source. See [the `Timer` documentation][driving-timers] for more information
+//! on using this type to implement a system timer.
+//!
 //! ### Global Timers
 //!
 //! In most cases, it is desirable to have a single global timer instance that
@@ -33,6 +40,8 @@
 //! [`set_global_timer`] after a global timer has been initialized will
 //! return an error.
 //!
+//! [wheel]: http://www.cs.columbia.edu/~nahum/w6998/papers/sosp87-timing-wheels.pdf
+//! [driving-timers]: Timer#driving-timers
 #![warn(missing_docs, missing_debug_implementations)]
 pub mod timeout;
 mod timer;
@@ -63,9 +72,19 @@ use core::future::Future;
 /// For a version of this function that does not panic, see [`try_sleep()`]
 /// instead.
 ///
+/// # Examples
+///
+/// ```
+/// use maitake::time;
+///
+/// async fn example() {
+///     time::sleep(time::Duration::from_secs(1)).await;
+///     println!("one second has passed!");
+/// }
+/// ```
+///
 /// [global]: #global-timers
 /// [max]: Timer::max_duration
-
 #[track_caller]
 
 pub fn sleep(duration: Duration) -> Sleep<'static> {
@@ -93,6 +112,28 @@ pub fn sleep(duration: Duration) -> Sleep<'static> {
 ///
 /// This function does not panic. For a version of this function that panics
 /// rather than returning a [`TimerError`], use [`sleep()`] instead.
+///
+/// # Examples
+///
+/// ```
+/// use maitake::time;
+///
+/// async fn example() {
+///     // try to sleep for one second
+///     match time::try_sleep(time::Duration::from_secs(1)) {
+///         // the sleep future was created successfully, so we can now await it.
+///         Ok(sleep) => {
+///             sleep.await;
+///             println!("one second has passed!");
+///         },
+///         Err(time::TimerError::NoGlobalTimer) =>
+///             println!("timer is not initialized"),
+///         Err(time::TimerError::DurationTooLong { .. }) =>
+///             unreachable!("1 second should not exceed the max duration"),
+///         Err(error) => panic!("unexpected timer error: {error}"),
+///     }
+/// }
+/// ```
 ///
 /// [global]: #global-timers
 pub fn try_sleep(duration: Duration) -> Result<Sleep<'static>, TimerError> {
@@ -129,6 +170,27 @@ pub fn try_sleep(duration: Duration) -> Result<Sleep<'static>, TimerError> {
 ///
 /// For a version of this function that does not panic, use the [`try_timeout()`]
 /// function instead.
+///
+/// # Examples
+///
+/// ```
+/// use maitake::time::{timeout, Duration};
+///
+/// /// A function that might wait for a long time before it completes.
+/// async fn do_slow_stuff() {
+///    // do some slow stuff ...
+/// }
+///
+/// async fn example() {
+///     // try to do some slow stuff, but if it takes longer than 10 seconds,
+///     // give up.
+///     match timeout(Duration::from_secs(10), do_slow_stuff()).await {
+///         Ok(_) => println!("slow stuff completed successfully"),
+///         Err(timeout::Elapsed(_)) =>
+///             eprintln!("slow stuff did not complete in 10 seconds!"),
+///     }
+/// }
+/// ```
 ///
 /// [global]: #global-timers
 /// [max]: Timer::max_duration
@@ -176,6 +238,37 @@ pub fn timeout<F: Future>(duration: Duration, future: F) -> Timeout<'static, F> 
 ///
 /// This function does not panic. For a version of this function that panics
 /// rather than returning a [`TimerError`], use [`timeout()`] instead.
+///
+/// # Examples
+///
+/// ```
+/// use maitake::time::{self,, Duration};
+///
+/// /// A function that might wait for a long time before it completes.
+/// async fn do_slow_stuff() {
+///    // do some slow stuff ...
+/// }
+///
+/// async fn example() {
+///     // if we can't create the timeout, just wait for the future to complete
+///     // with no timeout.
+///     match time::try_timeout(Duration::from_secs(10), do_slow_stuff()) {
+///         // we successfully created a timeout, so await the timeout future.
+///         Ok(timeout) => match timeout.await {
+///             Ok(_) => {},
+///             Err(time::timeout::Elapsed(_)) => {
+///                 eprintln!("slow stuff did not complete in 10 seconds!");
+///                 return;
+///             },
+///         },
+///         // a timeout could not be created, so just try the slow stuff
+///         // without setting the timeout.
+///         Err(_) => do_slow_stuff().await,
+///     };
+///
+///     println!("slow stuff completed successfully");
+/// }
+/// ```
 ///
 /// [global]: #global-timers
 /// [`Elapsed`]: timeout::Elapsed
