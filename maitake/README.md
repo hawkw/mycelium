@@ -35,21 +35,81 @@ supporting `#![no_std]` projects.
 
 Unlike other async runtime implementations, `maitake` does *not* provide a
 complete, fully-functional runtime implementation. Instead, it provides reusable
-implementations of common functionality, including a [task system],
-[scheduling], and [notification primitives][wait]. These components may be
-combined with other runtime services, such as timers and I/O resources, to
-produce a complete, application-specific async runtime.
+implementations of common functionality, including a [task system][task],
+[scheduler], a [timer wheel][timer], and [synchronization primitives][sync].
+These components may be combined with other runtime services, such as timers and
+I/O resources, to produce a complete, application-specific async runtime.
 
 `maitake` was initially designed for use in the [mycelium] and [mnemOS]
 operating systems, but may be useful for other projects as well.
 
 [`core::task`]: https://doc.rust-lang.org/stable/core/task/index.html
 [`core::future`]: https://doc.rust-lang.org/stable/core/future/index.html
-[task system]: https://mycelium.elizas.website/maitake/task/index.html
+[task]: https://mycelium.elizas.website/maitake/task/index.html
 [scheduling]: https://mycelium.elizas.website/maitake/scheduler/index.html
-[wait]: https://mycelium.elizas.website/maitake/wait/index.html
+[timer]: https://mycelium.elizas.website/maitake/time/struct.Timer.html
+[sync]: https://mycelium.elizas.website/maitake/sync/index.html
 [mycelium]: https://github.com/hawkw/mycelium
 [mnemOS]: https://mnemos.jamesmunns.com
+## a tour of `maitake`
+
+`maitake` currently provides the following major API components:
+
+- **[`maitake::task`][task]: the `maitake` task system**. This module contains the
+  [`Task`] type, representing an asynchronous task (a [`Future`] that can be
+  spawned on the runtime), and the [`TaskRef`] type, a reference-counted,
+  type-erased pointer to a spawned [`Task`].
+
+  Additionally, it also contains other utility types for working with tasks.
+  These include the [`JoinHandle`] type, which can be used to await the output
+  of a task once it has been spawned, and the [`task::Builder`] type, for
+  configuring a task prior to spawning it.
+
+- **[`maitake::scheduler`][scheduler]: schedulers for executing tasks**. In order to
+  actually execute asynchronous tasks, one or more schedulers is required. This
+  module contains the [`Scheduler`] and [`StaticScheduler`] types, which
+  implement task schedulers, and utilities for constructing and using
+  schedulers.
+
+- **[`maitake::time`][time]: timers and futures for tracking time**. This module
+  contains tools for waiting for time-based events in asynchronous systems. It
+  provides the [`Sleep`] type, a [`Future`] which completes after a specified
+  duration, and the [`Timeout`] type, which wraps another [`Future`] and cancels
+  it if it runs for longer than a specified duration without completing.
+
+  In order to use these futures, a system must have a timer. The `maitake::time`
+  module therefore provides the [`Timer`] type, a hierarchical timer wheel which
+  can track and notify a large number of time-based futures efficiently. A
+  [`Timer`] must be [driven by a hardware time source][time-source], such as an
+  interrupt or timestamp counter.
+
+- **[`maitake::sync`][sync]: asynchronous synchronization primitives**. This
+  module provides asynchronous implementations of common [synchronization
+  primitives], including a [`Mutex`], [`RwLock`], and [`Semaphore`].
+  Additionally, it provides lower-level synchronization types which may be
+  useful when implementing custom synchronization strategies.
+
+- **[`maitake::future`][future]: utility futures**. This module provides
+  general-purpose utility [`Future`] types that may be used without the Rust
+  standard library.
+
+[`Task`]: https://mycelium.elizas.website/maitake/task/struct.Task.html
+[`Future`]: https://doc.rust-lang.org/stable/core/future/trait.Future.html
+[`TaskRef`]: https://mycelium.elizas.website/maitake/task/struct.TaskRef.html
+[`JoinHandle`]: https://mycelium.elizas.website/maitake/task/struct.JoinHandle.html
+[`task::Builder`]: https://mycelium.elizas.website/maitake/task/struct.Builder.html
+[`Scheduler`]: https://mycelium.elizas.website/maitake/scheduler/struct.Scheduler.html
+[`StaticScheduler`]: https://mycelium.elizas.website/maitake/scheduler/struct.StaticScheduler.html
+[time]: https://mycelium.elizas.website/maitake/time/index.html
+[`Sleep`]: https://mycelium.elizas.website/maitake/time/struct.Sleep.html
+[`Timeout`]: https://mycelium.elizas.website/maitake/time/struct.Timeout.html
+[`Timer`]: https://mycelium.elizas.website/maitake/time/struct.Timer.html
+[time-source]: https://mycelium.elizas.website/maitake/time/timer/struct.Timer.html#driving-timers
+[synchronization primitives]: https://wiki.osdev.org/Synchronization_Primitives
+[`Mutex`]: https://mycelium.elizas.website/maitake/sync/struct.Mutex.html
+[`RwLock`]: https://mycelium.elizas.website/maitake/sync/struct.RwLock.html
+[`Semaphore`]: https://mycelium.elizas.website/maitake/sync/struct.Semaphore.html
+[future]: https://mycelium.elizas.website/maitake/future/index.html
 
 ## usage considerations
 
