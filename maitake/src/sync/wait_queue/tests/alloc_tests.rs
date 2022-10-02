@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
 fn wake_all() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
     let scheduler = Scheduler::new();
@@ -38,7 +38,7 @@ fn wake_all() {
 
 #[test]
 fn close() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
     let scheduler = Scheduler::new();
@@ -71,7 +71,7 @@ fn close() {
 
 #[test]
 fn wake_one() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
     let scheduler = Scheduler::new();

@@ -39,7 +39,7 @@ fn notify_future() {
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     let chan = Chan::new(1);
 
     MyBoxTask::spawn(&SCHEDULER, {
@@ -66,7 +66,7 @@ fn notify_external() {
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     let chan = Chan::new(1);
 
     MyBoxTask::spawn(&SCHEDULER, {

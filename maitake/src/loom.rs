@@ -156,7 +156,7 @@ mod inner {
 
     #[cfg(test)]
     pub(crate) fn model(f: impl FnOnce()) {
-        crate::util::test::trace_init();
+        let _trace = crate::util::test::trace_init();
         let registry = alloc::track::Registry::default();
         let _tracking = registry.set_default();
         f();

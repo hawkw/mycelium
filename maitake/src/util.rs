@@ -132,12 +132,12 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
 #[cfg(test)]
 pub(crate) mod test {
 
-    pub(crate) fn trace_init() {
-        trace_init_with_default("maitake=debug,cordyceps=debug");
+    pub(crate) fn trace_init() -> impl Drop {
+        trace_init_with_default("maitake=debug,cordyceps=debug")
     }
 
     #[cfg(not(loom))]
-    pub(crate) fn trace_init_with_default(default: &str) {
+    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
         use tracing_subscriber::filter::{EnvFilter, LevelFilter};
         let env = std::env::var("RUST_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
@@ -153,19 +153,21 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        let _ = tracing_02::collect::set_global_default(collector);
+        tracing_02::collect::set_default(collector)
     }
 
     #[cfg(loom)]
-    pub(crate) fn trace_init_with_default(default: &str) {
+    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
         use tracing_subscriber_03::filter::{EnvFilter, LevelFilter};
-        let env = std::env::var("RUST_LOG").unwrap_or_default();
+        let env = std::env::var("LOOM_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
         let filter = if env.is_empty() {
             builder
                 .parse(default)
                 .unwrap()
-                .add_directive("loom=debug".parse().unwrap())
+                // enable "loom=info" if using the default, so that we get
+                // loom's thread number and iteration count traces.
+                .add_directive("loom=info".parse().unwrap())
         } else {
             builder.parse_lossy(env)
         };
@@ -174,7 +176,7 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        let _ = tracing_01::subscriber::set_global_default(collector);
+        tracing_01::subscriber::set_global_default(collector)
     }
 
     #[allow(dead_code)]

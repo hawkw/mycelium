@@ -1,4 +1,3 @@
-
 use super::super::*;
 use crate::loom::sync::Arc;
 use crate::scheduler::Scheduler;
@@ -7,7 +6,7 @@ use futures::{future::poll_fn, pin_mut, select_biased, FutureExt};
 
 #[test]
 fn enqueue() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
     static ENQUEUED: AtomicUsize = AtomicUsize::new(0);
 
@@ -66,7 +65,7 @@ fn enqueue() {
 
 #[test]
 fn duplicate() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
     static ENQUEUED: AtomicUsize = AtomicUsize::new(0);
     static ERRORED: AtomicUsize = AtomicUsize::new(0);
@@ -120,7 +119,7 @@ fn duplicate() {
 
 #[test]
 fn close() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
     let scheduler = Scheduler::new();
@@ -153,7 +152,7 @@ fn close() {
 
 #[test]
 fn wake_one() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
     let scheduler = Scheduler::new();
@@ -226,7 +225,7 @@ impl Drop for CountDropVal {
 
 #[test]
 fn drop_no_wake() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
     static KEY_DROPS: AtomicUsize = AtomicUsize::new(0);
     static VAL_DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -270,7 +269,7 @@ fn drop_no_wake() {
 
 #[test]
 fn drop_wake_completed() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
     static KEY_DROPS: AtomicUsize = AtomicUsize::new(0);
     static VAL_DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -327,7 +326,7 @@ fn drop_wake_completed() {
 
 #[test]
 fn drop_wake_bailed() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
     static KEY_DROPS: AtomicUsize = AtomicUsize::new(0);
     static VAL_DROPS: AtomicUsize = AtomicUsize::new(0);

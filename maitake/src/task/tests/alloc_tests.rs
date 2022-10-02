@@ -60,7 +60,7 @@ fn empty_task_size() {
 
 #[test]
 fn join_handle_wakes() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -85,7 +85,7 @@ fn join_handle_wakes() {
 
 #[test]
 fn join_handle_cancels_before_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -113,7 +113,7 @@ fn join_handle_cancels_before_poll() {
 
 #[test]
 fn join_handle_cancels_after_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -141,7 +141,7 @@ fn join_handle_cancels_after_poll() {
 
 #[test]
 fn taskref_cancels_before_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -170,7 +170,7 @@ fn taskref_cancels_before_poll() {
 
 #[test]
 fn taskref_cancels_after_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -199,7 +199,7 @@ fn taskref_cancels_after_poll() {
 
 #[test]
 fn drop_join_handle() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicBool = AtomicBool::new(false);
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {

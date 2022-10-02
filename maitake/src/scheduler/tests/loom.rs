@@ -202,7 +202,7 @@ fn injector() {
     const TASKS: usize = if cfg!(loom) { 2 } else { 10 };
     const THREADS: usize = if cfg!(loom) { 2 } else { 5 };
 
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     // for some reason this branches slightly too many times for the default max
     // branches, IDK why...
     let mut model = loom::model::Builder::new();
