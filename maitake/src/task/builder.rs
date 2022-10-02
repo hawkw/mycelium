@@ -127,7 +127,7 @@ impl<'a, S: Schedule + 'static> Builder<'a, S> {
             use super::{BoxStorage, Task};
 
             let mut task = Box::new(Task::<S, _, BoxStorage>::new(future));
-            task.bind( self.scheduler.clone());
+            task.bind(self.scheduler.clone());
             let (task, join) = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
             self.scheduler.schedule(task);
             join

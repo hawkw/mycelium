@@ -153,6 +153,10 @@
 //!     [`Timer`](crate::time::Timer) implementation, but other timers could be
 //!     used as well.
 //!
+//! # Scheduling in Multi-Core Systems
+//!
+//! WIP ELIZA WRITE THIS
+//!
 //! [woken]: task::Waker::wake
 //! [polling]: core::future::Future::poll
 //! [task]: crate::task
