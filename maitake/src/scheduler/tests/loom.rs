@@ -153,7 +153,8 @@ fn current_task() {
 }
 
 #[test]
-#[ignore] // this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
+// this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
+#[cfg_attr(loom, ignore)]
 fn cross_thread_spawn() {
     const TASKS: usize = 10;
     loom::model(|| {
@@ -195,21 +196,14 @@ fn cross_thread_spawn() {
 #[test]
 // this gets OOMkilled when running under loom, probably due to buffering too
 // much tracing data across a huge number of iterations. skip it for now.
-// #[cfg_attr(loom, ignore)]
+#[cfg_attr(loom, ignore)]
 fn injector() {
     // when running in loom, don't spawn all ten tasks, because that makes this
     // test run F O R E V E R
     const TASKS: usize = if cfg!(loom) { 2 } else { 10 };
     const THREADS: usize = if cfg!(loom) { 2 } else { 5 };
-    // use a less verbose default tracing filter under loom, to try and stop
-    // getting oomkilled.
-    const TRACE_FILTER: &str = if cfg!(loom) {
-        "maitake=info,loom=info"
-    } else {
-        "maitake=trace,cordyceps=trace"
-    };
+    let _trace = crate::util::trace_init();
 
-    let _trace = crate::util::test::trace_init_with_default(TRACE_FILTER);
     // for some reason this branches slightly too many times for the default max
     // branches, IDK why...
     let mut model = loom::model::Builder::new();
