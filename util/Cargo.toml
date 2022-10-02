@@ -27,6 +27,9 @@ tracing = { git = "https://github.com/tokio-rs/tracing", default_features = fals
 [target.'cfg(loom)'.dependencies]
 loom = "0.5.5"
 
+[target.'cfg(loom)'.dev-dependencies]
+tracing_01 = { package = "tracing", version = "0.1.36" }
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

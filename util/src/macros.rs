@@ -66,3 +66,34 @@ macro_rules! unreachable_unchecked {
         }
     });
 }
+
+#[cfg(all(test, not(loom)))]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        match $x {
+            x => {
+                tracing::debug!("{} = {x:?}", stringify!($x));
+                x
+            }
+        }
+    };
+}
+
+#[cfg(all(test, loom))]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        match $x {
+            x => {
+                tracing_01::debug!("{} = {x:?}", stringify!($x));
+                x
+            }
+        }
+    };
+}
+
+#[cfg(not(test))]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        $x
+    };
+}
