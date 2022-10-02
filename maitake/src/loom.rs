@@ -149,7 +149,10 @@ mod inner {
             }
 
             pub(crate) fn check(&self, f: impl FnOnce()) {
-                super::model(f)
+                let registry = super::alloc::track::Registry::default();
+                let _tracking = registry.set_default();
+                f();
+                registry.check();
             }
         }
     }
@@ -157,10 +160,7 @@ mod inner {
     #[cfg(test)]
     pub(crate) fn model(f: impl FnOnce()) {
         let _trace = crate::util::test::trace_init();
-        let registry = alloc::track::Registry::default();
-        let _tracking = registry.set_default();
-        f();
-        registry.check();
+        model::Builder::new().check(f)
     }
 
     pub(crate) mod hint {

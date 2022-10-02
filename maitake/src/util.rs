@@ -176,7 +176,7 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        tracing_01::subscriber::set_global_default(collector)
+        tracing_01::subscriber::set_default(collector)
     }
 
     #[allow(dead_code)]
