@@ -66,3 +66,40 @@ macro_rules! unreachable_unchecked {
         }
     });
 }
+
+#[cfg(test)]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        match $x {
+            x => {
+                test_trace!(
+                    location = %core::panic::Location::caller(),
+                    "{} = {x:?}",
+                    stringify!($x)
+                );
+                x
+            }
+        }
+    };
+}
+
+#[cfg(not(test))]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        $x
+    };
+}
+
+#[cfg(all(test, not(loom)))]
+macro_rules! test_trace {
+    ($($arg:tt)+) => {
+        tracing::trace!($($arg)+);
+    };
+}
+
+#[cfg(all(test, loom))]
+macro_rules! test_trace {
+    ($($arg:tt)+) => {
+        tracing_01::trace!($($arg)+);
+    };
+}
