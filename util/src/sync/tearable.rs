@@ -142,8 +142,11 @@ mod tests {
     fn spmc() {
         const VALS: &[u64] = &[0, u64::MAX, u32::MAX as u64 + 1];
         const READERS: usize = 2;
-
-        loom::model(|| {
+        let _trace = crate::test_util::trace_init();
+        
+        let mut builder = loom::model::Builder::new();
+        builder.max_branches = 10_000;
+        builder.check(|| {
             let t = Arc::new(TearableU64::new(0));
 
             let threads = (0..READERS)
