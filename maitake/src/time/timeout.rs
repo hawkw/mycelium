@@ -47,7 +47,7 @@ pub struct Timeout<'timer, F> {
 
 /// An error indicating that a [`Timeout`] elapsed before the inner [`Future`]
 /// completed.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Elapsed(Duration);
 
 // === impl Timeout ===
@@ -132,6 +132,12 @@ impl fmt::Display for Elapsed {
     }
 }
 
+impl Elapsed {
+    /// Returns the [`Duration`] the inner [`Future`] was allowed to run for.
+    pub fn duration(self) -> Duration {
+        self.0
+    }
+}
 // === impl Timer ===
 
 impl Timer {
