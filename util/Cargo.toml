@@ -21,7 +21,7 @@ mycelium-bitfield = { path = "../bitfield", default-features = false }
 
 [dev-dependencies]
 proptest = "1"
-tracing-subscriber = { git = "https://github.com/tokio-rs/tracing" }
+tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = ["fmt", "env-filter"]  }
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes", "std"] }
 
 [target.'cfg(loom)'.dependencies]
@@ -29,6 +29,8 @@ loom = "0.5.5"
 
 [target.'cfg(loom)'.dev-dependencies]
 tracing_01 = { package = "tracing", version = "0.1.36" }
+tracing-subscriber_03 = { package = "tracing-subscriber", version = "0.3.15", features = ["fmt", "env-filter"] }
+
 
 [package.metadata.docs.rs]
 all-features = true
