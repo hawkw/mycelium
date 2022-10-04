@@ -205,9 +205,9 @@ impl<'a, T: fmt::Display> fmt::Display for MutexGuard<'a, T> {
     }
 }
 
-#[cfg(all(test, loom))]
+#[cfg(test)]
 mod tests {
-    use loom::thread;
+    use crate::loom::{self, thread};
     use std::prelude::v1::*;
     use std::sync::Arc;
 
@@ -220,19 +220,19 @@ mod tests {
             let mutex2 = mutex.clone();
 
             let t1 = thread::spawn(move || {
-                println!("t1: locking...");
+                test_info!("t1: locking...");
                 let mut lock = mutex2.lock();
-                println!("t1: locked");
+                test_info!("t1: locked");
                 lock.push_str("bbbbb");
-                println!("t1: dropping...");
+                test_info!("t1: dropping...");
             });
 
             {
-                println!("t2: locking...");
+                test_info!("t2: locking...");
                 let mut lock = mutex.lock();
-                println!("t2: locked");
+                test_info!("t2: locked");
                 lock.push_str("bbbbb");
-                println!("t2: dropping...");
+                test_info!("t2: dropping...");
             }
             t1.join().unwrap();
         });

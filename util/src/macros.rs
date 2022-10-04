@@ -103,3 +103,17 @@ macro_rules! test_trace {
         tracing_01::trace!($($arg)+);
     };
 }
+
+#[cfg(all(test, not(loom)))]
+macro_rules! test_info {
+    ($($arg:tt)+) => {
+        tracing::trace!($($arg)+);
+    };
+}
+
+#[cfg(all(test, loom))]
+macro_rules! test_info {
+    ($($arg:tt)+) => {
+        tracing_01::trace!($($arg)+);
+    };
+}
