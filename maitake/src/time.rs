@@ -186,8 +186,8 @@ pub fn try_sleep(duration: Duration) -> Result<Sleep<'static>, TimerError> {
 ///     // give up.
 ///     match timeout(Duration::from_secs(10), do_slow_stuff()).await {
 ///         Ok(_) => println!("slow stuff completed successfully"),
-///         Err(timeout::Elapsed(_)) =>
-///             eprintln!("slow stuff did not complete in 10 seconds!"),
+///         Err(elapsed) =>
+///             eprintln!("slow stuff did not complete in {:?}!", elapsed.duration()),
 ///     }
 /// }
 /// ```
@@ -242,7 +242,7 @@ pub fn timeout<F: Future>(duration: Duration, future: F) -> Timeout<'static, F> 
 /// # Examples
 ///
 /// ```
-/// use maitake::time::{self,, Duration};
+/// use maitake::time::{self, Duration};
 ///
 /// /// A function that might wait for a long time before it completes.
 /// async fn do_slow_stuff() {
@@ -256,8 +256,8 @@ pub fn timeout<F: Future>(duration: Duration, future: F) -> Timeout<'static, F> 
 ///         // we successfully created a timeout, so await the timeout future.
 ///         Ok(timeout) => match timeout.await {
 ///             Ok(_) => {},
-///             Err(time::timeout::Elapsed(_)) => {
-///                 eprintln!("slow stuff did not complete in 10 seconds!");
+///             Err(elapsed) => {
+///                 eprintln!("slow stuff did not complete in {:?}", elapsed.duration());
 ///                 return;
 ///             },
 ///         },
