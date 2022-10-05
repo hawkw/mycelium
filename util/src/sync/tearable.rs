@@ -1,18 +1,19 @@
 use crate::sync::{
     atomic::{AtomicU32, Ordering::*},
     hint,
-    spin::Backoff,
 };
 
-/// An efficient
+/// An efficient shareable 64-bit integer value, based on a [sequence lock].
+///
+/// This type is intended for cases where an atomic 64-bit value is needed on
+/// platforms that do not support atomic operations on 64-bit memory locations.
+///
 /// [sequence lock]: https://en.wikipedia.org/wiki/Seqlock
 pub struct TearableU64 {
     seq: AtomicU32,
     high: AtomicU32,
     low: AtomicU32,
 }
-
-pub struct TryWriteError<T>(T);
 
 impl TearableU64 {
     loom_const_fn! {
@@ -27,28 +28,31 @@ impl TearableU64 {
         }
     }
 
-    /// Reads the data stored inside the sequence lock.
+    /// Loads the current value.
     ///
-    /// This method may spin if the lock is currently being written to.
+    /// This method may spin if a write is in progress or a torn write is
+    /// observed.
+    #[must_use]
     pub fn load(&self) -> u64 {
         loop {
-            let mut preread = self.seq.load(Acquire);
+            // snapshot the sequence number before reading the value, waiting
+            // for a write to complete if one is in progress.
+            let preread = self.seq.load(Acquire);
 
-            let mut backoff = Backoff::new();
-            while is_writing(test_dbg!(preread)) {
-                backoff.spin();
-                preread = self.seq.load(Acquire);
-            }
+            // wait for a current write to complete
+            if !is_writing(test_dbg!(preread)) {
+                // read the number
+                let low = self.low.load(Acquire);
+                let high = self.high.load(Acquire);
 
-            let low = self.low.load(Acquire);
-            let high = self.high.load(Acquire);
+                // snapshot the sequence number again after the value has been read.
+                let postread = self.seq.load(Acquire);
 
-            let postread = self.seq.load(Acquire);
-
-            // if the sequence numbers match, we didn't observe a torn write.
-            // return it!
-            if test_dbg!(preread) == test_dbg!(postread) {
-                return unsplit(high, low);
+                // if the sequence numbers match, we didn't observe a torn write.
+                // return it!
+                if test_dbg!(preread) == test_dbg!(postread) {
+                    return unsplit(high, low);
+                }
             }
 
             // in the case we *did* observe a torn write, we only issue one spin
@@ -59,61 +63,65 @@ impl TearableU64 {
         }
     }
 
-    /// Writes a new value to the data stored inside the lock.
-    ///
-    /// This method may spin if the lock is currently being written to.
     pub fn store(&self, value: u64) {
-        let mut seq = self.seq.load(Relaxed);
-        let mut backoff = Backoff::new();
+        let mut curr = self.seq.load(Relaxed);
+        loop {
+            // is a write in progress?
+            if is_writing(test_dbg!(curr)) {
+                hint::spin_loop();
+                curr = self.seq.load(Relaxed);
+                continue;
+            }
 
-        // wait for a current write to complete
-        while test_dbg!(is_writing(seq)) {
-            backoff.spin();
-            seq = self.seq.load(Relaxed);
-        }
+            match self.write(curr, value) {
+                // write succeeded!
+                Ok(_) => return,
+                // no joy, try again.
+                Err(actual) => curr = actual,
+            }
 
-        // increment the sequence number by one to indicate that we're starting
-        // a write.
-        while let Err(actual) =
-            test_dbg!(self
-                .seq
-                .compare_exchange_weak(seq, seq.wrapping_add(1), Acquire, Relaxed))
-        {
-            seq = actual;
             hint::spin_loop();
         }
+    }
 
+    pub fn try_store(&self, value: u64) -> Result<(), u64> {
+        let mut curr = self.seq.load(Relaxed);
+        loop {
+            // is a write in progress?
+            if is_writing(test_dbg!(curr)) {
+                return Err(value);
+            }
+
+            match self.write(curr, value) {
+                // write succeeded!
+                Ok(_) => return Ok(()),
+                // no joy, try again.
+                Err(actual) => curr = actual,
+            }
+
+            hint::spin_loop();
+        }
+    }
+
+    fn write(&self, curr: u32, value: u64) -> Result<(), u32> {
+        // try to increment the sequence number by one to indicate that
+        // we're starting a write.
+        test_dbg!(self
+            .seq
+            .compare_exchange_weak(curr, curr.wrapping_add(1), Acquire, Relaxed))?;
+
+        // incremented the sequence number, go ahead and do a write
         let (high, low) = split(value);
         self.low.store(low, Release);
         self.high.store(high, Release);
 
         // increment the sequence number again to indicate that we have finished
         // a write.
-        self.seq.store(seq.wrapping_add(2), Release);
+        self.seq.store(curr.wrapping_add(2), Release);
+        Ok(())
     }
 
-    // pub fn try_store(&self, value: u64) -> Result<(), TryWriteError<u64>> {
-    //     // increment the sequence number by one to indicate that we're starting
-    //     // a write.
-    //     let seq = self.seq.fetch_add(1, Relaxed);
-    //     if is_writing(seq) {
-    //         return Err(TryWriteError(value));
-    //     }
-
-    //     let next = seq.wrapping_add(1);
-    //     self.seq
-    //         .compare_exchange(seq, next, Acquire, Relaxed)
-    //         .map_err(|_| TryWriteError(value))?;
-
-    //     let (high, low) = split(value);
-    //     self.low.store(low, Release);
-    //     self.high.store(high, Release);
-
-    //     // increment the sequence number again to indicate that we have finished
-    //     // a write.
-    //     self.seq.store(seq.wrapping_add(2), Release);
-    //     Ok(())
-    // }
+    // fn start_write(&self, curr: u32) -> Result<(), u32> {}
 }
 
 /// Returns `true` if a sequence number indicates that a write is in progress.
@@ -139,21 +147,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spmc() {
-        const VALS: &[u64] = &[0, u64::MAX, u32::MAX as u64 + 1];
-        const READERS: usize = 2;
+    fn doesnt_tear() {
+        // multiple reader tests hit the loom branch limit really easily, since
+        // loom's scheduler may find a path through the execution where yielding
+        // in the spin loop makes it ping-pong back and forth between the two
+        // reader threads forever, without executing the writer again. this is
+        // annoying. so, just test with one reader in `cfg!(loom)`.
+        const READERS: usize = if cfg!(loom) { 1 } else { 4 };
+        const VALS: &[u64] = &[0, u64::MAX, u32::MAX as u64 - 1];
+
         let _trace = crate::test_util::trace_init();
-        
-        let mut builder = loom::model::Builder::new();
-        builder.max_branches = 10_000;
-        builder.check(|| {
+
+        loom::model(|| {
             let t = Arc::new(TearableU64::new(0));
 
             let threads = (0..READERS)
                 .map(|_| {
                     let t = t.clone();
                     thread::spawn(move || {
-                        for _ in 0..READERS {
+                        for _ in 0..VALS.len() {
                             let value = test_dbg!(t.load());
                             assert!(VALS.contains(&value));
                         }
