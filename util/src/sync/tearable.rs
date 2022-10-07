@@ -1,14 +1,46 @@
-use crate::sync::{
-    atomic::{AtomicU32, Ordering::*},
-    hint,
+use crate::{
+    fmt,
+    sync::{
+        atomic::{AtomicU32, Ordering::*},
+        hint,
+    },
 };
 
-use core::convert::TryFrom;
-
-/// An efficient shareable 64-bit integer value, based on a [sequence lock].
+/// An efficient shareable 64-bit integer value, based on a [sequence
+/// lock].
 ///
-/// This type is intended for cases where an atomic 64-bit value is needed on
-/// platforms that do not support atomic operations on 64-bit memory locations.
+/// This type is intended for cases where an atomic 64-bit value is
+/// needed on platforms that do not support atomic operations on 64-bit
+/// memory locations.
+///
+/// In addition, a [polyfill type](AtomicU64Polyfill), which uses 64-bit atomic
+/// operations on platforms that support them, and tearable 32-bit atomic
+/// operations otherwise, is also provided. This type can be used to provide a
+/// more efficient implementation when 64-bit atomics are available, while still
+/// exposing the same API when they are not.
+///
+/// # Implementation Details
+///
+/// A [sequence lock] is a form of reader-writer lock which works by
+/// allowing writers to load the locked data at any time, using a
+/// sequence number which is incremented both before and after a write
+/// operation to determine if a given read of the locked data has
+/// observed a torn write. In essence, the sequence lock deliberately
+/// performs a potentially racy read, but only *uses* the result of the
+/// read if it did not observe a torn write.
+///
+/// In Rust, sequence locks for arbitrary data cannot currently be
+/// implemented soundly, as an unsynchronized (non-atomic) read of a
+/// memory location during a write to the same location isu ndefined
+/// behavior, even if the *result* of such a read is not actually
+/// observed. However, this type is *not* unsound (and in fact does not
+/// involve any unsafe code), as it stores a pair of [`AtomicU32`]
+/// values, rather than arbitrary data. Therefore, reading the data is
+/// always a pair of atomic operations, and potential tearing occurs
+/// only between loading the two atomic values. This is potentially
+/// racy, but it is not a *data race*, so the seqeunce lock
+/// implementation is sound *when specialized specifically for atomic
+/// integers*.
 ///
 /// [sequence lock]: https://en.wikipedia.org/wiki/Seqlock
 pub struct TearableU64 {
@@ -17,8 +49,19 @@ pub struct TearableU64 {
     low: AtomicU32,
 }
 
+pub use polyfill::AtomicU64Polyfill;
+
+/// Error returned by [`TearableU64::try_store`] that indicates another write
+/// operation is in progress.
+///
+/// This error contains the value that we were attempting to write, which can be
+/// retrieved using [`WriteInProgress::into_inner`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WriteInProgress(u64);
+
 impl TearableU64 {
     loom_const_fn! {
+        /// Returns a new `TearableU64` with the provided current `value`.
         #[must_use]
         pub(crate) fn new(value: u64) -> Self {
             let (high, low) = split(value);
@@ -65,6 +108,18 @@ impl TearableU64 {
         }
     }
 
+    /// Store `value` in this `TearableU64`.
+    ///
+    /// This method will spin if another write operation ([`store`], [`swap`],
+    /// or [`try_store`]) is concurrently in progress, and it will spin until
+    /// that write operation completes. Therefore, this method is **not** safe
+    /// for use in an interrupt handler if writes to a `TearableU64` may occur
+    /// outside of that interrupt handler. For use in an interrupt handler,
+    /// consider the fallible [`try_store`] method instead.
+    ///
+    /// [`store`]: Self::store
+    /// [`swap`]: Self::swap
+    /// [`try_store`]: Self::try_store
     pub fn store(&self, value: u64) {
         let mut curr = self.seq.load(Relaxed);
         loop {
@@ -81,11 +136,26 @@ impl TearableU64 {
                 // no joy, try again.
                 Err(actual) => curr = actual,
             }
-
-            hint::spin_loop();
         }
     }
 
+    /// Attempt to store `value` in this `TearableU64`, failing if another write
+    /// operation ([`store`], [`swap`], or [`try_store`]) is concurrently in
+    /// progress.
+    ///
+    /// This method will not spin if a write is in progress, but may retry a
+    /// failed `compare_exchange_weak`. It is safe to call this method in an
+    /// interrupt handler, however, as it will not spin indefinitely if a write
+    /// operation is interrupted.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the value was successfully stored.
+    /// - `Err(`[`WriteInProgress`]`)` if another write is in progress
+    ///
+    /// [`store`]: Self::store
+    /// [`swap`]: Self::swap
+    /// [`try_store`]: Self::try_store
     pub fn try_store(&self, value: u64) -> Result<(), u64> {
         let mut curr = self.seq.load(Relaxed);
         loop {
@@ -100,12 +170,44 @@ impl TearableU64 {
                 // no joy, try again.
                 Err(actual) => curr = actual,
             }
-
-            hint::spin_loop();
         }
     }
 
+    /// Store a new value, returning the previous one.
+    ///
+    /// This method may spin if another write is in progress.
+    #[must_use = "if the return value of `TearableU64::swap` is not used, consider using `TearableU64::store` instead"]
+    pub fn swap(&self, value: u64) -> u64 {
+        let mut curr = self.seq.load(Relaxed);
+        loop {
+            // is a write in progress?
+            if is_writing(test_dbg!(curr)) {
+                hint::spin_loop();
+                curr = self.seq.load(Relaxed);
+                continue;
+            }
+
+            // try to start a write
+            if let Err(actual) = self.try_start_write(curr) {
+                curr = actual;
+                hint::spin_loop();
+                continue;
+            }
+
+            // write started!
+            let (high, low) = split(value);
+            let prev_low = self.low.swap(low, AcqRel);
+            let prev_high = self.high.swap(high, AcqRel);
+
+            self.finish_write(curr);
+            return unsplit(prev_high, prev_low);
+        }
+    }
+
+    // TODO(eliza): finish this
+    /*
     pub fn fetch_add(&self, value: u64) -> u64 {
+        use core::convert::TryFrom;
         let mut curr = self.seq.load(Relaxed);
         loop {
             // is a write in progress?
@@ -133,6 +235,7 @@ impl TearableU64 {
             return unsplit(prev_high, prev_low);
         }
     }
+    */
 
     fn write(&self, curr: u32, value: u64) -> Result<(), u32> {
         self.try_start_write(curr)?;
@@ -149,6 +252,7 @@ impl TearableU64 {
     /// Try to increment the sequence number by one to indicate that
     /// we're starting a write.
     #[inline(always)]
+    #[cfg_attr(loom, track_caller)]
     fn try_start_write(&self, curr: u32) -> Result<u32, u32> {
         test_dbg!(self
             .seq
@@ -158,10 +262,44 @@ impl TearableU64 {
     // Increment the sequence number again to indicate that we have finished
     // a write.
     #[inline(always)]
+    #[cfg_attr(loom, track_caller)]
     fn finish_write(&self, curr: u32) {
         test_dbg!(self.seq.store(curr.wrapping_add(2), Release));
     }
 }
+
+impl fmt::Debug for TearableU64 {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TearableU64")
+            .field("value", &self.load())
+            .field("seq", &self.seq.load(Relaxed))
+            .finish()
+    }
+}
+
+// === impl WriteInProgress ===
+
+impl fmt::Display for WriteInProgress {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "failed to store {}; another write is in progress",
+            self.0
+        )
+    }
+}
+
+impl WriteInProgress {
+    /// Returns the value that the caller of [`TearableU64::try_store`]
+    /// attempted to store when this error was returned.
+    pub fn into_inner(self) -> u64 {
+        self.0
+    }
+}
+
+// === helpers ===
 
 /// Returns `true` if a sequence number indicates that a write is in progress.
 
@@ -170,12 +308,151 @@ const fn is_writing(seq: u32) -> bool {
     seq & 1 == 1
 }
 
+/// Split a 64-bit integer into a `(high, low)` pair of 32-bit integers.
+#[inline(always)]
 const fn split(val: u64) -> (u32, u32) {
     ((val >> 32) as u32, val as u32)
 }
 
+/// Combine a `(high, low)` pair of 32-bit integers into a 64-bit integer.
 const fn unsplit(high: u32, low: u32) -> u64 {
     ((high as u64) << 32) | (low as u64)
+}
+
+/// `AtomicU64` version of the polyfill.
+// NOTE: `target_arch` values of "arm", "mips", and
+// "powerpc" refer specifically to the 32-bit versions
+// of those architectures; the 64-bit architectures get
+// the `target_arch` strings "aarch64", "mips64", and
+// "powerpc64", respectively.
+#[cfg(not(any(
+    target_arch = "arm",
+    target_arch = "mips",
+    target_arch = "powerpc",
+    target_arch = "riscv32",
+)))]
+mod polyfill {
+    use super::*;
+    use crate::sync::atomic::AtomicU64;
+
+    /// A polyfill implementation of an [`AtomicU64`] that is available
+    /// regardless of whether or not the target architecture supports 64-bit
+    /// atomic operations.
+    ///
+    /// This type provides a limited subset of the [`AtomicU64`] API. When
+    /// 64-bit atomic operations are available, this type is implemented using
+    /// an [`AtomicU64`]. Otherwise, it is implemented using a [`TearableU64`].
+    ///
+    /// This version of `AtomicU64Polyfill` was compiled for a target
+    /// architecture that supports 64-bit atomic operations.
+    #[derive(Debug)]
+    pub struct AtomicU64Polyfill(AtomicU64);
+
+    impl AtomicU64Polyfill {
+        loom_const_fn! {
+            #[must_use]
+            pub fn new(value: u64) -> Self {
+                Self(AtomicU64::new(value))
+            }
+        }
+
+        /// Load the current value in the cell.
+        ///
+        /// This method always performs an [`Acquire`] load.
+        #[inline]
+        #[must_use]
+        #[cfg_attr(loom, track_caller)]
+        pub fn load(&self) -> u64 {
+            self.0.load(Acquire)
+        }
+
+        /// Store `value` in the cell.
+        ///
+        /// This method always performs a [`Release`] store.
+        #[inline]
+        #[cfg_attr(loom, track_caller)]
+        pub fn store(&self, value: u64) {
+            self.0.store(value, Acquire)
+        }
+
+        /// Store `value` in the cell, returning the previous value.
+        ///
+        /// This method always performs an [`AcqRel`] swap.
+        #[inline]
+        #[must_use]
+        #[cfg_attr(loom, track_caller)]
+        pub fn swap(&self, value: u64) -> u64 {
+            self.0.swap(value, AcqRel)
+        }
+    }
+}
+
+/// Version of the polyfill without `AtomicU64`.
+// NOTE: `target_arch` values of "arm", "mips", and
+// "powerpc" refer specifically to the 32-bit versions
+// of those architectures; the 64-bit architectures get
+// the `target_arch` strings "aarch64", "mips64", and
+// "powerpc64", respectively.
+#[cfg(any(
+    target_arch = "arm",
+    target_arch = "mips",
+    target_arch = "powerpc",
+    target_arch = "riscv32",
+))]
+mod polyfill {
+    use super::*;
+
+    /// A polyfill implementation of an [`AtomicU64`] that is available
+    /// regardless of whether or not the target architecture supports 64-bit
+    /// atomic operations.
+    ///
+    /// This type provides a limited subset of the [`AtomicU64`] API. When
+    /// 64-bit atomic operations are available, this type is implemented using
+    /// an [`AtomicU64`]. Otherwise, it is implemented using a [`TearableU64`].
+    ///
+    /// This version of `AtomicU64Polyfill` was compiled for a target
+    /// architecture that does not support 64-bit atomic operations, and
+    /// therefore uses a [`TearableU64`].
+    #[derive(Debug)]
+    pub struct AtomicU64Polyfill(TearableU64);
+
+    impl AtomicU64Polyfill {
+        loom_const_fn! {
+            #[must_use]
+            pub fn new(value: u64) -> Self {
+                Self(TearableU64::new(value))
+            }
+        }
+
+        /// Load the current value in the cell.
+        ///
+        /// This method always performs an [`Acquire`] load.
+        #[inline]
+        #[must_use]
+        #[cfg_attr(loom, track_caller)]
+        pub fn load(&self) -> u64 {
+            self.0.load()
+        }
+
+        /// Store `value` in the cell.
+        ///
+        /// This method always performs a [`Release`] store.
+        #[inline]
+        #[cfg_attr(loom, track_caller)]
+        pub fn store(&self, value: u64) {
+            self.0.store(value)
+        }
+
+        /// Store `value` in the cell, returning the previous value.
+        ///
+        /// This method always performs an [`AcqRel`] swap.
+        #[inline]
+        #[must_use]
+        #[cfg_attr(loom, track_caller)]
+        pub fn swap(&self, value: u64) -> u64 {
+            self.0.swap(value)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -231,6 +508,8 @@ mod tests {
         });
     }
 
+    // TODO(eliza): put this back when you finish `fetch_add`...
+    /*
     #[test]
     fn fetch_add_would_tear() {
         const VALS: &[u64] = &[U32_MAX, U32_MAX + 1];
@@ -275,4 +554,5 @@ mod tests {
             }
         });
     }
+    */
 }
