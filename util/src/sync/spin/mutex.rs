@@ -79,11 +79,12 @@ impl<T> Mutex<T> {
     ///
     /// This function will never spin.
     #[must_use]
+    #[cfg_attr(test, track_caller)]
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        if self
+        if test_dbg!(self
             .locked
             .compare_exchange(false, true, Acquire, Acquire)
-            .is_ok()
+            .is_ok())
         {
             Some(MutexGuard {
                 ptr: self.data.get_mut(),
@@ -100,14 +101,15 @@ impl<T> Mutex<T> {
     /// returning, the thread is the only thread with the lock
     /// held. An RAII guard is returned to allow scoped unlock of the lock. When
     /// the guard goes out of scope, the mutex will be unlocked.
+    #[cfg_attr(test, track_caller)]
     pub fn lock(&self) -> MutexGuard<'_, T> {
         let mut boff = Backoff::default();
-        while self
+        while test_dbg!(self
             .locked
             .compare_exchange(false, true, Acquire, Acquire)
-            .is_err()
+            .is_err())
         {
-            while self.locked.load(Relaxed) {
+            while test_dbg!(self.locked.load(Relaxed)) {
                 boff.spin();
             }
         }
@@ -187,7 +189,7 @@ where
 
 impl<'a, T> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
-        self.locked.store(false, Release);
+        test_dbg!(self.locked.store(false, Release));
     }
 }
 
