@@ -40,7 +40,8 @@ pub struct Stealer<'worker, S> {
     _scheduler_type: PhantomData<fn(S)>,
 }
 
-/// Errors returned by [`Stealer::try_steal`].
+/// Errors returned by [`Injector::try_steal`], [`Scheduler::try_steal`], and
+/// [`StaticScheduler::try_steal`].
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TryStealError {
@@ -52,11 +53,14 @@ pub enum TryStealError {
 }
 
 impl<S: Schedule> Injector<S> {
+    /// Returns a new injector queue.
+    ///
     /// # Safety
     ///
     /// The "stub" provided must ONLY EVER be used for a single
-    /// `Distributor` instance. Re-using the stub for multiple distributors
+    /// `Injector` instance. Re-using the stub for multiple distributors
     /// or schedulers may lead to undefined behavior.
+    #[must_use]
     #[cfg(not(loom))]
     pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
         Self {
@@ -66,6 +70,26 @@ impl<S: Schedule> Injector<S> {
         }
     }
 
+    /// Spawns a pre-allocated task on the injector queue.
+    ///
+    /// The spawned task will be executed by any
+    /// [`Scheduler`]/[`StaticScheduler`] instance that runs tasks from this
+    /// queue.
+    ///
+    /// This method is used to spawn a task that requires some bespoke
+    /// procedure of allocation, typically of a custom [`Storage`] implementor.
+    /// See the documentation for the [`Storage`] trait for more details on
+    /// using custom task storage.
+    ///
+    /// When the "alloc" feature flag is available, tasks that do not require
+    /// custom storage may be spawned using the [`Injector::spawn`] method,
+    /// instead.
+    ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
+    ///
+    /// [`Storage`]: crate::task::Storage
     pub fn spawn_allocated<STO, F>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
@@ -78,6 +102,16 @@ impl<S: Schedule> Injector<S> {
         join
     }
 
+    /// Attempt to take tasks from the injector queue.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(`[`Stealer`]`)) if tasks can be spawned from the injector
+    ///   queue.
+    /// - `Err`([`TryStealError::Empty`]`)` if there were no tasks in this
+    ///   injector queue.
+    /// - `Err`([`TryStealError::Busy`]`)` if another worker was already
+    ///   taking tasks from this injector queue.
     pub fn try_steal(&self) -> Result<Stealer<'_, S>, TryStealError> {
         Stealer::try_new(&self.queue, &self.tasks)
     }
@@ -249,6 +283,15 @@ impl<S> fmt::Debug for Stealer<'_, S> {
 
 impl StaticScheduler {
     /// Attempt to steal tasks from this scheduler's run queue.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(`[`Stealer`]`)) if tasks can be stolen from this scheduler's
+    ///   queue.
+    /// - `Err`([`TryStealError::Empty`]`)` if there were no tasks in this
+    ///   scheduler's run queue.
+    /// - `Err`([`TryStealError::Busy`]`)` if another worker was already
+    ///   stealing from this scheduler's run queue.
     pub fn try_steal(&self) -> Result<Stealer<'_, &'static StaticScheduler>, TryStealError> {
         Stealer::try_new(&self.0.run_queue, &self.0.queued)
     }
@@ -276,7 +319,9 @@ feature! {
 
         }
 
-        /// Spawns a new task with this builder's configured settings.
+        /// Spawns a new task on the injector queue, to execute on any
+        /// [`Scheduler`]/[`StaticScheduler`] instance that runs tasks from this
+        /// queue.
         ///
         /// This method returns a [`JoinHandle`] that can be used to await the
         /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
@@ -302,6 +347,15 @@ feature! {
 
     impl Scheduler {
         /// Attempt to steal tasks from this scheduler's run queue.
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(`[`Stealer`]`)) if tasks can be stolen from this scheduler's
+        ///   queue.
+        /// - `Err`([`TryStealError::Empty`]`)` if there were no tasks in this
+        ///   scheduler's run queue.
+        /// - `Err`([`TryStealError::Busy`]`)` if another worker was already
+        ///   stealing from this scheduler's run queue.
         pub fn try_steal(&self) -> Result<Stealer<'_, Scheduler>, TryStealError> {
             Stealer::try_new(&self.0.run_queue, &self.0.queued)
         }

@@ -69,7 +69,7 @@ macro_rules! trace_span {
     };
 }
 
-#[allow(dead_code)]
+#[allow(unused_macros)]
 macro_rules! debug_span {
     ($($arg:tt)+) => {
         span!(Level::DEBUG, $($arg)+)
