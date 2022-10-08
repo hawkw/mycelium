@@ -204,10 +204,8 @@ impl TearableU64 {
         }
     }
 
-    // TODO(eliza): finish this
-    /*
-    pub fn fetch_add(&self, value: u64) -> u64 {
-        use core::convert::TryFrom;
+    // TODO(eliza): add a fetch_add for 64-bit vals...
+    pub fn fetch_add_u32(&self, value: u32) -> u64 {
         let mut curr = self.seq.load(Relaxed);
         loop {
             // is a write in progress?
@@ -223,19 +221,32 @@ impl TearableU64 {
                 continue;
             }
 
-            let (high, low) = split(value);
-            let prev_low = self.low.fetch_add(low, AcqRel);
-            let overflow = (prev_low as u64 + low as u64).saturating_sub(u32::MAX as u64);
-            let prev_high = match u32::try_from(high as u64 + overflow) {
-                Ok(high) => self.high.fetch_add(high, Release),
-                Err(_) => todo!("wrap around"),
+            let prev_low = self.low.fetch_add(value, AcqRel);
+            let overflow = ((prev_low as u64 + value as u64) >> 32) as u32;
+            let prev_high = if overflow > 0 {
+                let prev_high = self.high.fetch_add(overflow, AcqRel);
+                // did adding to the high half wrap?
+                if prev_high as u64 + overflow as u64 > u32::MAX as u64 {
+                    // NOTE(eliza): this doesn't *need* to be a swap, but it's
+                    // nice to be able to check that nobody else is writing...
+                    let _low = self.low.swap(prev_high.wrapping_add(overflow), AcqRel);
+                    debug_assert_eq!(
+                        _low,
+                        prev_low.wrapping_add(value),
+                        "fetch_add_u32: low value should not be modified \
+                        concurrently, since we haven't incremented the seq \
+                        number to finish writing yet. this is a bug!"
+                    );
+                }
+                prev_high
+            } else {
+                self.high.load(Acquire)
             };
 
             self.finish_write(curr);
             return unsplit(prev_high, prev_low);
         }
     }
-    */
 
     fn write(&self, curr: u32, value: u64) -> Result<(), u32> {
         self.try_start_write(curr)?;
@@ -372,7 +383,7 @@ mod polyfill {
         #[inline]
         #[cfg_attr(loom, track_caller)]
         pub fn store(&self, value: u64) {
-            self.0.store(value, Acquire)
+            self.0.store(value, Release)
         }
 
         /// Store `value` in the cell, returning the previous value.
@@ -480,7 +491,12 @@ mod tests {
                 thread::spawn(move || {
                     for _ in 0..vals.len() {
                         let value = test_dbg!(t.load());
-                        assert!(vals.contains(&value));
+                        assert!(
+                            vals.contains(&value),
+                            "\n value: {:?}\n  vals: {:?}",
+                            value,
+                            vals
+                        );
                     }
                 })
             })
@@ -508,10 +524,8 @@ mod tests {
         });
     }
 
-    // TODO(eliza): put this back when you finish `fetch_add`...
-    /*
     #[test]
-    fn fetch_add_would_tear() {
+    fn fetch_add_u32_would_tear() {
         const VALS: &[u64] = &[U32_MAX, U32_MAX + 1];
 
         let _trace = crate::test_util::trace_init();
@@ -520,7 +534,7 @@ mod tests {
             let t = Arc::new(TearableU64::new(U32_MAX));
             let readers = spawn_readers(&t, VALS);
 
-            let prev = t.fetch_add(1);
+            let prev = t.fetch_add_u32(1);
             thread::yield_now();
             assert_eq!(prev, U32_MAX);
 
@@ -531,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_add_no_tear() {
+    fn fetch_add_u32_no_tear() {
         const VALS: &[u64] = &[0, U32_MAX - 1, U32_MAX];
 
         let _trace = crate::test_util::trace_init();
@@ -541,11 +555,11 @@ mod tests {
 
             let readers = spawn_readers(&t, VALS);
 
-            let prev = t.fetch_add(U32_MAX - 1);
+            let prev = t.fetch_add_u32(u32::MAX - 1);
             thread::yield_now();
             assert_eq!(prev, 0);
 
-            let prev = t.fetch_add(1);
+            let prev = t.fetch_add_u32(1);
             thread::yield_now();
             assert_eq!(prev, U32_MAX - 1);
 
@@ -554,5 +568,68 @@ mod tests {
             }
         });
     }
-    */
+
+    #[test]
+    fn fetch_add_u32_wrap_low() {
+        const VALS: &[u64] = &[U32_MAX - 1, U32_MAX + 99];
+
+        let _trace = crate::test_util::trace_init();
+
+        loom::model(|| {
+            let t = Arc::new(TearableU64::new(U32_MAX - 1));
+
+            let readers = spawn_readers(&t, VALS);
+
+            let prev = t.fetch_add_u32(100);
+            thread::yield_now();
+            assert_eq!(prev, U32_MAX - 1);
+
+            for thread in readers {
+                thread.join().unwrap()
+            }
+        });
+    }
+
+    #[test]
+    fn fetch_add_u32_wrap_high() {
+        const VALS: &[u64] = &[u64::MAX, 100];
+
+        let _trace = crate::test_util::trace_init();
+
+        loom::model(|| {
+            let t = Arc::new(TearableU64::new(u64::MAX));
+
+            let readers = spawn_readers(&t, VALS);
+
+            let prev = t.fetch_add_u32(100);
+            thread::yield_now();
+            assert_eq!(prev, u64::MAX);
+
+            for thread in readers {
+                thread.join().unwrap()
+            }
+        });
+    }
+
+    #[test]
+    fn fetch_add_u32_high_maxed() {
+        const HIGH_MAX: u64 = U32_MAX << 32;
+        const VALS: &[u64] = &[HIGH_MAX, HIGH_MAX + 100];
+
+        let _trace = crate::test_util::trace_init();
+
+        loom::model(|| {
+            let t = Arc::new(TearableU64::new(HIGH_MAX));
+
+            let readers = spawn_readers(&t, VALS);
+
+            let prev = t.fetch_add_u32(100);
+            thread::yield_now();
+            assert_eq!(prev, HIGH_MAX);
+
+            for thread in readers {
+                thread.join().unwrap()
+            }
+        });
+    }
 }
