@@ -233,10 +233,10 @@ impl<'worker, S: Schedule> Stealer<'worker, S> {
     ///
     /// ```
     /// # fn docs() {
-    /// # use maitake::scheduler::{StaticScheduler, steal::Stealer};
-    /// # let scheduler = StaticScheduler::new();
-    /// # let stealer: Stealer<_, &'static StaticScheduler> = unimplemented!();
-    /// stealer.steal_n(&scheduler, stealer.initial_task_count() / 2)
+    /// # use maitake::scheduler::{StaticScheduler, Stealer};
+    /// # let scheduler = unimplemented!();
+    /// # let stealer: Stealer<'_, &'static StaticScheduler> = unimplemented!();
+    /// stealer.spawn_n(&scheduler, stealer.initial_task_count() / 2);
     /// # }
     /// ```
     ///
