@@ -50,7 +50,7 @@ impl Backoff {
     #[inline(always)]
     pub fn spin(&mut self) {
         // Issue 2^exp pause instructions.
-        for _ in 0..(1 << self.exp) {
+        for _ in 0..test_dbg!(1 << self.exp) {
             hint::spin_loop();
         }
 

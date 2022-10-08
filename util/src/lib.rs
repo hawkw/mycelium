@@ -21,3 +21,29 @@ pub(crate) mod loom;
 pub use self::macros::*;
 pub use cordyceps as intrusive;
 pub use mycelium_bitfield as bits;
+
+#[cfg(test)]
+pub(crate) mod test_util {
+    #[cfg(not(loom))]
+    pub(crate) fn trace_init() -> impl Drop {
+        use tracing_subscriber::{prelude::*, EnvFilter};
+        let filter = EnvFilter::from_env("RUST_LOG");
+        tracing_subscriber::fmt()
+            .with_test_writer()
+            .without_time()
+            .with_env_filter(filter)
+            .with_thread_names(true)
+            .set_default()
+    }
+
+    #[cfg(loom)]
+    pub(crate) fn trace_init() -> impl Drop {
+        use tracing_subscriber_03::{prelude::*, EnvFilter};
+        let filter = EnvFilter::from_env("LOOM_LOG");
+        tracing_subscriber_03::fmt()
+            .with_test_writer()
+            .without_time()
+            .with_env_filter(filter)
+            .set_default()
+    }
+}
