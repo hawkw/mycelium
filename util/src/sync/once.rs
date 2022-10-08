@@ -108,8 +108,9 @@ impl<T> InitOnce<T> {
     ///
     /// If the cell has already been initialized.
     #[track_caller]
-    pub fn init(&self, value: T) {
-        self.try_init(value).unwrap()
+    pub fn init(&self, value: T) -> &T {
+        self.try_init(value).unwrap();
+        self.get()
     }
 
     /// Borrow the contents of this `InitOnce` cell, if it has been

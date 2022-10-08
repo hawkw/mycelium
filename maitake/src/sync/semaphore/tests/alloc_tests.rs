@@ -40,7 +40,7 @@ fn basic_concurrency_limit() {
 #[test]
 fn countdown() {
     const TASKS: usize = 4;
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     let scheduler = Scheduler::new();
     let semaphore = Arc::new(Semaphore::new(0));
     let a_done = Arc::new(AtomicUsize::new(0));

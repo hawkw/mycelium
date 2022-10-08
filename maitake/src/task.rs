@@ -29,7 +29,7 @@ mod tests;
 use crate::{loom::cell::UnsafeCell, scheduler::Schedule, trace, util::non_null};
 
 use core::{
-    any::type_name,
+    any::{type_name, TypeId},
     future::Future,
     marker::PhantomData,
     mem,
@@ -185,6 +185,9 @@ pub(crate) struct Header {
 
     /// The task's `tracing` span, if `tracing` is enabled.
     span: trace::Span,
+
+    #[cfg(debug_assertions)]
+    scheduler_type: Option<TypeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,12 +248,13 @@ struct Schedulable<S> {
     /// [run queue links]: cordyceps::mpsc_queue::Links
     header: Header,
 
-    /// A reference to the [scheduler] this task is spawned on.
+    /// A reference to the [scheduler] this task is spawned on, or `None` if
+    /// this task has not yet been bound to a scheduler.
     ///
     /// This is used to schedule the task when it is woken.
     ///
     /// [scheduler]: crate::scheduler::Schedule
-    scheduler: S,
+    scheduler: UnsafeCell<Option<S>>,
 }
 
 /// The core of a task: either the [`Future`] that was spawned, if the task
@@ -496,8 +500,10 @@ where
                         state: StateCell::new(),
                         id: TaskId::stub(),
                         span: crate::trace::Span::none(),
+                        #[cfg(debug_assertions)]
+                        scheduler_type: None,
                     },
-                    scheduler: Stub,
+                    scheduler: UnsafeCell::new(Some(Stub)),
                 },
                 inner: UnsafeCell::new(Cell::Pending(Stub)),
                 join_waker: UnsafeCell::new(CheckedMaybeUninit::uninit()),
@@ -509,7 +515,7 @@ where
 
 impl<S, F, STO> Task<S, F, STO>
 where
-    S: Schedule,
+    S: Schedule + 'static,
     F: Future,
     STO: Storage<S, F>,
 {
@@ -526,7 +532,7 @@ where
     /// the [`Storage`] trait to be used with the scheduler.
     ///
     /// [`Storage`]: crate::task::Storage
-    pub fn new(scheduler: S, future: F) -> Self {
+    pub fn new(future: F) -> Self {
         Self {
             schedulable: Schedulable {
                 header: Header {
@@ -535,8 +541,10 @@ where
                     state: StateCell::new(),
                     id: TaskId::next(),
                     span: crate::trace::Span::none(),
+                    #[cfg(debug_assertions)]
+                    scheduler_type: Some(TypeId::of::<S>()),
                 },
-                scheduler,
+                scheduler: UnsafeCell::new(None),
             },
             inner: UnsafeCell::new(Cell::Pending(future)),
             join_waker: UnsafeCell::new(CheckedMaybeUninit::uninit()),
@@ -553,6 +561,12 @@ where
     #[must_use]
     pub fn id(&self) -> TaskId {
         self.header().id
+    }
+
+    pub(crate) fn bind(&mut self, scheduler: S) {
+        self.schedulable.scheduler.with_mut(|current| unsafe {
+            *current = Some(scheduler);
+        });
     }
 
     unsafe fn poll(ptr: NonNull<Header>) -> PollResult {
@@ -789,7 +803,12 @@ impl<S: Schedule> Schedulable<S> {
 
     #[inline(always)]
     unsafe fn schedule(this: TaskRef) {
-        this.0.cast::<Self>().as_ref().scheduler.schedule(this);
+        this.0.cast::<Self>().as_ref().scheduler.with(|current| {
+            (*current)
+                .as_ref()
+                .expect("cannot schedule a task that has not been bound to a scheduler!")
+                .schedule(this)
+        })
     }
 
     #[inline]
@@ -852,7 +871,7 @@ impl<S: Schedule> Schedulable<S> {
         trace_waker_op!(ptr, wake_by_ref);
 
         let this = non_null(ptr as *mut ()).cast::<Self>();
-        if this.as_ref().state().wake_by_ref() == ScheduleAction::Enqueue {
+        if test_dbg!(this.as_ref().state().wake_by_ref()) == ScheduleAction::Enqueue {
             Self::schedule(TaskRef(this.cast::<Header>()));
         }
     }
@@ -889,7 +908,7 @@ impl<S> fmt::Debug for Schedulable<S> {
 // === impl TaskRef ===
 
 impl TaskRef {
-    const NO_BUILDER: &'static Settings<'static> = &Settings::new();
+    pub(crate) const NO_BUILDER: &'static Settings<'static> = &Settings::new();
 
     /// Returns a [`TaskId`] that uniquely identifies this task.
     ///
@@ -922,21 +941,42 @@ impl TaskRef {
         // up after itself.
         if canceled {
             test_debug!("woke canceled task");
-            let wake_by_ref = self.header().vtable.wake_by_ref;
-            unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
+            self.wake_by_ref();
         }
 
         canceled
     }
 
+    /// Wakes the task.
+    ///
+    /// TODO(eliza): would this be better if we just added an `Into<Waker>` impl
+    /// for `TaskRef` or something? Should this be a public API?
+    pub(crate) fn wake_by_ref(&self) {
+        test_debug!(?self, "TaskRef::wake_by_ref");
+        let wake_by_ref = self.header().vtable.wake_by_ref;
+        unsafe { wake_by_ref(self.0.as_ptr().cast::<()>()) }
+    }
+
+    /// Sets the task's `WOKEN` bit.
+    ///
+    /// This must be called when enqueueing a spawned task for the first time.
+    pub(crate) fn set_woken(&self) {
+        self.state().set_woken();
+    }
+
     #[track_caller]
-    pub(crate) fn new_allocated<S, F, STO>(task: STO::StoredTask) -> (Self, JoinHandle<F::Output>)
+    pub(crate) fn new_allocated<S, F, STO>(
+        scheduler: S,
+        task: STO::StoredTask,
+    ) -> (Self, JoinHandle<F::Output>)
     where
-        S: Schedule,
+        S: Schedule + 'static,
         F: Future,
         STO: Storage<S, F>,
     {
-        Self::build_allocated::<S, F, STO>(Self::NO_BUILDER, task)
+        let (task, join) = Self::build_allocated::<S, F, STO>(Self::NO_BUILDER, task);
+        unsafe { task.bind_scheduler(scheduler) };
+        (task, join)
     }
 
     /// Returns a **non-owning** pointer to the referenced task's [`Header`].
@@ -1033,6 +1073,26 @@ impl TaskRef {
         unsafe { poll_fn(self.0) }
     }
 
+    pub(crate) unsafe fn bind_scheduler<S: Schedule + 'static>(&self, scheduler: S) {
+        #[cfg(debug_assertions)]
+        {
+            if let Some(scheduler_type) = self.header().scheduler_type {
+                assert_eq!(
+                    scheduler_type,
+                    TypeId::of::<S>(),
+                    "cannot bind {self:?} to a scheduler of type {}",
+                    type_name::<S>(),
+                );
+            }
+        }
+
+        self.0
+            .cast::<Schedulable<S>>()
+            .as_ref()
+            .scheduler
+            .with_mut(|current| *current = Some(scheduler));
+    }
+
     /// # Safety
     ///
     /// `T` *must* be the task's actual output type!
@@ -1100,6 +1160,7 @@ impl Clone for TaskRef {
         test_debug!(
             task.addr = ?self.0,
             task.tid = self.id().as_u64(),
+            location = %core::panic::Location::caller(),
             "TaskRef::clone",
         );
         self.state().clone_ref();
@@ -1190,6 +1251,8 @@ impl Header {
                 vtable: &Self::STATIC_STUB_VTABLE,
                 span: trace::Span::none(),
                 id: TaskId::stub(),
+                #[cfg(debug_assertions)]
+                scheduler_type: None,
             }
         }
     }
@@ -1307,10 +1370,11 @@ feature! {
         #[track_caller]
         pub(crate) fn new<S, F>(scheduler: S, future: F) -> (Self, JoinHandle<F::Output>)
         where
-            S: Schedule,
+            S: Schedule + 'static,
             F: Future + 'static
         {
-            let task = Box::new(Task::<S, F, BoxStorage>::new(scheduler, future));
+            let mut task = Box::new(Task::<S, F, BoxStorage>::new(future));
+            task.bind(scheduler);
             Self::build_allocated::<S, F, BoxStorage>(Self::NO_BUILDER, task)
         }
     }

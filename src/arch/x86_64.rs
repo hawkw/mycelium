@@ -1,10 +1,9 @@
 use bootloader::boot_info;
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{cpu, serial, vga};
-pub use hal_x86_64::{mm, NAME};
+pub use hal_x86_64::{cpu::entropy::seed_rng, mm, NAME};
 use mycelium_util::sync::InitOnce;
 
-pub mod entropy;
 mod framebuf;
 pub mod interrupt;
 mod oops;
@@ -101,8 +100,7 @@ impl BootInfo for RustbootBootInfo {
             // disable really noisy traces from maitake
             // TODO(eliza): it would be nice if this was configured by
             // non-arch-specific OS code...
-            const DISABLED_TARGETS: &[&str] =
-                &["maitake::time::timer::wheel", "maitake::scheduler"];
+            const DISABLED_TARGETS: &[&str] = &["maitake::time"];
             DISABLED_TARGETS
                 .iter()
                 .all(|target| !meta.target().starts_with(target))

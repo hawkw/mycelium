@@ -835,7 +835,7 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 if node != self.stub {
                     // Convert the pointer to the owning handle and drop it.
                     #[cfg(debug_assertions)]
-                    debug_assert!(!links.is_stub());
+                    debug_assert!(!links.is_stub(), "stub: {:p}, node: {node:p}", self.stub);
                     drop(T::from_ptr(node));
                 } else {
                     #[cfg(debug_assertions)]
@@ -1348,6 +1348,34 @@ mod loom {
             for thread in threads {
                 thread.join().unwrap();
             }
+        })
+    }
+
+    #[test]
+    fn crosses_queues() {
+        loom::model(|| {
+            let stub1 = entry(666);
+            let q1 = Arc::new(MpscQueue::<Entry>::new_with_stub(stub1));
+
+            let thread = thread::spawn({
+                let q1 = q1.clone();
+                move || {
+                    let stub2 = entry(420);
+                    let q2 = Arc::new(MpscQueue::<Entry>::new_with_stub(stub2));
+                    // let mut dequeued = false;
+                    for entry in q1.consume() {
+                        tracing::info!("dequeued");
+                        q2.enqueue(entry);
+                        q2.try_dequeue().unwrap();
+                    }
+                    tracing::info!("consumer done\nq1={q1:#?}\nq2={q2:#?}");
+                }
+            });
+
+            q1.enqueue(entry(1));
+            drop(q1);
+
+            thread.join().unwrap();
         })
     }
 }

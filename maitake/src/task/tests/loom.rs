@@ -8,6 +8,7 @@ use crate::{
             atomic::{AtomicBool, Ordering},
             Arc,
         },
+        thread,
     },
     scheduler::Scheduler,
 };
@@ -219,4 +220,97 @@ fn drop_join_handle() {
         thread.join().unwrap();
         assert!(completed.load(Ordering::Relaxed))
     })
+}
+
+#[test]
+fn steal_while_waking() {
+    loom::model(|| {
+        let completed = Arc::new(AtomicBool::new(false));
+        let scheduler1 = Scheduler::new();
+        let task = scheduler1.spawn({
+            let completed = completed.clone();
+            TrackFuture::new(async move {
+                future::yield_now().await;
+                completed.store(true, Ordering::SeqCst);
+            })
+        });
+
+        let stealer_thread = thread::spawn(move || {
+            let scheduler2 = Scheduler::new();
+            while !completed.load(Ordering::SeqCst) {
+                if let Ok(stealer) = test_dbg!(scheduler1.try_steal()) {
+                    test_dbg!(stealer.spawn_one(&scheduler2));
+                }
+                test_dbg!(scheduler2.tick());
+                thread::yield_now();
+            }
+            info!("stealer thread done\nscheduler1={scheduler1:#?}\nscheduler2={scheduler2:#?}");
+            info!("dropping scheduler1");
+            drop(scheduler1);
+            info!("dropped scheduler1\n");
+
+            info!("dropping scheduler2");
+            drop(scheduler2);
+            info!("dropped scheduler2\n");
+        });
+
+        task.task_ref().wake_by_ref();
+
+        stealer_thread.join().unwrap();
+        info!("stealer thread joined");
+    });
+}
+
+#[test]
+fn steal_while_waking_evil_version() {
+    loom::model(|| {
+        let completed = Arc::new(AtomicBool::new(false));
+        let scheduler1 = Scheduler::new();
+        let task = scheduler1.spawn({
+            let completed = completed.clone();
+            TrackFuture::new(async move {
+                future::yield_now().await;
+                completed.store(true, Ordering::SeqCst);
+            })
+        });
+
+        let stealer_thread = thread::spawn({
+            let completed = completed.clone();
+            move || {
+                let scheduler2 = Scheduler::new();
+                while !completed.load(Ordering::SeqCst) {
+                    if let Ok(stealer) = test_dbg!(scheduler1.try_steal()) {
+                        test_dbg!(stealer.spawn_one(&scheduler2));
+                    }
+                    test_dbg!(scheduler2.tick());
+                    thread::yield_now();
+                }
+                info!(
+                    "stealer thread done\nscheduler1={scheduler1:#?}\nscheduler2={scheduler2:#?}"
+                );
+                info!("dropping scheduler1");
+                drop(scheduler1);
+                info!("dropped scheduler1\n");
+
+                info!("dropping scheduler2");
+                drop(scheduler2);
+                info!("dropped scheduler2\n");
+            }
+        });
+
+        // this one is just, like, totally pathological, but it's good to have
+        // tests, i guess...
+        let evil_thread = thread::spawn(move || {
+            while !completed.load(Ordering::SeqCst) {
+                task.task_ref().wake_by_ref();
+                thread::yield_now();
+            }
+        });
+
+        stealer_thread.join().unwrap();
+        info!("stealer thread joined");
+
+        evil_thread.join().unwrap();
+        info!("evil_thread thread joined");
+    });
 }

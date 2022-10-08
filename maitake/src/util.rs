@@ -72,6 +72,18 @@ macro_rules! if_no_atomic_u64 {
 macro_rules! loom_const_fn {
     (
         $(#[$meta:meta])*
+        $vis:vis unsafe fn $name:ident($($arg:ident: $T:ty),*) -> $Ret:ty $body:block
+    ) => {
+        $(#[$meta])*
+        #[cfg(not(loom))]
+        $vis const unsafe fn $name($($arg: $T),*) -> $Ret $body
+
+        $(#[$meta])*
+        #[cfg(loom)]
+        $vis unsafe fn $name($($arg: $T),*) -> $Ret $body
+    };
+    (
+        $(#[$meta:meta])*
         $vis:vis fn $name:ident($($arg:ident: $T:ty),*) -> $Ret:ty $body:block
     ) => {
         $(#[$meta])*
@@ -107,7 +119,7 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
     NonNull::new_unchecked(ptr)
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
 pub(crate) use self::test::trace_init;
 
 pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg: &str) -> T {
@@ -119,13 +131,13 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
 
 #[cfg(test)]
 pub(crate) mod test {
-    #[cfg(not(loom))]
-    pub(crate) fn trace_init() {
-        trace_init_with_default("maitake=debug,cordyceps=debug");
+
+    pub(crate) fn trace_init() -> impl Drop {
+        trace_init_with_default("maitake=debug,cordyceps=debug")
     }
 
     #[cfg(not(loom))]
-    pub(crate) fn trace_init_with_default(default: &str) {
+    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
         use tracing_subscriber::filter::{EnvFilter, LevelFilter};
         let env = std::env::var("RUST_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
@@ -141,7 +153,30 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        let _ = tracing_02::collect::set_global_default(collector);
+        tracing_02::collect::set_default(collector)
+    }
+
+    #[cfg(loom)]
+    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
+        use tracing_subscriber_03::filter::{EnvFilter, LevelFilter};
+        let env = std::env::var("LOOM_LOG").unwrap_or_default();
+        let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
+        let filter = if env.is_empty() {
+            builder
+                .parse(default)
+                .unwrap()
+                // enable "loom=info" if using the default, so that we get
+                // loom's thread number and iteration count traces.
+                .add_directive("loom=info".parse().unwrap())
+        } else {
+            builder.parse_lossy(env)
+        };
+        let collector = tracing_subscriber_03::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .without_time()
+            .finish();
+        tracing_01::subscriber::set_default(collector)
     }
 
     #[allow(dead_code)]

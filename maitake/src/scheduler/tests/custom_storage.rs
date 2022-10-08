@@ -24,11 +24,11 @@ impl<S, F: Future> task::Storage<S, F> for MyBoxStorage {
 
 impl<F> MyBoxTask<&'static StaticScheduler, F>
 where
-    F: Future + 'static,
-    F::Output: 'static,
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
 {
     fn spawn(scheduler: &'static StaticScheduler, future: F) -> task::JoinHandle<F::Output> {
-        let task = MyBoxTask(Box::new(Task::new(scheduler, future)));
+        let task = MyBoxTask(Box::new(Task::new(future)));
         scheduler.spawn_allocated::<F, MyBoxStorage>(task)
     }
 }
@@ -39,7 +39,7 @@ fn notify_future() {
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     let chan = Chan::new(1);
 
     MyBoxTask::spawn(&SCHEDULER, {
@@ -66,7 +66,7 @@ fn notify_external() {
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     let chan = Chan::new(1);
 
     MyBoxTask::spawn(&SCHEDULER, {

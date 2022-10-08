@@ -16,7 +16,6 @@ pub mod wasm;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
-use maitake::scheduler::{self, StaticScheduler};
 use mycelium_alloc::buddy;
 
 #[cfg(test)]
@@ -24,7 +23,6 @@ mod tests;
 
 #[cfg_attr(target_os = "none", global_allocator)]
 static ALLOC: buddy::Alloc<32> = buddy::Alloc::new(32);
-static SCHEDULER: StaticScheduler = scheduler::new_static!();
 
 pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -154,16 +152,30 @@ pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
 }
 
 fn kernel_main() -> ! {
-    SCHEDULER.spawn(async move {
-        use maitake::time;
-        let duration = time::Duration::from_secs(5);
-        loop {
+    use maitake::{task, time};
+
+    fn spawn_sleep(duration: time::Duration) -> task::JoinHandle<()> {
+        tracing::info!(?duration, "spawning a sleep");
+
+        rt::spawn(async move {
+            tracing::info!(?duration, "sleeping");
             time::sleep(duration).await;
             tracing::info!(?duration, "slept");
+        })
+    }
+
+    rt::spawn(async move {
+        loop {
+            let result = futures_util::try_join! {
+                spawn_sleep(time::Duration::from_secs(2)),
+                spawn_sleep(time::Duration::from_secs(5)),
+                spawn_sleep(time::Duration::from_secs(10)),
+            };
+            tracing::info!(?result);
         }
     });
 
-    let core = rt::Core::new(&SCHEDULER);
+    let mut core = rt::Core::new();
     loop {
         core.run();
         tracing::warn!("someone stopped CPU 0's core! restarting it...");

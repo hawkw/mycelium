@@ -29,7 +29,7 @@ mod alloc {
         let scheduler = Scheduler::new();
         let lock = Arc::new(Mutex::new(0));
 
-        fn incr(lock: &Arc<Mutex<usize>>) -> impl Future + Send + 'static {
+        fn incr(lock: &Arc<Mutex<usize>>) -> impl Future<Output = ()> + Send + 'static {
             let lock = lock.clone();
             async move {
                 let mut guard = lock.lock().await;
@@ -58,7 +58,7 @@ mod alloc {
         let scheduler = Scheduler::new();
         let lock = Arc::new(Mutex::new(0));
 
-        fn incr(lock: &Arc<Mutex<usize>>) -> impl Future + Send + 'static {
+        fn incr(lock: &Arc<Mutex<usize>>) -> impl Future<Output = ()> + Send + 'static {
             let lock = lock.clone().lock_owned();
             async move {
                 let mut guard = lock.await;

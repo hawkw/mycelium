@@ -323,6 +323,10 @@ impl StateCell {
         })
     }
 
+    pub(super) fn set_woken(&self) {
+        self.0.fetch_or(State::WOKEN.raw_mask(), AcqRel);
+    }
+
     #[inline]
     pub(super) fn clone_ref(&self) {
         // Using a relaxed ordering is alright here, as knowledge of the

@@ -11,7 +11,7 @@ use tokio_test::{assert_pending, assert_ready_err, assert_ready_ok};
 /// vtable methods are valid.
 #[test]
 fn task_is_valid_for_casts() {
-    let task = Box::new(Task::<_, _, BoxStorage>::new(NopSchedule, async {
+    let task = Box::new(Task::<NopSchedule, _, BoxStorage>::new(async {
         unimplemented!("this task should never be polled")
     }));
 
@@ -60,7 +60,7 @@ fn empty_task_size() {
 
 #[test]
 fn join_handle_wakes() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -85,7 +85,7 @@ fn join_handle_wakes() {
 
 #[test]
 fn join_handle_cancels_before_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -113,7 +113,7 @@ fn join_handle_cancels_before_poll() {
 
 #[test]
 fn join_handle_cancels_after_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -141,7 +141,7 @@ fn join_handle_cancels_after_poll() {
 
 #[test]
 fn taskref_cancels_before_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -170,7 +170,7 @@ fn taskref_cancels_before_poll() {
 
 #[test]
 fn taskref_cancels_after_poll() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
 
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {
@@ -199,7 +199,7 @@ fn taskref_cancels_after_poll() {
 
 #[test]
 fn drop_join_handle() {
-    crate::util::trace_init();
+    let _trace = crate::util::trace_init();
     static COMPLETED: AtomicBool = AtomicBool::new(false);
     let scheduler = Scheduler::new();
     let join = scheduler.spawn(async move {

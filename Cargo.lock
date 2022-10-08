@@ -951,6 +951,7 @@ version = "0.0.1"
 dependencies = [
  "bootloader",
  "embedded-graphics",
+ "futures-util",
  "hal-core",
  "hal-x86_64",
  "maitake",
@@ -960,6 +961,8 @@ dependencies = [
  "mycotest",
  "once_cell",
  "parity-wasm",
+ "rand",
+ "rand_xoshiro",
  "rlibc",
  "tracing 0.2.0",
  "wasmi",
@@ -1264,6 +1267,15 @@ name = "rand_xorshift"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
+dependencies = [
+ "rand_core",
+]
+
+[[package]]
+name = "rand_xoshiro"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f97cdb2a36ed4183de61b2f824cc45c9f1037f28afe0a322e9fff4c108b5aaa"
 dependencies = [
  "rand_core",
 ]
