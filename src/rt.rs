@@ -28,12 +28,7 @@ pub struct Core {
     /// have a situation where all idle steal from the first available worker,
     /// resulting in other cores ending up with huge queues of idle tasks while
     /// the first core's queue is always empty.
-    ///
-    /// This is *not* a cryptographically secure random number generator, since
-    /// randomness of this value is not required for security. Instead, it just
-    /// helps ensure a good distribution of load. Therefore, we use a fast,
-    /// non-cryptographic RNG.
-    rng: rand_xoshiro::Xoroshiro128PlusPlus,
+    rng: crate::random::SystemRng,
 }
 
 struct Runtime {
@@ -82,7 +77,7 @@ impl Core {
         Self {
             scheduler,
             id,
-            rng: crate::arch::seed_rng(),
+            rng: crate::random::new_rng_blocking(),
             running: AtomicBool::new(false),
         }
     }
