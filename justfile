@@ -26,6 +26,9 @@ _fmt := if env_var_or_default("GITHUB_ACTIONS", "") != "true" { "" } else {
     ```
 }
 
+_loom_max_preemptions := env_var_or_default("LOOM_MAX_PREEMPTIONS", "2")
+_loom_max_branches := env_var_or_default("LOOM_MAX_BRANCHES", "10000")
+
 # default recipe to display help information
 default:
     @echo "justfile for Mycelium"
@@ -110,6 +113,7 @@ loom crate='' *args='': _get-nextest
 
     export RUSTFLAGS="--cfg loom ${RUSTFLAGS:-}"
     export LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}"
+    export LOOM_MAX_BRANCHES="${LOOM_MAX_BRANCHES:-10000}"
     export LOOM_LOG="${LOOM_LOG:-mycelium=trace,maitake=trace,cordyceps=trace,debug}"
 
     # if logging is enabled, also enable location tracking.
@@ -120,7 +124,7 @@ loom crate='' *args='': _get-nextest
         status "Disabled" "logging and location tracking"
     fi
 
-    status "Configured" "loom, LOOM_MAX_PREEMPTIONS=${LOOM_MAX_PREEMPTIONS}"
+    status "Configured" "loom, LOOM_MAX_PREEMPTIONS=${LOOM_MAX_PREEMPTIONS}, LOOM_MAX_BRANCHES=${LOOM_MAX_BRANCHES}"
 
     if [[ "${LOOM_CHECKPOINT_FILE:-}" ]]; then
         export LOOM_CHECKPOINT_FILE="${LOOM_CHECKPOINT_FILE:-}"

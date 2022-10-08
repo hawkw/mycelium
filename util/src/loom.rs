@@ -10,6 +10,42 @@ mod inner {
 mod inner {
     #![allow(dead_code)]
 
+    #[cfg(test)]
+    pub(crate) use std::thread;
+
+    #[cfg(test)]
+    pub(crate) fn model(f: impl Fn()) {
+        f()
+    }
+
+
+    #[cfg(test)]
+    pub(crate) mod model {
+        #[non_exhaustive]
+        #[derive(Default)]
+        pub(crate) struct Builder {
+            pub(crate) max_threads: usize,
+            pub(crate) max_branches: usize,
+            pub(crate) max_permutations: Option<usize>,
+            // pub(crate) max_duration: Option<Duration>,
+            pub(crate) preemption_bound: Option<usize>,
+            // pub(crate) checkpoint_file: Option<PathBuf>,
+            pub(crate) checkpoint_interval: usize,
+            pub(crate) location: bool,
+            pub(crate) log: bool,
+        }
+
+        impl Builder {
+            pub(crate) fn new() -> Self {
+                Self::default()
+            }
+
+            pub(crate) fn check(&self, f: impl Fn()) {
+                super::model(f)
+            }
+        }
+    }
+    
     pub(crate) mod alloc {
         /// Track allocations, detecting leaks
         #[derive(Debug, Default)]

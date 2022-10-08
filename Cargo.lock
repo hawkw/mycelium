@@ -990,8 +990,10 @@ dependencies = [
  "loom",
  "mycelium-bitfield",
  "proptest",
+ "tracing 0.1.36",
  "tracing 0.2.0",
  "tracing-subscriber 0.3.0",
+ "tracing-subscriber 0.3.15",
 ]
 
 [[package]]

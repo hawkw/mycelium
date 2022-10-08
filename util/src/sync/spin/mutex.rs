@@ -203,9 +203,9 @@ impl<'a, T: fmt::Display> fmt::Display for MutexGuard<'a, T> {
     }
 }
 
-#[cfg(all(test, loom))]
+#[cfg(test)]
 mod tests {
-    use loom::thread;
+    use crate::loom::{self, thread};
     use std::prelude::v1::*;
     use std::sync::Arc;
 
