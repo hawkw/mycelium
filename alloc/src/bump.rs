@@ -1,3 +1,6 @@
+//! The simplest thing resembling an "allocator" I could possibly create.
+//! Allocates into a "large" static array.
+
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
@@ -13,8 +16,8 @@ macro_rules! try_null {
     };
 }
 
-// 640k is enough for anyone
-const HEAP_SIZE: usize = 640 * 1024;
+// 1k is enough for anyone
+const HEAP_SIZE: usize = 1024;
 
 #[repr(align(16))]
 struct Heap(UnsafeCell<MaybeUninit<[u8; HEAP_SIZE]>>);
@@ -71,6 +74,14 @@ unsafe impl GlobalAlloc for Alloc {
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         dealloc(ptr, layout)
+    }
+}
+
+impl Alloc {
+    pub fn owns(&self, addr: *mut u8) -> bool {
+        let start_addr = HEAP.0.get() as *mut u8 as usize;
+        let end_addr = start_addr + HEAP_SIZE;
+        (addr as usize) < end_addr
     }
 }
 

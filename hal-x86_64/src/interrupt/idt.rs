@@ -1,4 +1,6 @@
 use crate::{cpu, segment};
+use core::fmt;
+use mycelium_util::bits;
 
 #[repr(C)]
 #[repr(align(16))]
@@ -10,17 +12,24 @@ pub struct Idt {
 #[repr(C)]
 pub struct Descriptor {
     offset_low: u16,
-    pub segment: segment::Selector,
+    segment: segment::Selector,
     ist_offset: u8,
-    pub attrs: Attrs,
+    attrs: Attrs,
     offset_mid: u16,
     offset_hi: u32,
     _zero: u32,
 }
 
-#[derive(Eq, PartialEq, Copy, Clone)]
-#[repr(transparent)]
-pub struct Attrs(u8);
+mycelium_util::bits::bitfield! {
+    #[derive(Eq, PartialEq)]
+    pub struct Attrs<u8> {
+        pub const GATE_KIND: GateKind;
+        pub const IS_32_BIT: bool;
+        pub const RING: cpu::Ring;
+        const _PAD = 1;
+        pub const PRESENT: bool;
+    }
+}
 
 impl Descriptor {
     pub const fn null() -> Self {
@@ -35,8 +44,8 @@ impl Descriptor {
         }
     }
 
-    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
-        self.segment = segment::code_segment();
+    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Self {
+        self.segment = segment::Selector::current_cs();
         let addr = handler as u64;
         self.offset_low = addr as u16;
         self.offset_mid = (addr >> 16) as u16;
@@ -44,7 +53,23 @@ impl Descriptor {
         self.attrs
             .set_present(true)
             .set_32_bit(true)
-            .set_gate_kind(GateKind::Interrupt)
+            .set_gate_kind(GateKind::Interrupt);
+        self
+    }
+
+    /// Sets the descriptor's [Interrupt Stack Table][ist] offset.
+    ///
+    /// [ist]: https://en.wikipedia.org/wiki/Task_state_segment#Inner-level_stack_pointers
+    pub(crate) fn set_ist_offset(&mut self, ist_offset: u8) -> &mut Self {
+        self.ist_offset = ist_offset;
+        self
+    }
+
+    /// Mutably borrows the descriptor's [attributes](Attrs).
+    #[inline]
+    #[must_use]
+    pub fn attrs_mut(&mut self) -> &mut Attrs {
+        &mut self.attrs
     }
 }
 
@@ -56,69 +81,25 @@ pub enum GateKind {
     Task = 0b0000_0101,
 }
 
-impl Attrs {
-    const IS_32_BIT: u8 = 0b1000;
-    const KIND_BITS: u8 = GateKind::Interrupt as u8 | GateKind::Trap as u8 | GateKind::Task as u8;
-    const PRESENT_BIT: u8 = 0b1000_0000;
-    const RING_BITS: u8 = 0b0111_0000;
-    const RING_SHIFT: u8 = Self::RING_BITS.trailing_zeros() as u8;
+impl bits::FromBits<u8> for GateKind {
+    const BITS: u32 = 3;
+    type Error = &'static str;
 
-    pub const fn null() -> Self {
-        Self(0)
-    }
-
-    pub fn gate_kind(&self) -> GateKind {
-        match self.0 & Self::KIND_BITS {
-            0b0110 => GateKind::Interrupt,
-            0b0111 => GateKind::Trap,
-            0b0101 => GateKind::Task,
-            bits => unreachable!("unexpected bit pattern {:#08b}", bits),
+    fn try_from_bits(bits: u8) -> Result<Self, Self::Error> {
+        match bits {
+            bits if bits == Self::Interrupt as u8 => Ok(Self::Interrupt),
+            bits if bits == Self::Trap as u8 => Ok(Self::Trap),
+            bits if bits == Self::Task as u8 => Ok(Self::Task),
+            _ => Err("unknown GateKind pattern, expected one of [110, 111, or 101]"),
         }
     }
 
-    pub fn is_32_bit(&self) -> bool {
-        self.0 & Self::IS_32_BIT != 0
-    }
-
-    pub fn is_present(&self) -> bool {
-        self.0 & Self::PRESENT_BIT == Self::PRESENT_BIT
-    }
-
-    pub fn ring(&self) -> cpu::Ring {
-        cpu::Ring::from_u8(self.0 & Self::RING_BITS >> Self::RING_SHIFT)
-    }
-
-    pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
-        self.0 &= !Self::KIND_BITS;
-        self.0 |= kind as u8;
-        self
-    }
-
-    pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
-        if is_32_bit {
-            self.0 |= Self::IS_32_BIT;
-        } else {
-            self.0 &= !Self::IS_32_BIT;
-        }
-        self
-    }
-
-    pub fn set_present(&mut self, present: bool) -> &mut Self {
-        if present {
-            self.0 |= Self::PRESENT_BIT;
-        } else {
-            self.0 &= !Self::PRESENT_BIT;
-        }
-        self
-    }
-
-    pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
-        let ring = (ring as u8) << Self::RING_SHIFT;
-        self.0 &= !Self::RING_BITS;
-        self.0 |= ring;
-        self
+    fn into_bits(self) -> u8 {
+        self as u8
     }
 }
+
+// === impl Idt ===
 
 impl Idt {
     const NUM_VECTORS: usize = 256;
@@ -159,7 +140,7 @@ impl Idt {
 
     pub const PAGE_FAULT: usize = 14;
 
-    pub const X87_FPU_EXCEPTION_PENDING: usize = 16;
+    pub const X87_FPU_EXCEPTION: usize = 16;
 
     pub const ALIGNMENT_CHECK: usize = 17;
 
@@ -171,6 +152,9 @@ impl Idt {
 
     pub const SECURITY_EXCEPTION: usize = 30;
 
+    /// Chosen by fair die roll, guaranteed to be random.
+    pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
+
     pub const fn new() -> Self {
         Self {
             descriptors: [Descriptor::null(); Self::NUM_VECTORS],
@@ -178,40 +162,93 @@ impl Idt {
     }
 
     pub(super) fn set_isr(&mut self, vector: usize, isr: *const ()) {
-        let attrs = self.descriptors[vector].set_handler(isr);
-        tracing::debug!(vector, isr = ?isr, ?attrs, "set isr");
+        let descr = self.descriptors[vector].set_handler(isr);
+        if vector == Self::DOUBLE_FAULT {
+            descr.set_ist_offset(Self::DOUBLE_FAULT_IST_OFFSET as u8);
+        }
+        tracing::debug!(vector, ?isr, ?descr, "set isr");
     }
 
     pub fn load(&'static self) {
-        let ptr = crate::cpu::DtablePtr::new(self);
-        unsafe { asm!("lidt [{0}]", in(reg) &ptr) }
+        let ptr = cpu::DtablePtr::new(self);
+        tracing::debug!(?ptr, "loading IDT");
+        unsafe {
+            // Safety: the `'static` bound ensures the IDT isn't going away
+            // unless you did something really evil.
+            cpu::intrinsics::lidt(ptr)
+        }
+        tracing::debug!("IDT loaded!");
     }
 }
 
-impl core::fmt::Debug for Idt {
+impl fmt::Debug for Idt {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_list().entries(self.descriptors[..].iter()).finish()
+        let Self { descriptors } = self;
+        f.debug_list().entries(descriptors[..].iter()).finish()
     }
 }
 
-impl core::fmt::Debug for Descriptor {
+// === impl Descriptor ===
+
+impl fmt::Debug for Descriptor {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let Self {
+            offset_low,
+            segment,
+            ist_offset,
+            attrs,
+            offset_mid,
+            offset_hi,
+            _zero: _,
+        } = self;
         f.debug_struct("Descriptor")
-            .field("offset_low", &format_args!("{:#x}", self.offset_low))
-            .field("segment", &self.segment)
-            .field("ist_offset", &format_args!("{:#x}", self.ist_offset))
-            .field("attrs", &self.attrs)
-            .field("offset_mid", &format_args!("{:#x}", self.offset_mid))
-            .field("offset_high", &format_args!("{:#x}", self.offset_hi))
+            .field("offset_low", &format_args!("{offset_low:#x}"))
+            .field("segment", segment)
+            .field("ist_offset", &format_args!("{ist_offset:#x}"))
+            .field("attrs", attrs)
+            .field("offset_mid", &format_args!("{offset_mid:#x}"))
+            .field("offset_high", &format_args!("{offset_hi:#x}"))
             .finish()
     }
 }
 
-impl core::fmt::Debug for Attrs {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Attrs")
-            .field(&format_args!("{:#08b}", self.0))
-            .finish()
+// === impl Attrs ===
+
+impl Attrs {
+    pub const fn null() -> Self {
+        Self(0)
+    }
+
+    pub fn gate_kind(&self) -> GateKind {
+        self.get(Self::GATE_KIND)
+    }
+
+    pub fn is_32_bit(&self) -> bool {
+        self.get(Self::IS_32_BIT)
+    }
+
+    pub fn is_present(&self) -> bool {
+        self.get(Self::PRESENT)
+    }
+
+    pub fn ring(&self) -> cpu::Ring {
+        self.get(Self::RING)
+    }
+
+    pub fn set_gate_kind(&mut self, kind: GateKind) -> &mut Self {
+        self.set(Self::GATE_KIND, kind)
+    }
+
+    pub fn set_32_bit(&mut self, is_32_bit: bool) -> &mut Self {
+        self.set(Self::IS_32_BIT, is_32_bit)
+    }
+
+    pub fn set_present(&mut self, present: bool) -> &mut Self {
+        self.set(Self::PRESENT, present)
+    }
+
+    pub fn set_ring(&mut self, ring: cpu::Ring) -> &mut Self {
+        self.set(Self::RING, ring)
     }
 }
 
@@ -226,13 +263,18 @@ mod tests {
     }
 
     #[test]
+    fn attrs_pack_specs() {
+        Attrs::assert_valid()
+    }
+
+    #[test]
     fn idt_attrs_are_correct() {
         let mut present_32bit_interrupt = Attrs::null();
         present_32bit_interrupt
             .set_present(true)
             .set_32_bit(true)
             .set_gate_kind(GateKind::Interrupt);
-
+        println!("{present_32bit_interrupt}");
         // expected bit pattern here is:
         // |   1|   0    0|   0|   1    1    1    0|
         // |   P|      DPL|   Z|          Gate Type|
@@ -241,13 +283,17 @@ mod tests {
         // DPL: Descriptor Privilege Level (0 => ring 0)
         // Z: this bit is 0 for a 64-bit IDT. for a 32-bit IDT, this may be 1 for task gates.
         // Gate Type: 32-bit interrupt gate is 0b1110. that's just how it is.
-        assert_eq!(present_32bit_interrupt.0 as u8, 0b1000_1110);
+        assert_eq!(
+            present_32bit_interrupt.0 as u8, 0b1000_1110,
+            "\n attrs: {:#?}",
+            present_32bit_interrupt
+        );
     }
 
     #[test]
     fn idt_entry_is_correct() {
         let mut idt_entry = Descriptor::null();
-        idt_entry.set_handler(0x12348765_abcdfdec as *const ());
+        idt_entry.set_handler(0x1234_8765_abcd_fdec as *const ());
 
         let idt_bytes = unsafe { core::mem::transmute::<&Descriptor, &[u8; 16]>(&idt_entry) };
 
@@ -261,6 +307,6 @@ mod tests {
             0x00, 0x00, 0x00, 0x00,
         ];
 
-        assert_eq!(idt_bytes, &expected_idt);
+        assert_eq!(idt_bytes, &expected_idt, "\n entry: {:#?}", idt_entry);
     }
 }

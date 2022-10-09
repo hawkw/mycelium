@@ -1,63 +1,121 @@
-use bootloader::bootinfo;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use bootloader::boot_info;
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
-use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
-pub use hal_x86_64::{interrupt, mm, NAME};
+use hal_x86_64::{cpu, serial, vga};
+pub use hal_x86_64::{cpu::entropy::seed_rng, mm, NAME};
+use mycelium_util::sync::InitOnce;
+
+mod framebuf;
+pub mod interrupt;
+mod oops;
+
+pub use self::oops::{oops, Oops};
+
+use self::framebuf::FramebufWriter;
+
+pub type MinPageSize = mm::size::Size4Kb;
+
+pub use self::interrupt::init_interrupts;
+
+pub fn tick_timer() {
+    interrupt::TIMER.advance_ticks(0);
+}
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
-    inner: &'static bootinfo::BootInfo,
+    inner: &'static boot_info::BootInfo,
+    has_framebuffer: bool,
 }
 
-type MemRegionIter = core::slice::Iter<'static, bootinfo::MemoryRegion>;
+type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
 
 impl BootInfo for RustbootBootInfo {
     // TODO(eliza): implement
-    type MemoryMap = core::iter::Map<MemRegionIter, fn(&bootinfo::MemoryRegion) -> mem::Region>;
+    type MemoryMap = core::iter::Map<MemRegionIter, fn(&boot_info::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
 
+    type Framebuffer = FramebufWriter;
+
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
-        fn convert_region_kind(kind: bootinfo::MemoryRegionType) -> mem::RegionKind {
+        fn convert_region_kind(kind: boot_info::MemoryRegionKind) -> mem::RegionKind {
             match kind {
-                bootinfo::MemoryRegionType::Usable => mem::RegionKind::FREE,
-                bootinfo::MemoryRegionType::InUse => mem::RegionKind::USED,
-                bootinfo::MemoryRegionType::Reserved => mem::RegionKind::USED,
-                bootinfo::MemoryRegionType::AcpiReclaimable => mem::RegionKind::BOOT_RECLAIMABLE,
-                bootinfo::MemoryRegionType::BadMemory => mem::RegionKind::BAD,
-                bootinfo::MemoryRegionType::Kernel => mem::RegionKind::KERNEL,
-                bootinfo::MemoryRegionType::KernelStack => mem::RegionKind::KERNEL,
-                bootinfo::MemoryRegionType::PageTable => mem::RegionKind::PAGE_TABLE,
-                bootinfo::MemoryRegionType::Bootloader => mem::RegionKind::BOOT,
-                bootinfo::MemoryRegionType::BootInfo => mem::RegionKind::BOOT,
+                boot_info::MemoryRegionKind::Usable => mem::RegionKind::FREE,
+                // TODO(eliza): make known
+                boot_info::MemoryRegionKind::UnknownUefi(_) => mem::RegionKind::UNKNOWN,
+                boot_info::MemoryRegionKind::UnknownBios(_) => mem::RegionKind::UNKNOWN,
+                boot_info::MemoryRegionKind::Bootloader => mem::RegionKind::BOOT,
                 _ => mem::RegionKind::UNKNOWN,
             }
         }
 
-        fn convert_region(region: &bootinfo::MemoryRegion) -> mem::Region {
-            let start = PAddr::from_u64(region.range.start_addr());
+        fn convert_region(region: &boot_info::MemoryRegion) -> mem::Region {
+            let start = PAddr::from_u64(region.start);
             let size = {
-                let end = PAddr::from_u64(region.range.end_addr()).offset(1);
-                assert!(start < end, "bad memory range from bootinfo!");
+                let end = PAddr::from_u64(region.end).offset(1);
+                assert!(start < end, "bad memory range from boot_info!");
                 let size = start.difference(end);
                 assert!(size >= 0);
                 size as usize + 1
             };
-            let kind = convert_region_kind(region.region_type);
+            let kind = convert_region_kind(region.kind);
             mem::Region::new(start, size, kind)
         }
-        (&self.inner.memory_map[..]).iter().map(convert_region)
+        self.inner.memory_regions[..].iter().map(convert_region)
     }
 
     fn writer(&self) -> Self::Writer {
         vga::writer()
     }
 
+    fn framebuffer(&self) -> Option<Self::Framebuffer> {
+        if !self.has_framebuffer {
+            return None;
+        }
+
+        Some(unsafe { framebuf::mk_framebuf() })
+    }
+
     fn subscriber(&self) -> Option<tracing::Dispatch> {
-        Some(tracing::Dispatch::new(
-            hal_x86_64::tracing::Subscriber::default(),
-        ))
+        use mycelium_trace::{
+            embedded_graphics::MakeTextWriter,
+            writer::{self, MakeWriterExt},
+            Subscriber,
+        };
+
+        type FilteredFramebuf = writer::WithMaxLevel<MakeTextWriter<FramebufWriter>>;
+        type FilteredSerial =
+            writer::WithFilter<&'static serial::Port, fn(&tracing::Metadata<'_>) -> bool>;
+
+        static COLLECTOR: InitOnce<Subscriber<FilteredFramebuf, Option<FilteredSerial>>> =
+            InitOnce::uninitialized();
+
+        if !self.has_framebuffer {
+            // TODO(eliza): we should probably write to just the serial port if
+            // there's no framebuffer...
+            return None;
+        }
+
+        fn serial_filter(meta: &tracing::Metadata<'_>) -> bool {
+            // disable really noisy traces from maitake
+            // TODO(eliza): it would be nice if this was configured by
+            // non-arch-specific OS code...
+            const DISABLED_TARGETS: &[&str] = &["maitake::time"];
+            DISABLED_TARGETS
+                .iter()
+                .all(|target| !meta.target().starts_with(target))
+        }
+
+        let collector = COLLECTOR.get_or_else(|| {
+            let display_writer = MakeTextWriter::new(|| unsafe { framebuf::mk_framebuf() })
+                .with_max_level(tracing::Level::INFO);
+            let serial = serial::com1().map(|com1| {
+                com1.with_filter(serial_filter as for<'a, 'b> fn(&'a tracing::Metadata<'b>) -> bool)
+            });
+            Subscriber::display_only(display_writer).with_serial(serial)
+        });
+
+        Some(tracing::Dispatch::from_static(collector))
     }
 
     fn bootloader_name(&self) -> &str {
@@ -71,130 +129,54 @@ impl BootInfo for RustbootBootInfo {
 
 impl RustbootBootInfo {
     fn vm_offset(&self) -> VAddr {
-        VAddr::from_u64(self.inner.physical_memory_offset)
-    }
-}
-
-pub(crate) static TIMER: AtomicUsize = AtomicUsize::new(0);
-pub(crate) struct InterruptHandlers;
-
-/// Forcibly unlock the IOs we write to in an oops (VGA buffer and COM1 serial
-/// port) to prevent deadlocks if the oops occured while either was locked.
-///
-/// # Safety
-///
-///  /!\ only call this when oopsing!!! /!\
-impl hal_core::interrupt::Handlers<X64Registers> for InterruptHandlers {
-    fn page_fault<C>(cx: C)
-    where
-        C: hal_core::interrupt::Context<Registers = X64Registers>
-            + hal_core::interrupt::ctx::PageFault,
-    {
-        oops(&"PAGE FAULT", Some(&cx));
+        VAddr::from_u64(
+            self.inner
+                .physical_memory_offset
+                .into_option()
+                .expect("haha wtf"),
+        )
     }
 
-    fn code_fault<C>(cx: C)
-    where
-        C: hal_core::interrupt::Context<Registers = X64Registers>
-            + hal_core::interrupt::ctx::CodeFault,
-    {
-        oops(&"CODE FAULT", Some(&cx));
-    }
+    fn from_bootloader(inner: &'static mut boot_info::BootInfo) -> Self {
+        let has_framebuffer = framebuf::init(inner);
 
-    fn double_fault<C>(cx: C)
-    where
-        C: hal_core::interrupt::Context<Registers = X64Registers>
-            + hal_core::interrupt::ctx::CodeFault,
-    {
-        oops(&"DOUBLE FAULT", Some(&cx))
-    }
-
-    fn timer_tick() {
-        TIMER.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn keyboard_controller() {
-        // load-bearing read - if we don't read from the keyboard controller it won't
-        // send another interrupt on later keystrokes.
-        //
-        // 0x60 is a magic PC/AT number.
-        let scancode = unsafe { hal_x86_64::cpu::Port::at(0x60).readb() };
-        tracing::info!(
-            // for now
-            "got scancode {}. the time is now: {}",
-            scancode,
-            TIMER.load(Ordering::Relaxed)
-        );
-    }
-
-    fn test_interrupt<C>(cx: C)
-    where
-        C: hal_core::interrupt::ctx::Context<Registers = X64Registers>,
-    {
-        tracing::info!(registers=?cx.registers(), "lol im in ur test interrupt");
-    }
-}
-
-#[no_mangle]
-#[cfg(target_os = "none")]
-pub extern "C" fn _start(info: &'static bootinfo::BootInfo) -> ! {
-    let bootinfo = RustbootBootInfo { inner: info };
-    crate::kernel_main(&bootinfo);
-}
-
-#[cold]
-pub fn oops(
-    cause: &dyn core::fmt::Display,
-    fault: Option<&dyn hal_core::interrupt::ctx::Context<Registers = X64Registers>>,
-) -> ! {
-    use core::fmt::Write;
-    let mut vga = vga::writer();
-    // /!\ disable all interrupts, unlock everything to prevent deadlock /!\
-    //
-    // Safety: it is okay to do this because we are oopsing and everything
-    // is going to die anyway.
-    unsafe {
-        // disable all interrupts.
-        cpu::intrinsics::cli();
-
-        // If the system has a COM1, unlock it.
-        if let Some(com1) = serial::com1() {
-            com1.force_unlock();
+        Self {
+            inner,
+            has_framebuffer,
         }
-
-        // unlock the VGA buffer.
-        vga.force_unlock();
     }
+}
 
-    let registers = if let Some(fault) = fault {
-        let registers = fault.registers();
-        tracing::error!(message = "OOPS! a CPU fault occurred", %cause, ?registers);
-        Some(registers)
-    } else {
-        tracing::error!(message = "OOPS! a panic occurred", %cause);
-        None
-    };
+#[cfg(target_os = "none")]
+bootloader::entry_point!(arch_entry);
 
-    const RED_BG: vga::ColorSpec = vga::ColorSpec::new(vga::Color::White, vga::Color::Red);
-    vga.set_color(RED_BG);
-    vga.clear();
-    let _ = vga.write_str("\n  ");
-    vga.set_color(vga::ColorSpec::new(vga::Color::Red, vga::Color::White));
-    let _ = vga.write_str("OOPSIE WOOPSIE");
-    vga.set_color(RED_BG);
-
-    let _ = writeln!(vga, "\n  uwu we did a widdle fucky-wucky!\n{}", cause);
-    if let Some(registers) = registers {
-        let _ = writeln!(vga, "\n{}\n", registers);
-    }
-    let _ = vga.write_str("\n  it will never be safe to turn off your computer.");
-
-    #[cfg(test)]
-    qemu_exit(QemuExitCode::Failed);
-
-    #[cfg(not(test))]
+pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
     unsafe {
-        cpu::halt();
+        cpu::intrinsics::cli();
+    }
+    if let Some(offset) = info.physical_memory_offset.into_option() {
+        // Safety: i hate everything
+        unsafe {
+            vga::init_with_offset(offset);
+        }
+    }
+    /* else {
+        // lol we're hosed
+    } */
+
+    let boot_info = RustbootBootInfo::from_bootloader(info);
+    crate::kernel_start(&boot_info);
+}
+
+// TODO(eliza): this is now in arch because it uses the serial port, would be
+// nice if that was cross platform...
+#[cfg(test)]
+pub fn run_tests() {
+    let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
+    let mk = || com1.lock();
+    match mycotest::runner::run_tests(mk) {
+        Ok(()) => qemu_exit(QemuExitCode::Success),
+        Err(_) => qemu_exit(QemuExitCode::Failed),
     }
 }
 
@@ -220,146 +202,146 @@ pub(crate) fn qemu_exit(exit_code: QemuExitCode) -> ! {
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_some_4k_pages() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         let page2 = tracing::info_span!("alloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page1, page2);
         tracing::info_span!("dealloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page1);
+            let res = crate::ALLOC.dealloc(page1);
             tracing::info!(?res, "deallocated page 1");
             res
         })?;
         let page3 = tracing::info_span!("alloc page 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page2, page3);
         tracing::info_span!("dealloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page2);
+            let res = crate::ALLOC.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
             res
         })?;
         let page4 = tracing::info_span!("alloc page 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page3, page4);
         tracing::info_span!("dealloc page 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page3);
+            let res = crate::ALLOC.dealloc(page3);
             tracing::info!(?res, "deallocated page 3");
             res
         })?;
         tracing::info_span!("dealloc page 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page4);
+            let res = crate::ALLOC.dealloc(page4);
             tracing::info!(?res, "deallocated page 4");
             res
         })
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_4k_pages_and_ranges() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let range1 = tracing::info_span!("alloc range 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc_range(mm::size::Size4Kb, 16);
+            let res = crate::ALLOC.alloc_range(mm::size::Size4Kb, 16);
             tracing::info!(?res);
             res
         })?;
         let page2 = tracing::info_span!("alloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         tracing::info_span!("dealloc range 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc_range(range1);
+            let res = crate::ALLOC.dealloc_range(range1);
             tracing::info!(?res, "deallocated range 1");
             res
         })?;
         let range3 = tracing::info_span!("alloc range 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc_range(mm::size::Size4Kb, 10);
+            let res = crate::ALLOC.alloc_range(mm::size::Size4Kb, 10);
             tracing::info!(?res);
             res
         })?;
         tracing::info_span!("dealloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page2);
+            let res = crate::ALLOC.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
             res
         })?;
         let range4 = tracing::info_span!("alloc range 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc_range(mm::size::Size4Kb, 8);
+            let res = crate::ALLOC.alloc_range(mm::size::Size4Kb, 8);
             tracing::info!(?res);
             res
         })?;
         tracing::info_span!("dealloc range 3").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc_range(range3);
+            let res = crate::ALLOC.dealloc_range(range3);
             tracing::info!(?res, "deallocated range 3");
             res
         })?;
         tracing::info_span!("dealloc range 4").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc_range(range4);
+            let res = crate::ALLOC.dealloc_range(range4);
             tracing::info!(?res, "deallocated range 4");
             res
         })
     }
 }
 
-mycelium_util::decl_test! {
+mycotest::decl_test! {
     fn alloc_some_pages() -> Result<(), hal_core::mem::page::AllocErr> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         let page2 = tracing::info_span!("alloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size4Kb);
+            let res = crate::ALLOC.alloc(mm::size::Size4Kb);
             tracing::info!(?res);
             res
         })?;
         assert_ne!(page1, page2);
         tracing::info_span!("dealloc page 1").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page1);
+            let res = crate::ALLOC.dealloc(page1);
             tracing::info!(?res, "deallocated page 1");
             res
         })?;
         // TODO(eliza): when 2mb pages work, test that too...
         // let page3 = tracing::info_span!("alloc page 3").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
+        //     let res = crate::ALLOC.alloc(mm::size::Size2Mb);
         //     tracing::info!(?res);
         //     res
         // })?;
         tracing::info_span!("dealloc page 2").in_scope(|| {
-            let res = crate::PAGE_ALLOCATOR.dealloc(page2);
+            let res = crate::ALLOC.dealloc(page2);
             tracing::info!(?res, "deallocated page 2");
             res
         })?;
         // let page4 = tracing::info_span!("alloc page 4").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.alloc(mm::size::Size2Mb);
+        //     let res = crate::ALLOC.alloc(mm::size::Size2Mb);
         //     tracing::info!(?res);
         //     res
         // })?;
         // tracing::info_span!("dealloc page 3").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.dealloc(page3);
+        //     let res = crate::ALLOC.dealloc(page3);
         //     tracing::info!(?res, "deallocated page 3");
         //     res
         // })?;
         // tracing::info_span!("dealloc page 4").in_scope(|| {
-        //     let res = crate::PAGE_ALLOCATOR.dealloc(page4);
+        //     let res = crate::ALLOC.dealloc(page4);
         //     tracing::info!(?res, "deallocated page 4");
         //     res
-        // })
+        // })?;
         Ok(())
     }
 }

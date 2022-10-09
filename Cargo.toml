@@ -1,17 +1,25 @@
 [workspace]
 members = [
     "alloc",
+    "bitfield",
+    "cordyceps",
     "util",
     "hal-core",
     "hal-x86_64",
+    "inoculate",
+    "maitake",
+    "mycotest",
+    "trace",
     "pci",
 ]
+resolver = "2"
 
 [package]
 name = "mycelium-kernel"
 version = "0.0.1"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
 edition = "2018"
+license = "MIT"
 
 [lib]
 name = "mycelium_kernel"
@@ -22,37 +30,72 @@ name = "mycelium_kernel"
 path = "src/main.rs"
 test = false
 
+[profile.dev]
+opt-level = 3
+
 [dependencies]
-hal-core = { path = "hal-core" }
+hal-core = { path = "hal-core", features = ["embedded-graphics-core"] }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
+maitake = { path = "maitake", features = ["tracing-02"] }
 mycelium-util = { path = "util" }
+mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
+rand_xoshiro = "0.6"
+rand = { version = "0.8", default_features = false }
 rlibc = "1.0"
+# NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
+# script is not that good, and breaks if you put this in `cfg(...).dependencies`
+# instead of normal [dependencies]. don't move this.
+bootloader = { version = "0.10.13" }
+embedded-graphics = "0.7"
+mycotest = { path = "mycotest" }
+futures-util = { version = "0.3", default-features = false, features = ["async-await", "async-await-macro"] }
+# we don't depend on this directly, but we need to ensure that `tracing` uses a
+# Miri-compatible version of `once_cell`.
+once_cell = { version = "1.15.0", default-features = false }
+
+[dev-dependencies]
+mycotest = { path = "mycotest", features = ["runner"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-bootloader = {version = "0.9.16", features = ["map_physical_memory"] }
-hal-x86_64 = { path = "hal-x86_64" }
+hal-x86_64 = { path = "hal-x86_64", features = ["rand_core"] }
+yaxpeax-x86 = { version = "1.0.0", default-features = false, features = ["fmt"] }
+yaxpeax-arch = { version = "0.2.0", default-features = false }
 
 [dependencies.tracing]
-version = "0.1"
 default_features = false
-features = ["attributes"]
+features = ["attributes", "alloc"]
+git = "https://github.com/tokio-rs/tracing"
 
 [dependencies.wasmi]
-git = "https://github.com/mystor/wasmi"
-branch = "mycelium"
+git = "https://github.com/hawkw/wasmi"
+branch = "mycelium-v0.9.0"
 default-features = false
 features = ["core"]
+
+[dependencies.parity-wasm]
+version = "0.42"
+default-features = false
+features = ["reduced-stack-buffer"]
 
 [build-dependencies]
 wat = "1.0"
 
-[package.metadata.bootimage]
-test-success-exit-code = 33 # (0x10 << 1) | 1
-test-args = [
-    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
-    "-serial", "stdio", "-display", "none"
-]
+[package.metadata.bootloader]
+map-physical-memory = true
+map-page-table-recursively = true
+map-framebuffer = true
+# the kernel is mapped into the higher half of the virtual address space.
+dynamic-range-start = "0xFFFF_8000_0000_0000"
 
-[package.metadata.target.'cfg(target_arch = "x86_64")'.cargo-xbuild]
-memcpy = true
-sysroot_path = "target/x86_64/sysroot"
+[patch.crates-io]
+# use `tracing` 0.2 from git
+tracing = { git = "https://github.com/tokio-rs/tracing" }
+tracing-core = { git = "https://github.com/tokio-rs/tracing" }
+
+
+# Custom profile for Loom tests: enable release optimizations so that the loom
+# tests are less slow, but don't disable debug assertions.
+[profile.loom]
+inherits = "test"
+lto = true
+opt-level = 3

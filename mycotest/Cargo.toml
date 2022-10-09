@@ -1,0 +1,20 @@
+[package]
+name = "mycotest"
+version = "0.1.0"
+authors = ["Eliza Weisman <eliza@elizas.website>"]
+edition = "2018"
+license = "MIT"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+alloc = []
+runner = ["mycelium-trace"]
+
+[dependencies.tracing]
+version = "0.1"
+default-features = false
+features = ["attributes"]
+
+[dependencies]
+mycelium-trace = { path = "../trace", optional = true }

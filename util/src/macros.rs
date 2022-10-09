@@ -1,3 +1,18 @@
+macro_rules! loom_const_fn {
+    (
+        $(#[$meta:meta])*
+        $vis:vis fn $name:ident($($arg:ident: $T:ty),*) -> $Ret:ty $body:block
+    ) => {
+        $(#[$meta])*
+        #[cfg(not(loom))]
+        $vis const fn $name($($arg: $T),*) -> $Ret $body
+
+        $(#[$meta])*
+        #[cfg(loom)]
+        $vis fn $name($($arg: $T),*) -> $Ret $body
+    }
+}
+
 /// Indicates unreachable code that we are confident is *truly* unreachable.
 ///
 /// This is essentially a compromise between `core::unreachable!()` and
@@ -50,4 +65,55 @@ macro_rules! unreachable_unchecked {
             core::hint::unreachable_unchecked();
         }
     });
+}
+
+#[cfg(test)]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        match $x {
+            x => {
+                test_trace!(
+                    location = %core::panic::Location::caller(),
+                    "{} = {x:?}",
+                    stringify!($x)
+                );
+                x
+            }
+        }
+    };
+}
+
+#[cfg(not(test))]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        $x
+    };
+}
+
+#[cfg(all(test, not(loom)))]
+macro_rules! test_trace {
+    ($($arg:tt)+) => {
+        tracing::trace!($($arg)+);
+    };
+}
+
+#[cfg(all(test, loom))]
+macro_rules! test_trace {
+    ($($arg:tt)+) => {
+        tracing_01::trace!($($arg)+);
+    };
+}
+
+#[cfg(all(test, not(loom)))]
+macro_rules! test_info {
+    ($($arg:tt)+) => {
+        tracing::trace!($($arg)+);
+    };
+}
+
+#[cfg(all(test, loom))]
+macro_rules! test_info {
+    ($($arg:tt)+) => {
+        tracing_01::trace!($($arg)+);
+    };
 }

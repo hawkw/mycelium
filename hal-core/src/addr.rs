@@ -156,13 +156,9 @@ macro_rules! impl_addrs {
             impl fmt::Debug for $name {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     if let Some(width) = f.width() {
-                        f.debug_tuple(stringify!($name))
-                            .field(&format_args!("{:#0width$x}", self.0, width = width))
-                            .finish()
+                        write!(f, concat!(stringify!($name), "({:#0width$x})"), self.0, width = width)
                     } else {
-                        f.debug_tuple(stringify!($name))
-                            .field(&format_args!("{:#x}", self.0,))
-                            .finish()
+                        write!(f, concat!(stringify!($name), "({:#x})"), self.0,)
                     }
                 }
             }
@@ -256,6 +252,10 @@ macro_rules! impl_addrs {
             }
 
             impl $name {
+                pub const fn zero() -> Self {
+                    Self(0)
+                }
+
                 /// # Panics
                 ///
                 /// * If debug assertions are enabled and the address is not
@@ -376,6 +376,28 @@ impl VAddr {
 
         Ok(Self(u))
     }
+
+    /// Constructs a `VAddr` from an arbitrary `usize` value *without* checking
+    /// if it's valid.
+    ///
+    /// Pros of this function:
+    /// - can be used in const-eval contexts
+    ///
+    /// Cons of this function:
+    /// - "refer to 'Safety' section"
+    ///
+    /// # Safety
+    ///
+    /// u can use dis function to construct invalid addresses. probably dont do
+    /// that.
+    pub const unsafe fn from_usize_unchecked(u: usize) -> Self {
+        Self(u)
+    }
+
+    #[inline]
+    pub fn of<T: ?Sized>(pointee: &T) -> Self {
+        Self::from_usize(pointee as *const _ as *const () as usize)
+    }
 }
 
 impl_addrs! {
@@ -385,7 +407,7 @@ impl_addrs! {
 
 impl InvalidAddress {
     fn new(addr: usize, msg: &'static str) -> Self {
-        Self { addr, msg }
+        Self { msg, addr }
     }
 }
 impl fmt::Display for InvalidAddress {
@@ -414,12 +436,12 @@ mod tests {
             PAddr::from_usize(0x0)
         );
         assert_eq!(
-            PAddr::from_usize(0xDEADFACE).align_up(1usize),
-            PAddr::from_usize(0xDEADFACE)
+            PAddr::from_usize(0xDEAD_FACE).align_up(1usize),
+            PAddr::from_usize(0xDEAD_FACE)
         );
         assert_eq!(
-            PAddr::from_usize(0x000_F_FFFF_FFFF_FFFF).align_up(1usize),
-            PAddr::from_usize(0x000_F_FFFF_FFFF_FFFF)
+            PAddr::from_usize(0x000F_FFFF_FFFF_FFFF).align_up(1usize),
+            PAddr::from_usize(0x000F_FFFF_FFFF_FFFF)
         );
     }
 

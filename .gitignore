@@ -11,3 +11,7 @@
 **/*.rs.bk
 
 # End of https://www.gitignore.io/api/rust
+
+### GDB ###
+
+.gdb_history

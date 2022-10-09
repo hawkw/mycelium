@@ -1,5 +1,6 @@
 pub mod cr3 {
     use crate::{mm::size::Size4Kb, PAddr};
+    use core::arch::asm;
     use hal_core::{mem::page::Page, Address};
 
     #[derive(Copy, Clone, Eq, PartialEq)]
@@ -11,6 +12,7 @@ pub mod cr3 {
             asm!("mov {0}, cr3", out(reg) val, options(readonly));
         };
         let addr = PAddr::from_u64(val);
+        tracing::debug!(?addr);
         let pml4_page = Page::starting_at_fixed(addr)
             .expect("PML4 physical addr not aligned! this is very bad");
         (pml4_page, Flags(val))

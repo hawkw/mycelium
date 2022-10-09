@@ -1,0 +1,14 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 889e57056182fa1e2dbbe318df2a7da1b7c3f3cc9afdad2545ad4017f6e05429 # shrinks to (nbits, val1, val2, base) = (2, 0, 1, 0)
+cc 5bd436e8afda1c06918f7089273e7e2e2e524d257b336fce07297248ec825b7f # shrinks to (nbits, val1, val2, base) = (2, 0, 1, 0)
+cc 6ce19d7323774f38d00db7311e510668c7a7d53413bdf274981faac54eb8da82 # shrinks to (nbits, val1, val2, base) = (2, 0, 1, 0)
+cc a88fb72679dbb1d69ce0b1c0e28c96892b7eb8cc8d03bec8375ca4cd8c4ae426 # shrinks to (nbits, val1, val2, base) = (2, 1, 0, 0)
+cc 8cb297b5da65a818db58ad459f137bf998e48e3ae305659faf228dc1ef589b27 # shrinks to (start, len, val, base) = (1, 1, 0, 0)
+cc 1b9d6dc15daeaeb7498db191373bf5e9da65b8ade20cfb904756cab2293901fb # shrinks to (start, len, val, base) = (1, 1, 0, 0)
+cc bcfe8e3e4183147d58825d89f1f0b8a92ec0c6ce375b1876278fca07b1dea268 # shrinks to (start, len, val, base) = (1, 1, 0, 0)
+cc 0cb80c2be582aa5bbc5cf97f134b183af1ded2dc5c48ae97f6d092718b5d4289 # shrinks to (start, len, val, base) = (1, 1, 0, 0)
