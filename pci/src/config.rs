@@ -1,6 +1,9 @@
 //! PCI Bus Configuration Space
 //!
-//! See https://wiki.osdev.org/Pci#Configuration_Space_Access_Mechanism_.231
+//! This module implements the PCI "configuration space access mechanism #1" as
+//! described [on the OSDev Wiki here][wiki].
+//!
+//! [wiki]: https://wiki.osdev.org/Pci#Configuration_Space_Access_Mechanism_.231
 use crate::{device, Device};
 use core::fmt;
 use hal_x86_64::cpu::Port;
