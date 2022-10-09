@@ -956,6 +956,7 @@ dependencies = [
  "hal-x86_64",
  "maitake",
  "mycelium-alloc",
+ "mycelium-pci",
  "mycelium-trace",
  "mycelium-util",
  "mycotest",
@@ -975,8 +976,10 @@ dependencies = [
 name = "mycelium-pci"
 version = "0.1.0"
 dependencies = [
+ "hal-x86_64",
  "mycelium-bitfield",
  "mycelium-util",
+ "tracing 0.2.0",
 ]
 
 [[package]]

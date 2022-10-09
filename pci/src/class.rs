@@ -1,4 +1,4 @@
-use crate::error;
+use crate::{device::RawClasses, error};
 use core::convert::TryFrom;
 use core::fmt;
 
@@ -293,9 +293,11 @@ class_enum! {
     }
 }
 
-impl TryFrom<(u8, u8, u8)> for Class {
+impl TryFrom<(RawClasses, u8)> for Class {
     type Error = error::UnexpectedValue<u8>;
-    fn try_from((class, subclass, prog_if): (u8, u8, u8)) -> Result<Self, Self::Error> {
+    fn try_from(
+        (RawClasses { class, subclass }, prog_if): (RawClasses, u8),
+    ) -> Result<Self, Self::Error> {
         Self::try_from((class, (subclass, prog_if)))
     }
 }
@@ -415,7 +417,13 @@ mod test {
 
     #[test]
     fn test_parsing() {
-        let mass_storage_sata_achi = (0x01, 0x06, 0x01);
+        let mass_storage_sata_achi = (
+            RawClasses {
+                class: 0x01,
+                subclass: 0x06,
+            },
+            0x01,
+        );
         let class = Class::try_from(mass_storage_sata_achi);
         assert_eq!(
             class,

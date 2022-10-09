@@ -2,10 +2,16 @@
 name = "mycelium-pci"
 version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 mycelium-util = { path = "../util" }
 mycelium-bitfield = { path = "../bitfield" }
+hal-x86_64 = { path = "../hal-x86_64" }
+
+[dependencies.tracing]
+default_features = false
+features = ["attributes", "alloc"]
+git = "https://github.com/tokio-rs/tracing"
