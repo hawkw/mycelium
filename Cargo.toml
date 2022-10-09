@@ -10,6 +10,7 @@ members = [
     "maitake",
     "mycotest",
     "trace",
+    "pci",
 ]
 resolver = "2"
 
@@ -36,6 +37,7 @@ opt-level = 3
 hal-core = { path = "hal-core", features = ["embedded-graphics-core"] }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
 maitake = { path = "maitake", features = ["tracing-02"] }
+mycelium-pci = { path = "pci" }
 mycelium-util = { path = "util" }
 mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
 rand_xoshiro = "0.6"

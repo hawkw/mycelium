@@ -7,6 +7,7 @@ use mycelium_util::sync::InitOnce;
 mod framebuf;
 pub mod interrupt;
 mod oops;
+pub mod pci;
 
 pub use self::oops::{oops, Oops};
 

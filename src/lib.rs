@@ -145,6 +145,7 @@ pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
         );
     }
 
+    arch::pci::init_pci();
     #[cfg(test)]
     arch::run_tests();
 
