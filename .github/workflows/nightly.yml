@@ -34,8 +34,25 @@ jobs:
   # file. this job checks to see if we can build mycelium on whatever the most
   # recent nightly is. if this fails, there are breaking changes we need to
   # address before updating to a newer nightly build.
+  kernel-x86_64-nightly:
+    name: build x86_64 boot image (latest nightly)
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1.0.6
+      with:
+        profile: minimal
+        # needed to build the kernel
+        components: rust-src, llvm-tools-preview
+        toolchain: nightly
+        override: true
+    - uses: actions/checkout@v2
+    - name: print current nightly
+      run: rustc --version && cargo --version
+      run: cargo build-x64
+
   clippy-nightly:
-    name: check latest nightly
+    name: check (latest nightly)
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
