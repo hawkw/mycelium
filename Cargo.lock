@@ -972,6 +972,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mycelium-pci"
+version = "0.1.0"
+dependencies = [
+ "mycelium-bitfield",
+ "mycelium-util",
+]
+
+[[package]]
 name = "mycelium-trace"
 version = "0.1.0"
 dependencies = [
@@ -980,13 +988,6 @@ dependencies = [
  "mycelium-util",
  "tracing 0.2.0",
  "tracing-core 0.2.0",
-]
-
-[[package]]
-name = "mycelium-pci"
-version = "0.1.0"
-dependencies = [
- "mycelium-util",
 ]
 
 [[package]]

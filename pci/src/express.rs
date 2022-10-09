@@ -1,11 +1,10 @@
-use super::HeaderType;
+use super::HeaderTypeReg;
 use core::ptr;
 
 pub type StandardDevice = Device<StandardDetails>;
 pub type PciBridgeDevice = Device<PciBridgeDetails>;
 pub type CardBusDevice = Device<CardBusDetails>;
 
-#[derive(Debug)]
 #[repr(C, packed)]
 pub struct Device<T> {
     header: Header,
@@ -23,7 +22,7 @@ pub struct Header {
     class: DeviceClasses,
     cache_line_size: u8,
     latency_timer: u8,
-    header_type: HeaderType,
+    header_type: HeaderTypeReg,
     bist: BistReg,
 }
 
@@ -74,15 +73,15 @@ pub struct SubsystemId {
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
+pub struct BistReg(u8);
+
+#[derive(Debug)]
 #[repr(C)]
 struct DeviceClasses {
     subclass: u8,
     class: u8,
 }
-
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct BistReg(u8);
 
 impl BistReg {
     const CAPABLE_BIT: u8 = 0b1000_0000;

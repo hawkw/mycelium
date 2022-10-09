@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 mycelium-util = { path = "../util" }
+mycelium-bitfield = { path = "../bitfield" }
