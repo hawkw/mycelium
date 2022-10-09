@@ -165,16 +165,16 @@ fn kernel_main() -> ! {
         })
     }
 
-    // rt::spawn(async move {
-    //     loop {
-    //         let result = futures_util::try_join! {
-    //             spawn_sleep(time::Duration::from_secs(2)),
-    //             spawn_sleep(time::Duration::from_secs(5)),
-    //             spawn_sleep(time::Duration::from_secs(10)),
-    //         };
-    //         tracing::info!(?result);
-    //     }
-    // });
+    rt::spawn(async move {
+        loop {
+            let result = futures_util::try_join! {
+                spawn_sleep(time::Duration::from_secs(2)),
+                spawn_sleep(time::Duration::from_secs(5)),
+                spawn_sleep(time::Duration::from_secs(10)),
+            };
+            tracing::info!(?result);
+        }
+    });
 
     let mut core = rt::Core::new();
     loop {
