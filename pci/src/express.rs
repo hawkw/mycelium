@@ -1,5 +1,4 @@
 use super::device::{self, CardBusDetails, PciBridgeDetails, StandardDetails};
-use core::ptr;
 
 pub type StandardDevice = MemoryMappedDevice<StandardDetails>;
 pub type PciBridgeDevice = MemoryMappedDevice<PciBridgeDetails>;
