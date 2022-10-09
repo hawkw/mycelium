@@ -65,8 +65,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: print current nightly
       run: rustc --version && cargo --version
-    - name: run cargo clippy
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: clippy
-        args: --all --all-features
+    - name: install Just
+      uses: extractions/setup-just@v1
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: cargo clippy
+      run: just clippy
