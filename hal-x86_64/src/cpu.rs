@@ -110,6 +110,15 @@ impl Port {
 
     /// # Safety
     ///
+    /// Reading from a CPU port is unsafe.
+    pub unsafe fn readl(&self) -> u32 {
+        let result: u32;
+        asm!("in eax, dx", in("dx") self.num, out("eax") result);
+        result
+    }
+
+    /// # Safety
+    ///
     /// Writing to a CPU port is unsafe.
     pub unsafe fn writel(&self, value: u32) {
         asm!("out dx, eax", in("dx") self.num, in("eax") value)
