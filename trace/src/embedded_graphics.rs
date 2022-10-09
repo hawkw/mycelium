@@ -178,5 +178,5 @@ where
 }
 
 fn default_text_style() -> MonoTextStyle<'static, pixelcolor::Rgb888> {
-    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, pixelcolor::Rgb888::WHITE)
+    MonoTextStyle::new(&mono_font::ascii::FONT_6X13, pixelcolor::Rgb888::WHITE)
 }
