@@ -6,6 +6,3 @@ pub enum Segment {
     /// contain up to 256 bus segments.
     Extended { group: u16, segment: u8 },
 }
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord)]
-pub 
