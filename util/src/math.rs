@@ -38,6 +38,10 @@ pub use max;
 #[doc(inline)]
 pub use min;
 
+mod constrain;
+
+pub use self::constrain::{Constrain, OutOfRange};
+
 /// Extension trait adding logarithm methods to integers.
 pub trait Log2 {
     /// Returns `ceiling(log2(self))`.
