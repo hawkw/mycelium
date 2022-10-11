@@ -6,3 +6,4 @@ pub mod config;
 pub mod device;
 pub mod error;
 pub mod express;
+pub mod register;

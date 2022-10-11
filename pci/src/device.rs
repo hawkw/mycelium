@@ -1,4 +1,4 @@
-use crate::{class::Class, error};
+use crate::{class::Class, error, register};
 use core::ptr;
 
 #[derive(Debug)]
@@ -58,8 +58,8 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
 #[repr(C)]
 pub struct Header {
     pub id: Id,
-    pub command: CommandReg,
-    pub status: u16,
+    pub command: register::Command,
+    pub status: register::Status,
     pub revision_id: u8,
     pub prog_if: u8,
     pub(crate) class: RawClasses,
@@ -68,10 +68,6 @@ pub struct Header {
     pub header_type: HeaderTypeReg,
     pub bist: BistReg,
 }
-
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct CommandReg(pub(crate) u16);
 
 #[derive(Debug)]
 pub enum Kind {
@@ -188,17 +184,5 @@ impl BistReg {
 
     pub fn completion_code(&self) -> u8 {
         (self.0) & Self::COMPLETION_MASK
-    }
-}
-
-impl CommandReg {
-    pub fn disconnect(&mut self) {
-        unsafe {
-            self.send_command(0);
-        }
-    }
-
-    pub unsafe fn send_command(&mut self, command: u16) {
-        ptr::write_volatile((&mut self.0) as *mut u16, command)
     }
 }
