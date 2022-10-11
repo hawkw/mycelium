@@ -4,7 +4,7 @@
 //! described [on the OSDev Wiki here][wiki].
 //!
 //! [wiki]: https://wiki.osdev.org/Pci#Configuration_Space_Access_Mechanism_.231
-use crate::{device, Device};
+use crate::{device, register, Device};
 use core::fmt;
 use hal_x86_64::cpu::Port;
 
@@ -77,14 +77,6 @@ impl ConfigReg {
         }
     }
 
-    fn read_offset(&self, offset: u8) -> u32 {
-        let addr = self.addr.with(ConfigAddressBits::REGISTER_OFFSET, offset);
-        unsafe {
-            self.addr_port.writel(addr.bits());
-            self.data_port.readl()
-        }
-    }
-
     pub fn read_device(&self) -> Option<device::Device> {
         let header = self.read_header()?;
         let details = match header.header_type() {
@@ -144,6 +136,18 @@ impl ConfigReg {
         Some(device::Device { header, details })
     }
 
+    pub fn read_command_status(&self) -> (register::Command, register::Status) {
+        let word = self.read_command_status_reg();
+        let command = word.get(register::RegisterWord::COMMAND);
+        let status = word.get(register::RegisterWord::STATUS);
+        (command, status)
+    }
+
+    fn read_command_status_reg(&self) -> register::RegisterWord {
+        let word = self.read_offset(offsets::COMMAND_STATUS);
+        register::RegisterWord::from_bits(word)
+    }
+
     pub fn read_header(&self) -> Option<device::Header> {
         // Off | Bits 31-24    | Bits 23-16    | Bits 15-8     | Bits 7-0      |
         // 0x0 | Device ID                     | Vendor ID                     |
@@ -151,13 +155,7 @@ impl ConfigReg {
         // 0x8 | Class code   | Subclass       | Prog IF        | Revision ID  |
         // 0xC | BIST         | Header type    | Latency Timer  | Cacheline Sz |
         let id = self.read_device_id()?;
-        let (status, command) = {
-            let word = self.read_offset(0x4);
-            let status = (word >> 16) as u16;
-            let command = device::CommandReg((word & 0xFFFF) as u16);
-            (status, command)
-        };
-
+        let (command, status) = self.read_command_status();
         let [revision_id, prog_if, subclass, class] = self.read_offset(0x8).to_le_bytes();
         let class = device::RawClasses { class, subclass };
 
@@ -200,6 +198,38 @@ impl ConfigReg {
         let bits = bits & 0xffff << 16;
         device::HeaderTypeReg::from_bits(bits as u8)
     }
+
+    pub fn send_command(
+        &self,
+        f: impl FnOnce(register::Status, register::Command) -> register::Command,
+    ) {
+        use register::RegisterWord;
+        let word = self.read_command_status_reg();
+        let command = f(
+            word.get(RegisterWord::STATUS),
+            word.get(RegisterWord::COMMAND),
+        );
+        self.write_offset(
+            offsets::COMMAND_STATUS,
+            word.with(RegisterWord::COMMAND, command).bits(),
+        );
+    }
+
+    fn read_offset(&self, offset: u8) -> u32 {
+        let addr = self.addr.with(ConfigAddressBits::REGISTER_OFFSET, offset);
+        unsafe {
+            self.addr_port.writel(addr.bits());
+            self.data_port.readl()
+        }
+    }
+
+    fn write_offset(&self, offset: u8, word: u32) {
+        let addr = self.addr.with(ConfigAddressBits::REGISTER_OFFSET, offset);
+        unsafe {
+            self.addr_port.writel(addr.bits());
+            self.data_port.writel(word)
+        }
+    }
 }
 
 const ADDRESS_PORT: u16 = 0xCF8;
@@ -230,6 +260,10 @@ impl fmt::Display for ConfigAddress {
         } = self;
         write!(f, "{bus:04x}:{device:02x}:{function:02x}",)
     }
+}
+
+mod offsets {
+    pub(super) const COMMAND_STATUS: u8 = 0x4;
 }
 
 #[cfg(test)]
