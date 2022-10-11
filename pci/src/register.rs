@@ -174,6 +174,45 @@ bitfield! {
     }
 }
 
+bitfield! {
+    /// Built-In Self Test (BIST) register.
+    #[derive(Eq, PartialEq)]
+    pub struct Bist<u8> {
+        /// The completion code set by running a built-in self test.
+        ///
+        /// If the test completed successfully, this should be 0.
+        pub const COMPLETION_CODE = 3;
+
+        /// Reserved
+        const _RES = 2;
+
+        /// Start BIST
+        ///
+        /// Set to 1 by the OS to start a BIST. This bit is reset when BIST
+        /// completes. If BIST does not complete after 2 seconds the device
+        /// should be failed by system software.
+        pub const START_BIST: bool;
+        /// BIST Capable
+        ///
+        /// If this is 1, the device supports BIST. If it is 0, this device does
+        /// not support a built-in self test.
+        pub const BIST_CAPABLE: bool;
+    }
+}
+
+impl Bist {
+    /// Returns the device's BIST completion code, if a BIST has completed.
+    ///
+    /// If the BIST is still in progress, this method returns `None`.
+    pub fn completion_code(self) -> Option<u8> {
+        if self.get(Self::START_BIST) {
+            return None;
+        }
+
+        Some(self.get(Self::COMPLETION_CODE))
+    }
+}
+
 /// Slowest time that a device will assert `DEVSEL#` for any bus command except
 /// Configuration Space reads/writes.
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -162,7 +162,7 @@ impl ConfigReg {
         let [cache_line_size, latency_timer, header_type, bist] =
             self.read_offset(0xC).to_le_bytes();
         let header_type = device::HeaderTypeReg::from_bits(header_type);
-        let bist = device::BistReg(bist);
+        let bist = register::Bist::from_bits(bist);
 
         Some(device::Header {
             id,

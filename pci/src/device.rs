@@ -140,10 +140,6 @@ pub struct SubsystemId {
     pub(crate) subsystem: u16,
 }
 
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct BistReg(pub(crate) u8);
-
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub(crate) struct RawClasses {
@@ -162,27 +158,5 @@ impl Header {
 
     pub fn class(&self) -> Result<Class, error::UnexpectedValue<u8>> {
         (self.class, self.prog_if).try_into()
-    }
-}
-
-impl BistReg {
-    const CAPABLE_BIT: u8 = 0b1000_0000;
-    const START_BIT: u8 = 0b0100_0000;
-    const COMPLETION_MASK: u8 = 0b0000_0111;
-
-    pub fn is_bist_capable(&self) -> bool {
-        (self.0) & Self::CAPABLE_BIT != 0
-    }
-
-    pub fn start_bist(&mut self) {
-        let val = (self.0) | Self::START_BIT;
-        let ptr = (&mut self.0) as *mut u8;
-        unsafe {
-            ptr::write_volatile(ptr, val);
-        }
-    }
-
-    pub fn completion_code(&self) -> u8 {
-        (self.0) & Self::COMPLETION_MASK
     }
 }
