@@ -1,5 +1,4 @@
 use crate::{class::Class, error, register};
-use core::ptr;
 
 #[derive(Debug)]
 pub struct Device {
@@ -7,7 +6,7 @@ pub struct Device {
     pub details: Kind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Id {
     pub vendor_id: u16,
@@ -54,7 +53,7 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Header {
     pub id: Id,
@@ -66,7 +65,7 @@ pub struct Header {
     pub cache_line_size: u8,
     pub latency_timer: u8,
     pub header_type: HeaderTypeReg,
-    pub bist: BistReg,
+    pub bist: register::Bist,
 }
 
 #[derive(Debug)]

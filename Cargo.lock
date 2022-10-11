@@ -980,6 +980,7 @@ dependencies = [
  "mycelium-bitfield",
  "mycelium-util",
  "tracing 0.2.0",
+ "volatile",
 ]
 
 [[package]]
