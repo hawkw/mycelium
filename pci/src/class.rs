@@ -154,13 +154,13 @@ class_enum! {
     pub enum Class<ClassValue, (u8, u8)> {
         /// Unclassified
         Unclassified(Unclassified) = 0x00,
-        /// Mass Storage Controller
+        /// Mass Storage
         MassStorage(MassStorage) = 0x01,
-        /// Network Controller
+        /// Network
         Network(Network) = 0x02,
-        /// Display Controller
+        /// Display
         Display(Display) = 0x03,
-        /// Multimedia Controller
+        /// Multimedia
         Multimedia(Multimedia) = 0x04,
         /// Memory Controller
         Memory = 0x05,
@@ -218,7 +218,7 @@ class_enum! {
         Raid = 0x04,
         /// ATA Controller
         Ata(iface::Ata) = 0x05,
-        /// Serial ATA
+        /// Serial ATA Controller
         Sata(iface::Sata) = 0x06,
         /// Serial Attached SCSI
         SerialAttachedScsi(iface::SerialAttachedScsi) = 0x07,
@@ -256,7 +256,7 @@ class_enum! {
 
 class_enum! {
     pub enum Display<DisplayValue, u8> {
-        /// VGA Compatible Controller
+        /// VGA Compatible
         VgaCompatible(iface::VgaCompatible) = 0x00,
         /// XGA Controller
         Xga = 0x01,
@@ -344,13 +344,13 @@ pub mod iface {
     impl fmt::Display for Ide {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             let mode = match (self.is_pci_native(), self.is_switchable()) {
-                (false, false) => "ISA compatibility mode-only controller",
+                (false, false) => "ISA compatibility mode-only",
                 (false, true) => {
-                    "ISA compatibility mode controller, supports both channels switched to PCI native mode"
+                    "ISA compatibility mode, supports both channels switched to PCI native mode"
                 }
-                (true, false) => "PCI native mode-only controller",
+                (true, false) => "PCI native mode-only",
                 (true, true) => {
-                    "PCI native mode controller, supports both channels switched to ISA compatibility mode"
+                    "PCI native mode, supports both channels switched to ISA compatibility mode"
                 }
             };
 
@@ -435,17 +435,17 @@ mod test {
     fn test_display() {
         assert_eq!(
             Class::MassStorage(MassStorage::Sata(iface::Sata::Achi1)).to_string(),
-            "Mass Storage Controller: Serial ATA: AHCI 1.0"
+            "Mass Storage: Serial ATA Controller: AHCI 1.0"
         );
 
         let ide_iface = iface::Ide::try_from(0x8F).unwrap();
         assert_eq!(
             Class::MassStorage(MassStorage::Ide(ide_iface)).to_string(),
-            "Mass Storage Controller: IDE Controller: PCI native mode controller, supports both channels switched to ISA compatibility mode, supports bus mastering"
+            "Mass Storage: IDE Controller: PCI native mode, supports both channels switched to ISA compatibility mode, supports bus mastering"
         );
         assert_eq!(
             format!("{:.1}", Class::MassStorage(MassStorage::Ide(ide_iface))),
-            "Mass Storage Controller: IDE Controller"
+            "Mass Storage: IDE Controller"
         );
     }
 }
