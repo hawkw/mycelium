@@ -236,8 +236,8 @@ impl Status {
     /// Returns `true` if this device received an abort (either a Master Abort
     /// or Target Abort).
     ///
-    /// This returns `true` if the [`RECEIVED_MASTER_ABORT`] or
-    /// [`RECEIVED_TARGET_ABORT`] bits are set.
+    /// This returns `true` if the [`Status::RECEIVED_MASTER_ABORT`] or
+    /// [`Status::RECEIVED_TARGET_ABORT`] bits are set.
     pub fn received_abort(self) -> bool {
         self.get(Self::RECEIVED_MASTER_ABORT) || self.get(Self::RECEIVED_TARGET_ABORT)
     }
