@@ -11,6 +11,7 @@ extern crate alloc;
 extern crate rlibc;
 
 pub mod arch;
+pub mod random;
 pub mod rt;
 pub mod wasm;
 
@@ -175,6 +176,8 @@ fn kernel_main() -> ! {
             tracing::info!(?result);
         }
     });
+
+    rt::spawn(random::entropy_upkeep(time::Duration::from_secs(1)));
 
     let mut core = rt::Core::new();
     loop {
