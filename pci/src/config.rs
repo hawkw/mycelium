@@ -4,30 +4,24 @@
 //! described [on the OSDev Wiki here][wiki].
 //!
 //! [wiki]: https://wiki.osdev.org/Pci#Configuration_Space_Access_Mechanism_.231
-use crate::{device, register, Device};
-use core::fmt;
+use crate::{
+    addr::AddressBits,
+    device,
+    error::{self, unexpected, UnexpectedValue},
+    register, Address, Device,
+};
 use hal_x86_64::cpu::Port;
-
-#[derive(Copy, Clone, Debug)]
-pub struct ConfigAddress {
-    pub bus: u8,
-    pub device: u8,
-    pub function: u8,
-}
+use mycelium_bitfield::{bitfield, pack};
 
 #[derive(Debug)]
 pub struct ConfigReg {
     data_port: Port,
     addr_port: Port,
-    addr: ConfigAddressBits,
+    addr: ConfigAddress,
 }
 
-pub fn enumerate_bus(bus: u8) -> impl Iterator<Item = (ConfigAddress, Device)> {
-    let addrs = (0..32u8).map(move |device| ConfigAddress {
-        device,
-        bus,
-        function: 0,
-    });
+pub fn enumerate_bus(bus: u8) -> impl Iterator<Item = (Address, Device)> {
+    let addrs = (0..32u8).map(move |device| Address::new().with_bus(bus).with_device(device));
 
     addrs
         .filter_map(|addr| Some((addr, ConfigReg::new(addr).read_device()?)))
@@ -40,7 +34,7 @@ pub fn enumerate_bus(bus: u8) -> impl Iterator<Item = (ConfigAddress, Device)> {
                 .into_iter()
                 .flatten();
             let functions = function_nums.filter_map(move |function| {
-                let addr = ConfigAddress { function, ..addr };
+                let addr = addr.with_function(function);
                 Some((addr, ConfigReg::new(addr).read_device()?))
             });
             core::iter::once((addr, device)).chain(functions)
@@ -48,17 +42,17 @@ pub fn enumerate_bus(bus: u8) -> impl Iterator<Item = (ConfigAddress, Device)> {
 }
 
 /// Enumerate all PCI buses
-pub fn enumerate_all() -> impl Iterator<Item = (ConfigAddress, Device)> {
+pub fn enumerate_all() -> impl Iterator<Item = (Address, Device)> {
     (0..=255u8).flat_map(enumerate_bus)
 }
 
-mycelium_bitfield::bitfield! {
+bitfield! {
     /// The PCI bus `CONFIG_ADDRESS` register (port `0xCF8`).
     ///
     /// |Bit 31    |Bits 30-24|Bits 23-16|Bits 15-11   |Bits 10-8      |Bits 7-0       |
     /// |:---------|----------|----------|:------------|:--------------|:--------------|
     /// |Enable Bit|Reserved  |Bus Number|Device Number|Function Number|Register Offset|
-    struct ConfigAddressBits<u32> {
+    struct ConfigAddress<u32> {
         const REGISTER_OFFSET: u8;
         const FUNCTION = 3;
         const DEVICE = 5;
@@ -69,12 +63,16 @@ mycelium_bitfield::bitfield! {
 }
 
 impl ConfigReg {
-    fn new(addr: ConfigAddress) -> Self {
-        Self {
+    pub fn new(addr: Address) -> Self {
+        Self::try_from(addr).expect("invalid config register address")
+    }
+
+    pub fn try_from(addr: Address) -> Result<Self, UnexpectedValue<Address>> {
+        Ok(Self {
             data_port: Port::at(DATA_PORT),
             addr_port: Port::at(ADDRESS_PORT),
-            addr: ConfigAddressBits::from_address(addr),
-        }
+            addr: ConfigAddress::from_address(addr)?,
+        })
     }
 
     pub fn read_device(&self) -> Option<device::Device> {
@@ -216,7 +214,7 @@ impl ConfigReg {
     }
 
     fn read_offset(&self, offset: u8) -> u32 {
-        let addr = self.addr.with(ConfigAddressBits::REGISTER_OFFSET, offset);
+        let addr = self.addr.with(ConfigAddress::REGISTER_OFFSET, offset);
         unsafe {
             self.addr_port.writel(addr.bits());
             self.data_port.readl()
@@ -224,7 +222,7 @@ impl ConfigReg {
     }
 
     fn write_offset(&self, offset: u8, word: u32) {
-        let addr = self.addr.with(ConfigAddressBits::REGISTER_OFFSET, offset);
+        let addr = self.addr.with(ConfigAddress::REGISTER_OFFSET, offset);
         unsafe {
             self.addr_port.writel(addr.bits());
             self.data_port.writel(word)
@@ -235,30 +233,24 @@ impl ConfigReg {
 const ADDRESS_PORT: u16 = 0xCF8;
 const DATA_PORT: u16 = 0xCFC;
 
-impl ConfigAddressBits {
-    fn from_address(
-        ConfigAddress {
-            bus,
-            device,
-            function,
-        }: ConfigAddress,
-    ) -> Self {
-        Self::new()
-            .with(Self::BUS, bus)
-            .with(Self::DEVICE, device as u32)
-            .with(Self::FUNCTION, function as u32)
-            .with(Self::ENABLE, true)
-    }
-}
+impl ConfigAddress {
+    const BUS_PAIR: pack::Pair32<u8> = Self::BUS.pair_with(AddressBits::BUS);
+    const DEVICE_PAIR: pack::Pair32 = Self::DEVICE.pair_with(AddressBits::DEVICE);
+    const FUNCTION_PAIR: pack::Pair32 = Self::FUNCTION.pair_with(AddressBits::FUNCTION);
 
-impl fmt::Display for ConfigAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self {
-            bus,
-            device,
-            function,
-        } = self;
-        write!(f, "{bus:04x}:{device:02x}:{function:02x}",)
+    fn from_address(addr: Address) -> Result<Self, error::UnexpectedValue<Address>> {
+        if addr.group().is_some() {
+            return Err(unexpected(addr)
+                .named("only PCI Express addresses may contain extended segment groups"));
+        }
+        let addr_bits = addr.bitfield().bits();
+        let bits = pack::Pack32::pack_in(0)
+            .pack_from_src(addr_bits, &Self::BUS_PAIR)
+            .pack_from_src(addr_bits, &Self::DEVICE_PAIR)
+            .pack_from_src(addr_bits, &Self::FUNCTION_PAIR)
+            .pack(true, &Self::ENABLE)
+            .bits();
+        Ok(Self::from_bits(bits))
     }
 }
 
@@ -269,10 +261,66 @@ mod offsets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::{prop_assert, prop_assert_eq, proptest};
 
     #[test]
     fn config_addr_is_valid() {
-        ConfigAddressBits::assert_valid();
-        assert_eq!(ConfigAddressBits::ENABLE.least_significant_index(), 31);
+        ConfigAddress::assert_valid();
+        assert_eq!(ConfigAddress::ENABLE.least_significant_index(), 31);
+    }
+
+    #[test]
+    fn config_addr_pairs_valid() {
+        ConfigAddress::BUS_PAIR.assert_valid();
+        ConfigAddress::DEVICE_PAIR.assert_valid();
+        ConfigAddress::FUNCTION_PAIR.assert_valid();
+
+        println!("BUS_PAIR: {:#?}", ConfigAddress::BUS_PAIR);
+        println!("DEVICE_PAIR: {:#?}", ConfigAddress::DEVICE_PAIR);
+        println!("FUNCTION_PAIR: {:#?}", ConfigAddress::FUNCTION_PAIR);
+    }
+
+    #[test]
+    fn config_addr_fn_pair() {
+        let addr = Address::new().with_function(3);
+        let addr_bits = addr.bitfield().bits();
+        let bits = pack::Pack32::pack_in(0)
+            .pack_from_src(addr_bits, &ConfigAddress::FUNCTION_PAIR)
+            .bits();
+        let config_addr = ConfigAddress::from_bits(bits);
+        assert_eq!(
+            config_addr.get(ConfigAddress::FUNCTION),
+            addr.bitfield().get(AddressBits::FUNCTION),
+            "\n{}",
+            config_addr
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn config_address_from_address(bus in 0u8..255u8, device in 0u8..32u8, function in 0u8..8u8) {
+            let addr = Address::new().with_bus(bus).with_device(device).with_function(function);
+
+            let config_addr = ConfigAddress::from_address(addr);
+            prop_assert!(config_addr.is_ok(), "converting address {addr} to ConfigAddress failed unexpectedly");
+            let config_addr = config_addr.unwrap();
+
+            prop_assert_eq!(
+                config_addr.get(ConfigAddress::BUS),
+                bus,
+                "\n  addr: {:?}\n   cfg:\n{}", addr, config_addr
+            );
+            prop_assert_eq!(
+                config_addr.get(ConfigAddress::DEVICE) as u8,
+                device,
+                "\n  addr: {:?}\n   cfg:\n{}", addr, config_addr
+            );
+            prop_assert_eq!(
+                config_addr.get(ConfigAddress::FUNCTION) as u8,
+                function,
+                "\n  addr: {:?}\n   cfg:\n{}", addr, config_addr
+            );
+
+        }
     }
 }
