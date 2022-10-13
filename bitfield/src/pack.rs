@@ -1314,4 +1314,62 @@ mod tests {
         fn pair_least_sig_arbitrary_16<Pack16, u16>(16);
         fn pair_least_sig_arbitrary_8<Pack8, u8>(8);
     }
+
+    // TODO(eliza): these fail because the pack pair API is...kinda backwards.
+    // Figure that out!
+    /*
+    // Test packing and unpacking through a pair using `Packing`
+    macro_rules! test_pair_pack_from_dst {
+        ($(fn $fn:ident<$Pack:ident, $Bits:ty>($max:expr);)+) => {
+            proptest! {
+                $(
+                    #[test]
+                    fn $fn(len in (1u32..($max/2))) {
+                        let val = <$Bits>::MAX;
+                        let dst = $Pack::least_significant(len);
+                        let src = dst.next(len);
+                        let pair = src.pair_with(dst);
+                        let packed = $Pack::pack_in(0).pack_from_dst(val, &pair).bits();
+
+                        prop_assert_bits_eq!(packed, (val & dst.raw_mask()) << len, format_args!("pair = {pair:#?}"));
+                    }
+                )+
+            }
+        };
+    }
+
+    // Test packing and unpacking through a pair using `Packing`
+    macro_rules! test_pair_pack_from_src {
+        ($(fn $fn:ident<$Pack:ident, $Bits:ty>($max:expr);)+) => {
+            proptest! {
+                $(
+                    #[test]
+                    fn $fn(len in (1u32..($max/2))) {
+                        let val = <$Bits>::MAX;
+                        let src = $Pack::least_significant(len);
+                        let dst = src.next(len);
+                        let pair = src.pair_with(dst);
+                        let packed = $Pack::pack_in(0).pack_from_src(val, &pair).bits();
+
+                        prop_assert_bits_eq!(packed, (val & src.raw_mask()) << len, format_args!("pair = {pair:#?}"));
+                    }
+                )+
+            }
+        };
+    }
+
+    test_pair_pack_from_dst! {
+        fn pair_from_dst_64<Pack64, u64>(64);
+        fn pair_from_dst_32<Pack32, u32>(32);
+        fn pair_from_dst_16<Pack16, u16>(16);
+        fn pair_from_dst_8<Pack8, u8>(8);
+    }
+
+    test_pair_pack_from_src! {
+        fn pair_from_src_64<Pack64, u64>(64);
+        fn pair_from_src_32<Pack32, u32>(32);
+        fn pair_from_src_16<Pack16, u16>(16);
+        fn pair_from_src_8<Pack8, u8>(8);
+    }
+    */
 }

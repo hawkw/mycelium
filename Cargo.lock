@@ -979,6 +979,7 @@ dependencies = [
  "hal-x86_64",
  "mycelium-bitfield",
  "mycelium-util",
+ "proptest",
  "tracing 0.2.0",
  "volatile",
 ]
