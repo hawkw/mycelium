@@ -1,5 +1,6 @@
 use crate::{class::Class, error, register};
-
+pub use bar::BaseAddress;
+mod bar;
 #[derive(Debug)]
 pub struct Device {
     pub header: Header,
@@ -82,7 +83,7 @@ pub enum Kind {
 #[derive(Debug)]
 #[repr(C)]
 pub struct StandardDetails {
-    pub base_addrs: [u32; 6],
+    pub(crate) base_addrs: [u32; 6],
     /// Points to the Card Information Structure and is used by devices that
     /// share silicon between CardBus and PCI.
     pub cardbus_cis_ptr: u32,
@@ -95,7 +96,7 @@ pub struct StandardDetails {
     /// two bits are reserved and should be masked before the Pointer is used to
     /// access the Configuration Space.
     pub cap_ptr: u8,
-    pub _res0: [u8; 7],
+    pub(crate) _res0: [u8; 7],
     /// Specifies which input of the system interrupt controllers the device's
     /// interrupt pin is connected to and is implemented by any device that
     /// makes use of an interrupt pin.
@@ -122,7 +123,7 @@ pub struct StandardDetails {
 #[derive(Debug)]
 #[repr(C)]
 pub struct PciBridgeDetails {
-    base_addrs: [u32; 2],
+    pub(crate) base_addrs: [u32; 2],
     // WIP
 }
 
@@ -157,5 +158,19 @@ impl Header {
 
     pub fn class(&self) -> Result<Class, error::UnexpectedValue<u8>> {
         (self.class, self.prog_if).try_into()
+    }
+}
+
+impl StandardDetails {
+    /// Returns this device's base address registers (BARs).
+    pub fn base_addrs(&self) -> Result<[Option<bar::BaseAddress>; 6], error::UnexpectedValue<u32>> {
+        bar::BaseAddress::decode_bars(&self.base_addrs)
+    }
+}
+
+impl PciBridgeDetails {
+    /// Returns this device's base address registers (BARs).
+    pub fn base_addrs(&self) -> Result<[Option<bar::BaseAddress>; 2], error::UnexpectedValue<u32>> {
+        bar::BaseAddress::decode_bars(&self.base_addrs)
     }
 }
