@@ -814,7 +814,7 @@ macro_rules! make_packers {
                 /// of the pair, and `src` serving as the "source" member of the
                 /// pair.
                 #[inline]
-                pub const fn pack_from_src(self, value: $Bits, pair: &$Pair) -> Self {
+                pub const fn pack_from_src<T>(self, value: $Bits, pair: &$Pair<T>) -> Self {
                     Self(pair.pack_from_src(self.0, value))
                 }
 
@@ -823,7 +823,7 @@ macro_rules! make_packers {
                 /// of the pair, and `dst` serving as the "destination" member of the
                 /// pair.
                 #[inline]
-                pub const fn pack_from_dst(self, value: $Bits, pair: &$Pair) -> Self {
+                pub const fn pack_from_dst<T>(self, value: $Bits, pair: &$Pair<T>) -> Self {
                     Self(pair.pack_from_dst(value, self.0))
                 }
 
@@ -920,7 +920,7 @@ macro_rules! make_packers {
             }
 
             // ==== impl Pair ===
-            impl $Pair {
+            impl<T> $Pair<T> {
                 const fn shift_dst(&self, val: $Bits) -> $Bits {
                     (val << self.dst_shl) >> self.dst_shr
                 }
@@ -931,13 +931,13 @@ macro_rules! make_packers {
 
 
                 /// Returns the "source" member of the packing pair.
-                pub const fn src(&self) -> &$Pack {
+                pub const fn src(&self) -> &$Pack<T> {
                     &self.src
                 }
 
 
                 /// Returns the "destination" member of the packing pair.
-                pub const fn dst(&self) -> &$Pack {
+                pub const fn dst(&self) -> &$Pack<T> {
                     &self.dst
                 }
 
