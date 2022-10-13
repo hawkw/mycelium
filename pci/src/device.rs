@@ -74,18 +74,24 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
 ///
 /// | Bits 31-24      | Bits 23-16      | Bits 15-8       | Bits 7-0        |
 /// |-----------------|-----------------|-----------------|-----------------|
-/// | Device ID       |                 | Vendor ID       |                 |
+/// | [Device ID]     |                 | [Vendor ID]     |                 |
 /// | [`Status`]      |                 | [`Command`]     |                 |
-/// | [`Class`] code  | Subclass code   | Prog IF         | Revision ID     |
-/// | [BIST] register | [`HeaderType`]  | Latency timer   | Cache line size |
+/// | [`Class`] code  | Subclass code   | [Prog IF]       | [Revision ID]   |
+/// | [BIST] register | [`HeaderType`]  | [Latency timer] |[Cache line size]|
 ///
 /// Much of the documentation for this struct's fields was copied from [the
-/// OSDev Wiki][1].
+/// OSDev Wiki][wiki].
 ///
-/// [1]: https://wiki.osdev.org/Pci#Common_Header_Fields
+/// [Device ID]: Id#structfield.device_id
+/// [Vendor ID]: Id#structfield.vendor_id
+/// [Prog IF]: #structfield.prog_if
+/// [Revision ID]: #structfield.revision_id
+/// [Latency timer]: #structfield.latency_timer
+/// [Cache line size]: #structfield.cache_line_size
 /// [`Status`]: register::Status
 /// [`Command`]: register::Command
 /// [BIST]: register::Bist
+/// [wiki]: https://wiki.osdev.org/Pci#Common_Header_Fields
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Header {
