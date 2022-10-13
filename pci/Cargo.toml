@@ -16,3 +16,6 @@ volatile = "0.4.5"
 default_features = false
 features = ["attributes", "alloc"]
 git = "https://github.com/tokio-rs/tracing"
+
+[dev-dependencies]
+proptest = "1"
