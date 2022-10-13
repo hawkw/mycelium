@@ -97,6 +97,16 @@ where
     PAddr::from_u64(paddr as u64)
 }
 
+#[inline(always)]
+pub fn kernel_vaddr_of<A>(it: A) -> VAddr
+where
+    PAddr: From<A>,
+{
+    let paddr = PAddr::from(it);
+    let vaddr = paddr.as_usize() + vm_offset().as_usize();
+    VAddr::from_usize(vaddr)
+}
+
 /// This value should only be set once, early in the kernel boot process before
 /// we have access to multiple cores. So, technically, it could be a `static
 /// mut`. But, using an atomic is safe, even though it's not strictly necessary.

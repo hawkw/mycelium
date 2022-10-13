@@ -145,7 +145,10 @@ pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
         );
     }
 
-    arch::pci::init_pci();
+    // perform arch-specific initialization once we have an allocator and
+    // tracing.
+    arch::init(&bootinfo);
+
     #[cfg(test)]
     arch::run_tests();
 

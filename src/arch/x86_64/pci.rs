@@ -1,3 +1,5 @@
+// TODO(eliza): write a `RwLock`...
+
 pub fn init_pci() {
     // TODO(eliza): store the enumerated PCI devices somewhere lol
     let mut found = 0;

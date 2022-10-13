@@ -4,11 +4,11 @@ use hal_x86_64::{cpu, serial, vga};
 pub use hal_x86_64::{cpu::entropy::seed_rng, mm, NAME};
 use mycelium_util::sync::InitOnce;
 
+mod acpi;
 mod framebuf;
 pub mod interrupt;
 mod oops;
 pub mod pci;
-
 pub use self::oops::{oops, Oops};
 
 use self::framebuf::FramebufWriter;
@@ -167,6 +167,10 @@ pub fn arch_entry(info: &'static mut boot_info::BootInfo) -> ! {
 
     let boot_info = RustbootBootInfo::from_bootloader(info);
     crate::kernel_start(&boot_info);
+}
+
+pub fn arch_init(info: &impl BootInfo) {
+    pci::init_pci();
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be

@@ -34,6 +34,7 @@ test = false
 opt-level = 3
 
 [dependencies]
+acpi = "4.1.1"
 hal-core = { path = "hal-core", features = ["embedded-graphics-core"] }
 mycelium-alloc = { path = "alloc", features = ["buddy", "bump"] }
 maitake = { path = "maitake", features = ["tracing-02"] }
