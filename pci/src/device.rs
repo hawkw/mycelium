@@ -16,7 +16,7 @@ pub struct Id {
     /// list is available [here]. Vendor ID `0xFFFF` is reserved to indicate
     /// that a device is not present.
     ///
-    /// [https://pcisig.com/membership/member-companies]
+    /// [here]: https://pcisig.com/membership/member-companies
     pub vendor_id: u16,
     /// Identifies the specific device.
     ///
@@ -85,7 +85,7 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
 /// [1]: https://wiki.osdev.org/Pci#Common_Header_Fields
 /// [`Status`]: register::Status
 /// [`Command`]: register::Command
-/// [`BIST`]: register::Bist
+/// [BIST]: register::Bist
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Header {
@@ -121,7 +121,7 @@ pub struct Header {
     pub prog_if: u8,
     /// The device's class and subclass.
     ///
-    /// See the [`class`] module for details.
+    /// See the [`class`](crate::class) module for details.
     pub(crate) class: RawClasses,
     /// Specifies the system cache line size in 32-bit units.
     ///
