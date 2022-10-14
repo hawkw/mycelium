@@ -1,15 +1,17 @@
-use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
+use hal_core::boot::BootInfo;
 use hal_x86_64::{cpu, vga};
 pub use hal_x86_64::{cpu::entropy::seed_rng, mm, NAME};
-use mycelium_util::sync::InitOnce;
 
 mod acpi;
-mod bootloader;
+mod boot;
 mod framebuf;
 pub mod interrupt;
 mod oops;
 pub mod pci;
-pub use self::oops::{oops, Oops};
+pub use self::{
+    boot::ArchInfo,
+    oops::{oops, Oops},
+};
 
 #[cfg(test)]
 mod tests;
@@ -25,10 +27,11 @@ pub fn tick_timer() {
 #[cfg(target_os = "none")]
 bootloader::entry_point!(arch_entry);
 
-pub fn arch_entry(info: &'static mut bootloader::boot_info::BootInfo) -> ! {
+pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
     unsafe {
         cpu::intrinsics::cli();
     }
+
     if let Some(offset) = info.physical_memory_offset.into_option() {
         // Safety: i hate everything
         unsafe {
@@ -39,18 +42,27 @@ pub fn arch_entry(info: &'static mut bootloader::boot_info::BootInfo) -> ! {
         // lol we're hosed
     } */
 
-    let boot_info = bootloader::RustbootBootInfo::from_bootloader(info);
-    crate::kernel_start(&boot_info);
+    let (boot_info, archinfo) = boot::RustbootBootInfo::from_bootloader(info);
+    crate::kernel_start(boot_info, archinfo);
 }
 
-pub fn arch_init(info: &impl BootInfo) {
+pub fn init(info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
+
+    if let Some(rsdp_addr) = archinfo.rsdp_addr {
+        acpi::bringup_smp(rsdp_addr)
+            .expect("failed to bring up application processors! this is bad news!");
+    } else {
+        // TODO(eliza): try using MP Table to bringup application processors?
+        tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
+    }
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be
 // nice if that was cross platform...
 #[cfg(test)]
 pub fn run_tests() {
+    use hal_x86_64::serial;
     let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
     let mk = || com1.lock();
     match mycotest::runner::run_tests(mk) {
