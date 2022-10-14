@@ -10,7 +10,17 @@ pub struct Device {
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Id {
+    /// Identifies the manufacturer of the device.
+    ///
+    /// PCI vendor IDs are allocated by PCI-SIG to ensure uniqueness; a complete
+    /// list is available [here]. Vendor ID `0xFFFF` is reserved to indicate
+    /// that a device is not present.
+    ///
+    /// [here]: https://pcisig.com/membership/member-companies
     pub vendor_id: u16,
+    /// Identifies the specific device.
+    ///
+    /// Device IDs are allocated by the device's vendor.
     pub device_id: u16,
 }
 
@@ -54,18 +64,92 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
     }
 }
 
+/// A PCI device header.
+///
+/// This stores data common to all PCI devices, whether they are [standard PCI
+/// devices](StandardDetails), [PCI-to-PCI bridges](PciBridgeDetails), or
+/// [PCI-to-CardBus bridges](CardBusDetails).
+///
+/// The header has the following layout:
+///
+/// | Bits 31-24      | Bits 23-16      | Bits 15-8       | Bits 7-0        |
+/// |-----------------|-----------------|-----------------|-----------------|
+/// | [Device ID]     |                 | [Vendor ID]     |                 |
+/// | [`Status`]      |                 | [`Command`]     |                 |
+/// | [`Class`] code  | Subclass code   | [Prog IF]       | [Revision ID]   |
+/// | [BIST] register | [`HeaderType`]  | [Latency timer] |[Cache line size]|
+///
+/// Much of the documentation for this struct's fields was copied from [the
+/// OSDev Wiki][wiki].
+///
+/// [Device ID]: Id#structfield.device_id
+/// [Vendor ID]: Id#structfield.vendor_id
+/// [Prog IF]: #structfield.prog_if
+/// [Revision ID]: #structfield.revision_id
+/// [Latency timer]: #structfield.latency_timer
+/// [Cache line size]: #structfield.cache_line_size
+/// [`Status`]: register::Status
+/// [`Command`]: register::Command
+/// [BIST]: register::Bist
+/// [wiki]: https://wiki.osdev.org/Pci#Common_Header_Fields
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Header {
+    /// The device's vendor ID and device ID.
     pub id: Id,
+    /// The device's [`Command`] register.
+    ///
+    /// This register provides control over a device's ability to generate and
+    /// respond to PCI cycles. When a 0 is written to this register, the device
+    /// is disconnected from the PCI bus. Other values may be written to this
+    /// register to send other commands, depending on the device.
+    ///
+    /// [`Command`]: register::Command
     pub command: register::Command,
+    /// The device's [`Status`] register.
+    ///
+    /// This register can be read from to access status information about PCI
+    /// events.
+    ///
+    /// [`Status`]: register::Command
     pub status: register::Status,
+    /// Specifies a revision identifier for a particular device.
+    ///
+    /// Revision IDs are allocated by the device's vendor.
     pub revision_id: u8,
+    /// Programming interface.
+    ///
+    /// A read-only register that specifies a register-level programming
+    /// interface the device has, if it has any at all.
+    ///
+    /// This is often used alongside the device's class and subclass to
+    /// determine how to interact with the device.
     pub prog_if: u8,
+    /// The device's class and subclass.
+    ///
+    /// See the [`class`](crate::class) module for details.
     pub(crate) class: RawClasses,
+    /// Specifies the system cache line size in 32-bit units.
+    ///
+    /// A device can limit the number of cacheline sizes it can support, if a
+    /// unsupported value is written to this field, the device will behave as if
+    /// a value of 0 was written.
     pub cache_line_size: u8,
+    /// Specifies the latency timer in units of PCI bus clocks.
     pub latency_timer: u8,
+    /// Identifies the [device kind] and the layout of the rest of the
+    /// device's PCI configuration space header.
+    ///
+    /// A device is one of the following:
+    ///
+    /// - A standard PCI device ([`StandardDetails`])
+    /// - A PCI-to-PCI bridge ([`PciBridgeDetails`])
+    /// - A PCI-to-CardBus bridge ([`CardBusDetails`])
+    ///
+    /// [device kind]: Kind
     pub header_type: HeaderTypeReg,
+    /// A read-write register for running the device's Built-In Self Test
+    /// (BIST).
     pub bist: register::Bist,
 }
 
@@ -76,6 +160,8 @@ pub enum Kind {
     CardBus(CardBusDetails),
 }
 
+/// A header describing a standard PCI device (not a bridge).
+///
 /// Much of the documentation for this struct's fields was copied from [the
 /// OSDev Wiki][1].
 ///
