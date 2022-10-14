@@ -11,7 +11,7 @@ pub enum Error {
 
 #[tracing::instrument(err)]
 pub fn bringup_smp(rsdp_addr: PAddr) -> Result<(), Error> {
-    use acpi::platform::interrupt::InterruptModel;
+    use acpi::platform::{self, interrupt::InterruptModel};
     tracing::info!("trying to parse ACPI tables from RSDP...");
     let tables = unsafe { AcpiTables::from_rsdp(IdentityMappedAcpiHandler, rsdp_addr.as_usize()) }?;
     tracing::info!("found ACPI tables!");
@@ -39,12 +39,18 @@ pub fn bringup_smp(rsdp_addr: PAddr) -> Result<(), Error> {
 
     tracing::debug!(?apic);
 
-    let processors = platform
+    let platform::ProcessorInfo {
+        application_processors,
+        boot_processor,
+    } = platform
         .processor_info
         .ok_or(Error::Other("no processor information found in MADT!"))?;
 
-    tracing::debug!(?processors.boot_processor);
-    tracing::debug!(?processors.application_processors);
+    tracing::info!(
+        "found {} application processors",
+        application_processors.len()
+    );
+    tracing::debug!(?boot_processor, ?application_processors);
 
     Ok(())
 }
