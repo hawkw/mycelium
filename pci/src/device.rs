@@ -193,10 +193,9 @@ pub struct StandardDetails {
     pub irq_line: u8,
     /// Specifies which interrupt pin the device uses.
     ///
-    /// Where a value of `0x1` is `INTA#`, `0x2` is `INTB#`, `0x3` is `INTC#`,
-    /// `0x4` is `INTD#`, and `0x0` means the
-    /// device does not use an interrupt pin.
-    irq_pin: u8,
+    /// A value of `0x1` is `INTA#`, `0x2` is `INTB#`, `0x3` is `INTC#`, `0x4`
+    /// is `INTD#`, and `0x0` means the device does not use an interrupt pin.
+    pub(crate) irq_pin: u8,
     /// A read-only register that specifies the burst period length,
     /// in 1/4 microsecond units, that the device needs (assuming a 33 MHz clock
     /// rate).
@@ -228,9 +227,8 @@ pub struct SubsystemId {
 
 /// Specifies which interrupt pin a standard PCI device uses.
 ///
-/// Where a value of `0x1` is `INTA#`, `0x2` is `INTB#`, `0x3` is `INTC#`,
-/// `0x4` is `INTD#`, and `0x0` means the
-/// device does not use an interrupt pin.
+/// A value of `0x1` is `INTA#`, `0x2` is `INTB#`, `0x3` is `INTC#`, `0x4` is
+/// `INTD#`, and `0x0` means the device does not use an interrupt pin.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum IrqPin {
