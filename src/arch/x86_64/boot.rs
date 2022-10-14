@@ -3,13 +3,18 @@
 use super::framebuf::{self, FramebufWriter};
 use bootloader::boot_info;
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
-use hal_x86_64::{mm, serial, vga};
+use hal_x86_64::{cpu, mm, serial, vga};
 use mycelium_util::sync::InitOnce;
 
 #[derive(Debug)]
 pub struct RustbootBootInfo {
     inner: &'static boot_info::BootInfo,
     has_framebuffer: bool,
+}
+
+#[derive(Debug)]
+pub struct ArchInfo {
+    pub(in crate::arch) rsdp_addr: Option<PAddr>,
 }
 
 type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
@@ -123,12 +128,15 @@ impl RustbootBootInfo {
         )
     }
 
-    pub(super) fn from_bootloader(inner: &'static mut boot_info::BootInfo) -> Self {
+    pub(super) fn from_bootloader(inner: &'static mut boot_info::BootInfo) -> (Self, ArchInfo) {
         let has_framebuffer = framebuf::init(inner);
-
-        Self {
+        let archinfo = ArchInfo {
+            rsdp_addr: inner.rsdp_addr.into_option().map(PAddr::from_u64),
+        };
+        let bootinfo = Self {
             inner,
             has_framebuffer,
-        }
+        };
+        (bootinfo, archinfo)
     }
 }
