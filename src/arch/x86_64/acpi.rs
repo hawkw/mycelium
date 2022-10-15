@@ -45,12 +45,13 @@ pub fn bringup_smp(rsdp_addr: PAddr) -> Result<(), Error> {
     } = platform
         .processor_info
         .ok_or(Error::Other("no processor information found in MADT!"))?;
-
+    tracing::info!("boot processor seems normalish");
+    tracing::debug!(?boot_processor);
     tracing::info!(
         "found {} application processors",
         application_processors.len()
     );
-    tracing::debug!(?boot_processor, ?application_processors);
+    tracing::debug!(?application_processors);
 
     Ok(())
 }
