@@ -125,7 +125,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
 
         // Round up to the heap's minimum allocateable size.
         if size < self.min_size {
-            tracing::warn!(
+            tracing::trace!(
                 size,
                 min_size = self.min_size,
                 layout.size = layout.size(),
