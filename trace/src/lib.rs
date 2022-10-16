@@ -28,7 +28,21 @@ struct Output<W, const BIT: u64> {
 struct OutputCfg {
     line_len: usize,
     indent: AtomicU64,
-    span_indent_chars: &'static str,
+    indent_cfg: IndentCfg,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct IndentCfg {
+    event: &'static str,
+    indent: &'static str,
+    new_span: &'static str,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum IndentKind {
+    Event,
+    NewSpan,
+    Indent,
 }
 
 #[derive(Debug)]
@@ -45,7 +59,7 @@ struct WriterPair<'a, D: Write, S: Write> {
 }
 
 struct Visitor<'writer, W> {
-    writer: fmt::WithIndent<'writer, W>,
+    writer: &'writer mut W,
     seen: bool,
     newline: bool,
     comma: bool,
@@ -75,8 +89,8 @@ impl<D, S> Subscriber<D, S> {
         S: Default,
     {
         Self {
-            display: Output::new(display, " "),
-            serial: Output::new(S::default(), " |"),
+            display: Output::new(display, Self::DISPLAY_INDENT_CFG),
+            serial: Output::new(S::default(), Self::SERIAL_INDENT_CFG),
             next_id: AtomicU64::new(0),
         }
     }
@@ -86,11 +100,22 @@ impl<D, S> Subscriber<D, S> {
         for<'a> S: MakeWriter<'a>,
     {
         Subscriber {
-            serial: Output::new(port, " |"),
+            serial: Output::new(port, Self::SERIAL_INDENT_CFG),
             display: self.display,
             next_id: self.next_id,
         }
     }
+
+    const SERIAL_INDENT_CFG: IndentCfg = IndentCfg {
+        indent: "│",
+        new_span: "┌",
+        event: "├",
+    };
+    const DISPLAY_INDENT_CFG: IndentCfg = IndentCfg {
+        indent: " ",
+        new_span: "",
+        event: " ",
+    };
 }
 
 impl<D, S> Subscriber<D, S> {
@@ -119,7 +144,7 @@ where
         let meta = span.metadata();
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
-        let _ = writer.indent(true);
+        let _ = writer.indent_initial(IndentKind::NewSpan);
         let _ = write!(writer, "{}: ", meta.name());
 
         span.record(&mut Visitor::new(&mut writer));
@@ -155,7 +180,7 @@ where
         let meta = event.metadata();
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
-        let _ = writer.indent(false);
+        let _ = writer.indent_initial(IndentKind::Event);
         let _ = write!(writer, "{}: ", meta.target());
         event.record(&mut Visitor::new(&mut writer));
     }
@@ -181,14 +206,14 @@ where
 // === impl Output ===
 
 impl<W, const BIT: u64> Output<W, BIT> {
-    fn new<'a>(make_writer: W, span_indent_chars: &'static str) -> Self
+    fn new<'a>(make_writer: W, indent_cfg: IndentCfg) -> Self
     where
         W: MakeWriter<'a>,
     {
         let cfg = OutputCfg {
             line_len: make_writer.line_len(),
             indent: AtomicU64::new(0),
-            span_indent_chars,
+            indent_cfg,
         };
         Self { make_writer, cfg }
     }
@@ -265,22 +290,19 @@ where
     D: Write,
     S: Write,
 {
-    fn indent(&mut self, is_span: bool) -> fmt::Result {
-        let chars = if is_span { " + " } else { " " };
+    fn indent_initial(&mut self, kind: IndentKind) -> fmt::Result {
         let err = if let Some(ref mut display) = self.display {
             // "rust has try-catch syntax lol"
             (|| {
-                display.indent()?;
-                display.write_str(chars)?;
+                display.indent(kind)?;
+                display.write_char(' ')?;
                 Ok(())
             })()
         } else {
             Ok(())
         };
         if let Some(ref mut serial) = self.serial {
-            serial.indent()?;
-
-            serial.write_str(chars)?;
+            serial.indent(kind)?;
         }
         err
     }
@@ -289,18 +311,38 @@ where
 // ==== impl Writer ===
 
 impl<'a, W: Write> Writer<'a, W> {
-    fn indent(&mut self) -> fmt::Result {
-        for _ in 0..self.cfg.indent.load(Ordering::Acquire) {
-            self.writer.write_str(self.cfg.span_indent_chars)?;
-            self.current_line += self.cfg.span_indent_chars.len();
+    fn indent(&mut self, kind: IndentKind) -> fmt::Result {
+        let indent = self.cfg.indent.load(Ordering::Acquire);
+
+        if indent == 0 {
+            return if kind == IndentKind::NewSpan {
+                self.write_indent(self.cfg.indent_cfg.new_span)
+            } else {
+                Ok(())
+            };
         }
+
+        for _ in 0..indent - 1 {
+            self.write_indent(self.cfg.indent_cfg.indent)?;
+        }
+
+        self.write_indent(match kind {
+            IndentKind::NewSpan => self.cfg.indent_cfg.new_span,
+            IndentKind::Event => self.cfg.indent_cfg.event,
+            IndentKind::Indent => self.cfg.indent_cfg.indent,
+        })
+    }
+
+    fn write_indent(&mut self, chars: &'static str) -> fmt::Result {
+        self.writer.write_str(chars)?;
+        self.current_line += chars.len();
         Ok(())
     }
 
     fn write_newline(&mut self) -> fmt::Result {
         self.writer.write_str("   ")?;
         self.current_line = 3;
-        self.indent()
+        self.indent(IndentKind::Indent)
     }
 
     fn finish(&mut self) -> fmt::Result {
@@ -330,8 +372,8 @@ where
                 };
                 self.writer.write_char('\n')?;
                 self.write_newline()?;
-                self.writer.write_str("  ")?;
-                self.current_line += 2;
+                self.writer.write_str(" ")?;
+                self.current_line += 1;
                 line = &line[offset..];
             }
             self.writer.write_str(line)?;
@@ -377,7 +419,7 @@ fn write_level(w: &mut impl fmt::Write, level: &Level) -> fmt::Result {
 impl<'writer, W: fmt::Write> Visitor<'writer, W> {
     fn new(writer: &'writer mut W) -> Self {
         Self {
-            writer: writer.with_indent(2),
+            writer,
             seen: false,
             comma: false,
             newline: false,
