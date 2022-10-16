@@ -366,9 +366,9 @@ impl<'a, W: Write> Drop for Writer<'a, W> {
 #[inline]
 fn write_level(w: &mut impl fmt::Write, level: &Level) -> fmt::Result {
     match *level {
-        Level::TRACE => w.write_str("[+]")?,
-        Level::DEBUG => w.write_str("[-]")?,
-        Level::INFO => w.write_str("[*]")?,
+        Level::TRACE => w.write_str("[*]")?,
+        Level::DEBUG => w.write_str("[?]")?,
+        Level::INFO => w.write_str("[i]")?,
         Level::WARN => w.write_str("[!]")?,
         Level::ERROR => w.write_str("[x]")?,
     };
