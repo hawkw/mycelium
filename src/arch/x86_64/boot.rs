@@ -69,14 +69,17 @@ impl BootInfo for RustbootBootInfo {
 
     fn subscriber(&self) -> Option<tracing::Dispatch> {
         use mycelium_trace::{
+            color::AnsiEscapes,
             embedded_graphics::MakeTextWriter,
             writer::{self, MakeWriterExt},
             Subscriber,
         };
 
         type FilteredFramebuf = writer::WithMaxLevel<MakeTextWriter<FramebufWriter>>;
-        type FilteredSerial =
-            writer::WithFilter<&'static serial::Port, fn(&tracing::Metadata<'_>) -> bool>;
+        type FilteredSerial = writer::WithFilter<
+            AnsiEscapes<&'static serial::Port>,
+            fn(&tracing::Metadata<'_>) -> bool,
+        >;
 
         static COLLECTOR: InitOnce<Subscriber<FilteredFramebuf, Option<FilteredSerial>>> =
             InitOnce::uninitialized();
@@ -101,6 +104,7 @@ impl BootInfo for RustbootBootInfo {
             let display_writer = MakeTextWriter::new(|| unsafe { framebuf::mk_framebuf() })
                 .with_max_level(tracing::Level::INFO);
             let serial = serial::com1().map(|com1| {
+                let com1 = AnsiEscapes::new(com1);
                 com1.with_filter(serial_filter as for<'a, 'b> fn(&'a tracing::Metadata<'b>) -> bool)
             });
             Subscriber::display_only(display_writer).with_serial(serial)
