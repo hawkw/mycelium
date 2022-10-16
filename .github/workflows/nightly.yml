@@ -49,7 +49,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: print current nightly
       run: rustc --version && cargo --version
-      run: cargo build-x64
+    - run: cargo build-x64
 
   clippy-nightly:
     name: check (latest nightly)

@@ -188,15 +188,14 @@ pub struct StandardDetails {
     /// makes use of an interrupt pin.
     ///
     /// For the x86 architectures, this register corresponds to the PIC IRQ
-    /// numbers 0-15 (and not I/O APIC IRQ numbers)  and a value of 0xFF defines
+    /// numbers 0-15 (and not I/O APIC IRQ numbers) and a value of 0xFF defines
     /// no connection.
     pub irq_line: u8,
     /// Specifies which interrupt pin the device uses.
     ///
-    /// Where a value of `0x1` is `INTA#`, `0x2` is `INTB#`, `0x3` is `INTC#`,
-    /// `0x4` is `INTD#`, and `0x0` means the
-    /// device does not use an interrupt pin.
-    pub irq_pin: u8,
+    /// A value of `0x1` is `INTA#`, `0x2` is `INTB#`, `0x3` is `INTC#`, `0x4`
+    /// is `INTD#`, and `0x0` means the device does not use an interrupt pin.
+    pub(crate) irq_pin: u8,
     /// A read-only register that specifies the burst period length,
     /// in 1/4 microsecond units, that the device needs (assuming a 33 MHz clock
     /// rate).
@@ -226,6 +225,19 @@ pub struct SubsystemId {
     pub(crate) subsystem: u16,
 }
 
+/// Specifies which interrupt pin a standard PCI device uses.
+///
+/// A value of `0x1` is `INTA#`, `0x2` is `INTB#`, `0x3` is `INTC#`, `0x4` is
+/// `INTD#`, and `0x0` means the device does not use an interrupt pin.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum IrqPin {
+    IntA = 0x1,
+    IntB = 0x2,
+    IntC = 0x3,
+    IntD = 0x4,
+}
+
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub(crate) struct RawClasses {
@@ -251,6 +263,25 @@ impl StandardDetails {
     /// Returns this device's base address registers (BARs).
     pub fn base_addrs(&self) -> Result<[Option<bar::BaseAddress>; 6], error::UnexpectedValue<u32>> {
         bar::BaseAddress::decode_bars(&self.base_addrs)
+    }
+
+    /// Returns which IRQ pin this device uses.
+    ///
+    /// # Returns
+    ///
+    /// - [`Err`]`(`[`error::UnexpectedValue`]`)` if the value is not a valid IRQ
+    ///   pin.
+    /// - [`None`] if this device does not use an IRQ pin.
+    /// - [`Some`]`(`[`IrqPin`]`)` if this device specifies a valid IRQ pin.
+    pub fn irq_pin(&self) -> Result<Option<IrqPin>, error::UnexpectedValue<u8>> {
+        match self.irq_pin {
+            0x00 => Ok(None),
+            0x01 => Ok(Some(IrqPin::IntA)),
+            0x02 => Ok(Some(IrqPin::IntB)),
+            0x03 => Ok(Some(IrqPin::IntC)),
+            0x04 => Ok(Some(IrqPin::IntD)),
+            bits => Err(error::unexpected(bits).named("IRQ pin")),
+        }
     }
 }
 

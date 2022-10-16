@@ -10,5 +10,4 @@ tracing-core = {git = "https://github.com/tokio-rs/tracing", default_features = 
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false }
 hal-core = { path = "../hal-core" }
 mycelium-util = { path = "../util" }
-
 embedded-graphics = { version = "0.7", optional = true }

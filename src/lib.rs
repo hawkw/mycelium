@@ -24,7 +24,7 @@ mod tests;
 #[cfg_attr(target_os = "none", global_allocator)]
 static ALLOC: buddy::Alloc<32> = buddy::Alloc::new(32);
 
-pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
+pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
         writer,
@@ -145,7 +145,10 @@ pub fn kernel_start(bootinfo: &impl BootInfo) -> ! {
         );
     }
 
-    arch::pci::init_pci();
+    // perform arch-specific initialization once we have an allocator and
+    // tracing.
+    arch::init(&bootinfo, &archinfo);
+
     #[cfg(test)]
     arch::run_tests();
 
@@ -165,16 +168,16 @@ fn kernel_main() -> ! {
         })
     }
 
-    rt::spawn(async move {
-        loop {
-            let result = futures_util::try_join! {
-                spawn_sleep(time::Duration::from_secs(2)),
-                spawn_sleep(time::Duration::from_secs(5)),
-                spawn_sleep(time::Duration::from_secs(10)),
-            };
-            tracing::info!(?result);
-        }
-    });
+    // rt::spawn(async move {
+    //     loop {
+    //         let result = futures_util::try_join! {
+    //             spawn_sleep(time::Duration::from_secs(2)),
+    //             spawn_sleep(time::Duration::from_secs(5)),
+    //             spawn_sleep(time::Duration::from_secs(10)),
+    //         };
+    //         tracing::info!(?result);
+    //     }
+    // });
 
     let mut core = rt::Core::new();
     loop {

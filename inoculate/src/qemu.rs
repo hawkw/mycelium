@@ -132,7 +132,7 @@ impl Cmd {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
             .arg(format!("format=raw,file={}", image.display()))
-            .arg("--no-reboot");
+            .arg("-no-reboot");
 
         match self {
             Cmd::Run {
@@ -258,6 +258,12 @@ impl Cmd {
 
 impl Settings {
     fn configure(&self, cmd: &mut Command) {
+        // tell QEMU to be a generic 4-core x86_64 machine by default.
+        //
+        // this is so tests are run with the same machine regardless of whether
+        // KVM or other accelerators are available, unless a specific QEMU
+        // configuration is requested.
+        const DEFAULT_QEMU_ARGS: &[&str] = &["-cpu", "qemu64", "-smp", "cores=4"];
         if self.gdb {
             tracing::debug!(gdb_port = self.gdb_port, "configuring QEMU to wait for GDB");
             cmd.arg("-S")
@@ -265,8 +271,13 @@ impl Settings {
                 .arg(format!("tcp::{}", self.gdb_port));
         }
 
-        tracing::debug!(qemu.args = ?self.qemu_args, "configuring qemu");
-        cmd.args(&self.qemu_args[..]);
+        if !self.qemu_args.is_empty() {
+            tracing::info!(qemu.args = ?self.qemu_args, "configuring qemu");
+            cmd.args(&self.qemu_args[..]);
+        } else {
+            tracing::info!(qemu.args = ?DEFAULT_QEMU_ARGS, "using default qemu args");
+            cmd.args(DEFAULT_QEMU_ARGS);
+        }
     }
 }
 
