@@ -266,13 +266,12 @@ where
     S: Write,
 {
     fn indent(&mut self, is_span: bool) -> fmt::Result {
+        let chars = if is_span { " + " } else { " " };
         let err = if let Some(ref mut display) = self.display {
             // "rust has try-catch syntax lol"
             (|| {
                 display.indent()?;
-                if is_span {
-                    display.write_char(' ')?;
-                };
+                display.write_str(chars)?;
                 Ok(())
             })()
         } else {
@@ -280,9 +279,8 @@ where
         };
         if let Some(ref mut serial) = self.serial {
             serial.indent()?;
-            let chars = if is_span { '-' } else { ' ' };
 
-            serial.write_char(chars)?;
+            serial.write_str(chars)?;
         }
         err
     }
