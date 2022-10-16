@@ -14,7 +14,7 @@ use hal_core::{
     interrupt, Address,
 };
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
-use mycelium_trace::{embedded_graphics::MakeTextWriter, writer::MakeWriter};
+use mycelium_trace::{embedded_graphics::TextWriterBuilder, writer::MakeWriter};
 use mycelium_util::fmt::{self, Write};
 
 #[derive(Debug)]
@@ -98,10 +98,9 @@ pub fn oops(oops: Oops<'_>) -> ! {
     .unwrap();
     drop(framebuf);
 
-    let mk_writer = MakeTextWriter::new_at(
-        || unsafe { super::framebuf::mk_framebuf() },
-        Point::new(4, 45),
-    );
+    let mk_writer = TextWriterBuilder::default()
+        .starting_point(Point::new(4, 45))
+        .build(|| unsafe { super::framebuf::mk_framebuf() });
 
     match oops.situation {
         OopsSituation::Fault {

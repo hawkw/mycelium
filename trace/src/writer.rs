@@ -1,6 +1,7 @@
 //! Abstractions for creating [`fmt::Write`] instances.
 //!
 //! [`fmt::Write`]: mycelium_util::fmt::Write
+use crate::color::{Color, SetColor};
 use mycelium_util::{
     fmt::{self, Debug},
     sync::spin::{Mutex, MutexGuard},
@@ -431,6 +432,33 @@ where
     }
 }
 
+impl<A, B> SetColor for EitherWriter<A, B>
+where
+    A: fmt::Write + SetColor,
+    B: fmt::Write + SetColor,
+{
+    fn set_fg_color(&mut self, color: Color) {
+        match self {
+            EitherWriter::A(a) => a.set_fg_color(color),
+            EitherWriter::B(b) => b.set_fg_color(color),
+        }
+    }
+
+    fn fg_color(&self) -> Color {
+        match self {
+            EitherWriter::A(a) => a.fg_color(),
+            EitherWriter::B(b) => b.fg_color(),
+        }
+    }
+
+    fn set_bold(&mut self, bold: bool) {
+        match self {
+            EitherWriter::A(a) => a.set_bold(bold),
+            EitherWriter::B(b) => b.set_bold(bold),
+        }
+    }
+}
+
 // === impl WithMaxLevel ===
 
 impl<M> WithMaxLevel<M> {
@@ -748,6 +776,20 @@ impl<'a> MakeWriter<'a> for NoWriter {
     #[inline]
     fn make_writer_for(&'a self, _: &Metadata<'_>) -> Option<Self::Writer> {
         None
+    }
+}
+
+impl SetColor for NoWriter {
+    fn set_fg_color(&mut self, _: Color) {
+        // nop
+    }
+
+    fn fg_color(&self) -> Color {
+        Color::Default
+    }
+
+    fn set_bold(&mut self, _: bool) {
+        // nop
     }
 }
 

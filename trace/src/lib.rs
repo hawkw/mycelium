@@ -1,14 +1,18 @@
 #![no_std]
 #![feature(doc_cfg)]
 
+pub mod color;
 #[cfg(feature = "embedded-graphics")]
 #[doc(cfg(feature = "embedded-graphics"))]
 pub mod embedded_graphics;
 pub mod writer;
 
-use crate::writer::MakeWriter;
+use crate::{
+    color::{Color, SetColor},
+    writer::MakeWriter,
+};
 use core::sync::atomic::{AtomicU64, Ordering};
-use mycelium_util::fmt::{self, Write, WriteExt};
+use mycelium_util::fmt::{self, Write};
 use tracing_core::{field, span, Event, Level, Metadata};
 
 #[derive(Debug)]
@@ -131,10 +135,12 @@ impl<D, S> Subscriber<D, S> {
     }
 }
 
-impl<D, S> tracing_core::Collect for Subscriber<D, S>
+impl<D, S, DW, SW> tracing_core::Collect for Subscriber<D, S>
 where
-    for<'a> D: MakeWriter<'a> + 'static,
-    for<'a> S: MakeWriter<'a> + 'static,
+    for<'a> D: MakeWriter<'a, Writer = DW> + 'static,
+    DW: Write + SetColor,
+    for<'a> S: MakeWriter<'a, Writer = SW> + 'static,
+    SW: Write + SetColor,
 {
     fn enabled(&self, meta: &Metadata) -> bool {
         self.display.enabled(meta) || self.serial.enabled(meta)
@@ -145,7 +151,8 @@ where
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent_initial(IndentKind::NewSpan);
-        let _ = write!(writer, "{}: ", meta.name());
+        let _ = writer.with_bold().write_str(meta.name());
+        let _ = writer.with_fg_color(Color::BrightBlack).write_str(": ");
 
         span.record(&mut Visitor::new(&mut writer));
 
@@ -181,7 +188,11 @@ where
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent_initial(IndentKind::Event);
-        let _ = write!(writer, "{}: ", meta.target());
+        let _ = write!(
+            writer.with_fg_color(Color::BrightBlack),
+            "{}: ",
+            meta.target()
+        );
         event.record(&mut Visitor::new(&mut writer));
     }
 
@@ -255,6 +266,38 @@ impl<W, const BIT: u64> Output<W, BIT> {
 
 // === impl WriterPair ===
 
+impl<'a, D, S> SetColor for WriterPair<'a, D, S>
+where
+    D: Write + SetColor,
+    S: Write + SetColor,
+{
+    fn set_fg_color(&mut self, color: Color) {
+        if let Some(ref mut w) = self.display {
+            w.set_fg_color(color)
+        }
+        if let Some(ref mut w) = self.serial {
+            w.set_fg_color(color)
+        };
+    }
+
+    fn fg_color(&self) -> Color {
+        self.display
+            .as_ref()
+            .map(SetColor::fg_color)
+            .or_else(|| self.serial.as_ref().map(SetColor::fg_color))
+            .unwrap_or(Color::Default)
+    }
+
+    fn set_bold(&mut self, bold: bool) {
+        if let Some(ref mut w) = self.display {
+            w.set_bold(bold)
+        }
+        if let Some(ref mut w) = self.serial {
+            w.set_bold(bold)
+        };
+    }
+}
+
 impl<'a, D, S> Write for WriterPair<'a, D, S>
 where
     D: Write,
@@ -295,7 +338,6 @@ where
             // "rust has try-catch syntax lol"
             (|| {
                 display.indent(kind)?;
-                display.write_char(' ')?;
                 Ok(())
             })()
         } else {
@@ -313,6 +355,7 @@ where
 impl<'a, W: Write> Writer<'a, W> {
     fn indent(&mut self, kind: IndentKind) -> fmt::Result {
         let indent = self.cfg.indent.load(Ordering::Acquire);
+        self.write_indent(" ")?;
 
         if indent == 0 {
             return if kind == IndentKind::NewSpan {
@@ -397,6 +440,23 @@ where
     }
 }
 
+impl<'a, W> SetColor for Writer<'a, W>
+where
+    W: Write + SetColor,
+{
+    fn fg_color(&self) -> Color {
+        self.writer.fg_color()
+    }
+
+    fn set_fg_color(&mut self, color: Color) {
+        self.writer.set_fg_color(color);
+    }
+
+    fn set_bold(&mut self, bold: bool) {
+        self.writer.set_bold(bold)
+    }
+}
+
 impl<'a, W: Write> Drop for Writer<'a, W> {
     fn drop(&mut self) {
         let _ = self.finish();
@@ -404,19 +464,26 @@ impl<'a, W: Write> Drop for Writer<'a, W> {
 }
 
 #[inline]
-fn write_level(w: &mut impl fmt::Write, level: &Level) -> fmt::Result {
+fn write_level<W>(w: &mut W, level: &Level) -> fmt::Result
+where
+    W: fmt::Write + SetColor,
+{
+    w.write_char('[')?;
     match *level {
-        Level::TRACE => w.write_str("[*]")?,
-        Level::DEBUG => w.write_str("[?]")?,
-        Level::INFO => w.write_str("[i]")?,
-        Level::WARN => w.write_str("[!]")?,
-        Level::ERROR => w.write_str("[x]")?,
-    };
-
-    Ok(())
+        Level::TRACE => w.with_fg_color(Color::BrightBlue).write_char('*'),
+        Level::DEBUG => w.with_fg_color(Color::BrightCyan).write_char('?'),
+        Level::INFO => w.with_fg_color(Color::BrightGreen).write_char('i'),
+        Level::WARN => w.with_fg_color(Color::BrightYellow).write_char('!'),
+        Level::ERROR => w.with_fg_color(Color::BrightRed).write_char('x'),
+    }?;
+    w.write_char(']')
 }
 
-impl<'writer, W: fmt::Write> Visitor<'writer, W> {
+impl<'writer, W> Visitor<'writer, W>
+where
+    W: fmt::Write,
+    &'writer mut W: SetColor,
+{
     fn new(writer: &'writer mut W) -> Self {
         Self {
             writer,
@@ -445,6 +512,23 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
             }
         }
 
+        impl<'a, W: fmt::Write> SetColor for HasWrittenNewline<'a, W>
+        where
+            W: SetColor,
+        {
+            fn fg_color(&self) -> Color {
+                self.writer.fg_color()
+            }
+
+            fn set_fg_color(&mut self, color: Color) {
+                self.writer.set_fg_color(color);
+            }
+
+            fn set_bold(&mut self, bold: bool) {
+                self.writer.set_bold(bold)
+            }
+        }
+
         let mut writer = HasWrittenNewline {
             writer: &mut self.writer,
             has_written_newline: false,
@@ -454,9 +538,9 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
 
         if field.name() == "message" {
             if self.seen {
-                let _ = write!(writer, ",{}{:?}", nl, val);
+                let _ = write!(writer.with_bold(), "{}{:?}", nl, val);
             } else {
-                let _ = write!(writer, "{:?}", val);
+                let _ = write!(writer.with_bold(), "{:?}", val);
                 self.comma = !writer.has_written_punct;
             }
             self.seen = true;
@@ -464,7 +548,7 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
         }
 
         if self.comma {
-            let _ = writer.write_char(',');
+            let _ = writer.with_fg_color(Color::BrightBlack).write_char(',');
         }
 
         if self.seen {
@@ -476,12 +560,27 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
             self.comma = true;
         }
 
-        let _ = write!(writer, "{}={:?}", field, val);
+        // pretty-print the name with dots in the punctuation color
+        let mut name_pieces = field.name().split('.');
+        if let Some(piece) = name_pieces.next() {
+            let _ = writer.write_str(piece);
+            for piece in name_pieces {
+                let _ = writer.with_fg_color(Color::BrightBlack).write_char('.');
+                let _ = writer.write_str(piece);
+            }
+        }
+
+        let _ = writer.with_fg_color(Color::BrightBlack).write_char('=');
+        let _ = write!(writer, "{val:?}");
         self.newline |= writer.has_written_newline;
     }
 }
 
-impl<'writer, W: fmt::Write> field::Visit for Visitor<'writer, W> {
+impl<'writer, W> field::Visit for Visitor<'writer, W>
+where
+    W: fmt::Write,
+    &'writer mut W: SetColor,
+{
     #[inline]
     fn record_u64(&mut self, field: &field::Field, val: u64) {
         self.record_inner(field, &val)
