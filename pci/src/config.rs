@@ -234,7 +234,9 @@ const ADDRESS_PORT: u16 = 0xCF8;
 const DATA_PORT: u16 = 0xCFC;
 
 impl ConfigAddress {
-    const BUS_PAIR: pack::Pair32<u8> = Self::BUS.pair_with(AddressBits::BUS);
+    const BUS_PAIR: pack::Pair32 = Self::BUS
+        .typed::<u32, ()>()
+        .pair_with(AddressBits::BUS.typed::<_, AddressBits>());
     const DEVICE_PAIR: pack::Pair32 = Self::DEVICE.pair_with(AddressBits::DEVICE);
     const FUNCTION_PAIR: pack::Pair32 = Self::FUNCTION.pair_with(AddressBits::FUNCTION);
 
