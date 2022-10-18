@@ -31,17 +31,28 @@ pub trait RegisterAccess {
 impl LocalApic {
     const BASE_PADDR_MASK: u64 = 0xffff_ffff_f000;
 
+    /// Try to construct a `LocalApic`.
+    ///
+    /// # Returns
+    /// - `Some(LocalApic)` if this CPU supports the APIC interrupt model.
+    /// - `None` if this CPU does not support APIC interrupt handling.
     #[must_use]
-    pub fn new() -> Self {
-        assert!(
-            super::is_supported(),
-            "CPU does not support APIC interrupt model!"
-        );
+    pub fn try_new() -> Option<Self> {
+        if !super::is_supported() {
+            return None;
+        }
+
         let msr = Msr::ia32_apic_base();
         let base_paddr = PAddr::from_u64(msr.read() & Self::BASE_PADDR_MASK);
         let base = mm::kernel_vaddr_of(base_paddr);
         tracing::debug!(?base, "LocalApic::new");
-        Self { msr, base }
+
+        Some(Self { msr, base })
+    }
+
+    #[must_use]
+    pub fn new() -> Self {
+        Self::try_new().expect("CPU does not support APIC interrupt model!")
     }
 
     pub fn enable(&self, spurious_vector: u8) {
