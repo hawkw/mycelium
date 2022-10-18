@@ -4,6 +4,7 @@ use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
 use volatile::{access, Volatile};
 
+#[derive(Debug)]
 pub struct LocalApic {
     msr: Msr,
     base: VAddr,
@@ -45,7 +46,8 @@ impl LocalApic {
         let msr = Msr::ia32_apic_base();
         let base_paddr = PAddr::from_u64(msr.read() & Self::BASE_PADDR_MASK);
         let base = mm::kernel_vaddr_of(base_paddr);
-        tracing::debug!(?base, "LocalApic::new");
+        tracing::info!(?base, "found local APIC base address");
+        assert_ne!(base, VAddr::from_u64(0));
 
         Some(Self { msr, base })
     }
