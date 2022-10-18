@@ -102,7 +102,7 @@ impl bits::FromBits<u8> for GateKind {
 // === impl Idt ===
 
 impl Idt {
-    const NUM_VECTORS: usize = 256;
+    pub(super) const NUM_VECTORS: usize = 256;
 
     /// Divide-by-zero interrupt (#D0)
     pub const DIVIDE_BY_ZERO: usize = 0;
@@ -170,13 +170,20 @@ impl Idt {
     }
 
     pub fn load(&'static self) {
-        let ptr = cpu::DtablePtr::new(self);
-        tracing::debug!(?ptr, "loading IDT");
         unsafe {
             // Safety: the `'static` bound ensures the IDT isn't going away
             // unless you did something really evil.
-            cpu::intrinsics::lidt(ptr)
+            self.load_raw()
         }
+    }
+
+    /// # Safety
+    ///
+    /// The referenced IDT must be valid for the `'static` lifetime.
+    pub unsafe fn load_raw(&self) {
+        let ptr = cpu::DtablePtr::new_unchecked(self);
+        tracing::debug!(?ptr, "loading IDT");
+        cpu::intrinsics::lidt(ptr);
         tracing::debug!("IDT loaded!");
     }
 }

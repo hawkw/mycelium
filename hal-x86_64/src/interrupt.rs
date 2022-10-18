@@ -1,7 +1,11 @@
 use crate::{cpu, segment, VAddr};
 use core::{arch::asm, marker::PhantomData};
+use hal_core::interrupt::Control;
 use hal_core::interrupt::{ctx, Handlers};
-use mycelium_util::{bits, fmt};
+use mycelium_util::{
+    bits, fmt,
+    sync::{spin, InitOnce},
+};
 
 pub mod idt;
 pub mod pic;
@@ -9,7 +13,12 @@ pub mod pic;
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
-pub type Control = &'static mut Idt;
+use self::apic::LocalApic;
+
+#[derive(Debug)]
+pub struct Controller {
+    model: InterruptModel,
+}
 
 #[derive(Debug)]
 #[repr(C)]
@@ -33,6 +42,13 @@ pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 pub struct Interrupt<T = ()> {
     vector: u8,
     _t: PhantomData<T>,
+}
+
+#[derive(Debug)]
+
+enum InterruptModel {
+    Pic(spin::Mutex<pic::CascadedPic>),
+    Apic(apic::LocalApic),
 }
 
 #[derive(Copy, Clone)]
@@ -63,30 +79,78 @@ pub struct Registers {
     _pad2: [u16; 3],
 }
 
-static mut IDT: idt::Idt = idt::Idt::new();
-static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
+static IDT: spin::Mutex<idt::Idt> = spin::Mutex::new(idt::Idt::new());
+static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 
-#[tracing::instrument(level = "info", name = "interrupts::init")]
-pub fn init<H: Handlers<Registers>>() -> Control {
-    use hal_core::interrupt::Control;
-    tracing::info!("configuring 8259 PIC interrupts...");
+impl Controller {
+    const APIC_TIMER_VECTOR: u8 = (Idt::NUM_VECTORS - 2) as u8;
+    const APIC_SUPRIOUS_VECTOR: u8 = (Idt::NUM_VECTORS - 1) as u8;
+    const PIC_BIG_START: u8 = 0x20;
+    const PIC_LITTLE_START: u8 = 0x28;
 
-    unsafe {
-        PIC.set_irq_address(0x20, 0x28);
-        // functionally a no-op, since interrupts from PC/AT PIC are enabled at boot, just being
-        // clear for you, the reader, that at this point they are definitely intentionally enabled.
-        PIC.enable();
+    #[tracing::instrument(level = "info", name = "interrupt::Controller::init")]
+    pub fn init<H: Handlers<Registers>>() {
+        tracing::info!("intializing IDT...");
+
+        let mut idt = IDT.lock();
+        idt.register_handlers::<H>().unwrap();
+        unsafe {
+            idt.load_raw();
+        }
     }
 
-    tracing::info!("intializing IDT...");
+    #[tracing::instrument(level = "info")]
+    pub fn enable_hardware_interrupts() -> &'static Self {
+        let mut pics = pic::CascadedPic::new();
+        // regardless of whether APIC or PIC interrupt handling will be used,
+        // the PIC interrupt vectors must be remapped so that they do not
+        // conflict with CPU exceptions.
+        unsafe {
+            tracing::debug!(
+                big = Self::PIC_BIG_START,
+                little = Self::PIC_LITTLE_START,
+                "remapping PIC interrupt vectors"
+            );
+            pics.set_irq_address(Self::PIC_BIG_START, Self::PIC_LITTLE_START);
+        }
 
-    unsafe {
-        IDT.register_handlers::<H>().unwrap();
-        IDT.load();
-        IDT.enable();
+        let model = if apic::is_supported() {
+            tracing::info!("detected APIC interrupt model");
+            let local_apic = LocalApic::new();
+            local_apic.enable(Self::APIC_SUPRIOUS_VECTOR);
+
+            // disable the 8259 PICs so that we can use APIC interrupts instead
+            tracing::info!("disabling 8259 PICs...");
+            unsafe {
+                pics.disable();
+            }
+
+            // start the local APIC periodic timer
+            local_apic.start_periodic_timer(
+                core::time::Duration::from_millis(1),
+                Self::APIC_TIMER_VECTOR,
+            );
+            InterruptModel::Apic(local_apic)
+        } else {
+            tracing::warn!("APIC not detected; falling back to 8259 PIC interrupt model");
+            tracing::info!("configuring 8259 PIC interrupts...");
+
+            unsafe {
+                // functionally a no-op, since interrupts from PC/AT PIC are enabled at boot, just being
+                // clear for you, the reader, that at this point they are definitely intentionally enabled.
+                pics.enable();
+            }
+            InterruptModel::Pic(spin::Mutex::new(pics))
+        };
+        tracing::trace!(interrupt_model = ?model);
+
+        unsafe {
+            crate::cpu::intrinsics::sti();
+        }
+
+        let controller = Self { model };
+        INTERRUPT_CONTROLLER.init(controller)
     }
-
-    unsafe { &mut IDT }
 }
 
 impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
@@ -232,14 +296,20 @@ impl hal_core::interrupt::Control for Idt {
                 H::timer_tick();
             }
             unsafe {
-                PIC.end_interrupt(0x20);
+                match INTERRUPT_CONTROLLER.get_unchecked().model {
+                    InterruptModel::Pic(ref pics) => pics.lock().end_interrupt(0x20),
+                    InterruptModel::Apic(ref apic) => apic.end_interrupt(),
+                }
             }
         }
 
         extern "x86-interrupt" fn keyboard_isr<H: Handlers<Registers>>(_regs: Registers) {
             H::keyboard_controller();
             unsafe {
-                PIC.end_interrupt(0x21);
+                match INTERRUPT_CONTROLLER.get_unchecked().model {
+                    InterruptModel::Pic(ref pics) => pics.lock().end_interrupt(0x21),
+                    InterruptModel::Apic(ref apic) => apic.end_interrupt(),
+                }
             }
         }
 

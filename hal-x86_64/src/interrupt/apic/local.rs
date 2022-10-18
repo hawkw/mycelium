@@ -1,7 +1,8 @@
 use crate::{cpu::Msr, mm};
-use core::{convert::TryInto, marker::PhantomData, ops::Deref, time::Duration};
+use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32, ops::Deref, time::Duration};
 use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
+use raw_cpuid::CpuId;
 use volatile::{access, Volatile};
 
 #[derive(Debug)]
@@ -75,17 +76,48 @@ impl LocalApic {
         tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
     }
 
-    pub fn start_periodic_timer(&self, interval: Duration, apic_frequency_hz: u32, vector: u8) {
+    fn timer_frequency_hz() -> NonZeroU32 {
+        let cpuid = CpuId::new();
+
+        if let Some(frequency_hz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
+            tracing::trace!("CPUID contains hypervisor info");
+            let freq = hypervisor.apic_frequency();
+            tracing::trace!(hypervisor.apic_frequency = ?freq);
+            freq?.try_into().ok()
+        }) {
+            tracing::debug!(
+                frequency_hz,
+                "determined APIC frequency from CPUID hypervisor info"
+            );
+            return frequency_hz;
+        }
+
+        if let Some(frequency_hz) = cpuid.get_tsc_info().and_then(|tsc| {
+            tracing::trace!("CPUID contains TSC info");
+            tsc.nominal_frequency().try_into().ok()
+        }) {
+            tracing::debug!(
+                frequency_hz,
+                "determined APIC frequency from CPUID TSC info"
+            );
+            return frequency_hz;
+        }
+
+        tracing::warn!("could not determine APIC timer frequency from CPUID");
+        todo!("eliza: calibrate APIC timer frequency using PIT timer...")
+    }
+
+    pub fn start_periodic_timer(&self, interval: Duration, vector: u8) {
         // divisor for the APIC timer.
         //
         // it would be nicer if we could set this to 1, but apparently some
         // platforms "don't like" that...
         const DIVISOR: u32 = 16;
-
-        let ticks_per_ms = apic_frequency_hz / 1000 / DIVISOR;
+        let timer_frequency_hz = Self::timer_frequency_hz();
+        let ticks_per_ms = timer_frequency_hz.get() / 1000 / DIVISOR;
         tracing::trace!(
             ?interval,
-            apic_frequency_hz,
+            timer_frequency_hz,
             vector,
             ticks_per_ms,
             "starting local APIC timer"
@@ -111,7 +143,7 @@ impl LocalApic {
 
         tracing::info!(
             ?interval,
-            apic_frequency_hz,
+            timer_frequency_hz,
             ticks_per_ms,
             vector,
             "started local APIC timer"

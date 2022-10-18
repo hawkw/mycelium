@@ -212,6 +212,14 @@ impl bits::FromBits<u8> for Ring {
 
 impl DtablePtr {
     pub(crate) fn new<T>(t: &'static T) -> Self {
+        unsafe {
+            // safety: the `'static` lifetime ensures the pointed dtable is
+            // never going away
+            Self::new_unchecked(t)
+        }
+    }
+
+    pub(crate) unsafe fn new_unchecked<T>(t: &T) -> Self {
         let limit = (mem::size_of::<T>() - 1) as u16;
         let base = t as *const _ as *const ();
 
