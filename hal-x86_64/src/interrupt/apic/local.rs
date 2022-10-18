@@ -1,8 +1,7 @@
-use crate::cpu::Msr;
+use crate::{cpu::Msr, mm};
 use core::{convert::TryInto, marker::PhantomData, ops::Deref, time::Duration};
 use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
-use raw_cpuid::CpuId;
 use volatile::{access, Volatile};
 
 pub struct LocalApic {
@@ -29,25 +28,38 @@ pub trait RegisterAccess {
     ) -> Volatile<&'static mut Self::Target, Self::Access>;
 }
 
-pub fn is_supported() -> bool {
-    CpuId::new()
-        .get_feature_info()
-        .map(|features| features.has_apic())
-        .unwrap_or(false)
-}
-
 impl LocalApic {
+    const BASE_PADDR_MASK: u64 = 0xffff_ffff_f000;
+
     #[must_use]
     pub fn new() -> Self {
-        assert!(is_supported(), "CPU does not support APIC interrupt model!");
-        todo!("get APIC base address from IA32_APIC_BASE MSR")
+        assert!(
+            super::is_supported(),
+            "CPU does not support APIC interrupt model!"
+        );
+        let msr = Msr::ia32_apic_base();
+        let base_paddr = PAddr::from_u64(msr.read() & Self::BASE_PADDR_MASK);
+        let base = mm::kernel_vaddr_of(base_paddr);
+        tracing::debug!(?base, "LocalApic::new");
+        Self { msr, base }
     }
 
     pub fn enable(&self, spurious_vector: u8) {
-        // Bit 8 in the spurious interrupt vector register enables the APIC.
-        const ENABLE_BIT: u32 = 1 << 8;
-        let value = spurious_vector as u32 | ENABLE_BIT;
+        /// Writing this to the IA32_APIC_BASE MSR enables the local APIC.
+        const MSR_ENABLE: u64 = 0x800;
+        /// Bit 8 in the spurious interrupt vector register enables the APIC.
+        const SPURIOUS_VECTOR_ENABLE_BIT: u32 = 1 << 8;
+
+        // Write the enable bit to the MSR
+        unsafe {
+            self.msr.update(|base| base | MSR_ENABLE);
+        }
+
+        // Enable the APIC by writing the spurious vector to the APIC's
+        // SPURIOUS_VECTOR register.
+        let value = spurious_vector as u32 | SPURIOUS_VECTOR_ENABLE_BIT;
         unsafe { self.register(register::SPURIOUS_VECTOR).write(value) }
+        tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
     }
 
     pub fn start_periodic_timer(&self, interval: Duration, apic_frequency_hz: u32, vector: u8) {
@@ -95,8 +107,8 @@ impl LocalApic {
 
     /// Returns the local APIC's base physical address.
     fn base_paddr(&self) -> PAddr {
-        let raw = self.msr.read_raw();
-        PAddr::from_u64(raw & 0xffff_ffff_f000)
+        let raw = self.msr.read();
+        PAddr::from_u64(raw & Self::BASE_PADDR_MASK)
     }
 
     #[must_use]
@@ -117,22 +129,10 @@ impl LocalApic {
     }
 }
 
-macro_rules! registers {
-    ( $( $(#[$m:meta])* $NAME:ident$(<$T:ty>)? = $offset:literal, $access:ident);+ $(;)? ) => {
-        $(
-            registers! {@ $(#[$m])* $NAME$(<$T>)? = $offset, $access }
-        )+
-    };
-    (@ $(#[$m:meta])* $NAME:ident = $offset:literal, $access:ident) => {
-        registers!{@ $(#[$m])* $NAME<u32> = $offset, $access }
-    };
-    (@ $(#[$m:meta])* $NAME:ident<$T:ty> = $offset:literal, $access:ident )=> {
-        $(#[$m])*
-        pub const $NAME: LocalApicRegister<$T, $access> = LocalApicRegister {
-            offset: $offset,
-            _ty: PhantomData,
-        };
-    };
+impl Default for LocalApic {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub mod register {
@@ -168,6 +168,24 @@ pub mod register {
         ) -> Volatile<&'static mut Self::Target, Self::Access> {
             Volatile::new_write_only(ptr)
         }
+    }
+
+    macro_rules! registers {
+        ( $( $(#[$m:meta])* $NAME:ident$(<$T:ty>)? = $offset:literal, $access:ident);+ $(;)? ) => {
+            $(
+                registers! {@ $(#[$m])* $NAME$(<$T>)? = $offset, $access }
+            )+
+        };
+        (@ $(#[$m:meta])* $NAME:ident = $offset:literal, $access:ident) => {
+            registers!{@ $(#[$m])* $NAME<u32> = $offset, $access }
+        };
+        (@ $(#[$m:meta])* $NAME:ident<$T:ty> = $offset:literal, $access:ident )=> {
+            $(#[$m])*
+            pub const $NAME: LocalApicRegister<$T, $access> = LocalApicRegister {
+                offset: $offset,
+                _ty: PhantomData,
+            };
+        };
     }
 
     registers! {
