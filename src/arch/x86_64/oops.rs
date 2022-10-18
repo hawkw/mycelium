@@ -70,10 +70,6 @@ pub fn oops(oops: Oops<'_>) -> ! {
     framebuf.fill(RgbColor::RED);
 
     let mut target = framebuf.as_draw_target();
-    let smol = MonoTextStyleBuilder::new()
-        .font(&ascii::FONT_6X10)
-        .text_color(Rgb888::WHITE)
-        .build();
     let uwu = MonoTextStyleBuilder::new()
         .font(&ascii::FONT_9X15_BOLD)
         .text_color(Rgb888::RED)
@@ -88,19 +84,17 @@ pub fn oops(oops: Oops<'_>) -> ! {
     )
     .draw(&mut target)
     .unwrap();
-    let _ = Text::with_alignment(
-        "uwu mycelium did a widdle fucky-wucky!",
-        Point::new(5, 30),
-        smol,
-        Alignment::Left,
-    )
-    .draw(&mut target)
-    .unwrap();
     drop(framebuf);
 
     let mk_writer = TextWriterBuilder::default()
-        .starting_point(Point::new(4, 45))
+        .starting_point(Point::new(5, 30))
+        .default_color(mycelium_trace::color::Color::BrightWhite)
         .build(|| unsafe { super::framebuf::mk_framebuf() });
+    writeln!(
+        mk_writer.make_writer(),
+        "uwu mycelium did a widdle fucky-wucky!\n"
+    )
+    .unwrap();
 
     match oops.situation {
         OopsSituation::Fault {
