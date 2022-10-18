@@ -103,7 +103,7 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
         tracing::trace!("hahahaha yayyyy we drew a screen!");
     }
 
-    arch::init_interrupts();
+    arch::interrupt::enable_exceptions();
     bootinfo.init_paging();
     ALLOC.init(&bootinfo);
 

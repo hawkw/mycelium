@@ -8,20 +8,24 @@ use hal_x86_64::{
     task,
 };
 use maitake::time;
-use mycelium_util::{fmt, sync};
+use mycelium_util::{
+    fmt,
+    sync::{self, InitOnce},
+};
 
 #[tracing::instrument]
-pub fn init_interrupts() {
+pub fn enable_exceptions() {
     init_gdt();
     tracing::info!("GDT initialized!");
 
-    init::<InterruptHandlers>();
+    Controller::init::<InterruptHandlers>();
     tracing::info!("IDT initialized!");
+}
 
-    match time::set_global_timer(&TIMER) {
-        Ok(_) => tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized"),
-        Err(_) => unreachable!("failed to initialize global timer, as it was already initialized (this shouldn't happen!)"),
-    }
+#[tracing::instrument]
+pub fn enable_hardware_interrupts() {
+    Controller::enable_hardware_interrupts();
+    todo!("eliza: timer");
 }
 
 // TODO(eliza): put this somewhere good.
@@ -54,7 +58,7 @@ static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
 ///
 /// [8253 PIT timer]: https://en.wikipedia.org/wiki/Intel_8253#IBM_PC_programming_tips_and_hints
 const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(55);
-pub(super) static TIMER: time::Timer = maitake::time::Timer::new(TIMER_INTERVAL);
+pub(super) static TIMER: InitOnce<time::Timer> = InitOnce::uninitialized();
 
 static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
 
@@ -93,7 +97,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
     }
 
     fn timer_tick() {
-        TIMER.pend_ticks(1);
+        TIMER.get().pend_ticks(1);
     }
 
     fn keyboard_controller() {
