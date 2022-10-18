@@ -116,6 +116,20 @@ impl LocalApic {
         );
     }
 
+    /// Sends an End of Interrupt (EOI) to the local APIC.
+    ///
+    /// This should be called by an interrupt handler after handling a local
+    /// APIC interrupt.
+    ///
+    /// # Safety
+    ///
+    /// This should only be called when an interrupt has been triggered by this
+    /// local APIC.
+    pub unsafe fn end_interrupt(&self) {
+        // Write a 0 to the EOI register.
+        self.register(register::END_OF_INTERRUPT).write(0);
+    }
+
     /// Returns the local APIC's base physical address.
     fn base_paddr(&self) -> PAddr {
         let raw = self.msr.read();
