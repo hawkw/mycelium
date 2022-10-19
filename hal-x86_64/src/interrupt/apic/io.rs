@@ -81,6 +81,33 @@ impl<'mmio> IoApic<'mmio> {
     const REDIRECTION_ENTRY_BASE: u32 = 0x10;
 
     #[must_use]
+    pub fn entry(&mut self, irq: u32) -> RedirectionEntry {
+        let register_low = Self::REDIRECTION_ENTRY_BASE + irq * 2;
+        let low = self.read(register_low);
+        let high = self.read(register_low + 1);
+        RedirectionEntry::from_bits((high as u64) << 32 | low as u64)
+    }
+
+    pub fn set_entry(&mut self, irq: u32, entry: RedirectionEntry) {
+        let register_low = Self::REDIRECTION_ENTRY_BASE + irq * 2;
+        let bits = entry.bits();
+        let low = bits as u32;
+        let high = (bits >> 32) as u32;
+        self.write(register_low, low);
+        self.write(register_low + 1, high);
+    }
+
+    pub fn update_entry(
+        &mut self,
+        irq: u32,
+        update: impl FnOnce(RedirectionEntry) -> RedirectionEntry,
+    ) {
+        let entry = self.entry(irq);
+        let new_entry = update(entry);
+        self.set_entry(irq, new_entry);
+    }
+
+    #[must_use]
     fn read(&mut self, offset: u32) -> u32 {
         self.set_offset(offset);
         self.registers.map_mut(|ioapic| &mut ioapic.data).read()
