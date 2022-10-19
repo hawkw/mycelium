@@ -1,4 +1,5 @@
 //! Advanced Programmable Interrupt Controller (APIC).
+pub mod io;
 pub mod local;
 pub use local::LocalApic;
 
