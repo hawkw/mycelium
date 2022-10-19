@@ -1,3 +1,4 @@
+use hal_core::VAddr;
 use mycelium_util::bits::{bitfield, FromBits};
 use volatile::Volatile;
 
@@ -79,17 +80,66 @@ struct MmioRegisters {
 
 impl<'mmio> IoApic<'mmio> {
     const REDIRECTION_ENTRY_BASE: u32 = 0x10;
-
+    /// Try to construct an `IoApic`.
+    ///
+    /// # Returns
+    /// - `Some(IoApic)` if this CPU supports the APIC interrupt model.
+    /// - `None` if this CPU does not support APIC interrupt handling.
     #[must_use]
-    pub fn entry(&mut self, irq: u32) -> RedirectionEntry {
-        let register_low = Self::REDIRECTION_ENTRY_BASE + irq * 2;
-        let low = self.read(register_low);
-        let high = self.read(register_low + 1);
-        RedirectionEntry::from_bits((high as u64) << 32 | low as u64)
+    pub fn try_new(addr: VAddr) -> Option<Self> {
+        if !super::is_supported() {
+            tracing::warn!("tried to construct an IO APIC, but the CPU does not support the APIC interrupt model");
+            return None;
+        }
+
+        let registers = unsafe { Volatile::new(&mut *addr.as_ptr::<MmioRegisters>()) };
+        let mut ioapic = Self { registers };
+        tracing::info!(
+            ?addr,
+            id = ioapic.id(),
+            version = ioapic.version(),
+            max_entries = ioapic.max_entries(),
+            "IO APIC"
+        );
+        Some(ioapic)
     }
 
-    pub fn set_entry(&mut self, irq: u32, entry: RedirectionEntry) {
-        let register_low = Self::REDIRECTION_ENTRY_BASE + irq * 2;
+    #[must_use]
+    pub fn new(addr: VAddr) -> Self {
+        Self::try_new(addr).expect("CPU does not support APIC interrupt model!")
+    }
+
+    /// Returns the IO APIC's ID.
+    #[must_use]
+    pub fn id(&mut self) -> u8 {
+        let val = self.read(0);
+        (val >> 24) as u8
+    }
+
+    /// Returns the IO APIC's version.
+    #[must_use]
+    pub fn version(&mut self) -> u8 {
+        self.read(0x1) as u8
+    }
+
+    /// Returns the maximum number of redirection entries.
+    #[must_use]
+    pub fn max_entries(&mut self) -> u8 {
+        (self.read(0x1) >> 16) as u8
+    }
+
+    #[must_use]
+    pub fn entry(&mut self, irq: u8) -> RedirectionEntry {
+        let register_low = self
+            .entry_offset(irq)
+            .expect("IRQ number exceeds max redirection entries");
+        self.entry_raw(register_low)
+    }
+
+    pub fn set_entry(&mut self, irq: u8, entry: RedirectionEntry) {
+        let register_low = self
+            .entry_offset(irq)
+            .expect("IRQ number exceeds max redirection entries");
         let bits = entry.bits();
         let low = bits as u32;
         let high = (bits >> 32) as u32;
@@ -99,15 +149,45 @@ impl<'mmio> IoApic<'mmio> {
 
     pub fn update_entry(
         &mut self,
-        irq: u32,
+        irq: u8,
         update: impl FnOnce(RedirectionEntry) -> RedirectionEntry,
     ) {
-        let entry = self.entry(irq);
+        let register_low = self
+            .entry_offset(irq)
+            .expect("IRQ number exceeds max redirection entries");
+        let entry = self.entry_raw(register_low);
         let new_entry = update(entry);
-        self.set_entry(irq, new_entry);
+        self.set_entry_raw(register_low, new_entry);
+    }
+
+    fn entry_offset(&mut self, irq: u8) -> Option<u32> {
+        let max_entries = self.max_entries();
+        if irq > max_entries {
+            tracing::warn!("tried to access redirection entry {irq}, but the IO APIC only supports supports up to {max_entries}");
+            return None;
+        }
+
+        Some(Self::REDIRECTION_ENTRY_BASE + irq as u32 * 2)
+    }
+
+    #[inline]
+    fn entry_raw(&mut self, register_low: u32) -> RedirectionEntry {
+        let low = self.read(register_low);
+        let high = self.read(register_low + 1);
+        RedirectionEntry::from_bits((high as u64) << 32 | low as u64)
+    }
+
+    #[inline]
+    fn set_entry_raw(&mut self, register_low: u32, entry: RedirectionEntry) {
+        let bits = entry.bits();
+        let low = bits as u32;
+        let high = (bits >> 32) as u32;
+        self.write(register_low, low);
+        self.write(register_low + 1, high);
     }
 
     #[must_use]
+
     fn read(&mut self, offset: u32) -> u32 {
         self.set_offset(offset);
         self.registers.map_mut(|ioapic| &mut ioapic.data).read()
