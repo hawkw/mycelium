@@ -8,10 +8,7 @@ use hal_x86_64::{
     task,
 };
 use maitake::time;
-use mycelium_util::{
-    fmt,
-    sync::{self, InitOnce},
-};
+use mycelium_util::{fmt, sync};
 
 #[tracing::instrument]
 pub fn enable_exceptions() {
@@ -22,10 +19,13 @@ pub fn enable_exceptions() {
     tracing::info!("IDT initialized!");
 }
 
-#[tracing::instrument]
-pub fn enable_hardware_interrupts() {
-    Controller::enable_hardware_interrupts();
-    todo!("eliza: timer");
+#[tracing::instrument(skip(acpi))]
+pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) {
+    let controller = Controller::enable_hardware_interrupts(acpi);
+    controller.start_periodic_timer(TIMER_INTERVAL);
+    time::set_global_timer(&TIMER)
+        .expect("`enable_hardware_interrupts` should only be called once!");
+    tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized")
 }
 
 // TODO(eliza): put this somewhere good.
@@ -54,11 +54,8 @@ static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
 
 static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
 
-/// The IBM PC's [8253 PIT timer] fires timer 0 (interrupt 8) every 55ms.
-///
-/// [8253 PIT timer]: https://en.wikipedia.org/wiki/Intel_8253#IBM_PC_programming_tips_and_hints
-const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(55);
-pub(super) static TIMER: InitOnce<time::Timer> = InitOnce::uninitialized();
+const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(10);
+pub(super) static TIMER: time::Timer = time::Timer::new(TIMER_INTERVAL);
 
 static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
 
@@ -97,7 +94,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
     }
 
     fn timer_tick() {
-        TIMER.get().pend_ticks(1);
+        TIMER.pend_ticks(1);
     }
 
     fn keyboard_controller() {

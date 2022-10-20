@@ -1,6 +1,7 @@
 //! Advanced Programmable Interrupt Controller (APIC).
 pub mod io;
 pub mod local;
+pub use io::IoApic;
 pub use local::LocalApic;
 
 use raw_cpuid::CpuId;

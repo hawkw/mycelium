@@ -19,7 +19,7 @@ mod tests;
 pub type MinPageSize = mm::size::Size4Kb;
 
 pub fn tick_timer() {
-    interrupt::TIMER.get().advance_ticks(0);
+    interrupt::TIMER.advance_ticks(0);
 }
 
 #[cfg(target_os = "none")]
@@ -47,21 +47,26 @@ pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
 pub fn init(info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
-    interrupt::Controller::enable_hardware_interrupts();
-    tracing::info!("started handling hardware interrupts!");
-
-    // match time::set_global_timer(&TIMER) {
-    //     Ok(_) => tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized"),
-    //     Err(_) => unreachable!("failed to initialize global timer, as it was already initialized (this shouldn't happen!)"),
-    // }
-
-    if let Some(rsdp_addr) = archinfo.rsdp_addr {
-        acpi::bringup_smp(rsdp_addr)
-            .expect("failed to bring up application processors! this is bad news!");
+    if let Some(rsdp) = archinfo.rsdp_addr {
+        let acpi = acpi::acpi_tables(rsdp);
+        let platform_info = acpi.and_then(|acpi| acpi.platform_info());
+        match platform_info {
+            Ok(platform) => {
+                tracing::debug!("found ACPI platform info");
+                interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
+                acpi::bringup_smp(&platform)
+                    .expect("failed to bring up application processors! this is bad news!");
+                return;
+            }
+            Err(error) => tracing::warn!(?error, "missing ACPI platform info"),
+        }
     } else {
         // TODO(eliza): try using MP Table to bringup application processors?
         tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
     }
+
+    // no ACPI
+    interrupt::enable_hardware_interrupts(None);
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be

@@ -9,18 +9,23 @@ pub enum Error {
     Other(&'static str),
 }
 
-#[tracing::instrument(err)]
-pub fn bringup_smp(rsdp_addr: PAddr) -> Result<(), Error> {
-    use acpi::platform::{self, interrupt::InterruptModel};
+pub(super) fn acpi_tables(
+    rsdp_addr: PAddr,
+) -> Result<AcpiTables<IdentityMappedAcpiHandler>, AcpiError> {
     tracing::info!("trying to parse ACPI tables from RSDP...");
     let tables = unsafe { AcpiTables::from_rsdp(IdentityMappedAcpiHandler, rsdp_addr.as_usize()) }?;
     tracing::info!("found ACPI tables!");
+    Ok(tables)
+}
 
-    let platform = tables.platform_info()?;
+#[tracing::instrument(err, skip(platform))]
+pub fn bringup_smp(platform: &acpi::PlatformInfo) -> Result<(), Error> {
+    use acpi::platform::{self, interrupt::InterruptModel};
+
     tracing::info!(?platform.power_profile);
 
     let apic = match platform.interrupt_model {
-        acpi::InterruptModel::Apic(apic) => {
+        acpi::InterruptModel::Apic(ref apic) => {
             tracing::info!("APIC interrupt model detected");
             apic
         }
@@ -29,7 +34,7 @@ pub fn bringup_smp(rsdp_addr: PAddr) -> Result<(), Error> {
                 "MADT does not indicate support for APIC interrupt model!",
             ));
         }
-        model => {
+        ref model => {
             tracing::warn!(?model, "unknown interrupt model detected");
             return Err(Error::Other(
                 "MADT does not indicate support for APIC interrupt model!",
@@ -40,10 +45,11 @@ pub fn bringup_smp(rsdp_addr: PAddr) -> Result<(), Error> {
     tracing::debug!(?apic);
 
     let platform::ProcessorInfo {
-        application_processors,
-        boot_processor,
+        ref application_processors,
+        ref boot_processor,
     } = platform
         .processor_info
+        .as_ref()
         .ok_or(Error::Other("no processor information found in MADT!"))?;
     tracing::info!("boot processor seems normalish");
     tracing::debug!(?boot_processor);
@@ -57,7 +63,7 @@ pub fn bringup_smp(rsdp_addr: PAddr) -> Result<(), Error> {
 }
 
 #[derive(Clone)]
-struct IdentityMappedAcpiHandler;
+pub(super) struct IdentityMappedAcpiHandler;
 
 impl AcpiHandler for IdentityMappedAcpiHandler {
     unsafe fn map_physical_region<T>(

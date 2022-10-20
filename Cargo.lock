@@ -602,6 +602,7 @@ dependencies = [
 name = "hal-x86_64"
 version = "0.1.0"
 dependencies = [
+ "acpi",
  "hal-core",
  "mycelium-trace",
  "mycelium-util",

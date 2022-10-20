@@ -155,6 +155,8 @@ impl Idt {
     /// Chosen by fair die roll, guaranteed to be random.
     pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
 
+    pub const PIT_TIMER: usize = 0x20;
+
     pub const fn new() -> Self {
         Self {
             descriptors: [Descriptor::null(); Self::NUM_VECTORS],

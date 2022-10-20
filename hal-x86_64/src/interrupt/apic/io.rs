@@ -3,8 +3,8 @@ use mycelium_util::bits::{bitfield, FromBits};
 use volatile::Volatile;
 
 #[derive(Debug)]
-pub struct IoApic<'mmio> {
-    registers: Volatile<&'mmio mut MmioRegisters>,
+pub struct IoApic {
+    registers: Volatile<&'static mut MmioRegisters>,
 }
 
 bitfield! {
@@ -25,6 +25,14 @@ bitfield! {
         pub const RECEIVED_LEVEL_TRIGGERED: bool;
         pub const TRIGGER: TriggerMode;
         pub const MASKED: bool;
+        const _RESERVED = 39;
+        /// Destination field.
+        ///
+        /// If the destination mode bit was clear, then the
+        /// lower 4 bits contain the bit APIC ID to sent the interrupt to. If
+        /// the bit was set, the upper 4 bits also contain a set of processors.
+        /// (See below)
+        pub const DESTINATION: u8;
     }
 }
 
@@ -72,13 +80,14 @@ pub enum DeliveryMode {
 struct MmioRegisters {
     /// Selects the address to read/write from
     address: u32,
+    _pad: [u32; 3],
     /// The data to read/write
     data: u32,
 }
 
 // === impl IoApic ===
 
-impl<'mmio> IoApic<'mmio> {
+impl IoApic {
     const REDIRECTION_ENTRY_BASE: u32 = 0x10;
     /// Try to construct an `IoApic`.
     ///
@@ -109,6 +118,21 @@ impl<'mmio> IoApic<'mmio> {
         Self::try_new(addr).expect("CPU does not support APIC interrupt model!")
     }
 
+    /// Map all ISA interrupts starting at `base`.
+    #[tracing::instrument(skip(self))]
+    pub fn map_isa_irqs(&mut self, base: u8) {
+        let flags = RedirectionEntry::new()
+            .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
+            .with(RedirectionEntry::POLARITY, PinPolarity::High)
+            .with(RedirectionEntry::TRIGGER, TriggerMode::Edge)
+            .with(RedirectionEntry::MASKED, true)
+            .with(RedirectionEntry::DESTINATION, 0xff);
+        for irq in 0..16 {
+            let entry = flags.with(RedirectionEntry::VECTOR, base + irq);
+            self.set_entry(irq, entry);
+        }
+    }
+
     /// Returns the IO APIC's ID.
     #[must_use]
     pub fn id(&mut self) -> u8 {
@@ -137,6 +161,7 @@ impl<'mmio> IoApic<'mmio> {
     }
 
     pub fn set_entry(&mut self, irq: u8, entry: RedirectionEntry) {
+        tracing::debug!(irq, ?entry, "setting IOAPIC redirection entry");
         let register_low = self
             .entry_offset(irq)
             .expect("IRQ number exceeds max redirection entries");
@@ -145,6 +170,12 @@ impl<'mmio> IoApic<'mmio> {
         let high = (bits >> 32) as u32;
         self.write(register_low, low);
         self.write(register_low + 1, high);
+    }
+
+    /// Convenience function to mask/unmask an IRQ.
+    pub fn set_masked(&mut self, irq: u8, masked: bool) {
+        tracing::info!(irq, masked, "IoApic::set_masked");
+        self.update_entry(irq, |entry| entry.with(RedirectionEntry::MASKED, masked))
     }
 
     pub fn update_entry(
@@ -297,5 +328,38 @@ impl FromBits<u64> for TriggerMode {
             1 => Self::Level,
             _ => unreachable!(),
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn redirection_entry_is_valid() {
+        RedirectionEntry::assert_valid();
+
+        let entry = RedirectionEntry::new()
+            .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
+            .with(RedirectionEntry::POLARITY, PinPolarity::High)
+            .with(RedirectionEntry::TRIGGER, TriggerMode::Edge)
+            .with(RedirectionEntry::MASKED, true)
+            .with(RedirectionEntry::DESTINATION, 0xff)
+            .with(RedirectionEntry::VECTOR, 0x30);
+        println!("{}", entry);
+    }
+
+    #[test]
+    fn offsetof() {
+        let mmregs = MmioRegisters {
+            address: 0,
+            _pad: [0, 0, 0],
+            data: 0,
+        };
+        let addrof = core::ptr::addr_of!(mmregs.data);
+        assert_eq!(
+            addrof as *const () as usize,
+            (&mmregs as *const _ as usize) + 0x10
+        )
     }
 }

@@ -94,7 +94,7 @@ impl BootInfo for RustbootBootInfo {
             // disable really noisy traces from maitake
             // TODO(eliza): it would be nice if this was configured by
             // non-arch-specific OS code...
-            const DISABLED_TARGETS: &[&str] = &["maitake::time"];
+            const DISABLED_TARGETS: &[&str] = &["maitake::time", "mycelium_alloc"];
             DISABLED_TARGETS
                 .iter()
                 .all(|target| !meta.target().starts_with(target))

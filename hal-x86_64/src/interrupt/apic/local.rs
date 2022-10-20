@@ -76,7 +76,9 @@ impl LocalApic {
         tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
     }
 
-    fn timer_frequency_hz() -> NonZeroU32 {
+    fn timer_frequency_hz(&self) -> NonZeroU32 {
+        use register::*;
+
         let cpuid = CpuId::new();
 
         if let Some(frequency_hz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
@@ -103,8 +105,36 @@ impl LocalApic {
             return frequency_hz;
         }
 
-        tracing::warn!("could not determine APIC timer frequency from CPUID");
-        todo!("eliza: calibrate APIC timer frequency using PIT timer...")
+        // CPUID didn't help, so fall back to calibrating the APIC frequency
+        // using the PIT.
+        tracing::debug!("calibrating APIC timer frequency using PIT...");
+        unsafe {
+            // set timer divisor to 16
+            self.register(TIMER_DIVISOR).write(0b11);
+            // set initial count to -1
+            self.register(TIMER_INITIAL_COUNT).write(-1i32 as u32);
+            let lvt = self.register(LVT_TIMER).read();
+
+            tracing::trace!(?lvt);
+            // stop the timer
+            self.register(LVT_TIMER)
+                .write(LvtTimer::new().with(LvtTimer::MODE, TimerMode::OneShot));
+        }
+
+        // use the PIT to sleep for 10ms
+        crate::interrupt::pit::sleep_blocking(Duration::from_millis(10));
+
+        unsafe {
+            // stop the timer
+            self.register(LVT_TIMER)
+                .write(LvtTimer::new().with(LvtTimer::MODE, TimerMode::Periodic));
+        }
+
+        let elapsed_ticks = unsafe { self.register(TIMER_CURRENT_COUNT).read() };
+        let ticks_per_10ms = (-1i32 as u32).wrapping_sub(elapsed_ticks);
+        tracing::info!(?ticks_per_10ms, "calibrated APIC timer");
+
+        NonZeroU32::new(ticks_per_10ms).expect("APIC timer frequency should not be zero")
     }
 
     pub fn start_periodic_timer(&self, interval: Duration, vector: u8) {
@@ -113,7 +143,7 @@ impl LocalApic {
         // it would be nicer if we could set this to 1, but apparently some
         // platforms "don't like" that...
         const DIVISOR: u32 = 16;
-        let timer_frequency_hz = Self::timer_frequency_hz();
+        let timer_frequency_hz = self.timer_frequency_hz();
         let ticks_per_ms = timer_frequency_hz.get() / 1000 / DIVISOR;
         tracing::trace!(
             ?interval,
@@ -134,7 +164,7 @@ impl LocalApic {
             let lvt_entry = register::LvtTimer::new()
                 .with(register::LvtTimer::VECTOR, vector)
                 .with(register::LvtTimer::MODE, register::TimerMode::Periodic);
-            // set the divisor to 16.
+            // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
             self.register(register::TIMER_DIVISOR).write(0b11);
             self.register(register::LVT_TIMER).write(lvt_entry);
             self.register(register::TIMER_INITIAL_COUNT)
