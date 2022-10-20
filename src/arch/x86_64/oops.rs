@@ -21,6 +21,7 @@ use mycelium_util::fmt::{self, Write};
 pub struct Oops<'a> {
     already_panicked: bool,
     already_faulted: bool,
+    alloc: crate::allocator::State,
     situation: OopsSituation<'a>,
 }
 
@@ -31,6 +32,7 @@ enum OopsSituation<'a> {
         details: Option<&'a dyn fmt::Display>,
     },
     Panic(&'a PanicInfo<'a>),
+    AllocError(alloc::alloc::Layout),
 }
 
 type Fault<'a> = &'a dyn interrupt::ctx::Context<Registers = X64Registers>;
@@ -117,6 +119,16 @@ pub fn oops(oops: Oops<'_>) -> ! {
                 writeln!(writer, "at {}:{}:{}", loc.file(), loc.line(), loc.column()).unwrap();
             }
         }
+        OopsSituation::AllocError(layout) => {
+            let mut writer = mk_writer.make_writer();
+            writeln!(
+                writer,
+                "out of memory: failed to allocate {}B aligned on a {}B boundary",
+                layout.size(),
+                layout.align()
+            )
+            .unwrap();
+        }
     }
 
     if let Some(registers) = oops.situation.registers() {
@@ -148,7 +160,18 @@ pub fn oops(oops: Oops<'_>) -> ! {
         }
     }
 
-    crate::ALLOC.dump_free_lists();
+    // we were in the allocator, so dump the allocator's free list
+    if oops.involves_allocator() {
+        if oops.alloc.is_allocating() {
+            writeln!(mk_writer.make_writer(), "...while allocating!").unwrap();
+        }
+
+        if oops.alloc.is_deallocating() {
+            writeln!(mk_writer.make_writer(), "...while deallocating!").unwrap();
+        }
+
+        crate::ALLOC.dump_free_lists();
+    }
 
     if oops.already_panicked {
         writeln!(
@@ -216,6 +239,7 @@ impl<'a> Oops<'a> {
         let already_panicked = IS_PANICKING.load(Ordering::Acquire);
         let already_faulted = IS_FAULTING.swap(true, Ordering::AcqRel);
         Self {
+            alloc: crate::ALLOC.state(),
             already_panicked,
             already_faulted,
             situation,
@@ -226,17 +250,33 @@ impl<'a> Oops<'a> {
         let already_panicked = IS_PANICKING.swap(true, Ordering::AcqRel);
         let already_faulted = IS_FAULTING.load(Ordering::Acquire);
         Self {
+            alloc: crate::ALLOC.state(),
             already_panicked,
             already_faulted,
             situation: OopsSituation::Panic(panic),
         }
     }
 
+    pub fn alloc_error(layout: alloc::alloc::Layout) -> Self {
+        let already_panicked = IS_PANICKING.swap(true, Ordering::AcqRel);
+        let already_faulted = IS_FAULTING.load(Ordering::Acquire);
+        Self {
+            alloc: crate::ALLOC.state(),
+            already_panicked,
+            already_faulted,
+            situation: OopsSituation::AllocError(layout),
+        }
+    }
+
+    fn involves_allocator(&self) -> bool {
+        matches!(self.situation, OopsSituation::AllocError(_)) || self.alloc.in_allocator()
+    }
+
     #[cfg(test)]
     fn fail_test(&self) -> ! {
         use super::{qemu_exit, QemuExitCode};
         let failure = match self.situation {
-            OopsSituation::Panic(_) => mycotest::Failure::Panic,
+            OopsSituation::Panic(_) | OopsSituation::AllocError(_) => mycotest::Failure::Panic,
             OopsSituation::Fault { .. } => mycotest::Failure::Fault,
         };
 
@@ -264,6 +304,7 @@ impl<'a> OopsSituation<'a> {
         match self {
             Self::Fault { .. } => " OOPSIE-WOOPSIE! ",
             Self::Panic(_) => " DON'T PANIC! ",
+            Self::AllocError(_) => " ALLOCATOR MACHINE BROKE! ",
         }
     }
 
@@ -292,6 +333,10 @@ impl fmt::Debug for OopsSituation<'_> {
                 dbg.finish()
             }
             Self::Panic(panic) => f.debug_tuple("OopsSituation::Panic").field(&panic).finish(),
+            Self::AllocError(layout) => f
+                .debug_tuple("OopsSituation::AllocError")
+                .field(&layout)
+                .finish(),
         }
     }
 }

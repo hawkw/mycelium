@@ -10,19 +10,19 @@
 extern crate alloc;
 extern crate rlibc;
 
+pub mod allocator;
 pub mod arch;
 pub mod rt;
 pub mod wasm;
 
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
-use mycelium_alloc::buddy;
 
 #[cfg(test)]
 mod tests;
 
 #[cfg_attr(target_os = "none", global_allocator)]
-static ALLOC: buddy::Alloc<32> = buddy::Alloc::new(32);
+static ALLOC: allocator::Allocator = allocator::Allocator::new();
 
 pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) -> ! {
     let mut writer = bootinfo.writer();
@@ -105,9 +105,7 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
 
     arch::init_interrupts();
     bootinfo.init_paging();
-
-    // XXX(eliza): this sucks
-    ALLOC.set_vm_offset(arch::mm::vm_offset());
+    ALLOC.init(&bootinfo);
 
     let mut regions = 0;
     let mut free_regions = 0;
@@ -130,9 +128,7 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
                 free_regions += 1;
                 free_bytes += size;
                 unsafe {
-                    tracing::trace!(?region, "adding to page allocator");
-                    let e = ALLOC.add_region(region);
-                    tracing::trace!(added = e.is_ok());
+                    ALLOC.add_region(region);
                 }
             }
         }
@@ -188,7 +184,7 @@ fn kernel_main() -> ! {
 
 #[cfg_attr(target_os = "none", alloc_error_handler)]
 pub fn alloc_error(layout: core::alloc::Layout) -> ! {
-    panic!("alloc error: {:?}", layout);
+    arch::oops(arch::Oops::alloc_error(layout))
 }
 
 #[cfg_attr(target_os = "none", panic_handler)]
