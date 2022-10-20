@@ -162,13 +162,60 @@ pub fn oops(oops: Oops<'_>) -> ! {
 
     // we were in the allocator, so dump the allocator's free list
     if oops.involves_allocator() {
-        if oops.alloc.is_allocating() {
-            writeln!(mk_writer.make_writer(), "...while allocating!").unwrap();
+        use mycelium_util::math::Logarithm;
+        let crate::allocator::State {
+            allocating,
+            deallocating,
+            heap_size,
+            min_size,
+            allocated,
+        } = oops.alloc;
+
+        let mut writer = mk_writer.make_writer();
+        if allocating > 0 {
+            writeln!(
+                &mut writer,
+                "...while allocating ({allocating} allocations in progress)!"
+            )
+            .unwrap();
         }
 
-        if oops.alloc.is_deallocating() {
-            writeln!(mk_writer.make_writer(), "...while deallocating!").unwrap();
+        if deallocating > 0 {
+            writeln!(
+                &mut writer,
+                "...while deallocating ({deallocating} deallocations in progress)!"
+            )
+            .unwrap();
         }
+
+        writer.write_char('\n').unwrap();
+        let digits = (heap_size).checked_ilog(10).unwrap_or(0) + 1;
+        writeln!(&mut writer, "heap stats:").unwrap();
+        writeln!(
+            &mut writer,
+            "  {heap_size:>digits$} B total",
+            digits = digits
+        )
+        .unwrap();
+        writeln!(
+            &mut writer,
+            "  {allocated:>digits$} B busy",
+            digits = digits
+        )
+        .unwrap();
+        writeln!(
+            &mut writer,
+            "  {:>digits$} B free",
+            heap_size - allocated,
+            digits = digits
+        )
+        .unwrap();
+        writeln!(
+            &mut writer,
+            "  {min_size:>digits$} B minimum allocation",
+            digits = digits
+        )
+        .unwrap();
 
         crate::ALLOC.dump_free_lists();
     }

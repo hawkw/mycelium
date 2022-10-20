@@ -13,10 +13,7 @@ use mycelium_util::fmt;
 use mycelium_util::intrusive::{list, Linked, List};
 use mycelium_util::math::Logarithm;
 use mycelium_util::sync::{
-    atomic::{
-        AtomicUsize,
-        Ordering::{AcqRel, Acquire, Relaxed},
-    },
+    atomic::{AtomicUsize, Ordering::*},
     spin,
 };
 
@@ -37,6 +34,9 @@ pub struct Alloc<const FREE_LISTS: usize> {
 
     /// Total size of the heap.
     heap_size: AtomicUsize,
+
+    /// Currently allocated size.
+    allocated_size: AtomicUsize,
 
     /// Array of free lists by "order". The order of an block is the number
     /// of times the minimum page size must be doubled to reach that block's
@@ -83,6 +83,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
             vm_offset: AtomicUsize::new(0),
             min_size_log2: mycelium_util::math::usize_const_log2_ceil(min_size),
             heap_size: AtomicUsize::new(0),
+            allocated_size: AtomicUsize::new(0),
             free_lists: [ONE_FREE_LIST; FREE_LISTS],
         }
     }
@@ -98,9 +99,14 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
         self.min_size
     }
 
-    /// Returns the current amount of allocatable memory, in bytes.
-    pub fn free_size(&self) -> usize {
+    /// Returns the total size of the allocator (allocated and free), in bytes.
+    pub fn total_size(&self) -> usize {
         self.heap_size.load(Acquire)
+    }
+
+    /// Returns the currently allocated size in bytes.
+    pub fn allocated_size(&self) -> usize {
+        self.allocated_size.load(Acquire)
     }
 
     /// Returns the base virtual memory offset.
@@ -299,6 +305,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
                 // it before the first word is written to.
                 block.make_busy();
                 tracing::trace!(?block, "made busy");
+                self.allocated_size.fetch_add(block.size(), Release);
                 return Some(block.into());
             }
         }
@@ -347,6 +354,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
                 // free list.
                 free_list.push_front(block);
                 tracing::trace!("deallocated block");
+                self.allocated_size.fetch_sub(size, Release);
                 return Ok(());
             }
         }

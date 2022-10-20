@@ -19,8 +19,11 @@ pub struct Allocator {
 
 #[derive(Debug, Copy, Clone)]
 pub struct State {
-    allocating: usize,
-    deallocating: usize,
+    pub(crate) allocating: usize,
+    pub(crate) deallocating: usize,
+    pub(crate) heap_size: usize,
+    pub(crate) allocated: usize,
+    pub(crate) min_size: usize,
 }
 
 impl Allocator {
@@ -36,6 +39,9 @@ impl Allocator {
         State {
             allocating: self.allocating.load(Ordering::Acquire),
             deallocating: self.deallocating.load(Ordering::Acquire),
+            heap_size: self.allocator.total_size(),
+            allocated: self.allocator.allocated_size(),
+            min_size: self.allocator.min_size(),
         }
     }
 
@@ -63,7 +69,6 @@ impl Allocator {
 unsafe impl GlobalAlloc for Allocator {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        return core::ptr::null_mut();
         self.allocating.fetch_add(1, Ordering::Release);
         let ptr = GlobalAlloc::alloc(&self.allocator, layout);
         self.allocating.fetch_sub(1, Ordering::Release);
@@ -110,19 +115,7 @@ impl State {
     #[inline]
     #[must_use]
     pub fn in_allocator(&self) -> bool {
-        self.is_allocating() || self.is_deallocating()
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_allocating(&self) -> bool {
-        self.allocating > 0
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_deallocating(&self) -> bool {
-        self.deallocating > 0
+        self.allocating > 0 || self.deallocating > 0
     }
 }
 
