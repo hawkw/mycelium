@@ -11,7 +11,7 @@ use hal_core::{
 };
 use mycelium_util::fmt;
 use mycelium_util::intrusive::{list, Linked, List};
-use mycelium_util::math::Log2;
+use mycelium_util::math::Logarithm;
 use mycelium_util::sync::{
     atomic::{
         AtomicUsize,
