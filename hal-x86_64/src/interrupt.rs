@@ -324,6 +324,8 @@ impl hal_core::interrupt::Control for Idt {
                 .is_ok();
             if !was_sleeping {
                 H::timer_tick();
+            } else {
+                tracing::trace!("PIT sleep completed");
             }
             unsafe {
                 match INTERRUPT_CONTROLLER.get_unchecked().model {
