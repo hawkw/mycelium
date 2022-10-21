@@ -350,6 +350,45 @@ mod test {
     }
 
     #[test]
+    fn redirection_entry_offsets() {
+        assert_eq!(
+            RedirectionEntry::DELIVERY.least_significant_index(),
+            8,
+            "delivery"
+        );
+        assert_eq!(
+            RedirectionEntry::DEST_MODE.least_significant_index(),
+            11,
+            "destination mode"
+        );
+        assert_eq!(
+            RedirectionEntry::QUEUED.least_significant_index(),
+            12,
+            "queued"
+        );
+        assert_eq!(
+            RedirectionEntry::POLARITY.least_significant_index(),
+            13,
+            "pin polarity"
+        );
+        assert_eq!(
+            RedirectionEntry::TRIGGER.least_significant_index(),
+            15,
+            "trigger mode"
+        );
+        assert_eq!(
+            RedirectionEntry::MASKED.least_significant_index(),
+            16,
+            "masked"
+        );
+        assert_eq!(
+            RedirectionEntry::DESTINATION.least_significant_index(),
+            56,
+            "destination field"
+        );
+    }
+
+    #[test]
     fn offsetof() {
         let mmregs = MmioRegisters {
             address: 0,
