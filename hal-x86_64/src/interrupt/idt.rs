@@ -155,7 +155,16 @@ impl Idt {
     /// Chosen by fair die roll, guaranteed to be random.
     pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
 
-    pub const PIT_TIMER: usize = 0x20;
+    pub const PIC_PIT_TIMER: usize = 0x20;
+
+    pub(super) const LOCAL_APIC_TIMER: usize = (Self::NUM_VECTORS - 2);
+    pub(super) const LOCAL_APIC_SPURIOUS: usize = (Self::NUM_VECTORS - 1);
+    pub(super) const PIC_BIG_START: usize = 0x20;
+    pub(super) const PIC_LITTLE_START: usize = 0x28;
+    // put the IOAPIC right after the PICs
+    pub(super) const IOAPIC_START: usize = 0x30;
+    pub(super) const IOAPIC_PIT_TIMER: usize =
+        Self::IOAPIC_START + super::apic::IoApic::PIT_TIMER_IRQ as usize;
 
     pub const fn new() -> Self {
         Self {

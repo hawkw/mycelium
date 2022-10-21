@@ -11,7 +11,7 @@ pub mod idt;
 pub mod pic;
 pub mod pit;
 
-use self::apic::LocalApic;
+use self::apic::{IoApic, LocalApic};
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
@@ -86,13 +86,7 @@ static IDT: spin::Mutex<idt::Idt> = spin::Mutex::new(idt::Idt::new());
 static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 
 impl Controller {
-    const APIC_TIMER_VECTOR: u8 = (Idt::NUM_VECTORS - 2) as u8;
-    const APIC_SUPRIOUS_VECTOR: u8 = (Idt::NUM_VECTORS - 1) as u8;
     const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
-    const PIC_BIG_START: u8 = 0x20;
-    const PIC_LITTLE_START: u8 = 0x28;
-    // put the IOAPIC right after the PICs
-    const IOAPIC_VECTOR_BASE: u8 = 0x30;
 
     #[tracing::instrument(level = "info", name = "interrupt::Controller::init")]
     pub fn init<H: Handlers<Registers>>() {
@@ -112,11 +106,11 @@ impl Controller {
         // conflict with CPU exceptions.
         unsafe {
             tracing::debug!(
-                big = Self::PIC_BIG_START,
-                little = Self::PIC_LITTLE_START,
+                big = Idt::PIC_BIG_START,
+                little = Idt::PIC_LITTLE_START,
                 "remapping PIC interrupt vectors"
             );
-            pics.set_irq_address(Self::PIC_BIG_START, Self::PIC_LITTLE_START);
+            pics.set_irq_address(Idt::PIC_BIG_START as u8, Idt::PIC_LITTLE_START as u8);
         }
 
         let model = match acpi {
@@ -129,21 +123,20 @@ impl Controller {
                     pics.disable();
                 }
 
-                let local = LocalApic::new();
-                local.enable(Self::APIC_SUPRIOUS_VECTOR);
-
                 let mut io = {
                     let io_apic = &apic_info.io_apics[0];
                     let paddr = PAddr::from_u64(io_apic.address as u64);
                     let vaddr = mm::kernel_vaddr_of(paddr);
-                    apic::IoApic::new(vaddr)
+                    IoApic::new(vaddr)
                 };
 
-                io.map_isa_irqs(Self::IOAPIC_VECTOR_BASE);
+                io.map_isa_irqs(Idt::IOAPIC_START as u8);
                 // unmask the PIT timer vector --- we'll need this for calibrating
                 // the local APIC timer...
-                io.set_masked(2, false);
-                // io.set_masked(1, false);
+                io.set_masked(IoApic::PIT_TIMER_IRQ, false);
+
+                let local = LocalApic::new();
+                local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
 
                 InterruptModel::Apic {
                     local,
@@ -184,7 +177,7 @@ impl Controller {
                 todo!("eliza: implement starting the PIC timer with a duration...")
             }
             InterruptModel::Apic { ref local, .. } => {
-                local.start_periodic_timer(duration, Self::APIC_TIMER_VECTOR);
+                local.start_periodic_timer(duration, Idt::LOCAL_APIC_TIMER as u8);
             }
         }
     }
@@ -335,7 +328,7 @@ impl hal_core::interrupt::Control for Idt {
             unsafe {
                 match INTERRUPT_CONTROLLER.get_unchecked().model {
                     InterruptModel::Pic(ref pics) => {
-                        pics.lock().end_interrupt(Idt::PIT_TIMER as u8)
+                        pics.lock().end_interrupt(Idt::PIC_PIT_TIMER as u8)
                     }
                     InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
                 }
@@ -346,7 +339,7 @@ impl hal_core::interrupt::Control for Idt {
             H::timer_tick();
             unsafe {
                 match INTERRUPT_CONTROLLER.get_unchecked().model {
-                    InterruptModel::Pic(ref pics) => unreachable!(),
+                    InterruptModel::Pic(_) => unreachable!(),
                     InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
                 }
             }
@@ -491,18 +484,14 @@ impl hal_core::interrupt::Control for Idt {
             Self::X87_FPU_EXCEPTION => fn x87_exn_isr("x87 Floating-Point Exception (0x10)"),
         }
 
-        self.set_isr(Self::PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.set_isr(Self::PIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.set_isr(Self::IOAPIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
         self.set_isr(
-            Controller::IOAPIC_VECTOR_BASE as usize,
-            pit_timer_isr::<H> as *const (),
-        );
-        self.set_isr(
-            Controller::APIC_SUPRIOUS_VECTOR as usize,
+            Self::LOCAL_APIC_SPURIOUS as usize,
             spurious_isr as *const (),
         );
-        self.set_isr(100, spurious_isr as *const ());
         self.set_isr(
-            Controller::APIC_TIMER_VECTOR as usize,
+            Self::LOCAL_APIC_TIMER as usize,
             apic_timer_isr::<H> as *const (),
         );
         self.set_isr(0x21, keyboard_isr::<H> as *const ());
