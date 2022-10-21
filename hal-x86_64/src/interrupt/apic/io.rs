@@ -20,9 +20,11 @@ bitfield! {
         /// Set if this interrupt is going to be sent, but the APIC is busy. Read only.
         pub const QUEUED: bool;
         pub const POLARITY: PinPolarity;
+        /// Remote IRR.
+        ///
         /// Used for level triggered interrupts only to show if a local APIC has
         /// received the interrupt (= 1), or has sent an EOI (= 0). Read only.
-        pub const RECEIVED_LEVEL_TRIGGERED: bool;
+        pub const REMOTE_IRR: bool;
         pub const TRIGGER: TriggerMode;
         pub const MASKED: bool;
         const _RESERVED = 39;
@@ -124,6 +126,7 @@ impl IoApic {
         let flags = RedirectionEntry::new()
             .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
             .with(RedirectionEntry::POLARITY, PinPolarity::High)
+            .with(RedirectionEntry::REMOTE_IRR, false)
             .with(RedirectionEntry::TRIGGER, TriggerMode::Edge)
             .with(RedirectionEntry::MASKED, true)
             .with(RedirectionEntry::DESTINATION, 0xff);
@@ -370,6 +373,11 @@ mod test {
             RedirectionEntry::POLARITY.least_significant_index(),
             13,
             "pin polarity"
+        );
+        assert_eq!(
+            RedirectionEntry::REMOTE_IRR.least_significant_index(),
+            14,
+            "remote IRR"
         );
         assert_eq!(
             RedirectionEntry::TRIGGER.least_significant_index(),
