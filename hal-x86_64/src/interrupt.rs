@@ -44,12 +44,24 @@ pub struct Interrupt<T = ()> {
     _t: PhantomData<T>,
 }
 
+/// The interrupt controller's active interrupt model.
 #[derive(Debug)]
 
 enum InterruptModel {
+    /// Interrupts are handled by the [8259 Programmable Interrupt Controller
+    /// (PIC)](pic).
     Pic(spin::Mutex<pic::CascadedPic>),
+    /// Interrupts are handled by the [local] and [I/O] [Advanced Programmable
+    /// Interrupt Controller (APIC)s][apics].
+    ///
+    /// [local]: apic::LocalApic
+    /// [I/O]: apic::IoApic
+    /// [apics]: apic
     Apic {
         local: apic::LocalApic,
+        // TODO(eliza): allow further configuration of the I/O APIC (e.g.
+        // masking/unmasking stuff...)
+        #[allow(dead_code)]
         io: spin::Mutex<apic::IoApic>,
     },
 }
@@ -86,7 +98,7 @@ static IDT: spin::Mutex<idt::Idt> = spin::Mutex::new(idt::Idt::new());
 static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 
 impl Controller {
-    const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
+    // const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
 
     #[tracing::instrument(level = "info", name = "interrupt::Controller::init")]
     pub fn init<H: Handlers<Registers>>() {

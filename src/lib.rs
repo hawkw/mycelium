@@ -170,7 +170,8 @@ fn kernel_main() -> ! {
                 spawn_sleep(time::Duration::from_secs(2)),
                 spawn_sleep(time::Duration::from_secs(5)),
                 spawn_sleep(time::Duration::from_secs(10)),
-            };
+            }
+            .expect("sleep futures failed!");
         }
     });
 

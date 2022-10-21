@@ -11,13 +11,29 @@ use mycelium_util::{
     sync::spin::Mutex,
 };
 
-/// Intel 8253/8254 Programmable Interval Timer (PIT)
+/// Intel 8253/8254 Programmable Interval Timer (PIT).
+///
+/// The PIT is a simple timer, with three channels. The most interesting is
+/// channel 0, which is capable of firing an interrupt to the [8259 PIC] or [I/O
+/// APIC] on ISA interrupt vector 0. Channel 1 was used to time the DRAM refresh
+/// rate on ancient IBM PCs and is now generally unused (and may not be
+/// implemented in hardware), and channel 2 was connected to the IBM PC speaker
+/// and could be used to play sounds.
+///
+/// The PIT has a non-configurable [base frequency] of 1.193182 MHz, for
+/// [extremely cool reasons][reasons], but a 16-bit divisor can be used to
+/// determine what multiple of this base frequency each channel fires at.
+///
+/// [8259 PIC]: super::pic
+/// [I/O APIC]: super::apic::IoApic
+/// [base frequency]: Self::base_frequency
+/// [reasons]: https://en.wikipedia.org/wiki/Programmable_interval_timer#IBM_PC_compatible
 #[derive(Debug)]
 pub struct Pit {
     /// PIT channel 0.
     ///
     /// The output from PIT channel 0 is connected to the PIC chip, so that it
-    /// generates an "IRQ 0". Typically during boot the BIOS sets channel 0 with
+    /// generates an IRQ 0. Typically during boot the BIOS sets channel 0 with
     /// a count of 65535 or 0 (which translates to 65536), which gives an output
     /// frequency of 18.2065 Hz (or an IRQ every 54.9254 ms). Channel 0 is
     /// probably the most useful PIT channel, as it is the only channel that is
@@ -46,14 +62,19 @@ pub struct Pit {
     /// implemented at all.
     ///
     /// In general, this channel should not be used.
+    #[allow(dead_code)] // currently, there are no APIs for accessing channel 1
+    // TODO(eliza): add APIs for using channel 1 (if it's available)?
     channel1: Port,
+    /// PIT channel 2.
+    ///
     /// The output of PIT channel 2 is connected to the PC speaker, so the
     /// frequency of the output determines the frequency of the sound produced
     /// by the speaker. This is the only channel where the gate input can be
     /// controlled by software (via bit 0 of I/O port 0x61), and the only
     /// channel where its output (a high or low voltage) can be read by software
-    /// (via bit 5 of I/O port 0x61). Details of how to program the PC speaker
-    /// can be found here.
+    /// (via bit 5 of I/O port 0x61).
+    #[allow(dead_code)] // currently, there are no APIs for accessing channel 2
+    // TODO(eliza): add APIs for using channel 2 (if it's available)?
     channel2: Port,
     /// PIT command port.
     command: Port,
@@ -84,9 +105,11 @@ pub fn sleep_blocking(duration: Duration) -> Result<(), InvalidDuration> {
 }
 
 impl Pit {
-    /// The PIT's base frequency runs at roughly 1.193182 MHz, for Extremely
-    /// Cursed reasons.
-    const BASE_FREQUENCY_HZ: usize = 1193180;
+    /// The PIT's base frequency runs at roughly 1.193182 MHz, for [extremely
+    /// cool reasons][reasons].
+    ///
+    /// [reasons]: https://en.wikipedia.org/wiki/Programmable_interval_timer#IBM_PC_compatible
+    pub const BASE_FREQUENCY_HZ: usize = 1193180;
     const TICKS_PER_MS: usize = Self::BASE_FREQUENCY_HZ / 1000;
 
     const fn new() -> Self {

@@ -44,7 +44,7 @@ pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
     crate::kernel_start(boot_info, archinfo);
 }
 
-pub fn init(info: &impl BootInfo, archinfo: &ArchInfo) {
+pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
     if let Some(rsdp) = archinfo.rsdp_addr {

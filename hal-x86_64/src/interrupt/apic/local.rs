@@ -206,12 +206,6 @@ impl LocalApic {
         self.register(register::END_OF_INTERRUPT).write(0);
     }
 
-    /// Returns the local APIC's base physical address.
-    fn base_paddr(&self) -> PAddr {
-        let raw = self.msr.read();
-        PAddr::from_u64(raw & Self::BASE_PADDR_MASK)
-    }
-
     unsafe fn write_register<T, A>(&self, register: LocalApicRegister<T, A>, value: T)
     where
         LocalApicRegister<T, A>: RegisterAccess<Target = T, Access = A>,
