@@ -81,8 +81,8 @@ where
     }
 }
 
-const SERIAL_BIT: u64 = 1 << 62;
-const VGA_BIT: u64 = 1 << 63;
+const SERIAL_BIT: u64 = 1 << 0;
+const VGA_BIT: u64 = 1 << 1;
 const _ACTUAL_ID_BITS: u64 = !(SERIAL_BIT | VGA_BIT);
 
 impl<D, S> Subscriber<D, S> {
@@ -117,7 +117,7 @@ impl<D, S> Subscriber<D, S> {
     };
     const DISPLAY_INDENT_CFG: IndentCfg = IndentCfg {
         indent: " ",
-        new_span: "",
+        new_span: "> ",
         event: " ",
     };
 }
@@ -240,14 +240,14 @@ impl<W, const BIT: u64> Output<W, BIT> {
     #[inline]
     fn enter(&self, id: u64) {
         if id & BIT != 0 {
-            self.cfg.indent.fetch_add(1, Ordering::Relaxed);
+            self.cfg.indent.fetch_add(1, Ordering::Release);
         }
     }
 
     #[inline]
     fn exit(&self, id: u64) {
         if id & BIT != 0 {
-            self.cfg.indent.fetch_sub(1, Ordering::Relaxed);
+            self.cfg.indent.fetch_sub(1, Ordering::Release);
         }
     }
 
@@ -357,23 +357,19 @@ impl<'a, W: Write> Writer<'a, W> {
         let indent = self.cfg.indent.load(Ordering::Acquire);
         self.write_indent(" ")?;
 
-        if indent == 0 {
-            return if kind == IndentKind::NewSpan {
-                self.write_indent(self.cfg.indent_cfg.new_span)
-            } else {
-                Ok(())
+        for i in 1..=indent {
+            let indent_str = match (i, kind) {
+                (i, IndentKind::Event) if i == indent => self.cfg.indent_cfg.event,
+                _ => self.cfg.indent_cfg.indent,
             };
+            self.write_indent(indent_str)?;
         }
 
-        for _ in 0..indent - 1 {
-            self.write_indent(self.cfg.indent_cfg.indent)?;
+        if kind == IndentKind::NewSpan {
+            self.write_indent(self.cfg.indent_cfg.new_span)?;
         }
 
-        self.write_indent(match kind {
-            IndentKind::NewSpan => self.cfg.indent_cfg.new_span,
-            IndentKind::Event => self.cfg.indent_cfg.event,
-            IndentKind::Indent => self.cfg.indent_cfg.indent,
-        })
+        Ok(())
     }
 
     fn write_indent(&mut self, chars: &'static str) -> fmt::Result {
