@@ -1,3 +1,4 @@
+use super::{PinPolarity, TriggerMode};
 use crate::{cpu::Msr, mm};
 use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32, time::Duration};
 use hal_core::{PAddr, VAddr};
@@ -368,11 +369,11 @@ pub mod register {
         ICR_HIGH = 0x310, ReadWrite;
 
         LVT_TIMER<LvtTimer> = 0x320, ReadWrite;
-        LVT_THERMAL = 0x330, ReadWrite;
-        LVT_PERF = 0x340, ReadWrite;
-        LVT_LINT0 = 0x350, ReadWrite;
-        LVT_LINT1 = 0x360, ReadWrite;
-        LVT_ERROR = 0x370, ReadWrite;
+        LVT_THERMAL<LvtEntry> = 0x330, ReadWrite;
+        LVT_PERF<LvtEntry> = 0x340, ReadWrite;
+        LVT_LINT0<LvtEntry> = 0x350, ReadWrite;
+        LVT_LINT1<LvtEntry> = 0x360, ReadWrite;
+        LVT_ERROR<LvtEntry> = 0x370, ReadWrite;
 
         TIMER_INITIAL_COUNT = 0x380, ReadWrite;
         TIMER_CURRENT_COUNT = 0x390, ReadOnly;
@@ -387,6 +388,19 @@ pub mod register {
             const _RESERVED_1 = 3;
             pub const MASKED: bool;
             pub const MODE: TimerMode;
+        }
+    }
+
+    bitfield! {
+        pub struct LvtEntry<u32> {
+            pub const VECTOR: u8;
+            const _RESERVED_0 = 2;
+            pub const NMI: bool;
+            pub const SEND_PENDING: bool;
+            pub const POLARITY: PinPolarity;
+            pub const REMOTE_IRR: bool;
+            pub const TRIGGER: TriggerMode;
+            pub const MASKED: bool;
         }
     }
 
@@ -423,6 +437,11 @@ pub mod register {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lvt_entry_is_valid() {
+        register::LvtEntry::assert_valid();
+    }
 
     #[test]
     fn lvt_timer_is_valid() {

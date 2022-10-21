@@ -1,3 +1,4 @@
+use super::{PinPolarity, TriggerMode};
 use hal_core::VAddr;
 use mycelium_util::bits::{bitfield, FromBits};
 use volatile::Volatile;
@@ -43,20 +44,6 @@ bitfield! {
 pub enum DestinationMode {
     Physical = 0,
     Logical = 1,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum PinPolarity {
-    High = 0,
-    Low = 1,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum TriggerMode {
-    Edge = 0,
-    Level = 1,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -278,25 +265,6 @@ impl FromBits<u64> for DeliveryMode {
     }
 }
 
-// === impl PinPolarity ===
-
-impl FromBits<u64> for PinPolarity {
-    const BITS: u32 = 1;
-    type Error = core::convert::Infallible;
-
-    fn into_bits(self) -> u64 {
-        self as u8 as u64
-    }
-
-    fn try_from_bits(bits: u64) -> Result<Self, Self::Error> {
-        Ok(match bits {
-            0 => Self::High,
-            1 => Self::Low,
-            _ => unreachable!(),
-        })
-    }
-}
-
 // === impl DestinationMode ===
 
 impl FromBits<u64> for DestinationMode {
@@ -311,25 +279,6 @@ impl FromBits<u64> for DestinationMode {
         Ok(match bits {
             0 => Self::Physical,
             1 => Self::Logical,
-            _ => unreachable!(),
-        })
-    }
-}
-
-// === impl TriggerMode ===
-
-impl FromBits<u64> for TriggerMode {
-    const BITS: u32 = 1;
-    type Error = core::convert::Infallible;
-
-    fn into_bits(self) -> u64 {
-        self as u8 as u64
-    }
-
-    fn try_from_bits(bits: u64) -> Result<Self, Self::Error> {
-        Ok(match bits {
-            0 => Self::Edge,
-            1 => Self::Level,
             _ => unreachable!(),
         })
     }
