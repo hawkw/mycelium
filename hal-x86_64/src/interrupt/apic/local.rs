@@ -1,5 +1,5 @@
 use crate::{cpu::Msr, mm};
-use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32, ops::Deref, time::Duration};
+use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32, time::Duration};
 use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
 use raw_cpuid::CpuId;
@@ -15,12 +15,9 @@ pub struct LocalApic {
 #[derive(Debug)]
 pub struct LocalApicRegister<T = u32, A = access::ReadWrite> {
     offset: usize,
+    name: &'static str,
     _ty: PhantomData<fn(T, A)>,
 }
-
-/// Configures the local APIC timer.
-#[derive(Copy, Clone, Debug)]
-pub struct TimerConfig {}
 
 pub trait RegisterAccess {
     type Access;
@@ -110,24 +107,29 @@ impl LocalApic {
         tracing::debug!("calibrating APIC timer frequency using PIT...");
         unsafe {
             // set timer divisor to 16
-            self.register(TIMER_DIVISOR).write(0b11);
+            self.write_register(TIMER_DIVISOR, 0b11);
             // set initial count to -1
-            self.register(TIMER_INITIAL_COUNT).write(-1i32 as u32);
+            self.write_register(TIMER_INITIAL_COUNT, -1i32 as u32);
             let lvt = self.register(LVT_TIMER).read();
 
             tracing::trace!(?lvt);
             // stop the timer
-            self.register(LVT_TIMER)
-                .write(LvtTimer::new().with(LvtTimer::MODE, TimerMode::OneShot));
+            self.write_register(
+                LVT_TIMER,
+                LvtTimer::new().with(LvtTimer::MODE, TimerMode::OneShot),
+            );
         }
 
         // use the PIT to sleep for 10ms
-        crate::interrupt::pit::sleep_blocking(Duration::from_millis(10));
+        crate::interrupt::pit::sleep_blocking(Duration::from_millis(10))
+            .expect("failed to wait for PIT timer!");
 
         unsafe {
             // stop the timer
-            self.register(LVT_TIMER)
-                .write(LvtTimer::new().with(LvtTimer::MODE, TimerMode::Periodic));
+            self.write_register(
+                LVT_TIMER,
+                LvtTimer::new().with(LvtTimer::MODE, TimerMode::Periodic),
+            );
         }
 
         let elapsed_ticks = unsafe { self.register(TIMER_CURRENT_COUNT).read() };
@@ -164,11 +166,11 @@ impl LocalApic {
             let lvt_entry = register::LvtTimer::new()
                 .with(register::LvtTimer::VECTOR, vector)
                 .with(register::LvtTimer::MODE, register::TimerMode::Periodic);
+            tracing::trace!("LVT timer to {lvt_entry:#b}");
             // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
-            self.register(register::TIMER_DIVISOR).write(0b11);
-            self.register(register::LVT_TIMER).write(lvt_entry);
-            self.register(register::TIMER_INITIAL_COUNT)
-                .write(ticks_per_interval);
+            self.write_register(register::TIMER_DIVISOR, 0b11);
+            self.write_register(register::LVT_TIMER, lvt_entry);
+            self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
         }
 
         tracing::info!(
@@ -198,6 +200,16 @@ impl LocalApic {
     fn base_paddr(&self) -> PAddr {
         let raw = self.msr.read();
         PAddr::from_u64(raw & Self::BASE_PADDR_MASK)
+    }
+
+    unsafe fn write_register<T, A>(&self, register: LocalApicRegister<T, A>, value: T)
+    where
+        LocalApicRegister<T, A>: RegisterAccess<Target = T, Access = A>,
+        A: access::Writable,
+        T: Copy + fmt::Debug + 'static,
+    {
+        tracing::trace!(%register, write = ?value);
+        self.register(register).write(value);
     }
 
     #[must_use]
@@ -259,6 +271,13 @@ pub mod register {
         }
     }
 
+    impl<T, A> fmt::Display for LocalApicRegister<T, A> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let Self { name, offset, _ty } = self;
+            write!(f, "{name} ({offset:#x})")
+        }
+    }
+
     macro_rules! registers {
         ( $( $(#[$m:meta])* $NAME:ident$(<$T:ty>)? = $offset:literal, $access:ident);+ $(;)? ) => {
             $(
@@ -272,6 +291,7 @@ pub mod register {
             $(#[$m])*
             pub const $NAME: LocalApicRegister<$T, $access> = LocalApicRegister {
                 offset: $offset,
+                name: stringify!($NAME),
                 _ty: PhantomData,
             };
         };
@@ -365,6 +385,7 @@ pub mod register {
             const _RESERVED_0 = 4;
             pub const SEND_PENDING: bool;
             const _RESERVED_1 = 3;
+            pub const MASKED: bool;
             pub const MODE: TimerMode;
         }
     }
@@ -396,5 +417,44 @@ pub mod register {
         fn into_bits(self) -> u32 {
             self as u8 as u32
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lvt_timer_is_valid() {
+        register::LvtTimer::assert_valid();
+    }
+
+    #[test]
+    fn lvt_timer_offsets() {
+        assert_eq!(
+            register::LvtTimer::VECTOR.least_significant_index(),
+            0,
+            "vector LSB"
+        );
+        assert_eq!(
+            register::LvtTimer::VECTOR.most_significant_index(),
+            8,
+            "vector MSB"
+        );
+        assert_eq!(
+            register::LvtTimer::SEND_PENDING.least_significant_index(),
+            12,
+            "send pending"
+        );
+        assert_eq!(
+            register::LvtTimer::MASKED.least_significant_index(),
+            16,
+            "masked MSB"
+        );
+        assert_eq!(
+            register::LvtTimer::MODE.least_significant_index(),
+            17,
+            "mode LSB"
+        );
     }
 }
