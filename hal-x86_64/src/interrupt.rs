@@ -130,12 +130,15 @@ impl Controller {
                 tracing::info!("detected APIC interrupt model");
 
                 // disable the 8259 PICs so that we can use APIC interrupts instead
-                tracing::info!("disabling 8259 PICs...");
                 unsafe {
                     pics.disable();
                 }
+                tracing::info!("disabled 8259 PICs");
 
+                // configure the I/O APIC
                 let mut io = {
+                    // TODO(eliza): consider actually using other I/O APICs? do
+                    // we need them for anything??
                     let io_apic = &apic_info.io_apics[0];
                     let paddr = PAddr::from_u64(io_apic.address as u64);
                     let vaddr = mm::kernel_vaddr_of(paddr);
@@ -147,6 +150,7 @@ impl Controller {
                 // the local APIC timer...
                 io.set_masked(IoApic::PIT_TIMER_IRQ, false);
 
+                // enable the local APIC
                 let local = LocalApic::new();
                 local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
 

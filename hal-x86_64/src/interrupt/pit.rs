@@ -93,14 +93,14 @@ pub fn sleep_blocking(duration: Duration) -> Result<(), InvalidDuration> {
     {
         PIT.lock().interrupt_in(duration)?;
     }
-    tracing::info!(?duration, "started PIT sleep");
+    tracing::debug!(?duration, "started PIT sleep");
 
     // spin until the sleep interrupt fires.
     while SLEEPING.load(Ordering::Acquire) {
         hint::spin_loop();
     }
 
-    tracing::info!(?duration, "slept");
+    tracing::debug!(?duration, "PIT slept");
     Ok(())
 }
 

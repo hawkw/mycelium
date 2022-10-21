@@ -109,7 +109,7 @@ impl IoApic {
     }
 
     /// Map all ISA interrupts starting at `base`.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self))]
     pub fn map_isa_irqs(&mut self, base: u8) {
         let flags = RedirectionEntry::new()
             .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
@@ -165,7 +165,7 @@ impl IoApic {
 
     /// Convenience function to mask/unmask an IRQ.
     pub fn set_masked(&mut self, irq: u8, masked: bool) {
-        tracing::info!(irq, masked, "IoApic::set_masked");
+        tracing::debug!(irq, masked, "IoApic::set_masked");
         self.update_entry(irq, |entry| entry.with(RedirectionEntry::MASKED, masked))
     }
 

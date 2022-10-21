@@ -51,7 +51,7 @@ impl LocalApic {
         let msr = Msr::ia32_apic_base();
         let base_paddr = PAddr::from_u64(msr.read() & Self::BASE_PADDR_MASK);
         let base = mm::kernel_vaddr_of(base_paddr);
-        tracing::info!(?base, "found local APIC base address");
+        tracing::debug!(?base, "found local APIC base address");
         assert_ne!(base, VAddr::from_u64(0));
 
         Some(Self { msr, base })
@@ -94,7 +94,7 @@ impl LocalApic {
             // the hypervisor info CPUID leaf expresses the frequency in kHz,
             // and the frequency is not divided by the target timer divisor.
             let frequency_hz = undivided_freq_khz.get() / 1000 / Self::TIMER_DIVISOR;
-            tracing::info!(
+            tracing::debug!(
                 frequency_hz,
                 "determined APIC frequency from CPUID hypervisor info"
             );
@@ -108,7 +108,7 @@ impl LocalApic {
         }) {
             // divide by the target timer divisor.
             let frequency_hz = undivided_freq_hz.get() / Self::TIMER_DIVISOR;
-            tracing::info!(
+            tracing::debug!(
                 frequency_hz,
                 "determined APIC frequency from CPUID TSC info"
             );
@@ -151,10 +151,16 @@ impl LocalApic {
         tracing::debug!(?ticks_per_10ms);
         // convert the frequency to Hz.
         let frequency_hz = ticks_per_10ms * 100;
-        tracing::info!(frequency_hz, "calibrated local APIC timer using PIT");
+        tracing::debug!(frequency_hz, "calibrated local APIC timer using PIT");
         frequency_hz
     }
 
+    #[tracing::instrument(
+        level = tracing::Level::DEBUG,
+        name = "LocalApic::start_periodic_timer",
+        skip(self, interval),
+        fields(?interval)
+    )]
     pub fn start_periodic_timer(&self, interval: Duration, vector: u8) {
         let timer_frequency_hz = self.timer_frequency_hz();
         let ticks_per_ms = timer_frequency_hz / 1000;
