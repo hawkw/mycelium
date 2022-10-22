@@ -5,11 +5,9 @@ use mycelium_util::{bits, fmt};
 
 pub mod idt;
 pub mod pic;
-pub mod pit;
 
 pub use idt::Idt;
 pub use pic::CascadedPic;
-pub use pit::PIT;
 
 pub type Control = &'static mut Idt;
 
@@ -227,7 +225,7 @@ impl hal_core::interrupt::Control for Idt {
             use core::sync::atomic::Ordering;
             // if we weren't trying to do a PIT sleep, handle the timer tick
             // instead.
-            let was_sleeping = pit::SLEEPING
+            let was_sleeping = crate::time::pit::SLEEPING
                 .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok();
             if !was_sleeping {
