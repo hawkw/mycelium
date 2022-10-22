@@ -58,6 +58,7 @@ pub fn bringup_smp(platform: &acpi::PlatformInfo) -> Result<(), Error> {
         application_processors.len()
     );
     tracing::debug!(?application_processors);
+    tracing::warn!("not starting app processors (SMP support isn't done yet)");
 
     Ok(())
 }
