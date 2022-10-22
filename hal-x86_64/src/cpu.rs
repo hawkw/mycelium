@@ -3,7 +3,9 @@ use mycelium_util::bits;
 
 pub mod entropy;
 pub mod intrinsics;
+mod msr;
 mod tsc;
+pub use self::msr::Msr;
 pub use self::tsc::Rdtsc;
 
 #[repr(transparent)]
