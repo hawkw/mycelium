@@ -187,13 +187,16 @@ impl Controller {
         INTERRUPT_CONTROLLER.init(controller)
     }
 
-    pub fn start_periodic_timer(&self, duration: Duration) {
+    /// Starts a periodic timer which fires the `timer_tick` interrupt of the
+    /// provided [`Handlers`] every time `interval` elapses.
+    pub fn start_periodic_timer(
+        &self,
+        interval: Duration,
+    ) -> Result<(), crate::time::InvalidDuration> {
         match self.model {
-            InterruptModel::Pic(_) => {
-                todo!("eliza: implement starting the PIC timer with a duration...")
-            }
+            InterruptModel::Pic(_) => crate::time::PIT.lock().start_periodic_timer(interval),
             InterruptModel::Apic { ref local, .. } => {
-                local.start_periodic_timer(duration, Idt::LOCAL_APIC_TIMER as u8);
+                local.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
             }
         }
     }

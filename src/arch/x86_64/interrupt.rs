@@ -22,7 +22,9 @@ pub fn enable_exceptions() {
 #[tracing::instrument(skip(acpi))]
 pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) {
     let controller = Controller::enable_hardware_interrupts(acpi);
-    controller.start_periodic_timer(TIMER_INTERVAL);
+    controller
+        .start_periodic_timer(TIMER_INTERVAL)
+        .expect("10ms should be a reasonable interval for the PIT or local APIC timer...");
     time::set_global_timer(&TIMER)
         .expect("`enable_hardware_interrupts` should only be called once!");
     tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized")
@@ -120,7 +122,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
 }
 
 #[inline]
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = tracing::Level::DEBUG)]
 pub(super) fn init_gdt() {
     tracing::trace!("initializing GDT...");
     let mut gdt = Gdt::new();

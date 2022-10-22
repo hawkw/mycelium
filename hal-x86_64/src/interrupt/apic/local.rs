@@ -1,6 +1,10 @@
 use super::{PinPolarity, TriggerMode};
-use crate::{cpu::Msr, mm};
-use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32, time::Duration};
+use crate::{
+    cpu::{FeatureNotSupported, Msr},
+    mm,
+    time::{Duration, InvalidDuration},
+};
+use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32};
 use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
 use raw_cpuid::CpuId;
@@ -40,12 +44,12 @@ impl LocalApic {
     /// Try to construct a `LocalApic`.
     ///
     /// # Returns
-    /// - `Some(LocalApic)` if this CPU supports the APIC interrupt model.
-    /// - `None` if this CPU does not support APIC interrupt handling.
-    #[must_use]
-    pub fn try_new() -> Option<Self> {
+    /// - [`Ok`]`(LocalApic)` if this CPU supports the APIC interrupt model.
+    /// - [`Err`]`(`[`FeatureNotSupported`]`)` if this CPU does not support APIC
+    ///   interrupt handling.
+    pub fn try_new() -> Result<Self, FeatureNotSupported> {
         if !super::is_supported() {
-            return None;
+            return Err(FeatureNotSupported::new("APIC interrupt model"));
         }
 
         let msr = Msr::ia32_apic_base();
@@ -54,12 +58,12 @@ impl LocalApic {
         tracing::debug!(?base, "found local APIC base address");
         assert_ne!(base, VAddr::from_u64(0));
 
-        Some(Self { msr, base })
+        Ok(Self { msr, base })
     }
 
     #[must_use]
     pub fn new() -> Self {
-        Self::try_new().expect("CPU does not support APIC interrupt model!")
+        Self::try_new().unwrap()
     }
 
     pub fn enable(&self, spurious_vector: u8) {
@@ -135,7 +139,7 @@ impl LocalApic {
         crate::time::PIT
             .lock()
             .sleep_blocking(Duration::from_millis(10))
-            .expect("failed to wait for PIT timer!");
+            .expect("the PIT should be able to send a 10ms interrupt...");
 
         unsafe {
             // stop the timer
@@ -161,25 +165,33 @@ impl LocalApic {
         level = tracing::Level::DEBUG,
         name = "LocalApic::start_periodic_timer",
         skip(self, interval),
-        fields(?interval)
+        fields(?interval, vector),
+        err
     )]
-    pub fn start_periodic_timer(&self, interval: Duration, vector: u8) {
+    pub fn start_periodic_timer(
+        &self,
+        interval: Duration,
+        vector: u8,
+    ) -> Result<(), InvalidDuration> {
         let timer_frequency_hz = self.timer_frequency_hz();
         let ticks_per_ms = timer_frequency_hz / 1000;
         tracing::trace!(
-            ?interval,
             timer_frequency_hz,
-            vector,
             ticks_per_ms,
             "starting local APIC timer"
         );
-        let interval_ms: u32 = interval
-            .as_millis()
-            .try_into()
-            .expect("requested interval exceeds u32!");
-        let ticks_per_interval = interval_ms
-            .checked_mul(ticks_per_ms)
-            .expect("requested interval exceeds u32");
+        let interval_ms: u32 = interval.as_millis().try_into().map_err(|_| {
+            InvalidDuration::new(
+                interval,
+                "local APIC periodic timer interval exceeds a `u32`",
+            )
+        })?;
+        let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).ok_or_else(|| {
+            InvalidDuration::new(
+                interval,
+                "local APIC periodic timer interval requires a number of ticks that exceed a `u32`",
+            )
+        })?;
 
         unsafe {
             let lvt_entry = register::LvtTimer::new()
@@ -198,6 +210,8 @@ impl LocalApic {
             vector,
             "started local APIC timer"
         );
+
+        Ok(())
     }
 
     /// Sends an End of Interrupt (EOI) to the local APIC.
