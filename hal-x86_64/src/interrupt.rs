@@ -5,9 +5,11 @@ use mycelium_util::{bits, fmt};
 
 pub mod idt;
 pub mod pic;
+pub mod pit;
 
 pub use idt::Idt;
 pub use pic::CascadedPic;
+pub use pit::PIT;
 
 pub type Control = &'static mut Idt;
 
@@ -221,8 +223,16 @@ impl hal_core::interrupt::Control for Idt {
             });
         }
 
-        extern "x86-interrupt" fn timer_isr<H: Handlers<Registers>>(_regs: Registers) {
-            H::timer_tick();
+        extern "x86-interrupt" fn pit_timer_isr<H: Handlers<Registers>>(_regs: Registers) {
+            use core::sync::atomic::Ordering;
+            // if we weren't trying to do a PIT sleep, handle the timer tick
+            // instead.
+            let was_sleeping = pit::SLEEPING
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok();
+            if !was_sleeping {
+                H::timer_tick();
+            }
             unsafe {
                 PIC.end_interrupt(0x20);
             }
@@ -360,7 +370,7 @@ impl hal_core::interrupt::Control for Idt {
             Self::X87_FPU_EXCEPTION => fn x87_exn_isr("x87 Floating-Point Exception (0x10)"),
         }
 
-        self.set_isr(0x20, timer_isr::<H> as *const ());
+        self.set_isr(0x20, pit_timer_isr::<H> as *const ());
         self.set_isr(0x21, keyboard_isr::<H> as *const ());
         self.set_isr(69, test_isr::<H> as *const ());
         self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
