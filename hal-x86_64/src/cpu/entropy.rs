@@ -4,7 +4,7 @@ use mycelium_util::sync::spin;
 use raw_cpuid::CpuId;
 
 #[cfg(feature = "rand_core")]
-use super::Rdtsc;
+use crate::time::Rdtsc;
 #[cfg(feature = "rand_core")]
 use mycelium_util::sync::Lazy;
 #[cfg(feature = "rand_core")]

@@ -24,6 +24,7 @@ pub mod mm;
 pub mod segment;
 pub mod serial;
 pub mod task;
+pub mod time;
 pub mod vga;
 
 pub const NAME: &str = "x86_64";

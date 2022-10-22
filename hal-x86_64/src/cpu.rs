@@ -4,9 +4,7 @@ use mycelium_util::bits;
 pub mod entropy;
 pub mod intrinsics;
 mod msr;
-mod tsc;
 pub use self::msr::Msr;
-pub use self::tsc::Rdtsc;
 
 #[repr(transparent)]
 pub struct Port {
@@ -246,7 +244,7 @@ impl FeatureNotSupported {
         self.0
     }
 
-    pub(in crate::cpu) fn new(feature_name: &'static str) -> Self {
+    pub(crate) fn new(feature_name: &'static str) -> Self {
         Self(feature_name)
     }
 }

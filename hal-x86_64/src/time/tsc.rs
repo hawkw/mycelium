@@ -1,4 +1,4 @@
-use super::{intrinsics, FeatureNotSupported};
+use crate::cpu::{intrinsics, FeatureNotSupported};
 use raw_cpuid::CpuId;
 
 #[derive(Copy, Clone, Debug)]

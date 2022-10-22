@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+use super::InvalidDuration;
 use crate::cpu::Port;
 use core::{
     convert::{Infallible, TryFrom},
@@ -14,8 +16,8 @@ use mycelium_util::{
 /// Intel 8253/8254 Programmable Interval Timer (PIT).
 ///
 /// The PIT is a simple timer, with three channels. The most interesting is
-/// channel 0, which is capable of firing an interrupt to the [8259 PIC] or I/O
-/// APIC on ISA interrupt vector 0. Channel 1 was used to time the DRAM refresh
+/// channel 0, which is capable of firing an interrupt to the [8259 PIC] or [I/O
+/// APIC] on ISA interrupt vector 0. Channel 1 was used to time the DRAM refresh
 /// rate on ancient IBM PCs and is now generally unused (and may not be
 /// implemented in hardware), and channel 2 was connected to the IBM PC speaker
 /// and could be used to play sounds.
@@ -24,7 +26,8 @@ use mycelium_util::{
 /// [extremely cool reasons][reasons], but a 16-bit divisor can be used to
 /// determine what multiple of this base frequency each channel fires at.
 ///
-/// [8259 PIC]: super::pic
+/// [8259 PIC]: crate::interrupt::pic
+/// [I/O APIC]: crate::interrupt::apic::IoApic
 /// [base frequency]: Self::BASE_FREQUENCY_HZ
 /// [reasons]: https://en.wikipedia.org/wiki/Programmable_interval_timer#IBM_PC_compatible
 #[derive(Debug)]
@@ -77,31 +80,127 @@ pub struct Pit {
     channel2: Port,
     /// PIT command port.
     command: Port,
-    channel0_frequency_hz: Option<usize>,
+
+    /// If PIT channel 0 is configured in periodic mode, this stores the period
+    /// as a `Duration` so that we can reset to periodic mode after firing a
+    /// sleep interrupt.
+    channel0_interval: Option<Duration>,
 }
 
+bitfield! {
+    struct Command<u8> {
+        /// BCD/binary mode.
+        ///
+        /// The "BCD/Binary" bit determines if the PIT channel will operate in
+        /// binary mode or BCD mode (where each 4 bits of the counter represent
+        /// a decimal digit, and the counter holds values from 0000 to 9999).
+        /// 80x86 PCs only use binary mode (BCD mode is ugly and limits the
+        /// range of counts/frequencies possible). Although it should still be
+        /// possible to use BCD mode, it may not work properly on some
+        /// "compatible" chips. For the "read back" command and the "counter
+        /// latch" command, this bit has different meanings.
+        const BCD_BINARY: bool;
+        /// Operating mode.
+        ///
+        /// The operating mode bits specify which mode the selected PIT
+        /// channel should operate in. For the "read back" command and the
+        /// "counter latch" command, these bits have different meanings.
+        /// There are 6 different operating modes. See the [`OperatingMode`]
+        /// enum for details on the PIT operating modes.
+        const MODE: OperatingMode;
+        /// Access mode.
+        ///
+        /// The access mode bits tell the PIT what access mode you wish to use
+        /// for the selected channel, and also specify the "counter latch"
+        /// command to the CTC. These bits must be valid on every write to the
+        /// mode/command register. For the "read back" command, these bits have
+        /// a different meaning. For the remaining combinations, these bits
+        /// specify what order data will be read and written to the data port
+        /// for the associated PIT channel. Because the data port is an 8 bit
+        /// I/O port and the values involved are all 16 bit, the PIT chip needs
+        /// to know what byte each read or write to the data port wants. For
+        /// "low byte only", only the lowest 8 bits of the counter value is read
+        /// or written to/from the data port. For "high byte only", only the
+        /// highest 8 bits of the counter value is read or written. For the
+        /// "low byte/high byte" mode, 16 bits are always transferred as a pair, with
+        /// the lowest 8 bits followed by the highest 8 bits (both 8 bit
+        /// transfers are to the same IO port, sequentially – a word transfer
+        /// will not work).
+        const ACCESS: AccessMode;
+        /// Channel select.
+        ///
+        /// The channel select bits select which channel is being configured,
+        /// and must always be valid on every write of the mode/command
+        /// register, regardless of the other bits or the type of operation
+        /// being performed. The ["read back"] (both bits set) is not supported on
+        /// the old 8253 chips but should be supported on all AT and later
+        /// computers except for PS/2 (i.e. anything that isn't obsolete will
+        /// support it).
+        ///
+        /// ["read back"]: ChannelSelect::ReadBack
+        const CHANNEL: ChannelSelect;
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+enum ChannelSelect {
+    Channel0 = 0b00,
+    Channel1 = 0b01,
+    Channel2 = 0b10,
+    /// Readback command (8254 only)
+    Readback = 0b11,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+enum AccessMode {
+    /// Latch count value command
+    LatchCount = 0b00,
+    /// Access mode: low byte only
+    LowByte = 0b01,
+    /// Access mode: high byte only
+    HighByte = 0b10,
+    /// Access mode: both bytes
+    Both = 0b11,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+enum OperatingMode {
+    /// Mode 0 (interrupt on terminal count)
+    Interrupt = 0b000,
+    /// Mode 1 (hardware re-triggerable one-shot)
+    HwOneshot = 0b001,
+    /// Mode 2 (rate generator)
+    RateGenerator = 0b010,
+    /// Mode 3 (square wave generator)
+    SquareWave = 0b011,
+    /// Mode 4 (software triggered strobe)
+    SwStrobe = 0b100,
+    /// Mode 5 (hardware triggered strobe)
+    HwStrobe = 0b101,
+    /// Mode 2 (rate generator, same as `0b010`)
+    ///
+    /// I'm not sure why both of these exist, but whatever lol.
+    RateGenerator2 = 0b110,
+    /// Mode 3 (square wave generator, same as `0b011`)
+    ///
+    /// Again, I don't know why two bit patterns configure the same behavior but
+    /// whatever lol.
+    SquareWave2 = 0b111,
+}
+
+/// The PIT.
+///
+/// Since a system only has a single PIT, the `Pit` type cannot be constructed
+/// publicly and is represented as a singleton. It's stored in a [`Mutex`] in
+/// order to ensure that multiple CPU cores don't try to write conflicting
+/// configurations to the PIT's configuration ports.
 pub static PIT: Mutex<Pit> = Mutex::new(Pit::new());
+
+/// Are we currently sleeping on an interrupt?
 pub(crate) static SLEEPING: AtomicBool = AtomicBool::new(false);
-
-/// Sleep (by spinning) for `duration`.
-pub fn sleep_blocking(duration: Duration) -> Result<(), InvalidDuration> {
-    SLEEPING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        // TODO(eliza): make this return an error...
-        .expect("someone already started a sleep!");
-    {
-        PIT.lock().interrupt_in(duration)?;
-    }
-    tracing::debug!(?duration, "started PIT sleep");
-
-    // spin until the sleep interrupt fires.
-    while SLEEPING.load(Ordering::Acquire) {
-        hint::spin_loop();
-    }
-
-    tracing::debug!(?duration, "PIT slept");
-    Ok(())
-}
 
 impl Pit {
     /// The PIT's base frequency runs at roughly 1.193182 MHz, for [extremely
@@ -118,28 +217,112 @@ impl Pit {
             channel1: Port::at(BASE + 1),
             channel2: Port::at(BASE + 2),
             command: Port::at(BASE + 3),
-            channel0_frequency_hz: None,
+            channel0_interval: None,
         }
     }
 
-    pub fn start_periodic_timer(&mut self, frequency_hz: usize) {
-        let divisor = Self::BASE_FREQUENCY_HZ / frequency_hz;
-        tracing::debug!(
-            frequency_hz,
-            divisor,
-            "setting PIT channel 0 frequency divisor"
+    /// Sleep (by spinning) for `duration`.
+    ///
+    /// This function sets a flag indicating that a sleep is in progress, and
+    /// configures the PIT to fire an interrupt on channel 0 in `duration`. It then
+    /// spins until the flag is cleared by an interrupt handler.
+    ///
+    /// # Usage Notes
+    ///
+    /// This is a low-level way of sleeping, and is not recommended for use as a
+    /// system's primary method of sleeping for a duration. Instead, a timer wheel
+    /// or other way of tracking multiple sleepers should be constructed and
+    /// advanced based on a periodic timer. This function is provided primarily to
+    /// allow using the PIT to calibrate other timers as part of initialization
+    /// code, rather than for general purpose use in an operating system.
+    ///
+    /// In particular, using this function is subject to the following
+    /// considerations:
+    ///
+    /// - An interrupt handler for the PIT interrupt which clears the sleeping flag
+    ///   must be installed. This is done automatically by the [`Controller::init`]
+    ///   function in the [`interrupt`] module. If that interrupt handler is not
+    ///   present, this function will spin forever!
+    /// - If the PIT is currently in periodic mode, it will be put in oneshot mode
+    ///   when this function is called. This will temporarily disable the existing
+    ///   periodic timer.
+    /// - This function returns an error if another CPU core is already sleeping. It
+    ///   should generally be used only prior to the initialization of application
+    ///   processors.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(())` after `duration` if a sleep was successfully completed.
+    /// - [`Err`]`(`[`InvalidDuration`]`)` if the provided duration was
+    ///   too long.
+    ///
+    /// [`Controller::init`]: crate::interrupt::Controller::init
+    /// [`interrupt`]: crate::interrupt
+    #[tracing::instrument(
+        name = "Pit::sleep_blocking"
+        level = tracing::Level::DEBUG,
+        skip(self),
+        fields(?duration),
+        err,
+    )]
+    pub fn sleep_blocking(&mut self, duration: Duration) -> Result<(), InvalidDuration> {
+        SLEEPING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .expect("if another CPU core is sleeping, it should be holding the lock on the PIT, preventing us from starting a sleep!");
+        self.interrupt_in(duration)?;
+        tracing::debug!("started PIT sleep");
+
+        // spin until the sleep interrupt fires.
+        while SLEEPING.load(Ordering::Acquire) {
+            hint::spin_loop();
+        }
+
+        tracing::info!(?duration, "slept using PIT channel 0");
+
+        // if we were previously in periodic mode, re-enable it.
+        if let Some(interval) = self.channel0_interval {
+            tracing::debug!("restarting PIT periodic timer");
+            self.start_periodic_timer(interval)?;
+        }
+
+        Ok(())
+    }
+
+    /// Configures PIT channel 0 in periodic mode, to fire an interrupt every
+    /// time the provided `interval` elapses.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(())` if the timer was successfully configured in periodic
+    ///   mode.
+    /// - [`Err`]`(`[`InvalidDuration`]`)` if the provided [`Duration`] was
+    ///   too long.
+    #[tracing::instrument(
+        name = "Pit::start_periodic_timer"
+        level = tracing::Level::DEBUG,
+        skip(self),
+        fields(?interval),
+        err,
+    )]
+    pub fn start_periodic_timer(&mut self, interval: Duration) -> Result<(), InvalidDuration> {
+        debug_assert!(
+            !SLEEPING.load(Ordering::Acquire),
+            "tried to start a periodic timer while a sleep was in progress!"
         );
 
-        let divisor = match u16::try_from(divisor) {
-            Ok(divisor) => divisor,
-            Err(_) => panic!(
-                "PIT frequency divisor {} for {} Hz frequency exceeds a 16-bit number",
-                divisor, frequency_hz
-            ),
-        };
+        let interval_ms = usize::try_from(interval.as_millis()).map_err(|_| {
+            InvalidDuration::new(
+                interval,
+                "PIT periodic timer interval as milliseconds would exceed a `usize`",
+            )
+        })?;
+        let interval_ticks = Self::TICKS_PER_MS * interval_ms;
+        let divisor = u16::try_from(interval_ticks).map_err(|_| {
+            InvalidDuration::new(interval, "PIT channel 0 divisor would exceed a `u16`")
+        })?;
 
-        // store the periodic timer frequency so we can reset later.
-        self.channel0_frequency_hz = Some(frequency_hz);
+        // store the periodic timer interval so we can reset later.
+        self.channel0_interval = Some(interval);
 
         // Send the PIT the following command:
         let command = Command::new()
@@ -153,6 +336,16 @@ impl Pit {
             .with(Command::CHANNEL, ChannelSelect::Channel0);
         self.send_command(command);
         self.set_divisor(divisor);
+
+        tracing::info!(
+            ?interval,
+            interval_ms,
+            interval_ticks,
+            divisor,
+            "started PIT periodic timer"
+        );
+
+        Ok(())
     }
 
     /// Configure the PIT to send an IRQ 0 interrupt in `duration`.
@@ -160,16 +353,29 @@ impl Pit {
     /// This configures the PIT in mode 0 (oneshot mode). Once the interrupt has
     /// fired, in order to use the periodic timer, the pit must be put back into
     /// periodic mode by calling [`Pit::start_periodic_timer`].
-    fn interrupt_in(&mut self, duration: Duration) -> Result<(), InvalidDuration> {
-        let duration_ms = usize::try_from(duration.as_millis()).map_err(|_| InvalidDuration {
-            duration,
-            message: "duration as milliseconds would exceed a usize",
+    #[tracing::instrument(
+        name = "Pit::interrupt_in"
+        level = tracing::Level::DEBUG,
+        skip(self),
+        fields(?duration),
+        err,
+    )]
+    pub fn interrupt_in(&mut self, duration: Duration) -> Result<(), InvalidDuration> {
+        let duration_ms = usize::try_from(duration.as_millis()).map_err(|_| {
+            InvalidDuration::new(
+                duration,
+                "PIT interrupt duration as milliseconds would exceed a `usize`",
+            )
         })?;
         let target_time = Self::TICKS_PER_MS * duration_ms;
-        let divisor = u16::try_from(target_time).map_err(|_| InvalidDuration {
-            duration,
-            message: "target tick count would exceed a u16",
+        let divisor = u16::try_from(target_time).map_err(|_| {
+            InvalidDuration::new(
+                duration,
+                "PIT interrupt target tick count would exceed a `u16`",
+            )
         })?;
+
+        tracing::trace!(?duration, duration_ms, target_time, "Pit::interrupt_in");
 
         let command = Command::new()
             // use the binary counter
@@ -204,116 +410,6 @@ impl Pit {
             self.command.writeb(command.bits());
         }
     }
-}
-
-bitfield! {
-    pub struct Command<u8> {
-        /// BCD/binary mode.
-        ///
-        /// The "BCD/Binary" bit determines if the PIT channel will operate in
-        /// binary mode or BCD mode (where each 4 bits of the counter represent
-        /// a decimal digit, and the counter holds values from 0000 to 9999).
-        /// 80x86 PCs only use binary mode (BCD mode is ugly and limits the
-        /// range of counts/frequencies possible). Although it should still be
-        /// possible to use BCD mode, it may not work properly on some
-        /// "compatible" chips. For the "read back" command and the "counter
-        /// latch" command, this bit has different meanings.
-        pub const BCD_BINARY: bool;
-        /// Operating mode.
-        ///
-        /// The operating mode bits specify which mode the selected PIT
-        /// channel should operate in. For the "read back" command and the
-        /// "counter latch" command, these bits have different meanings.
-        /// There are 6 different operating modes. See the [`OperatingMode`]
-        /// enum for details on the PIT operating modes.
-        pub const MODE: OperatingMode;
-        /// Access mode.
-        ///
-        /// The access mode bits tell the PIT what access mode you wish to use
-        /// for the selected channel, and also specify the "counter latch"
-        /// command to the CTC. These bits must be valid on every write to the
-        /// mode/command register. For the "read back" command, these bits have
-        /// a different meaning. For the remaining combinations, these bits
-        /// specify what order data will be read and written to the data port
-        /// for the associated PIT channel. Because the data port is an 8 bit
-        /// I/O port and the values involved are all 16 bit, the PIT chip needs
-        /// to know what byte each read or write to the data port wants. For
-        /// "low byte only", only the lowest 8 bits of the counter value is read
-        /// or written to/from the data port. For "high byte only", only the
-        /// highest 8 bits of the counter value is read or written. For the
-        /// "low byte/high byte" mode, 16 bits are always transferred as a pair, with
-        /// the lowest 8 bits followed by the highest 8 bits (both 8 bit
-        /// transfers are to the same IO port, sequentially – a word transfer
-        /// will not work).
-        pub const ACCESS: AccessMode;
-        /// Channel select.
-        ///
-        /// The channel select bits select which channel is being configured,
-        /// and must always be valid on every write of the mode/command
-        /// register, regardless of the other bits or the type of operation
-        /// being performed. The ["read back"] (both bits set) is not supported on
-        /// the old 8253 chips but should be supported on all AT and later
-        /// computers except for PS/2 (i.e. anything that isn't obsolete will
-        /// support it).
-        ///
-        /// ["read back"]: ChannelSelect::ReadBack
-        pub const CHANNEL: ChannelSelect;
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct InvalidDuration {
-    duration: Duration,
-    message: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[repr(u8)]
-pub enum ChannelSelect {
-    Channel0 = 0b00,
-    Channel1 = 0b01,
-    Channel2 = 0b10,
-    /// Readback command (8254 only)
-    Readback = 0b11,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[repr(u8)]
-pub enum AccessMode {
-    /// Latch count value command
-    LatchCount = 0b00,
-    /// Access mode: low byte only
-    LowByte = 0b01,
-    /// Access mode: high byte only
-    HighByte = 0b10,
-    /// Access mode: both bytes
-    Both = 0b11,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[repr(u8)]
-pub enum OperatingMode {
-    /// Mode 0 (interrupt on terminal count)
-    Interrupt = 0b000,
-    /// Mode 1 (hardware re-triggerable one-shot)
-    HwOneshot = 0b001,
-    /// Mode 2 (rate generator)
-    RateGenerator = 0b010,
-    /// Mode 3 (square wave generator)
-    SquareWave = 0b011,
-    /// Mode 4 (software triggered strobe)
-    SwStrobe = 0b100,
-    /// Mode 5 (hardware triggered strobe)
-    HwStrobe = 0b101,
-    /// Mode 2 (rate generator, same as `0b010`)
-    ///
-    /// I'm not sure why both of these exist, but whatever lol.
-    RateGenerator2 = 0b110,
-    /// Mode 3 (square wave generator, same as `0b011`)
-    ///
-    /// Again, I don't know why two bit patterns configure the same behavior but
-    /// whatever lol.
-    SquareWave2 = 0b111,
 }
 
 // === impl ChannelSelect ===
