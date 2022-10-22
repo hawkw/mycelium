@@ -16,8 +16,8 @@ use mycelium_util::{
 /// Intel 8253/8254 Programmable Interval Timer (PIT).
 ///
 /// The PIT is a simple timer, with three channels. The most interesting is
-/// channel 0, which is capable of firing an interrupt to the [8259 PIC] or [I/O
-/// APIC] on ISA interrupt vector 0. Channel 1 was used to time the DRAM refresh
+/// channel 0, which is capable of firing an interrupt to the [8259 PIC] or I/O
+/// APIC on ISA interrupt vector 0. Channel 1 was used to time the DRAM refresh
 /// rate on ancient IBM PCs and is now generally unused (and may not be
 /// implemented in hardware), and channel 2 was connected to the IBM PC speaker
 /// and could be used to play sounds.
@@ -26,8 +26,8 @@ use mycelium_util::{
 /// [extremely cool reasons][reasons], but a 16-bit divisor can be used to
 /// determine what multiple of this base frequency each channel fires at.
 ///
-/// [8259 PIC]: super::pic
-/// [I/O APIC]: super::apic::IoApic
+/// [8259 PIC]: crate::interrupt::pic
+// [I/O APIC]: super::apic::IoApic
 /// [base frequency]: Self::BASE_FREQUENCY_HZ
 /// [reasons]: https://en.wikipedia.org/wiki/Programmable_interval_timer#IBM_PC_compatible
 #[derive(Debug)]
