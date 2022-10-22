@@ -7,9 +7,9 @@ use mycelium_util::{
     sync::{spin, InitOnce},
 };
 
+pub mod apic;
 pub mod idt;
 pub mod pic;
-pub mod pit;
 
 use self::apic::{IoApic, LocalApic};
 pub use idt::Idt;

@@ -132,7 +132,9 @@ impl LocalApic {
         }
 
         // use the PIT to sleep for 10ms
-        crate::interrupt::pit::sleep_blocking(Duration::from_millis(10))
+        crate::time::PIT
+            .lock()
+            .sleep_blocking(Duration::from_millis(10))
             .expect("failed to wait for PIT timer!");
 
         unsafe {
