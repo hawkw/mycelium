@@ -11,17 +11,23 @@ use maitake::time;
 use mycelium_util::{fmt, sync};
 
 #[tracing::instrument]
-pub fn init_interrupts() {
+pub fn enable_exceptions() {
     init_gdt();
     tracing::info!("GDT initialized!");
 
-    init::<InterruptHandlers>();
+    Controller::init::<InterruptHandlers>();
     tracing::info!("IDT initialized!");
+}
 
-    match time::set_global_timer(&TIMER) {
-        Ok(_) => tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized"),
-        Err(_) => unreachable!("failed to initialize global timer, as it was already initialized (this shouldn't happen!)"),
-    }
+#[tracing::instrument(skip(acpi))]
+pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) {
+    let controller = Controller::enable_hardware_interrupts(acpi);
+    controller
+        .start_periodic_timer(TIMER_INTERVAL)
+        .expect("10ms should be a reasonable interval for the PIT or local APIC timer...");
+    time::set_global_timer(&TIMER)
+        .expect("`enable_hardware_interrupts` should only be called once!");
+    tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized")
 }
 
 // TODO(eliza): put this somewhere good.
@@ -50,11 +56,8 @@ static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
 
 static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
 
-/// The IBM PC's [8253 PIT timer] fires timer 0 (interrupt 8) every 55ms.
-///
-/// [8253 PIT timer]: https://en.wikipedia.org/wiki/Intel_8253#IBM_PC_programming_tips_and_hints
-const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(55);
-pub(super) static TIMER: time::Timer = maitake::time::Timer::new(TIMER_INTERVAL);
+const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(10);
+pub(super) static TIMER: time::Timer = time::Timer::new(TIMER_INTERVAL);
 
 static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
 
@@ -119,7 +122,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
 }
 
 #[inline]
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = tracing::Level::DEBUG)]
 pub(super) fn init_gdt() {
     tracing::trace!("initializing GDT...");
     let mut gdt = Gdt::new();

@@ -18,8 +18,6 @@ mod tests;
 
 pub type MinPageSize = mm::size::Size4Kb;
 
-pub use self::interrupt::init_interrupts;
-
 pub fn tick_timer() {
     interrupt::TIMER.advance_ticks(0);
 }
@@ -46,16 +44,29 @@ pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
     crate::kernel_start(boot_info, archinfo);
 }
 
-pub fn init(info: &impl BootInfo, archinfo: &ArchInfo) {
+pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
-    if let Some(rsdp_addr) = archinfo.rsdp_addr {
-        acpi::bringup_smp(rsdp_addr)
-            .expect("failed to bring up application processors! this is bad news!");
+    if let Some(rsdp) = archinfo.rsdp_addr {
+        let acpi = acpi::acpi_tables(rsdp);
+        let platform_info = acpi.and_then(|acpi| acpi.platform_info());
+        match platform_info {
+            Ok(platform) => {
+                tracing::debug!("found ACPI platform info");
+                interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
+                acpi::bringup_smp(&platform)
+                    .expect("failed to bring up application processors! this is bad news!");
+                return;
+            }
+            Err(error) => tracing::warn!(?error, "missing ACPI platform info"),
+        }
     } else {
         // TODO(eliza): try using MP Table to bringup application processors?
         tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
     }
+
+    // no ACPI
+    interrupt::enable_hardware_interrupts(None);
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be

@@ -1,6 +1,7 @@
 use crate::cpu;
 use hal_core::interrupt::{Handlers, RegistrationError};
 
+#[derive(Debug)]
 pub(crate) struct Pic {
     address: u8,
     command: cpu::Port,
@@ -17,11 +18,14 @@ impl Pic {
     }
 }
 
+#[derive(Debug)]
 pub struct CascadedPic {
     sisters: PicSisters,
 }
 
 // two of them
+
+#[derive(Debug)]
 struct PicSisters {
     big: Pic,
     little: Pic,

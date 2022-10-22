@@ -103,7 +103,7 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
         tracing::trace!("hahahaha yayyyy we drew a screen!");
     }
 
-    arch::init_interrupts();
+    arch::interrupt::enable_exceptions();
     bootinfo.init_paging();
     ALLOC.init(&bootinfo);
 
@@ -164,16 +164,16 @@ fn kernel_main() -> ! {
         })
     }
 
-    // rt::spawn(async move {
-    //     loop {
-    //         let result = futures_util::try_join! {
-    //             spawn_sleep(time::Duration::from_secs(2)),
-    //             spawn_sleep(time::Duration::from_secs(5)),
-    //             spawn_sleep(time::Duration::from_secs(10)),
-    //         };
-    //         tracing::info!(?result);
-    //     }
-    // });
+    rt::spawn(async move {
+        loop {
+            futures_util::try_join! {
+                spawn_sleep(time::Duration::from_secs(2)),
+                spawn_sleep(time::Duration::from_secs(5)),
+                spawn_sleep(time::Duration::from_secs(10)),
+            }
+            .expect("sleep futures failed!");
+        }
+    });
 
     let mut core = rt::Core::new();
     loop {

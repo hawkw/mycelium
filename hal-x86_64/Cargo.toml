@@ -9,6 +9,7 @@ license = "MIT"
 log = ["tracing/log"]
 
 [dependencies]
+acpi = "4.1.1"
 hal-core = { path = "../hal-core" }
 mycelium-util = { path = "../util" }
 mycelium-trace = { path = "../trace" }

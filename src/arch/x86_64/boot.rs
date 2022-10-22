@@ -3,7 +3,7 @@
 use super::framebuf::{self, FramebufWriter};
 use bootloader::boot_info;
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
-use hal_x86_64::{cpu, mm, serial, vga};
+use hal_x86_64::{mm, serial, vga};
 use mycelium_util::sync::InitOnce;
 
 #[derive(Debug)]
@@ -94,7 +94,12 @@ impl BootInfo for RustbootBootInfo {
             // disable really noisy traces from maitake
             // TODO(eliza): it would be nice if this was configured by
             // non-arch-specific OS code...
-            const DISABLED_TARGETS: &[&str] = &["maitake::time"];
+            const DISABLED_TARGETS: &[&str] = &[
+                "maitake::time",
+                "maitake::task",
+                "runtime::waker",
+                "mycelium_alloc",
+            ];
             DISABLED_TARGETS
                 .iter()
                 .all(|target| !meta.target().starts_with(target))

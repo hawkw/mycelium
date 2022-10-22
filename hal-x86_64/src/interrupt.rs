@@ -1,15 +1,24 @@
-use crate::{cpu, segment, VAddr};
-use core::{arch::asm, marker::PhantomData};
+use crate::{cpu, mm, segment, PAddr, VAddr};
+use core::{arch::asm, marker::PhantomData, time::Duration};
+use hal_core::interrupt::Control;
 use hal_core::interrupt::{ctx, Handlers};
-use mycelium_util::{bits, fmt};
+use mycelium_util::{
+    bits, fmt,
+    sync::{spin, InitOnce},
+};
 
+pub mod apic;
 pub mod idt;
 pub mod pic;
 
+use self::apic::{IoApic, LocalApic};
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
-pub type Control = &'static mut Idt;
+#[derive(Debug)]
+pub struct Controller {
+    model: InterruptModel,
+}
 
 #[derive(Debug)]
 #[repr(C)]
@@ -33,6 +42,28 @@ pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 pub struct Interrupt<T = ()> {
     vector: u8,
     _t: PhantomData<T>,
+}
+
+/// The interrupt controller's active interrupt model.
+#[derive(Debug)]
+
+enum InterruptModel {
+    /// Interrupts are handled by the [8259 Programmable Interrupt Controller
+    /// (PIC)](pic).
+    Pic(spin::Mutex<pic::CascadedPic>),
+    /// Interrupts are handled by the [local] and [I/O] [Advanced Programmable
+    /// Interrupt Controller (APIC)s][apics].
+    ///
+    /// [local]: apic::LocalApic
+    /// [I/O]: apic::IoApic
+    /// [apics]: apic
+    Apic {
+        local: apic::LocalApic,
+        // TODO(eliza): allow further configuration of the I/O APIC (e.g.
+        // masking/unmasking stuff...)
+        #[allow(dead_code)]
+        io: spin::Mutex<apic::IoApic>,
+    },
 }
 
 #[derive(Copy, Clone)]
@@ -63,30 +94,112 @@ pub struct Registers {
     _pad2: [u16; 3],
 }
 
-static mut IDT: idt::Idt = idt::Idt::new();
-static mut PIC: pic::CascadedPic = pic::CascadedPic::new();
+static IDT: spin::Mutex<idt::Idt> = spin::Mutex::new(idt::Idt::new());
+static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 
-#[tracing::instrument(level = "info", name = "interrupts::init")]
-pub fn init<H: Handlers<Registers>>() -> Control {
-    use hal_core::interrupt::Control;
-    tracing::info!("configuring 8259 PIC interrupts...");
+impl Controller {
+    // const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
 
-    unsafe {
-        PIC.set_irq_address(0x20, 0x28);
-        // functionally a no-op, since interrupts from PC/AT PIC are enabled at boot, just being
-        // clear for you, the reader, that at this point they are definitely intentionally enabled.
-        PIC.enable();
+    #[tracing::instrument(level = "info", name = "interrupt::Controller::init")]
+    pub fn init<H: Handlers<Registers>>() {
+        tracing::info!("intializing IDT...");
+
+        let mut idt = IDT.lock();
+        idt.register_handlers::<H>().unwrap();
+        unsafe {
+            idt.load_raw();
+        }
     }
 
-    tracing::info!("intializing IDT...");
+    pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) -> &'static Self {
+        let mut pics = pic::CascadedPic::new();
+        // regardless of whether APIC or PIC interrupt handling will be used,
+        // the PIC interrupt vectors must be remapped so that they do not
+        // conflict with CPU exceptions.
+        unsafe {
+            tracing::debug!(
+                big = Idt::PIC_BIG_START,
+                little = Idt::PIC_LITTLE_START,
+                "remapping PIC interrupt vectors"
+            );
+            pics.set_irq_address(Idt::PIC_BIG_START as u8, Idt::PIC_LITTLE_START as u8);
+        }
 
-    unsafe {
-        IDT.register_handlers::<H>().unwrap();
-        IDT.load();
-        IDT.enable();
+        let model = match acpi {
+            Some(acpi::InterruptModel::Apic(apic_info)) => {
+                tracing::info!("detected APIC interrupt model");
+
+                // disable the 8259 PICs so that we can use APIC interrupts instead
+                unsafe {
+                    pics.disable();
+                }
+                tracing::info!("disabled 8259 PICs");
+
+                // configure the I/O APIC
+                let mut io = {
+                    // TODO(eliza): consider actually using other I/O APICs? do
+                    // we need them for anything??
+                    let io_apic = &apic_info.io_apics[0];
+                    let paddr = PAddr::from_u64(io_apic.address as u64);
+                    let vaddr = mm::kernel_vaddr_of(paddr);
+                    IoApic::new(vaddr)
+                };
+
+                io.map_isa_irqs(Idt::IOAPIC_START as u8);
+                // unmask the PIT timer vector --- we'll need this for calibrating
+                // the local APIC timer...
+                io.set_masked(IoApic::PIT_TIMER_IRQ, false);
+
+                // enable the local APIC
+                let local = LocalApic::new();
+                local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
+
+                InterruptModel::Apic {
+                    local,
+                    io: spin::Mutex::new(io),
+                }
+            }
+            model => {
+                if model.is_none() {
+                    tracing::warn!("platform does not support ACPI; falling back to 8259 PIC");
+                } else {
+                    tracing::warn!(
+                        "ACPI does not indicate APIC interrupt model; falling back to 8259 PIC"
+                    )
+                }
+                tracing::info!("configuring 8259 PIC interrupts...");
+
+                unsafe {
+                    // functionally a no-op, since interrupts from PC/AT PIC are enabled at boot, just being
+                    // clear for you, the reader, that at this point they are definitely intentionally enabled.
+                    pics.enable();
+                }
+                InterruptModel::Pic(spin::Mutex::new(pics))
+            }
+        };
+        tracing::trace!(interrupt_model = ?model);
+
+        unsafe {
+            crate::cpu::intrinsics::sti();
+        }
+
+        let controller = Self { model };
+        INTERRUPT_CONTROLLER.init(controller)
     }
 
-    unsafe { &mut IDT }
+    /// Starts a periodic timer which fires the `timer_tick` interrupt of the
+    /// provided [`Handlers`] every time `interval` elapses.
+    pub fn start_periodic_timer(
+        &self,
+        interval: Duration,
+    ) -> Result<(), crate::time::InvalidDuration> {
+        match self.model {
+            InterruptModel::Pic(_) => crate::time::PIT.lock().start_periodic_timer(interval),
+            InterruptModel::Apic { ref local, .. } => {
+                local.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
+            }
+        }
+    }
 }
 
 impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
@@ -230,16 +343,36 @@ impl hal_core::interrupt::Control for Idt {
                 .is_ok();
             if !was_sleeping {
                 H::timer_tick();
+            } else {
+                tracing::trace!("PIT sleep completed");
             }
             unsafe {
-                PIC.end_interrupt(0x20);
+                match INTERRUPT_CONTROLLER.get_unchecked().model {
+                    InterruptModel::Pic(ref pics) => {
+                        pics.lock().end_interrupt(Idt::PIC_PIT_TIMER as u8)
+                    }
+                    InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
+                }
+            }
+        }
+
+        extern "x86-interrupt" fn apic_timer_isr<H: Handlers<Registers>>(_regs: Registers) {
+            H::timer_tick();
+            unsafe {
+                match INTERRUPT_CONTROLLER.get_unchecked().model {
+                    InterruptModel::Pic(_) => unreachable!(),
+                    InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
+                }
             }
         }
 
         extern "x86-interrupt" fn keyboard_isr<H: Handlers<Registers>>(_regs: Registers) {
             H::keyboard_controller();
             unsafe {
-                PIC.end_interrupt(0x21);
+                match INTERRUPT_CONTROLLER.get_unchecked().model {
+                    InterruptModel::Pic(ref pics) => pics.lock().end_interrupt(0x21),
+                    InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
+                }
             }
         }
 
@@ -356,6 +489,10 @@ impl hal_core::interrupt::Control for Idt {
             });
         }
 
+        extern "x86-interrupt" fn spurious_isr() {
+            tracing::trace!("spurious");
+        }
+
         gen_code_faults! {
             self, H,
             Self::DIVIDE_BY_ZERO => fn div_0_isr("Divide-By-Zero (0x0)"),
@@ -368,7 +505,16 @@ impl hal_core::interrupt::Control for Idt {
             Self::X87_FPU_EXCEPTION => fn x87_exn_isr("x87 Floating-Point Exception (0x10)"),
         }
 
-        self.set_isr(0x20, pit_timer_isr::<H> as *const ());
+        self.set_isr(Self::PIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.set_isr(Self::IOAPIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.set_isr(
+            Self::LOCAL_APIC_SPURIOUS as usize,
+            spurious_isr as *const (),
+        );
+        self.set_isr(
+            Self::LOCAL_APIC_TIMER as usize,
+            apic_timer_isr::<H> as *const (),
+        );
         self.set_isr(0x21, keyboard_isr::<H> as *const ());
         self.set_isr(69, test_isr::<H> as *const ());
         self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());

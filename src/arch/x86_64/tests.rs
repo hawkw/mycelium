@@ -1,4 +1,3 @@
-use super::*;
 use hal_x86_64::mm;
 
 mycotest::decl_test! {
