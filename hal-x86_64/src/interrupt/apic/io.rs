@@ -77,6 +77,7 @@ struct MmioRegisters {
 // === impl IoApic ===
 
 impl IoApic {
+    pub(crate) const PS2_KEYBOARD_IRQ: u8 = 0x1;
     pub(crate) const PIT_TIMER_IRQ: u8 = 0x2;
     const REDIRECTION_ENTRY_BASE: u32 = 0x10;
     /// Try to construct an `IoApic`.

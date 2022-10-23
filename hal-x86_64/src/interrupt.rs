@@ -139,16 +139,24 @@ impl Controller {
                 let mut io = {
                     // TODO(eliza): consider actually using other I/O APICs? do
                     // we need them for anything??
+                    tracing::trace!(?apic_info.io_apics, "found {} IO APICs", apic_info.io_apics.len());
+
                     let io_apic = &apic_info.io_apics[0];
                     let paddr = PAddr::from_u64(io_apic.address as u64);
                     let vaddr = mm::kernel_vaddr_of(paddr);
                     IoApic::new(vaddr)
                 };
 
+                // map the standard ISA hardware interrupts to I/O APIC
+                // redirection entries.
                 io.map_isa_irqs(Idt::IOAPIC_START as u8);
+
                 // unmask the PIT timer vector --- we'll need this for calibrating
                 // the local APIC timer...
                 io.set_masked(IoApic::PIT_TIMER_IRQ, false);
+
+                // unmask the PS/2 keyboard interrupt as well.
+                io.set_masked(IoApic::PS2_KEYBOARD_IRQ, false);
 
                 // enable the local APIC
                 let local = LocalApic::new();
@@ -375,7 +383,9 @@ impl hal_core::interrupt::Control for Idt {
             H::ps2_keyboard(scancode);
             unsafe {
                 match INTERRUPT_CONTROLLER.get_unchecked().model {
-                    InterruptModel::Pic(ref pics) => pics.lock().end_interrupt(0x21),
+                    InterruptModel::Pic(ref pics) => {
+                        pics.lock().end_interrupt(Idt::PIC_PS2_KEYBOARD as u8)
+                    }
                     InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
                 }
             }
@@ -498,6 +508,10 @@ impl hal_core::interrupt::Control for Idt {
             tracing::trace!("spurious");
         }
 
+        // === exceptions ===
+        // these exceptions are mapped to the HAL `Handlers` trait's "code
+        // fault" handler, and indicate that the code that was executing did a
+        // Bad Thing
         gen_code_faults! {
             self, H,
             Self::DIVIDE_BY_ZERO => fn div_0_isr("Divide-By-Zero (0x0)"),
@@ -510,18 +524,7 @@ impl hal_core::interrupt::Control for Idt {
             Self::X87_FPU_EXCEPTION => fn x87_exn_isr("x87 Floating-Point Exception (0x10)"),
         }
 
-        self.set_isr(Self::PIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
-        self.set_isr(Self::IOAPIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
-        self.set_isr(
-            Self::LOCAL_APIC_SPURIOUS as usize,
-            spurious_isr as *const (),
-        );
-        self.set_isr(
-            Self::LOCAL_APIC_TIMER as usize,
-            apic_timer_isr::<H> as *const (),
-        );
-        self.set_isr(0x21, keyboard_isr::<H> as *const ());
-        self.set_isr(69, test_isr::<H> as *const ());
+        // other exceptions, not mapped to the "code fault" handler
         self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
         self.set_isr(Self::INVALID_TSS, invalid_tss_isr::<H> as *const ());
         self.set_isr(
@@ -534,6 +537,27 @@ impl hal_core::interrupt::Control for Idt {
         );
         self.set_isr(Self::GENERAL_PROTECTION_FAULT, gpf_isr::<H> as *const ());
         self.set_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
+
+        // === hardware interrupts ===
+        // ISA standard hardware interrupts mapped on both the PICs and IO APIC
+        // interrupt models.
+        self.set_isr(Self::PIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.set_isr(Self::IOAPIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.set_isr(Self::PIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
+        self.set_isr(Self::IOAPIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
+        // local APIC specific hardware itnerrupts
+        self.set_isr(
+            Self::LOCAL_APIC_SPURIOUS as usize,
+            spurious_isr as *const (),
+        );
+        self.set_isr(
+            Self::LOCAL_APIC_TIMER as usize,
+            apic_timer_isr::<H> as *const (),
+        );
+
+        // vector 69 (nice) is reserved by the HAL for testing the IDT.
+        self.set_isr(69, test_isr::<H> as *const ());
+
         Ok(())
     }
 }
