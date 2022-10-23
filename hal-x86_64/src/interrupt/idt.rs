@@ -1,3 +1,4 @@
+use super::apic::IoApic;
 use crate::{cpu, segment};
 use core::fmt;
 use mycelium_util::bits;
@@ -155,7 +156,8 @@ impl Idt {
     /// Chosen by fair die roll, guaranteed to be random.
     pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
 
-    pub const PIC_PIT_TIMER: usize = 0x20;
+    pub const PIC_PIT_TIMER: usize = Self::PIC_BIG_START;
+    pub const PIC_PS2_KEYBOARD: usize = Self::PIC_BIG_START + 1;
 
     pub(super) const LOCAL_APIC_TIMER: usize = (Self::NUM_VECTORS - 2);
     pub(super) const LOCAL_APIC_SPURIOUS: usize = (Self::NUM_VECTORS - 1);
@@ -163,8 +165,9 @@ impl Idt {
     pub(super) const PIC_LITTLE_START: usize = 0x28;
     // put the IOAPIC right after the PICs
     pub(super) const IOAPIC_START: usize = 0x30;
-    pub(super) const IOAPIC_PIT_TIMER: usize =
-        Self::IOAPIC_START + super::apic::IoApic::PIT_TIMER_IRQ as usize;
+    pub(super) const IOAPIC_PIT_TIMER: usize = Self::IOAPIC_START + IoApic::PIT_TIMER_IRQ as usize;
+    pub(super) const IOAPIC_PS2_KEYBOARD: usize =
+        Self::IOAPIC_START + IoApic::PS2_KEYBOARD_IRQ as usize;
 
     pub const fn new() -> Self {
         Self {
