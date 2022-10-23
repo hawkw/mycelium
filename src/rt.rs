@@ -1,3 +1,4 @@
+use crate::arch;
 use core::{
     cmp,
     future::Future,
@@ -82,30 +83,39 @@ impl Core {
         Self {
             scheduler,
             id,
-            rng: crate::arch::seed_rng(),
+            rng: arch::seed_rng(),
             running: AtomicBool::new(false),
         }
     }
 
     /// Runs one tick of the kernel main loop on this core.
-    pub fn tick(&mut self) {
+    ///
+    /// Returns `true` if this core has more work to do, or `false` if it does not.
+    pub fn tick(&mut self) -> bool {
         // drive the task scheduler
         let tick = self.scheduler.tick();
 
         // turn the timer wheel if it wasn't turned recently and no one else is
         // holding a lock, ensuring any pending timer ticks are consumed.
-        crate::arch::tick_timer();
+        arch::tick_timer();
+
+        // if there are remaining tasks to poll, continue without stealing.
+        if tick.has_remaining {
+            return true;
+        }
 
         // if there are no tasks remaining in this core's run queue, try to
         // steal new tasks from the distributor queue.
-        // TODO(eliza): add a "check distributor first interval" of some kind to
-        // ensure new tasks are eventually spawned on a core...
-        if !tick.has_remaining {
-            let stolen = self.try_steal();
-            if stolen > 0 {
-                tracing::debug!(tick.stolen = stolen)
-            }
+        let stolen = self.try_steal();
+        if stolen > 0 {
+            tracing::debug!(tick.stolen = stolen);
+            // if we stole tasks, we need to keep ticking
+            return true;
         }
+
+        // if we have no remaining woken tasks, and we didn't steal any new
+        // tasks, this core can sleep until an interrupt occurs.
+        false
     }
 
     /// Returns `true` if this core is currently running.
@@ -143,11 +153,22 @@ impl Core {
 
         tracing::info!("started kernel main loop");
 
-        while self.is_running() {
-            self.tick();
-        }
+        loop {
+            // tick the scheduler until it indicates that it's out of tasks to run.
+            if self.tick() {
+                continue;
+            }
 
-        tracing::info!("stop signal received, shutting down");
+            // check if this core should shut down.
+            if !self.is_running() {
+                tracing::info!(core = self.id, "stop signal received, shutting down");
+                return;
+            }
+
+            // if we have no tasks to run, we can sleep until an interrupt
+            // occurs.
+            arch::wait_for_interrupt();
+        }
     }
 
     fn try_steal(&mut self) -> usize {
