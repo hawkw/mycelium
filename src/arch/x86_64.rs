@@ -1,6 +1,9 @@
 use hal_core::boot::BootInfo;
 use hal_x86_64::{cpu, vga};
-pub use hal_x86_64::{cpu::entropy::seed_rng, mm, NAME};
+pub use hal_x86_64::{
+    cpu::{entropy::seed_rng, wait_for_interrupt},
+    mm, NAME,
+};
 
 mod acpi;
 mod boot;
