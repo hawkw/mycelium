@@ -1,9 +1,8 @@
 #![warn(missing_docs)]
 use super::InvalidDuration;
-use crate::cpu::Port;
+use crate::cpu::{self, Port};
 use core::{
     convert::{Infallible, TryFrom},
-    hint,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -274,7 +273,7 @@ impl Pit {
 
         // spin until the sleep interrupt fires.
         while SLEEPING.load(Ordering::Acquire) {
-            hint::spin_loop();
+            cpu::wait_for_interrupt();
         }
 
         tracing::info!(?duration, "slept using PIT channel 0");
