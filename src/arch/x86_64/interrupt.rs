@@ -100,11 +100,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
     }
 
     fn ps2_keyboard(scancode: u8) {
-        tracing::info!(
-            // for now
-            scancode,
-            "keyboard interrupt read"
-        );
+        crate::drivers::ps2_keyboard::handle_scancode(scancode)
     }
 
     fn test_interrupt<C>(cx: C)

@@ -12,6 +12,7 @@ extern crate rlibc;
 
 pub mod allocator;
 pub mod arch;
+pub mod drivers;
 pub mod rt;
 pub mod wasm;
 
@@ -172,6 +173,13 @@ fn kernel_main() -> ! {
                 spawn_sleep(time::Duration::from_secs(10)),
             }
             .expect("sleep futures failed!");
+        }
+    });
+
+    rt::spawn(async {
+        loop {
+            let key = crate::drivers::ps2_keyboard::next_key().await;
+            tracing::info!(?key, "you typed a key");
         }
     });
 

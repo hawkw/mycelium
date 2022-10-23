@@ -54,6 +54,8 @@ futures-util = { version = "0.3", default-features = false, features = ["async-a
 # we don't depend on this directly, but we need to ensure that `tracing` uses a
 # Miri-compatible version of `once_cell`.
 once_cell = { version = "1.15.0", default-features = false }
+pc-keyboard = "0.6.1"
+thingbuf = { version = "0.1.3", default_features = false, features = ["static"] }
 
 [dev-dependencies]
 mycotest = { path = "mycotest", features = ["runner"] }
