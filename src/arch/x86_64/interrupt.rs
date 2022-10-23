@@ -99,12 +99,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
         TIMER.pend_ticks(1);
     }
 
-    fn keyboard_controller() {
-        // load-bearing read - if we don't read from the keyboard controller it won't
-        // send another interrupt on later keystrokes.
-        //
-        // 0x60 is a magic PC/AT number.
-        let scancode = unsafe { hal_x86_64::cpu::Port::at(0x60).readb() };
+    fn ps2_keyboard(scancode: u8) {
         tracing::info!(
             // for now
             scancode,

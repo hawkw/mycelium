@@ -55,7 +55,9 @@ pub trait Handlers<R: fmt::Debug + fmt::Display> {
 
     fn timer_tick();
 
-    fn keyboard_controller();
+    /// Called when a PS/2 keyboard interrupt is fired. The handler is provided
+    /// with the scancode read from the PS/2 keyboard controller.
+    fn ps2_keyboard(scancode: u8);
 
     fn test_interrupt<C>(_cx: C)
     where
