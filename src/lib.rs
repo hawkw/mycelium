@@ -176,12 +176,7 @@ fn kernel_main() -> ! {
         }
     });
 
-    rt::spawn(async {
-        loop {
-            let key = crate::drivers::ps2_keyboard::next_key().await;
-            tracing::info!(?key, "you typed a key");
-        }
-    });
+    rt::spawn(keyboard_demo());
 
     let mut core = rt::Core::new();
     loop {
@@ -225,4 +220,41 @@ pub fn panic(panic: &core::panic::PanicInfo<'_>) -> ! {
 #[cfg(all(test, not(target_os = "none")))]
 pub fn main() {
     /* no host-platform tests in this crate */
+}
+
+/// Keyboard handler demo task: logs each line typed by the user.
+// TODO(eliza): let's do something Actually Useful with keyboard input...
+async fn keyboard_demo() {
+    #[cfg(target_os = "none")]
+    use alloc::string::String;
+    use drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
+
+    let mut line = String::new();
+    loop {
+        let key = ps2_keyboard::next_key().await;
+        let mut newline = false;
+        match key {
+            DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
+                newline = true;
+            }
+            // backspace
+            DecodedKey::RawKey(KeyCode::Backspace)
+            | DecodedKey::RawKey(KeyCode::Delete)
+            | DecodedKey::Unicode('\u{0008}') => {
+                line.pop();
+            }
+            DecodedKey::Unicode(c) => {
+                line.push(c);
+                if line.len() == 80 {
+                    tracing::info!("you typed 80 characters!");
+                    newline = true;
+                }
+            }
+            DecodedKey::RawKey(key) => tracing::warn!(?key, "you typed something weird"),
+        }
+        if newline {
+            tracing::info!(?line, "you typed a line");
+            line.clear();
+        }
+    }
 }

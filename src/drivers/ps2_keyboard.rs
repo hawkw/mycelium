@@ -1,7 +1,7 @@
 use maitake::sync::WaitQueue;
 use mycelium_util::{fmt, sync::spin::Mutex};
-pub use pc_keyboard::DecodedKey;
 use pc_keyboard::{layouts, Keyboard};
+pub use pc_keyboard::{DecodedKey, KeyCode};
 
 pub struct Ps2Keyboard {
     // TODO(eliza): this should use some kind of broadcast channel that waits
