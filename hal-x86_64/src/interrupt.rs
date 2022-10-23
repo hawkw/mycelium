@@ -367,7 +367,12 @@ impl hal_core::interrupt::Control for Idt {
         }
 
         extern "x86-interrupt" fn keyboard_isr<H: Handlers<Registers>>(_regs: Registers) {
-            H::keyboard_controller();
+            // 0x60 is a magic PC/AT number.
+            static PORT: cpu::Port = cpu::Port::at(0x60);
+            // load-bearing read - if we don't read from the keyboard controller it won't
+            // send another interrupt on later keystrokes.
+            let scancode = unsafe { PORT.readb() };
+            H::ps2_keyboard(scancode);
             unsafe {
                 match INTERRUPT_CONTROLLER.get_unchecked().model {
                     InterruptModel::Pic(ref pics) => pics.lock().end_interrupt(0x21),
