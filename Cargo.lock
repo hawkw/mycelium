@@ -981,9 +981,11 @@ dependencies = [
  "mycotest",
  "once_cell",
  "parity-wasm",
+ "pc-keyboard",
  "rand",
  "rand_xoshiro",
  "rlibc",
+ "thingbuf",
  "tracing 0.2.0",
  "wasmi",
  "wat",
@@ -1114,6 +1116,12 @@ name = "parity-wasm"
 version = "0.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be5e13c266502aadf83426d87d81a0f5d1ef45b8027f5a471c360abfe4bfae92"
+
+[[package]]
+name = "pc-keyboard"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0ad9805165d0672a3efa682cac952870d8b05d98e02e08063ca7db597005338"
 
 [[package]]
 name = "percent-encoding"
@@ -1532,6 +1540,15 @@ name = "textwrap"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1141d4d61095b28419e22cb0bbf02755f5e54e0526f97f1e3d1d160e60885fb"
+
+[[package]]
+name = "thingbuf"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bee2d290fe0db0225026350bc1f0bd02b2daad43b09b56780e29e549effcd54a"
+dependencies = [
+ "pin-project",
+]
 
 [[package]]
 name = "thread_local"
