@@ -76,6 +76,23 @@ pub fn halt() -> ! {
     }
 }
 
+/// Wait for an interrupt in a spin loop.
+///
+/// This is distinct from `core::hint::spin_loop`, as it is intended
+/// specifically for waiting for an interrupt, rather than progress from another
+/// thread. This should be called on each iteration of a loop that waits on a condition
+/// set by an interrupt handler.
+///
+/// This function will execute one [`intrinsics::sti`] instruction to enable interrupts
+/// followed by one [`intrinsics::hlt`] instruction to halt the CPU.
+#[inline(always)]
+pub fn wait_for_interrupt() {
+    unsafe {
+        intrinsics::sti();
+        intrinsics::hlt();
+    }
+}
+
 // === impl Port ===
 
 impl fmt::Debug for Port {
