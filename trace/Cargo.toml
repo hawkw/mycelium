@@ -3,7 +3,11 @@ name = "mycelium-trace"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# See more keys and their definitions at
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+embedded-graphics = ["dep:embedded-graphics", "hal-core/embedded-graphics-core"]
+default = ["embedded-graphics",]
 
 [dependencies]
 tracing-core = {git = "https://github.com/tokio-rs/tracing", default_features = false }
