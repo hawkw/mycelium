@@ -1,5 +1,8 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
-use core::fmt::{self, Write};
+use core::{
+    fmt::{self, Write},
+    num::Wrapping,
+};
 
 /// A ring buffer of fixed-size lines.
 #[derive(Debug)]
@@ -7,8 +10,8 @@ pub struct Buf {
     lines: Box<[Line]>,
     /// The maximum length of each line in the buffer
     line_len: usize,
-    start: usize,
-    end: usize,
+    start: Wrapping<usize>,
+    end: Wrapping<usize>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -30,7 +33,7 @@ pub struct Iter<'buf> {
 #[derive(Debug)]
 struct Line {
     line: String,
-    stamp: usize,
+    stamp: Wrapping<usize>,
 }
 
 #[cfg(test)]
