@@ -4,12 +4,11 @@ use core::fmt::{self, Write};
 /// A ring buffer of fixed-size lines.
 #[derive(Debug)]
 pub struct Buf {
-    lines: Box<[String]>,
+    lines: Box<[Line]>,
     /// The maximum length of each line in the buffer
     line_len: usize,
     start: usize,
     end: usize,
-    started: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -28,17 +27,39 @@ pub struct Iter<'buf> {
     idx: usize,
 }
 
+#[derive(Debug)]
+struct Line {
+    line: String,
+    stamp: usize,
+}
+
+#[cfg(test)]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        dbg!($x)
+    };
+}
+
+#[cfg(not(test))]
+macro_rules! test_dbg {
+    ($x:expr) => {
+        $x
+    };
+}
+
 impl Buf {
     pub fn new(BufConfig { line_len, lines }: BufConfig) -> Self {
         Self {
             lines: (0..lines)
-                .map(|_| String::with_capacity(line_len))
+                .map(|stamp| Line {
+                    stamp,
+                    line: String::with_capacity(line_len),
+                })
                 .collect::<Vec<_>>()
                 .into(),
             line_len,
             start: 0,
             end: 0,
-            started: false,
         }
     }
 
@@ -54,52 +75,60 @@ impl Buf {
         }
     }
 
-    fn advance(&mut self) -> usize {
-        let end = self.end;
-
-        self.end = self.end + 1;
-        if self.end == self.start {
-            self.start += 1
-        }
-        let idx = end % self.lines.len();
-        self.started = false;
-        idx
+    fn advance(&mut self) {
+        self.end += 1;
     }
 
-    fn line(&mut self) -> &mut String {
-        let line = &mut self.lines[(self.end % self.lines.len())];
+    fn line_mut(&mut self) -> &mut String {
+        let Line { stamp, line } = &mut self.lines[(self.end % self.lines.len())];
+        if *stamp != self.end {
+            *stamp = self.end;
+            line.clear();
+
+            if self.end == self.start {
+                // we are writing to the current start index, so scootch the
+                // start forward by one.
+                self.start += 1;
+            }
+        }
         line
     }
 
     fn write_chunk<'s>(&mut self, s: &'s str) -> Option<&'s str> {
-        let rem = self.line_len - self.line().len();
+        let rem = self.line_len - self.line_mut().len();
         let (line, next) = if s.len() > rem {
             let (this, next) = s.split_at(rem);
             (this, Some(next))
         } else {
             (s, None)
         };
-        self.line().push_str(line);
+        self.line_mut().push_str(line);
         next
     }
 
     fn write_line(&mut self, mut line: &str) {
-        while let Some(next) = self.write_chunk(line) {
+        while let Some(next) = test_dbg!(self.write_chunk(dbg!(line))) {
             line = next;
-            self.advance();
+            test_dbg!(self.advance());
         }
     }
 }
 
 impl Write for &mut Buf {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        let ends_with_newline = s.chars().any(|ch| ch == '\n');
+    fn write_str(&mut self, mut s: &str) -> fmt::Result {
+        let ends_with_newline = if let Some(stripped) = s.strip_suffix('\n') {
+            s = stripped;
+            true
+        } else {
+            false
+        };
+
         let mut lines = s.split('\n');
         if let Some(line) = lines.next() {
             self.write_line(line);
             for line in lines {
-                self.write_line(line);
                 self.advance();
+                self.write_line(line);
             }
         }
 
@@ -116,13 +145,14 @@ impl<'buf> Iterator for Iter<'buf> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.idx;
+        self.idx += 1;
         if idx == self.buf.end {
             return None;
         }
         self.buf
             .lines
             .get(idx % self.buf.lines.len())
-            .map(String::as_str)
+            .map(|Line { line, .. }| line.as_str())
     }
 }
 
@@ -144,12 +174,12 @@ mod tests {
 
         dbg!(&buf);
         let mut iter = buf.iter();
-        assert_eq!(iter.next(), Some("hello"));
-        assert_eq!(iter.next(), Some("world"));
-        assert_eq!(iter.next(), Some("have"));
-        assert_eq!(iter.next(), Some("lots"));
-        assert_eq!(iter.next(), Some("of"));
-        assert_eq!(iter.next(), Some("fun"));
-        assert_eq!(iter.next(), None);
+        assert_eq!(test_dbg!(iter.next()), Some("hello"));
+        assert_eq!(test_dbg!(iter.next()), Some("world"));
+        assert_eq!(test_dbg!(iter.next()), Some("have"));
+        assert_eq!(test_dbg!(iter.next()), Some("lots"));
+        assert_eq!(test_dbg!(iter.next()), Some("of"));
+        assert_eq!(test_dbg!(iter.next()), Some("fun"));
+        assert_eq!(test_dbg!(iter.next()), None);
     }
 }
