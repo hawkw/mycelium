@@ -14,7 +14,9 @@ pub struct Buf {
     end: Wrapping<usize>,
 }
 
+/// Configuration for a [`Buf`].
 #[derive(Copy, Clone, Debug)]
+#[non_exhaustive]
 pub struct BufConfig {
     pub line_len: usize,
     pub lines: usize,
@@ -46,9 +48,10 @@ macro_rules! test_dbg {
 }
 
 impl Buf {
-    pub fn new(BufConfig { line_len, lines }: BufConfig) -> Self {
+    pub fn new(config: BufConfig) -> Self {
+        let line_len = config.line_len;
         Self {
-            lines: (0..lines)
+            lines: (0..config.lines)
                 .map(|stamp| Line {
                     stamp: Wrapping(stamp),
                     line: String::with_capacity(line_len),
@@ -150,6 +153,16 @@ impl<'buf> Iterator for Iter<'buf> {
     }
 }
 
+impl Default for BufConfig {
+    fn default() -> Self {
+        Self {
+            line_len: 80,
+            // CHOSEN BY FAIR DIE ROLL, GUARANTEED TO BE RANDOM
+            lines: 120,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +232,4 @@ mod tests {
         assert_eq!(test_dbg!(iter.next()), Some("line"));
         assert_eq!(test_dbg!(iter.next()), None);
     }
-
-
 }
