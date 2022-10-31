@@ -2,6 +2,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{
     fmt::{self, Write},
     num::Wrapping,
+    ops::{Bound, RangeBounds},
 };
 
 /// A ring buffer of fixed-size lines.
@@ -26,6 +27,7 @@ pub struct BufConfig {
 pub struct Iter<'buf> {
     buf: &'buf LineBuf,
     idx: Wrapping<usize>,
+    end: usize,
 }
 
 #[derive(Debug)]
@@ -68,6 +70,25 @@ impl LineBuf {
     pub fn iter(&self) -> Iter<'_> {
         Iter {
             idx: self.start,
+            end: self.end.0,
+            buf: self,
+        }
+    }
+
+    pub fn lines(&self, range: impl RangeBounds<usize>) -> Iter<'_> {
+        let idx = match range.start_bound() {
+            Bound::Excluded(start) => todo!(),
+            Bound::Included(start) => todo!(),
+            Bound::Unbounded => self.start,
+        };
+        let end = match range.end_bound() {
+            Bound::Excluded(end) => todo!(),
+            Bound::Included(end) => todo!(),
+            Bound::Unbounded => self.end.0,
+        };
+        Iter {
+            idx,
+            end,
             buf: self,
         }
     }
@@ -144,7 +165,7 @@ impl<'buf> Iterator for Iter<'buf> {
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.idx.0;
         self.idx += 1;
-        if idx == self.buf.end.0 {
+        if idx == self.end {
             return None;
         }
         self.buf
@@ -232,5 +253,23 @@ mod tests {
         assert_eq!(test_dbg!(iter.next()), Some("ong "));
         assert_eq!(test_dbg!(iter.next()), Some("line"));
         assert_eq!(test_dbg!(iter.next()), None);
+    }
+
+    #[test]
+    fn unbounded_range_lines_iter() {
+        let mut buf = LineBuf::new(BufConfig {
+            line_len: 6,
+            lines: 6,
+        });
+        writeln!(&mut buf, "hello").unwrap();
+        writeln!(&mut buf, "world").unwrap();
+        writeln!(&mut buf, "have\nlots").unwrap();
+        writeln!(&mut buf, "of").unwrap();
+        writeln!(&mut buf, "fun").unwrap();
+
+        let iter = buf.iter().zip(buf.lines(..));
+        for (iter_line, range_line) in iter {
+            assert_eq!(iter_line, range_line);
+        }
     }
 }
