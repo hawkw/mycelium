@@ -23,7 +23,6 @@ pub struct BufConfig {
 }
 
 #[derive(Copy, Clone, Debug)]
-
 pub struct Iter<'buf> {
     buf: &'buf LineBuf,
     idx: Wrapping<usize>,
