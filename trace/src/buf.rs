@@ -6,7 +6,7 @@ use core::{
 
 /// A ring buffer of fixed-size lines.
 #[derive(Debug)]
-pub struct Buf {
+pub struct LineBuf {
     lines: Box<[Line]>,
     /// The maximum length of each line in the buffer
     line_len: usize,
@@ -22,8 +22,10 @@ pub struct BufConfig {
     pub lines: usize,
 }
 
+#[derive(Copy, Clone, Debug)]
+
 pub struct Iter<'buf> {
-    buf: &'buf Buf,
+    buf: &'buf LineBuf,
     idx: Wrapping<usize>,
 }
 
@@ -47,7 +49,7 @@ macro_rules! test_dbg {
     };
 }
 
-impl Buf {
+impl LineBuf {
     pub fn new(config: BufConfig) -> Self {
         let line_len = config.line_len;
         Self {
@@ -111,7 +113,7 @@ impl Buf {
     }
 }
 
-impl Write for &mut Buf {
+impl Write for &mut LineBuf {
     fn write_str(&mut self, mut s: &str) -> fmt::Result {
         let ends_with_newline = if let Some(stripped) = s.strip_suffix('\n') {
             s = stripped;
@@ -169,7 +171,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut buf = Buf::new(BufConfig {
+        let mut buf = LineBuf::new(BufConfig {
             line_len: 6,
             lines: 6,
         });
@@ -192,7 +194,7 @@ mod tests {
 
     #[test]
     fn buffer_wraparound() {
-        let mut buf = Buf::new(BufConfig {
+        let mut buf = LineBuf::new(BufConfig {
             line_len: 7,
             lines: 6,
         });
@@ -216,7 +218,7 @@ mod tests {
 
     #[test]
     fn line_wrapping() {
-        let mut buf = Buf::new(BufConfig {
+        let mut buf = LineBuf::new(BufConfig {
             line_len: 4,
             lines: 6,
         });
