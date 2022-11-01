@@ -30,7 +30,6 @@ pub struct Iter<'buf> {
     end: Wrapping<usize>,
 }
 
-#[derive(Debug)]
 struct Line {
     line: String,
     stamp: Wrapping<usize>,
@@ -76,8 +75,16 @@ impl LineBuf {
     }
 
     pub fn lines(&self, range: impl RangeBounds<usize>) -> Iter<'_> {
-        let idx = self.bound_offset(range.start_bound()).unwrap_or(self.start);
-        let end = self.bound_offset(range.end_bound()).unwrap_or(self.end);
+        let idx = match range.start_bound() {
+            Bound::Excluded(&offset) => self.wrap_offset(offset + 1),
+            Bound::Included(&offset) => self.wrap_offset(offset),
+            Bound::Unbounded => self.start,
+        };
+        let end = match range.end_bound() {
+            Bound::Excluded(&offset) => self.wrap_offset(offset),
+            Bound::Included(&offset) => self.wrap_offset(offset + 1),
+            Bound::Unbounded => self.end,
+        };
         Iter {
             idx,
             end,
@@ -85,13 +92,8 @@ impl LineBuf {
         }
     }
 
-    fn bound_offset(&self, bound: Bound<&usize>) -> Option<Wrapping<usize>> {
-        let offset = match bound {
-            Bound::Excluded(&offset) => offset + 1,
-            Bound::Included(&offset) => offset,
-            Bound::Unbounded => return None,
-        };
-        Some(self.start + Wrapping(offset) % Wrapping(self.lines.len()))
+    fn wrap_offset(&self, offset: usize) -> Wrapping<usize> {
+        self.start + Wrapping(offset)
     }
 
     fn advance(&mut self) {
@@ -166,15 +168,22 @@ impl<'buf> Iterator for Iter<'buf> {
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.idx;
         self.idx += 1;
-        if idx == self.end {
+        let Line { line, stamp } = self.buf.lines.get(idx.0 % self.buf.lines.len())?;
+        if *stamp == self.end {
             return None;
         }
-        self.buf
-            .lines
-            .get(idx.0 % self.buf.lines.len())
-            .map(|Line { line, .. }| line.as_str())
+        Some(line.as_str())
     }
 }
+
+impl fmt::Debug for Line {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Line { line, stamp } = self;
+        write!(f, "{line:?}:{stamp}")
+    }
+}
+
+// === impl BufConfig ===
 
 impl Default for BufConfig {
     fn default() -> Self {
@@ -230,13 +239,12 @@ mod tests {
 
         dbg!(&buf);
         let mut iter = buf.iter();
-        assert_eq!(test_dbg!(iter.next()), Some("goodbye"));
-        assert_eq!(test_dbg!(iter.next()), Some("world"));
-        assert_eq!(test_dbg!(iter.next()), Some("have"));
-        assert_eq!(test_dbg!(iter.next()), Some("lots"));
-        assert_eq!(test_dbg!(iter.next()), Some("of"));
-        assert_eq!(test_dbg!(iter.next()), Some("fun"));
-        assert_eq!(test_dbg!(iter.next()), None);
+        assert_slicelike(
+            "buffer wraparounnd",
+            &buf,
+            &["goodbye", "world", "have", "lots", "of", "fun"],
+            ..,
+        )
     }
 
     #[test]
@@ -266,7 +274,7 @@ mod tests {
         });
         let expected = ["hello", "world", "have", "lots", "of", "fun"];
         fill(&mut buf, &expected);
-        assert_slicelike(&buf, &expected, ..)
+        assert_slicelike("unbounded", &buf, &expected, ..)
     }
 
     #[test]
@@ -299,44 +307,49 @@ mod tests {
     }
 
     fn test_range_iters(buf: &LineBuf, expected: &[&str]) {
-        test_dbg!(buf);
-        test_dbg!(expected);
+        assert_slicelike("unbounded", &buf, &expected, ..);
 
-        println!("\n=== range unbounded ===\n");
-        assert_slicelike(&buf, &expected, ..);
+        assert_slicelike("start inclusive", &buf, &expected, 2..);
+        assert_slicelike("start inclusive", &buf, &expected, 3..);
+        assert_slicelike("start inclusive", &buf, &expected, 4..);
+        assert_slicelike("start inclusive", &buf, &expected, 5..);
 
-        println!("\n=== range start inclusive ===\n");
-        assert_slicelike(&buf, &expected, 2..);
-        assert_slicelike(&buf, &expected, 3..);
-        assert_slicelike(&buf, &expected, 4..);
-        assert_slicelike(&buf, &expected, 5..);
+        assert_slicelike("end inclusive", &buf, &expected, ..=2);
+        assert_slicelike("end inclusive", &buf, &expected, ..=5);
 
-        println!("\n=== range end inclusive ===\n");
-        assert_slicelike(&buf, &expected, ..=2);
-        assert_slicelike(&buf, &expected, ..=5);
-
-        println!("\n=== range end exclusive ===\n");
-        assert_slicelike(&buf, &expected, ..2);
-        assert_slicelike(&buf, &expected, ..5);
-        assert_slicelike(&buf, &expected, ..6)
+        assert_slicelike("end exclusive", &buf, &expected, ..2);
+        assert_slicelike("end exclusive", &buf, &expected, ..5);
+        assert_slicelike("end exclusive", &buf, &expected, ..6)
     }
 
     fn fill(mut buf: &mut LineBuf, strs: &[&str]) {
         for item in strs {
             writeln!(buf, "{item}").unwrap();
         }
-        dbg!(buf);
     }
 
     fn assert_slicelike<'ex>(
+        kind: &str,
         buf: &LineBuf,
         expected: &'ex [&'ex str],
-        range: impl RangeBounds<usize> + SliceIndex<[&'ex str], Output = [&'ex str]> + Clone,
+        range: impl RangeBounds<usize>
+            + SliceIndex<[&'ex str], Output = [&'ex str]>
+            + Clone
+            + fmt::Debug,
     ) {
         let slice = &expected[range.clone()];
-        let mut iter = test_dbg!(buf.lines(range));
+        let mut iter = buf.lines(range.clone());
         for &expected in slice {
-            assert_eq!(Some(test_dbg!(expected)), test_dbg!(iter.next()))
+            assert_eq!(
+                Some(expected),
+                iter.next(),
+                "\n range: {range:?}\n   buf: {buf:?}\n  iter: {iter:?}\n   exp: {slice:?}\n  kind: {kind}"
+            )
         }
+        assert_eq!(
+            None,
+            iter.next(),
+            "\n range: {range:?}\n   buf: {buf:?}\n  iter: {iter:?}\n   exp: {slice:?}\n  kind: {kind}"
+        )
     }
 }
