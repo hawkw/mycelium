@@ -13,7 +13,6 @@ pub struct LineBuf {
     line_len: usize,
     start: Wrapping<usize>,
     end: Wrapping<usize>,
-    next: Wrapping<usize>,
 }
 
 /// Configuration for a [`Buf`].
@@ -27,7 +26,7 @@ pub struct BufConfig {
 #[derive(Copy, Clone, Debug)]
 pub struct Iter<'buf> {
     buf: &'buf LineBuf,
-    idx: Option<Wrapping<usize>>,
+    idx: Wrapping<usize>,
     end: Wrapping<usize>,
 }
 
@@ -64,14 +63,13 @@ impl LineBuf {
             line_len,
             start: Wrapping(0),
             end: Wrapping(0),
-            next: Wrapping(0),
         }
     }
 
     pub fn iter(&self) -> Iter<'_> {
         Iter {
-            idx: Some(self.start),
-            end: self.next,
+            idx: self.start,
+            end: self.end,
             buf: self,
         }
     }
@@ -85,10 +83,10 @@ impl LineBuf {
         let end = match range.end_bound() {
             Bound::Excluded(&offset) => self.wrap_offset(offset),
             Bound::Included(&offset) => self.wrap_offset(offset + 1),
-            Bound::Unbounded => self.next,
+            Bound::Unbounded => self.end,
         };
         Iter {
-            idx: Some(idx),
+            idx,
             end,
             buf: self,
         }
@@ -99,7 +97,7 @@ impl LineBuf {
     }
 
     fn advance(&mut self) {
-        self.next += 1;
+        self.end += 1;
     }
 
     fn wrap_idx(&self, Wrapping(idx): Wrapping<usize>) -> usize {
@@ -107,13 +105,10 @@ impl LineBuf {
     }
 
     fn line_mut(&mut self) -> &mut String {
-        let idx = self.wrap_idx(self.next);
-        if self.end < self.next {
-            self.end = self.next;
-        }
+        let idx = self.wrap_idx(self.end);
         let Line { stamp, line } = &mut self.lines[idx];
-        if *stamp != self.next {
-            *stamp = self.next;
+        if *stamp != self.end {
+            *stamp = self.end;
             line.clear();
 
             if idx == self.start.0 {
@@ -175,20 +170,16 @@ impl<'buf> Iterator for Iter<'buf> {
     type Item = &'buf str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.idx?;
-        if idx == self.end {
+        let idx = self.idx;
+        if idx >= self.end {
             return None;
         }
-        let next = idx + Wrapping(1);
-        self.idx = if next == self.buf.start {
-            None
-        } else {
-            Some(next)
-        };
-        self.buf
-            .lines
-            .get(self.buf.wrap_idx(idx))
-            .map(|Line { line, .. }| line.as_str())
+        self.idx += 1;
+        let Line { line, stamp } = self.buf.lines.get(self.buf.wrap_idx(idx))?;
+        if *stamp != idx {
+            return None;
+        }
+        Some(line.as_str())
     }
 }
 
