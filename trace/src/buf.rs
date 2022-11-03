@@ -102,8 +102,12 @@ impl LineBuf {
         self.next += 1;
     }
 
+    fn wrap_idx(&self, Wrapping(idx): Wrapping<usize>) -> usize {
+        idx % self.lines.len()
+    }
+
     fn line_mut(&mut self) -> &mut String {
-        let idx = self.next.0 % self.lines.len();
+        let idx = self.wrap_idx(self.next);
         if self.end < self.next {
             self.end = self.next;
         }
@@ -181,11 +185,10 @@ impl<'buf> Iterator for Iter<'buf> {
         } else {
             Some(next)
         };
-        let Line { line, stamp } = self.buf.lines.get(idx.0 % self.buf.lines.len())?;
-        // if *stamp < idx {
-        //     return None;
-        // }
-        Some(line.as_str())
+        self.buf
+            .lines
+            .get(self.buf.wrap_idx(idx))
+            .map(|Line { line, .. }| line.as_str())
     }
 }
 
@@ -273,8 +276,6 @@ mod tests {
         writeln!(&mut buf, "fun").unwrap();
         writeln!(&mut buf, "goodbye").unwrap();
 
-        dbg!(&buf);
-        let mut iter = buf.iter();
         assert_slicelike(
             "buffer wraparound",
             &buf,
