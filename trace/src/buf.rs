@@ -13,6 +13,7 @@ pub struct LineBuf {
     line_len: usize,
     start: Wrapping<usize>,
     end: Wrapping<usize>,
+    next: Wrapping<usize>,
 }
 
 /// Configuration for a [`Buf`].
@@ -26,7 +27,7 @@ pub struct BufConfig {
 #[derive(Copy, Clone, Debug)]
 pub struct Iter<'buf> {
     buf: &'buf LineBuf,
-    idx: Wrapping<usize>,
+    idx: Option<Wrapping<usize>>,
     end: Wrapping<usize>,
 }
 
@@ -63,13 +64,14 @@ impl LineBuf {
             line_len,
             start: Wrapping(0),
             end: Wrapping(0),
+            next: Wrapping(0),
         }
     }
 
     pub fn iter(&self) -> Iter<'_> {
         Iter {
-            idx: self.start,
-            end: self.end,
+            idx: Some(self.start),
+            end: self.next,
             buf: self,
         }
     }
@@ -83,10 +85,10 @@ impl LineBuf {
         let end = match range.end_bound() {
             Bound::Excluded(&offset) => self.wrap_offset(offset),
             Bound::Included(&offset) => self.wrap_offset(offset + 1),
-            Bound::Unbounded => self.end,
+            Bound::Unbounded => self.next,
         };
         Iter {
-            idx,
+            idx: Some(idx),
             end,
             buf: self,
         }
@@ -97,17 +99,20 @@ impl LineBuf {
     }
 
     fn advance(&mut self) {
-        self.end += 1;
+        self.next += 1;
     }
 
     fn line_mut(&mut self) -> &mut String {
-        let idx = self.end.0 % self.lines.len();
+        let idx = self.next.0 % self.lines.len();
+        if self.end < self.next {
+            self.end = self.next;
+        }
         let Line { stamp, line } = &mut self.lines[idx];
-        if *stamp != self.end {
-            *stamp = self.end;
+        if *stamp != self.next {
+            *stamp = self.next;
             line.clear();
 
-            if self.end == self.start {
+            if idx == self.start.0 {
                 // we are writing to the current start index, so scootch the
                 // start forward by one.
                 self.start += 1;
@@ -166,12 +171,20 @@ impl<'buf> Iterator for Iter<'buf> {
     type Item = &'buf str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.idx;
-        self.idx += 1;
-        let Line { line, stamp } = self.buf.lines.get(idx.0 % self.buf.lines.len())?;
-        if *stamp == self.end {
+        let idx = self.idx?;
+        if idx == self.end {
             return None;
         }
+        let next = idx + Wrapping(1);
+        self.idx = if next == self.buf.start {
+            None
+        } else {
+            Some(next)
+        };
+        let Line { line, stamp } = self.buf.lines.get(idx.0 % self.buf.lines.len())?;
+        // if *stamp < idx {
+        //     return None;
+        // }
         Some(line.as_str())
     }
 }
@@ -213,14 +226,37 @@ mod tests {
         writeln!(&mut buf, "of").unwrap();
         writeln!(&mut buf, "fun").unwrap();
 
-        dbg!(&buf);
         let mut iter = buf.iter();
-        assert_eq!(test_dbg!(iter.next()), Some("hello"));
-        assert_eq!(test_dbg!(iter.next()), Some("world"));
-        assert_eq!(test_dbg!(iter.next()), Some("have"));
-        assert_eq!(test_dbg!(iter.next()), Some("lots"));
-        assert_eq!(test_dbg!(iter.next()), Some("of"));
-        assert_eq!(test_dbg!(iter.next()), Some("fun"));
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("hello"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("world"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("have"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("lots"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("of"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("fun"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
         assert_eq!(test_dbg!(iter.next()), None);
     }
 
@@ -240,9 +276,9 @@ mod tests {
         dbg!(&buf);
         let mut iter = buf.iter();
         assert_slicelike(
-            "buffer wraparounnd",
+            "buffer wraparound",
             &buf,
-            &["goodbye", "world", "have", "lots", "of", "fun"],
+            &["world", "have", "lots", "of", "fun", "goodbye"],
             ..,
         )
     }
@@ -257,13 +293,41 @@ mod tests {
 
         dbg!(&buf);
         let mut iter = buf.iter();
-        assert_eq!(test_dbg!(iter.next()), Some("this"));
-        assert_eq!(test_dbg!(iter.next()), Some(" is "));
-        assert_eq!(test_dbg!(iter.next()), Some("a ve"));
-        assert_eq!(test_dbg!(iter.next()), Some("ry l"));
-        assert_eq!(test_dbg!(iter.next()), Some("ong "));
-        assert_eq!(test_dbg!(iter.next()), Some("line"));
-        assert_eq!(test_dbg!(iter.next()), None);
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("this"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some(" is "),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("a ve"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("ry l"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("ong "),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            Some("line"),
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
+        assert_eq!(
+            test_dbg!(iter.next()),
+            None,
+            "\n   buf: {buf:?}\n  iter: {iter:?}"
+        );
     }
 
     #[test]
@@ -302,7 +366,7 @@ mod tests {
         writeln!(&mut buf, "fun").unwrap();
         writeln!(&mut buf, "goodbye").unwrap();
 
-        let expected = ["goodbye", "world", "have", "lots", "of", "fun"];
+        let expected = ["world", "have", "lots", "of", "fun", "goodbye"];
         test_range_iters(&buf, &expected);
     }
 
