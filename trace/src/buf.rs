@@ -15,7 +15,7 @@ pub struct LineBuf {
     end: Wrapping<usize>,
 }
 
-/// Configuration for a [`Buf`].
+/// Configuration for a [`LineBuf`].
 #[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
 pub struct BufConfig {
@@ -24,6 +24,7 @@ pub struct BufConfig {
 }
 
 #[derive(Copy, Clone, Debug)]
+#[must_use = "iterators do nothing if not iterated over"]
 pub struct Iter<'buf> {
     buf: &'buf LineBuf,
     idx: Wrapping<usize>,
@@ -50,6 +51,7 @@ macro_rules! test_dbg {
 }
 
 impl LineBuf {
+    #[must_use]
     pub fn new(config: BufConfig) -> Self {
         let line_len = config.line_len;
         Self {
