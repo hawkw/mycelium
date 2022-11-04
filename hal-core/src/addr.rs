@@ -32,7 +32,7 @@ pub trait Address:
             return self;
         }
         let aligned = (u | mask) + 1;
-        Self::from_usize(aligned as usize)
+        Self::from_usize(aligned)
     }
 
     /// Align `self` up to the required alignment for a value of type `T`.
