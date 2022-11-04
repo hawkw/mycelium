@@ -3,6 +3,7 @@
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
+use core::fmt;
 use core::mem::MaybeUninit;
 use core::ptr;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -16,9 +17,6 @@ macro_rules! try_null {
     };
 }
 
-// 1k is enough for anyone
-const HEAP_SIZE: usize = 1024;
-
 pub struct Alloc<const SIZE: usize> {
     heap: Heap<SIZE>,
     free: AtomicUsize,
@@ -28,11 +26,22 @@ pub struct Alloc<const SIZE: usize> {
 struct Heap<const SIZE: usize>(UnsafeCell<MaybeUninit<[u8; SIZE]>>);
 
 impl<const SIZE: usize> Alloc<SIZE> {
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             heap: Heap(UnsafeCell::new(MaybeUninit::uninit())),
             free: AtomicUsize::new(SIZE),
         }
+    }
+
+    #[must_use]
+    pub fn total_size(&self) -> usize {
+        SIZE
+    }
+
+    #[must_use]
+    pub fn allocated_size(&self) -> usize {
+        SIZE - self.free.load(Ordering::Relaxed)
     }
 
     pub fn owns(&self, addr: *mut u8) -> bool {
@@ -89,6 +98,17 @@ unsafe impl<const SIZE: usize> GlobalAlloc for Alloc<SIZE> {
 
 // Safety: access to the bump region is guarded by an atomic.
 unsafe impl<const SIZE: usize> Sync for Alloc<SIZE> {}
+
+impl<const SIZE: usize> fmt::Debug for Alloc<SIZE> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { free, heap: _ } = self;
+        f.debug_struct("bump::Alloc")
+            .field("heap", &format_args!("[u8; {}]", SIZE))
+            .field("free", &free)
+            .field("allocated_size", &self.allocated_size())
+            .finish()
+    }
+}
 
 #[cfg(test)]
 mod test {
