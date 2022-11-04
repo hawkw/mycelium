@@ -1,9 +1,12 @@
-#![no_std]
-#![feature(doc_cfg)]
+#![cfg_attr(not(test), no_std)]
+#![feature(doc_cfg, doc_auto_cfg)]
 
+#[cfg(feature = "embedded-graphics")]
+extern crate alloc;
+#[cfg(feature = "embedded-graphics")]
+pub mod buf;
 pub mod color;
 #[cfg(feature = "embedded-graphics")]
-#[doc(cfg(feature = "embedded-graphics"))]
 pub mod embedded_graphics;
 pub mod writer;
 
