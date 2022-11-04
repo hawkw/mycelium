@@ -148,7 +148,11 @@ impl PinnedDrop for Sleep<'_> {
 
 impl fmt::Debug for Sleep<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { state, entry, timer } = self;
+        let Self {
+            state,
+            entry,
+            timer,
+        } = self;
         f.debug_struct("Sleep")
             .field("duration", &self.duration())
             .field("state", state)
