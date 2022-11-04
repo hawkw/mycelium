@@ -318,15 +318,14 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
         tracing::trace!(?min_order);
         let min_order = min_order.ok_or_else(AllocErr::oom)?;
 
-        let size = match self.size_for(layout) {
-            Some(size) => size,
+        let Some(size) = self.size_for(layout) else {
             // XXX(eliza): is it better to just leak it?
-            None => panic!(
+            panic!(
                 "couldn't determine the correct layout for an allocation \
                 we previously allocated successfully, what the actual fuck!\n \
                 addr={:?}; layout={:?}; min_order={}",
                 paddr, layout, min_order,
-            ),
+            )
         };
 
         // Construct a new free block.

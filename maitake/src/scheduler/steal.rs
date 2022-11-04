@@ -192,10 +192,7 @@ impl<'worker, S: Schedule> Stealer<'worker, S> {
     /// - `true` if a task was successfully stolen.
     /// - `false` if the targeted queue is empty.
     pub fn spawn_one(&self, scheduler: &S) -> bool {
-        let task = match self.queue.dequeue() {
-            Some(task) => task,
-            None => return false,
-        };
+        let Some(task) = self.queue.dequeue() else { return false };
         test_trace!(?task, "stole");
 
         // decrement the target queue's task count

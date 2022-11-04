@@ -61,12 +61,9 @@ impl<'a> TestName<'a> {
 
     #[tracing::instrument(level = "trace")]
     pub fn parse_outcome(line: &'a str) -> Result<Option<(Self, Outcome)>, ParseError> {
-        let line = match line.strip_prefix("MYCELIUM_TEST_") {
-            None => {
-                tracing::trace!("not a test outcome");
-                return Ok(None);
-            }
-            Some(line) => line,
+        let Some(line) = line.strip_prefix("MYCELIUM_TEST_") else {
+            tracing::trace!("not a test outcome");
+            return Ok(None);
         };
         tracing::trace!(?line);
         let (line, result) = if let Some(line) = line.strip_prefix("PASS:") {

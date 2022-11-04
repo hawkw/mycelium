@@ -312,14 +312,11 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     ///
     /// This operation should compute in *O*(1) time and *O*(1) memory.
     pub fn append(&mut self, other: &mut Self) {
-        let tail = match self.tail {
+        let Some(tail) = self.tail else {
             // if this list is empty, simply replace it with `other`
-            None => {
-                debug_assert!(self.is_empty());
-                mem::swap(self, other);
-                return;
-            }
-            Some(tail) => tail,
+            debug_assert!(self.is_empty());
+            mem::swap(self, other);
+            return;
         };
 
         // if `other` is empty, do nothing.
@@ -450,19 +447,16 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Asserts as many of the linked list's invariants as possible.
     #[track_caller]
     pub(crate) fn assert_valid_named(&self, name: &str) {
-        let head = match self.head {
-            Some(head) => head,
-            None => {
-                assert!(
-                    self.tail.is_none(),
-                    "{name}if the linked list's head is null, the tail must also be null"
-                );
-                assert_eq!(
-                    self.len, 0,
-                    "{name}if a linked list's head is null, its length must be 0"
-                );
-                return;
-            }
+        let Some(head) = self.head else {
+            assert!(
+                self.tail.is_none(),
+                "{name}if the linked list's head is null, the tail must also be null"
+            );
+            assert_eq!(
+                self.len, 0,
+                "{name}if a linked list's head is null, its length must be 0"
+            );
+            return;
         };
 
         assert_ne!(
@@ -928,9 +922,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
     #[inline]
     unsafe fn split_after_node(&mut self, split_node: Link<T>, idx: usize) -> Self {
-        let split_node = match split_node {
-            Some(node) => node,
-            None => return mem::replace(self, Self::new()),
+        let Some(split_node) = split_node else {
+            return mem::replace(self, Self::new());
         };
 
         // the head of the new list is the split node's `next` node (which is
