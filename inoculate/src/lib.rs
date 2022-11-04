@@ -200,9 +200,9 @@ impl Options {
         let mut cmd = self.cargo_cmd("builder");
         cmd.current_dir(run_dir)
             .arg("--kernel-manifest")
-            .arg(&paths.kernel_manifest())
+            .arg(paths.kernel_manifest())
             .arg("--kernel-binary")
-            .arg(&paths.kernel_bin())
+            .arg(paths.kernel_bin())
             .arg("--out-dir")
             .arg(out_dir)
             .arg("--target-dir")

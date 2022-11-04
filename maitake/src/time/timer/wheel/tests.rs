@@ -12,7 +12,7 @@ fn wheel_indices() {
         )
     }
 
-    for wheel in 1..Core::WHEELS as usize {
+    for wheel in 1..Core::WHEELS {
         for slot in wheel..Wheel::SLOTS {
             let ticks = (slot * usize::pow(Wheel::SLOTS, wheel as u32)) as u64;
             assert_eq!(
@@ -60,10 +60,7 @@ fn slot_indices() {
         for i in level..Wheel::SLOTS {
             let ticks = i * usize::pow(Wheel::SLOTS, level as u32);
             let slot_index = wheel.slot_index(ticks as u64);
-            assert_eq!(
-                i as usize, slot_index,
-                "wheels[{level}].slot_index({ticks}) == {i}"
-            )
+            assert_eq!(i, slot_index, "wheels[{level}].slot_index({ticks}) == {i}")
         }
     }
 }

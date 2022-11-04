@@ -305,7 +305,7 @@ mod tests {
         // Z: this bit is 0 for a 64-bit IDT. for a 32-bit IDT, this may be 1 for task gates.
         // Gate Type: 32-bit interrupt gate is 0b1110. that's just how it is.
         assert_eq!(
-            present_32bit_interrupt.0 as u8, 0b1000_1110,
+            present_32bit_interrupt.0, 0b1000_1110,
             "\n attrs: {:#?}",
             present_32bit_interrupt
         );
