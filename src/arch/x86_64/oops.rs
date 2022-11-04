@@ -162,60 +162,29 @@ pub fn oops(oops: Oops<'_>) -> ! {
 
     // we were in the allocator, so dump the allocator's free list
     if oops.involves_allocator() {
-        use mycelium_util::math::Logarithm;
-        let crate::allocator::State {
-            allocating,
-            deallocating,
-            heap_size,
-            min_size,
-            allocated,
-        } = oops.alloc;
+        let alloc_state = oops.alloc;
 
         let mut writer = mk_writer.make_writer();
-        if allocating > 0 {
+        if alloc_state.allocating > 0 {
             writeln!(
                 &mut writer,
-                "...while allocating ({allocating} allocations in progress)!"
+                "...while allocating ({} allocations in progress)!",
+                alloc_state.allocating,
             )
             .unwrap();
         }
 
-        if deallocating > 0 {
+        if alloc_state.deallocating > 0 {
             writeln!(
                 &mut writer,
-                "...while deallocating ({deallocating} deallocations in progress)!"
+                "...while deallocating ({} deallocations in progress)!",
+                alloc_state.deallocating
             )
             .unwrap();
         }
 
         writer.write_char('\n').unwrap();
-        let digits = (heap_size).checked_ilog(10).unwrap_or(0) + 1;
-        writeln!(&mut writer, "heap stats:").unwrap();
-        writeln!(
-            &mut writer,
-            "  {heap_size:>digits$} B total",
-            digits = digits
-        )
-        .unwrap();
-        writeln!(
-            &mut writer,
-            "  {allocated:>digits$} B busy",
-            digits = digits
-        )
-        .unwrap();
-        writeln!(
-            &mut writer,
-            "  {:>digits$} B free",
-            heap_size - allocated,
-            digits = digits
-        )
-        .unwrap();
-        writeln!(
-            &mut writer,
-            "  {min_size:>digits$} B minimum allocation",
-            digits = digits
-        )
-        .unwrap();
+        writeln!(&mut writer, "{alloc_state}").unwrap();
 
         crate::ALLOC.dump_free_lists();
     }
