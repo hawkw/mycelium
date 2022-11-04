@@ -36,7 +36,7 @@ struct Wheel {
     /// A bitmask for masking out all lower wheels' indices from a `now` timestamp.
     wheel_mask: u64,
 
-    slots: [List<sleep::Entry>; Self::SLOTS],
+    slots: SlotArray,
 }
 
 #[derive(Debug)]
@@ -46,6 +46,17 @@ struct Deadline {
     wheel: usize,
 }
 
+/// In loom mode, the slot arrays are apparently a bit too big to pass around
+/// (since loom's `UnsafeCell`s and atomics are larger than "real" ones), and we
+/// apparently segfault when trying to construct a timer wheel. Therefore, it's
+/// necessary to box the slot arrau when running under loom in order to reduce
+/// the stack size of the timer wheel.
+#[cfg(loom)]
+type SlotArray = alloc::boxed::Box<[List<sleep::Entry>; Wheel::SLOTS]>;
+
+#[cfg(not(loom))]
+type SlotArray = [List<sleep::Entry>; Wheel::SLOTS];
+
 // === impl Core ===
 
 impl Core {
@@ -53,33 +64,34 @@ impl Core {
 
     pub(super) const MAX_SLEEP_TICKS: u64 = (1 << (Wheel::BITS * Self::WHEELS)) - 1;
 
-    pub(super) const fn new() -> Self {
-        // Initialize the wheels.
-        // XXX(eliza): we would have to do this extremely gross thing if we
-        // wanted to support a variable number of wheels, because const fn...
-        /*
-        // Used as an initializer when constructing a new `Core`.
-        const NEW_WHEEL: Wheel = Wheel::empty();
+    loom_const_fn! {
+        pub(super) fn new() -> Self {
+            // Initialize the wheels.
+            // XXX(eliza): we would have to do this extremely gross thing if we
+            // wanted to support a variable number of wheels, because const fn...
+            /*
+            // Used as an initializer when constructing a new `Core`.
+            const NEW_WHEEL: Wheel = Wheel::empty();
 
-        let mut wheels = [NEW_WHEEL; Self::WHEELS];n
-        let mut level = 0;
-        while level < Self::WHEELS {
-            wheels[level].level = level;
-            wheels[level].ticks_per_slot = wheel::ticks_per_slot(level);
-            level += 1;
-        }
-        */
-
-        Self {
-            now: 0,
-            wheels: [
-                Wheel::new(0),
-                Wheel::new(1),
-                Wheel::new(2),
-                Wheel::new(3),
-                Wheel::new(4),
-                Wheel::new(5),
-            ],
+            let mut wheels = [NEW_WHEEL; Self::WHEELS];n
+            let mut level = 0;
+            while level < Self::WHEELS {
+                wheels[level].level = level;
+                wheels[level].ticks_per_slot = wheel::ticks_per_slot(level);
+                level += 1;
+            }
+            */
+            Self {
+                now: 0,
+                wheels: [
+                    Wheel::new(0),
+                    Wheel::new(1),
+                    Wheel::new(2),
+                    Wheel::new(3),
+                    Wheel::new(4),
+                    Wheel::new(5),
+                ],
+            }
         }
     }
 
@@ -249,29 +261,34 @@ impl Wheel {
     /// slots are occupied.
     const SLOTS: usize = 64;
     const BITS: usize = Self::SLOTS.trailing_zeros() as usize;
-    const fn new(level: usize) -> Self {
-        // linked list const initializer
-        const NEW_LIST: List<sleep::Entry> = List::new();
+    loom_const_fn! {
+        fn new(level: usize) -> Self {
+            // linked list const initializer
+            const NEW_LIST: List<sleep::Entry> = List::new();
 
-        // how many ticks does a single slot represent in a wheel of this level?
-        let ticks_per_slot = Self::SLOTS.pow(level as u32) as Ticks;
-        let ticks_per_wheel = ticks_per_slot * Self::SLOTS as u64;
+            // how many ticks does a single slot represent in a wheel of this level?
+            let ticks_per_slot = Self::SLOTS.pow(level as u32) as Ticks;
+            let ticks_per_wheel = ticks_per_slot * Self::SLOTS as u64;
 
-        debug_assert!(ticks_per_slot.is_power_of_two());
-        debug_assert!(ticks_per_wheel.is_power_of_two());
+            debug_assert!(ticks_per_slot.is_power_of_two());
+            debug_assert!(ticks_per_wheel.is_power_of_two());
 
-        // because `ticks_per_wheel` is a power of two, we can calculate a
-        // bitmask for masking out the indices in all lower wheels from a `now`
-        // timestamp.
-        let wheel_mask = !(ticks_per_wheel - 1);
+            // because `ticks_per_wheel` is a power of two, we can calculate a
+            // bitmask for masking out the indices in all lower wheels from a `now`
+            // timestamp.
+            let wheel_mask = !(ticks_per_wheel - 1);
+            let slots = [NEW_LIST; Self::SLOTS];
+            #[cfg(loom)]
+            let slots = alloc::boxed::Box::new(slots);
 
-        Self {
-            level,
-            ticks_per_slot,
-            ticks_per_wheel,
-            wheel_mask,
-            occupied_slots: 0,
-            slots: [NEW_LIST; Self::SLOTS],
+            Self {
+                level,
+                ticks_per_slot,
+                ticks_per_wheel,
+                wheel_mask,
+                occupied_slots: 0,
+                slots,
+            }
         }
     }
 
@@ -444,7 +461,7 @@ impl fmt::Debug for Wheel {
             .field("ticks_per_wheel", ticks_per_wheel)
             .field("wheel_mask", &fmt::bin(wheel_mask))
             .field("occupied_slots", &fmt::bin(occupied_slots))
-            .field("slots", &format_args!("[...]"))
+            .field("slots", &format_args!("[Slot; {}]", Self::SLOTS))
             .finish()
     }
 }
