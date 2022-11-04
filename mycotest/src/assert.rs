@@ -143,10 +143,12 @@ macro_rules! assert_binop {
 
 impl core::fmt::Debug for Failed {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let Self { expr, file, line, col } = self;
-        write!(
-            f,
-            "assertion failed: `{expr}`, {file}:{line}:{col}",
-        )
+        let Self {
+            expr,
+            file,
+            line,
+            col,
+        } = self;
+        write!(f, "assertion failed: `{expr}`, {file}:{line}:{col}",)
     }
 }
