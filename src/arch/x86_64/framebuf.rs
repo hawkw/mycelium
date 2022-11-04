@@ -54,11 +54,10 @@ pub(super) fn init(bootinfo: &mut BootInfo) -> bool {
     }
 
     // Okay, try to initialize the framebuffer
-    let framebuffer = match mem::replace(&mut bootinfo.framebuffer, Optional::None) {
-        Optional::Some(framebuffer) => framebuffer,
+    let Optional::Some(framebuffer) = mem::replace(&mut bootinfo.framebuffer, Optional::None) else {
         // The boot info does not contain a framebuffer configuration. Nothing
         // for us to do!
-        Optional::None => return false,
+        return false;
     };
 
     let info = framebuffer.info();
