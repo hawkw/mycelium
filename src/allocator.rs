@@ -102,6 +102,15 @@ unsafe impl GlobalAlloc for Allocator {
         self.deallocating.fetch_add(1, Ordering::Release);
         if !self.bump.owns(ptr) {
             GlobalAlloc::dealloc(&self.allocator, ptr, layout);
+        } else {
+            // TODO(eliza): should this be a debug assertion?
+            tracing::warn!(
+                ?ptr,
+                ?layout,
+                "an allocation in the bump region was deallocated! this is not \
+                great: the bump region should not be used for short-lived \
+                allocations"
+            );
         }
         self.deallocating.fetch_sub(1, Ordering::Release);
     }
