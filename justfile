@@ -26,6 +26,9 @@ _fmt := if env_var_or_default("GITHUB_ACTIONS", "") != "true" { "" } else {
     ```
 }
 
+# arguments to pass to all RustDoc invocations
+_rustdoc := _cargo + " doc --no-deps --all-features --document-private-items"
+
 # default recipe to display help information
 default:
     @echo "justfile for Mycelium"
@@ -81,14 +84,13 @@ check-docs crate='': (build-docs crate '--cfg docsrs -Dwarnings') (test-docs cra
 
 # open RustDoc documentation for `crate` (or for the whole workspace).
 docs crate='' $RUSTDOCFLAGS='--cfg docsrs': (build-docs crate RUSTDOCFLAGS)
-    {{ _cargo }} doc \
+    {{ _rustdoc }} \
         {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
-        --no-deps --all-features \
         --open
 
 # build RustDoc documentation for the workspace.
 build-docs crate='' $RUSTDOCFLAGS='--cfg docsrs':
-    {{ _cargo }} doc --no-deps --all-features --document-private-items \
+    {{ _rustdoc }} \
         {{ if crate == '' { '--workspace' } else { '--package' } }} {{ crate }} \
         {{ _fmt }}
 
