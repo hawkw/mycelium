@@ -98,6 +98,16 @@ impl Msr {
             ..Self::new(0x1b)
         }
     }
+
+    /// Returns a `Msr` for reading and writing to the `IA32_GS_BASE`
+    /// model-specific register.
+    #[must_use]
+    pub fn ia32_gs_base() -> Self {
+        Self {
+            name: Some("IA32_GS_BASE"),
+            ..Self::new(0xc000_0101)
+        }
+    }
 }
 
 impl<V: FromBits<u64>> Msr<V> {

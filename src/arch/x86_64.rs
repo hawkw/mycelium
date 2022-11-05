@@ -1,4 +1,5 @@
-use hal_core::boot::BootInfo;
+use alloc::boxed::Box;
+use hal_core::{boot::BootInfo, cpu::LocalData};
 use hal_x86_64::{cpu, vga};
 pub use hal_x86_64::{
     cpu::{entropy::seed_rng, wait_for_interrupt},
@@ -49,6 +50,14 @@ pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
 
 pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
+
+    // init boot processor's core-local data
+    let localdata = Box::pin(cpu::GsLocalData::new("hello world im the boot processor"));
+    unsafe {
+        // safety: doing this twice will clobber the previous local data;
+        localdata.install();
+    }
+    tracing::info!(localdata = ?cpu::GsLocalData::<&'static str>::get(), "set up the boot processor's local data");
 
     if let Some(rsdp) = archinfo.rsdp_addr {
         let acpi = acpi::acpi_tables(rsdp);
