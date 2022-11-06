@@ -22,7 +22,7 @@ pub struct GsLocalData {
     ///
     // TODO(eliza): consider storing this in some kind of heap allocated tree
     // so that it's growable?
-    userdata: [AtomicPtr<()>; MAX_LOCAL_KEYS],
+    userdata: [AtomicPtr<()>; Self::MAX_LOCAL_KEYS],
 }
 
 pub struct LocalKey<T> {
@@ -30,11 +30,11 @@ pub struct LocalKey<T> {
     initializer: fn() -> T,
 }
 
-pub const MAX_LOCAL_KEYS: usize = 64;
-
 impl GsLocalData {
     // coffee is magic
     const MAGIC: usize = 0xC0FFEE;
+    pub const MAX_LOCAL_KEYS: usize = 64;
+
     const fn new() -> Self {
         #[allow(clippy::declare_interior_mutable_const)] // array initializer
         const LOCAL_SLOT_INIT: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
@@ -42,13 +42,15 @@ impl GsLocalData {
             _self: ptr::null(),
             _must_pin: PhantomPinned,
             magic: Self::MAGIC,
-            userdata: [LOCAL_SLOT_INIT; MAX_LOCAL_KEYS],
+            userdata: [LOCAL_SLOT_INIT; Self::MAX_LOCAL_KEYS],
         }
     }
 
+    /// Returns this CPU core's local data, or `None` if local data has not yet
+    /// been initialized.
     #[must_use]
     pub fn try_current() -> Option<Pin<&'static Self>> {
-        if !Self::has_magic() {
+        if !Self::has_local_data() {
             return None;
         }
         unsafe {
@@ -63,6 +65,12 @@ impl GsLocalData {
         }
     }
 
+    /// Returns this CPU core's local data.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if `GsLocalData::init()` has not yet been called
+    /// *on this CPU core*.
     #[track_caller]
     #[must_use]
     pub fn current() -> Pin<&'static Self> {
@@ -70,13 +78,14 @@ impl GsLocalData {
             .expect("GsLocalData::current() called before local data was initialized on this core!")
     }
 
+    /// Access a local key on this CPU core's local data.
     pub fn with<T, U>(&self, key: &LocalKey<T>, f: impl FnOnce(&T) -> U) -> U {
         let idx = *key.idx.get();
         let slot = match self.userdata.get(idx) {
             Some(slot) => slot,
             None => panic!(
-                "local key had an index greater than MAX_LOCAL_KEYS: index = {idx}, max = {}",
-                MAX_LOCAL_KEYS
+                "local key had an index greater than GsLocalData::MAX_LOCAL_KEYS: index = {idx}, max = {}",
+                Self::MAX_LOCAL_KEYS
             ),
         };
 
@@ -98,9 +107,16 @@ impl GsLocalData {
     /// # Safety
     ///
     /// This should only be called a single time per CPU core.
-    pub unsafe fn init() {
-        tracing::trace!("initializing local data");
+    #[track_caller]
+    pub fn init() {
+        if Self::has_local_data() {
+            tracing::warn!("this CPU core already has local data initialized!");
+            debug_assert!(false, "this CPU core already has local data initialized!");
+            return;
+        }
+
         let ptr = Box::into_raw(Box::new(Self::new()));
+        tracing::trace!(?ptr, "initializing local data");
         unsafe {
             // set up self reference
             (*ptr)._self = ptr as *const _;
@@ -108,10 +124,17 @@ impl GsLocalData {
         }
     }
 
-    fn has_magic() -> bool {
+    /// Returns `true` if the current CPU core has local data initialized.
+    fn has_local_data() -> bool {
+        // is the MSR null?
+        if Msr::ia32_gs_base().read() == 0 {
+            return false;
+        }
+
+        // okay, check for magic at `gs:0x8`
         let word: usize;
         unsafe {
-            asm!("mov {}, gs:8", out(reg) word);
+            asm!("mov {}, gs:0x8", out(reg) word);
         }
         word == Self::MAGIC
     }
@@ -119,18 +142,29 @@ impl GsLocalData {
 
 impl<T: 'static> LocalKey<T> {
     #[must_use]
+    #[track_caller]
     pub const fn new(initializer: fn() -> T) -> Self {
         Self {
-            idx: Lazy::new(|| {
-                static NEXT_INDEX: AtomicUsize = AtomicUsize::new(0);
-                NEXT_INDEX.fetch_add(1, Ordering::Relaxed)
-            }),
+            idx: Lazy::new(Self::next_index),
             initializer,
         }
     }
 
+    #[track_caller]
     pub fn with<U>(&self, f: impl FnOnce(&T) -> U) -> U {
         GsLocalData::current().with(self, f)
+    }
+
+    #[track_caller]
+    fn next_index() -> usize {
+        static NEXT_INDEX: AtomicUsize = AtomicUsize::new(0);
+        let idx = NEXT_INDEX.fetch_add(1, Ordering::Relaxed);
+        assert!(
+            idx < GsLocalData::MAX_LOCAL_KEYS,
+            "maximum number of local keys ({}) exceeded",
+            GsLocalData::MAX_LOCAL_KEYS
+        );
+        idx
     }
 }
 
