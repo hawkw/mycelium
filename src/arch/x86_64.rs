@@ -1,7 +1,12 @@
+use alloc::boxed::Box;
+use core::cell::RefCell;
 use hal_core::boot::BootInfo;
-use hal_x86_64::{cpu, vga};
+use hal_x86_64::{
+    cpu::{self, local::GsLocalData},
+    vga,
+};
 pub use hal_x86_64::{
-    cpu::{entropy::seed_rng, wait_for_interrupt},
+    cpu::{entropy::seed_rng, local::LocalKey, wait_for_interrupt},
     mm, NAME,
 };
 
@@ -49,6 +54,12 @@ pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
 
 pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
+
+    // init boot processor's core-local data
+    unsafe {
+        GsLocalData::init();
+    }
+    tracing::info!("set up the boot processor's local data");
 
     if let Some(rsdp) = archinfo.rsdp_addr {
         let acpi = acpi::acpi_tables(rsdp);

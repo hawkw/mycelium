@@ -3,6 +3,7 @@ use mycelium_util::bits;
 
 pub mod entropy;
 pub mod intrinsics;
+pub mod local;
 mod msr;
 pub use self::msr::Msr;
 
