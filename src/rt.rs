@@ -1,5 +1,6 @@
 use crate::arch;
 use core::{
+    cell::Cell,
     cmp,
     future::Future,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
@@ -72,8 +73,18 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    RUNTIME.injector.spawn(future)
+    SCHEDULER.with(|scheduler| {
+        if let Some(scheduler) = scheduler.get() {
+            scheduler.spawn(future)
+        } else {
+            // no scheduler is running on this core.
+            RUNTIME.injector.spawn(future)
+        }
+    })
 }
+
+static SCHEDULER: arch::LocalKey<Cell<Option<&'static StaticScheduler>>> =
+    arch::LocalKey::new(|| Cell::new(None));
 
 impl Core {
     #[must_use]
@@ -141,6 +152,13 @@ impl Core {
 
     /// Run this core until [`Core::stop`] is called.
     pub fn run(&mut self) {
+        struct CoreGuard;
+        impl Drop for CoreGuard {
+            fn drop(&mut self) {
+                SCHEDULER.with(|scheduler| scheduler.set(None));
+            }
+        }
+
         let _span = tracing::info_span!("core", id = self.id).entered();
         if self
             .running
@@ -150,6 +168,9 @@ impl Core {
             tracing::error!("this core is already running!");
             return;
         }
+
+        SCHEDULER.with(|scheduler| scheduler.set(Some(self.scheduler)));
+        let _unset = CoreGuard;
 
         tracing::info!("started kernel main loop");
 
@@ -227,7 +248,7 @@ impl Default for Core {
     }
 }
 
-// === impl Schedulers ===
+// === impl Runtime ===
 
 impl Runtime {
     fn active_cores(&self) -> usize {
