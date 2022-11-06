@@ -6,7 +6,6 @@ mod addr;
 extern crate alloc;
 
 pub mod boot;
-pub mod cpu;
 pub mod framebuffer;
 pub mod interrupt;
 pub mod mem;
