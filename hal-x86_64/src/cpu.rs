@@ -3,9 +3,8 @@ use mycelium_util::bits;
 
 pub mod entropy;
 pub mod intrinsics;
-mod local_data;
+pub mod local;
 mod msr;
-pub use self::local_data::GsLocalData;
 pub use self::msr::Msr;
 
 #[repr(transparent)]

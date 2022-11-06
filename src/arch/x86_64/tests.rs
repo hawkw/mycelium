@@ -143,3 +143,33 @@ mycotest::decl_test! {
         Ok(())
     }
 }
+
+mycotest::decl_test! {
+    fn gs_local_data() -> mycotest::TestResult {
+        use super::LocalKey;
+        use core::cell::RefCell;
+
+        const INIT: &str = "did it work?";
+        const NEXT: &str = "it worked!";
+
+        pub static TEST_LOCAL_DATA: LocalKey<RefCell<&'static str>> = LocalKey::new(|| RefCell::new(INIT));
+
+        TEST_LOCAL_DATA.with(|data| {
+            let mut data = data.borrow_mut();
+            tracing::info!("test local data: {data}");
+            mycotest::assert_eq!(*data, INIT);
+            *data = NEXT;
+
+            Ok(())
+        })?;
+
+        TEST_LOCAL_DATA.with(|data| {
+            let data = data.borrow();
+            tracing::info!("test local data: {data}");
+            mycotest::assert_eq!(*data, NEXT);
+
+            Ok(())
+        })?;
+        Ok(())
+    }
+}
