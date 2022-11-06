@@ -3,6 +3,8 @@
 #![feature(doc_cfg)]
 mod addr;
 
+extern crate alloc;
+
 pub mod boot;
 pub mod framebuffer;
 pub mod interrupt;

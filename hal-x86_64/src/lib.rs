@@ -15,6 +15,7 @@
 #![allow(clippy::cognitive_complexity)]
 
 pub(crate) use hal_core::{PAddr, VAddr};
+extern crate alloc;
 
 pub mod control_regs;
 pub mod cpu;
