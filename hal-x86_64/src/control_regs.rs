@@ -235,3 +235,18 @@ impl Cr4 {
         Self::write(f(curr));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cr4_valid() {
+        Cr4::assert_valid();
+    }
+
+    #[test]
+    fn cr0_valid() {
+        Cr0::assert_valid();
+    }
+}
