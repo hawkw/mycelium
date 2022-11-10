@@ -513,6 +513,11 @@ impl SystemDescriptor {
     const BASE_HIGH: bits::Pack64 = bits::Pack64::least_significant(32);
     const BASE_HIGH_PAIR: Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
 
+    #[cfg(feature = "alloc")]
+    pub fn boxed_tss(tss: alloc::boxed::Box<task::StateSegment>) -> Self {
+        Self::tss(alloc::boxed::Box::leak(tss))
+    }
+
     pub fn tss(tss: &'static task::StateSegment) -> Self {
         let tss_addr = tss as *const _ as u64;
         tracing::trace!(tss_addr = fmt::hex(tss_addr), "making TSS descriptor...");
