@@ -1,6 +1,9 @@
 #![warn(missing_docs)]
 use core::{arch::asm, marker::PhantomData};
-use mycelium_util::{bits::FromBits, fmt};
+use mycelium_util::{
+    bits::{bitfield, FromBits},
+    fmt,
+};
 use raw_cpuid::CpuId;
 
 /// An x86_64 [Model-Specific Register][msr] (MSR).
@@ -33,9 +36,42 @@ use raw_cpuid::CpuId;
 /// [sandpile]: https://sandpile.org/x86/msr.htm
 /// [msr]: https://wiki.osdev.org/MSR
 pub struct Msr<V = u64> {
-    num: u32,
+    pub(crate) num: u32,
     name: Option<&'static str>,
     _ty: PhantomData<fn(V)>,
+}
+
+bitfield! {
+    /// Bit flags for the Extended Feature Enable Register (EFER) [`Msr`].
+    ///
+    /// This MSR was added by AMD in the K6 processor, and became part of the
+    /// architecture in AMD64. It controls features related to entering long mode.
+    pub struct Efer<u64> {
+        /// System Call Extensions (SCE).
+        ///
+        /// This enables the `SYSCALL` and `SYSRET` instructions.
+        pub const SYSTEM_CALL_EXTENSIONS: bool;
+        const _RESERVED_0 = 7;
+        /// Long Mode Enable (LME).
+        ///
+        /// Setting this bit enables long mode.
+        pub const LONG_MODE_ENABLE: bool;
+        const _RESERVED_1 = 1;
+        /// Long Mode Active (LMA).
+        ///
+        /// This bit is set if the processor is in long mode.
+        pub const LONG_MODE_ACTIVE: bool;
+        /// No-Execute Enable (NXE).
+        pub const NO_EXECUTE_ENABLE: bool;
+        /// Secure Virtual Machine Enable (SVME).
+        pub const SECURE_VM_ENABLE: bool;
+        /// Long Mode Segment Limit Enable (LMSLE).
+        pub const LONG_MODE_SEGMENT_LIMIT_ENABLE: bool;
+        /// Fast `FXSAVE`/`FXRSTOR` (FFXSR).
+        pub const FAST_FXSAVE_FXRSTOR: bool;
+        /// Translation Cache Extension (TCE).
+        pub const TRANSLATION_CACHE_EXTENSION: bool;
+    }
 }
 
 impl Msr {
@@ -92,20 +128,36 @@ impl Msr {
     /// This register stores the base address of the local APIC memory-mapped
     /// configuration area.
     #[must_use]
-    pub fn ia32_apic_base() -> Self {
+    pub const fn ia32_apic_base() -> Self {
         Self {
             name: Some("IA32_APIC_BASE"),
-            ..Self::new(0x1b)
+            num: 0x1b,
+            _ty: PhantomData,
         }
     }
 
     /// Returns a `Msr` for reading and writing to the `IA32_GS_BASE`
     /// model-specific register.
     #[must_use]
-    pub fn ia32_gs_base() -> Self {
+    pub const fn ia32_gs_base() -> Self {
         Self {
             name: Some("IA32_GS_BASE"),
-            ..Self::new(0xc000_0101)
+            num: 0xc000_0101,
+            _ty: PhantomData,
+        }
+    }
+
+    /// Returns a `Msr` for reading and writing to the `IA32_EFER`
+    /// model-specific register.
+    ///
+    /// Flags for the `IA32_EFER` MSR are represented by the [`Efer`]
+    /// type.
+    #[must_use]
+    pub const fn ia32_efer() -> Msr<Efer> {
+        Msr {
+            name: Some("IA32_EFER"),
+            num: 0xc0000080,
+            _ty: PhantomData,
         }
     }
 }
@@ -243,5 +295,30 @@ impl<V> fmt::Display for Msr<V> {
             Some(name) => write!(f, "MSR {num:#x} ({name})"),
             None => write!(f, "MSR {num:#x})"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn efer_valid() {
+        Efer::assert_valid();
+        println!("{}", Efer::new())
+    }
+
+    #[test]
+    fn efer_bitoffsets() {
+        assert_eq!(
+            Efer::LONG_MODE_ENABLE.least_significant_index(),
+            8,
+            "LONG_MODE_ENABLE LSB",
+        );
+        assert_eq!(
+            Efer::TRANSLATION_CACHE_EXTENSION.least_significant_index(),
+            15,
+            "TCE LSB"
+        );
     }
 }
