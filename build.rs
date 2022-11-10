@@ -7,6 +7,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build our helloworld.wast into binary.
     let binary = wat::parse_file("src/helloworld.wast")?;
-    fs::write(out_dir.join("helloworld.wasm"), binary)?;
+    fs::write(out_dir.join("helloworld.wasm"), &binary)?;
+
+    println!("cargo:rerun-if-changed=src/helloworld.wast");
+    println!("cargo:rerun-if-changed=x86_64-mycelium.json");
     Ok(())
 }
