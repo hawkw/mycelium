@@ -5,7 +5,7 @@ pub mod entropy;
 pub mod intrinsics;
 #[cfg(feature = "alloc")]
 pub mod local;
-mod msr;
+pub mod msr;
 pub use self::msr::Msr;
 
 #[repr(transparent)]
