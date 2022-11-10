@@ -6,7 +6,9 @@ edition = "2018"
 license = "MIT"
 
 [features]
+default = ["alloc"]
 log = ["tracing/log"]
+alloc = []
 
 [dependencies]
 acpi = "4.1.1"
