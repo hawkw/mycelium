@@ -48,10 +48,10 @@ pub trait Logarithm: Sized {
 
     /// Returns the integer logarithm base `base` of `self`, or `None` if it is
     /// not possible  to take the log base `base` of `self`.
-    fn checked_ilog(self, base: Self) -> Option<Self>;
+    fn checked_log(self, base: Self) -> Option<Self>;
 
     /// Returns the integer logarithm base `base` of `self`.
-    fn ilog(self, base: Self) -> Self;
+    fn log(self, base: Self) -> Self;
 }
 
 impl Logarithm for usize {
@@ -72,15 +72,15 @@ impl Logarithm for usize {
     #[inline(always)]
     #[must_use = "this returns the result of the operation, \
                     without modifying the original"]
-    fn checked_ilog(self, base: usize) -> Option<Self> {
+    fn checked_log(self, base: usize) -> Option<Self> {
         usize_const_checked_log(self, base)
     }
 
     #[inline(always)]
     #[must_use = "this returns the result of the operation, \
                     without modifying the original"]
-    fn ilog(self, base: usize) -> Self {
-        match self.checked_ilog(base) {
+    fn log(self, base: usize) -> Self {
+        match self.checked_log(base) {
             Some(log) => log,
             None => panic!("cannot take log base {} of {}", base, self),
         }
