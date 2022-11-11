@@ -125,6 +125,15 @@ pub struct Gdt<const SIZE: usize = 8> {
     push_at: usize,
 }
 
+#[derive(Clone)]
+#[repr(C)]
+pub struct LongModeGdt {
+    null_descriptor: Descriptor,
+    kernel_code: Descriptor,
+    kernel_data: Descriptor,
+    tss_descrs: [SystemDescriptor; crate::cpu::topology::MAX_CPUS],
+}
+
 /// A 64-bit mode descriptor for a system segment (such as an LDT or TSS
 /// descriptor).
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -479,6 +488,20 @@ impl Descriptor {
         Self(Self::DEFAULT_BITS | Self::DATA_FLAGS)
     }
 
+    // TODO(eliza): construct this more nicely
+    pub(crate) const fn data_flat_16() -> Self {
+        Self(
+            Packing64::new(0)
+                .set_all(&Self::LIMIT_LOW)
+                .set_all(&Self::READABLE)
+                .set_all(&Self::IS_USER_SEGMENT)
+                .set_all(&Self::IS_PRESENT)
+                .set_all(&Self::LIMIT_HIGH)
+                .set_all(&Self::GRANULARITY)
+                .bits(),
+        )
+    }
+
     pub fn ring(&self) -> cpu::Ring {
         cpu::Ring::from_u8(self.ring_bits())
     }
@@ -676,6 +699,14 @@ mod tests {
         dbg!(Descriptor::BASE_LOW_PAIR);
         dbg!(Descriptor::BASE_MID_PAIR);
         dbg!(SystemDescriptor::BASE_HIGH_PAIR);
+    }
+
+    #[test]
+    fn data_flat_16() {
+        assert_eq!(
+            Descriptor::data_flat_16(),
+            Descriptor::from_bits(0x008F_9200_0000_FFFF)
+        )
     }
 
     proptest! {

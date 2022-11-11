@@ -6,6 +6,8 @@ pub mod intrinsics;
 #[cfg(feature = "alloc")]
 pub mod local;
 pub mod msr;
+pub mod smp;
+pub mod topology;
 pub use self::msr::Msr;
 
 #[repr(transparent)]
