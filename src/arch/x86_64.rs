@@ -61,12 +61,6 @@ pub fn arch_entry(info: &'static mut bootloader_api::BootInfo) -> ! {
 pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
-    // init boot processor's core-local data
-    unsafe {
-        GsLocalData::init();
-    }
-    tracing::info!("set up the boot processor's local data");
-
     if let Some(rsdp) = archinfo.rsdp_addr {
         let acpi = acpi::acpi_tables(rsdp);
         let platform_info = acpi.and_then(|acpi| acpi.platform_info());
