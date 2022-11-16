@@ -1,3 +1,17 @@
+//! x86_64 [Model-Specific Register][msr] (MSR)s.
+//!
+//! Model-specific registers are used to configure features of the CPU that may
+//! not be available on all x86 processors, such as memory type-range,
+//! sysenter/sysexit, local APIC, et cetera.
+//!
+//! This module contains the [`Msr`] type for accessing model-specific
+//! registers. In addition, since most MSRs contain bitflags, this module also
+//! contains bitflags types defining the flags that can be set in a particular
+//! MSR.
+//!
+//! See the documentation for the [`Msr`] type for details on using MSRs.
+//!
+//! [msr]: https://wiki.osdev.org/MSR
 #![warn(missing_docs)]
 use core::{arch::asm, marker::PhantomData};
 use mycelium_util::{
@@ -27,14 +41,32 @@ use raw_cpuid::CpuId;
 /// reading/writing to the MSR.
 ///
 /// When a typed representation of a MSR's value is available, a special
-/// constructor is provided for accessing that MSR in a typed manner. Currently,
-/// the following typed MSR constructors are abailable:
+/// constructor is provided for accessing that MSR in a typed manner.
 ///
-/// - [`Msr::ia32_apic_base`] for accessing the `IA32_APIC_BASE` MSR, which
-///   stores the base address of the local APIC's memory-mapped configuration area.
+/// # MSR Constructors
+///
+/// This type provides a number of constructors which construct a [`Msr`] for
+/// accessing a specific model-specific register by name. The following
+/// constructors are currently provided:
+///
+/// - [`Msr::ia32_apic_base`] for accessing the [`IA32_APIC_BASE`] MSR, which
+///   stores the base address of the local APIC's memory-mapped configuration
+///   area.
+///
+/// - [`Msr::ia32_gs_base`] for accessing the [`IA32_GS_BASE`] MSR, which stores
+///   the base address of the `GS` segment.
+///
+/// - [`Msr::ia32_efer`] for accessing the [Extended Flags Enable Register
+///   (EFER)][efer], which contains flags for enabling long mode and controlling
+///   long-mode-specific features.
+///
+///   Flags for the `IA32_EFER` MSR are represented by the [`Efer`] type.
 ///
 /// [sandpile]: https://sandpile.org/x86/msr.htm
 /// [msr]: https://wiki.osdev.org/MSR
+/// [efer]: https://wiki.osdev.org/CPU_Registers_x86-64#IA32_EFER
+/// [`IA32_APIC_BASE`]: https://wiki.osdev.org/APIC#Local_APIC_configuration
+/// [`IA32_GS_BASE`]: https://wiki.osdev.org/CPU_Registers_x86-64#FS.base.2C_GS.base
 pub struct Msr<V = u64> {
     pub(crate) num: u32,
     name: Option<&'static str>,
@@ -42,10 +74,14 @@ pub struct Msr<V = u64> {
 }
 
 bitfield! {
-    /// Bit flags for the Extended Feature Enable Register (EFER) [`Msr`].
+    /// Bit flags for the [Extended Feature Enable Register (EFER)][efer] [`Msr`].
     ///
     /// This MSR was added by AMD in the K6 processor, and became part of the
     /// architecture in AMD64. It controls features related to entering long mode.
+    ///
+    /// To access the EFER, use the [`Msr::ia32_efer`] constructor.
+    ///
+    /// [efer]: https://wiki.osdev.org/CPU_Registers_x86-64#IA32_EFER
     pub struct Efer<u64> {
         /// System Call Extensions (SCE).
         ///
@@ -122,11 +158,14 @@ impl Msr {
             .expect("CPU does not support model-specific registers (must be pre-Pentium...)")
     }
 
-    /// Returns a `Msr` for reading and writing to the `IA32_APIC_BASE`
+    /// Returns a `Msr` for reading and writing to the [`IA32_APIC_BASE`]
     /// model-specific register.
     ///
-    /// This register stores the base address of the local APIC memory-mapped
-    /// configuration area.
+    /// This register has MSR number 0x1B, and stores the base address of the
+    /// [local APIC] memory-mapped configuration area.
+    ///
+    /// [`IA32_APIC_BASE`]: https://wiki.osdev.org/APIC#Local_APIC_configuration
+    /// [local APIC]: crate::interrupt::apic::LocalApic
     #[must_use]
     pub const fn ia32_apic_base() -> Self {
         Self {
@@ -136,8 +175,13 @@ impl Msr {
         }
     }
 
-    /// Returns a `Msr` for reading and writing to the `IA32_GS_BASE`
+    /// Returns a `Msr` for reading and writing to the [`IA32_GS_BASE`]
     /// model-specific register.
+    ///
+    /// This register has MSR number 0xC0000101, and contains the base address
+    /// of the `GS` segment.
+    ///
+    /// [`IA32_GS_BASE`]: https://wiki.osdev.org/CPU_Registers_x86-64#FS.base.2C_GS.base
     #[must_use]
     pub const fn ia32_gs_base() -> Self {
         Self {
@@ -147,11 +191,17 @@ impl Msr {
         }
     }
 
-    /// Returns a `Msr` for reading and writing to the `IA32_EFER`
-    /// model-specific register.
+    /// Returns a `Msr` for reading and writing to the [`IA32_EFER` (Extended
+    /// Flags Enable Register)][efer] MSR.
+    ///
+    /// The EFER register has MSR number 0xC0000080, and contains flags for
+    /// enabling the `SYSCALL` and `SYSRET` instructions, and for entering and
+    /// exiting long mode, and for enabling features related to long mode.
     ///
     /// Flags for the `IA32_EFER` MSR are represented by the [`Efer`]
     /// type.
+    ///
+    /// [efer]: https://wiki.osdev.org/CPU_Registers_x86-64#IA32_EFER
     #[must_use]
     pub const fn ia32_efer() -> Msr<Efer> {
         Msr {
