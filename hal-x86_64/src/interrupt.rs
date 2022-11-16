@@ -546,14 +546,8 @@ impl hal_core::interrupt::Control for Idt {
         self.set_isr(Self::PIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
         self.set_isr(Self::IOAPIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
         // local APIC specific hardware itnerrupts
-        self.set_isr(
-            Self::LOCAL_APIC_SPURIOUS as usize,
-            spurious_isr as *const (),
-        );
-        self.set_isr(
-            Self::LOCAL_APIC_TIMER as usize,
-            apic_timer_isr::<H> as *const (),
-        );
+        self.set_isr(Self::LOCAL_APIC_SPURIOUS, spurious_isr as *const ());
+        self.set_isr(Self::LOCAL_APIC_TIMER, apic_timer_isr::<H> as *const ());
 
         // vector 69 (nice) is reserved by the HAL for testing the IDT.
         self.set_isr(69, test_isr::<H> as *const ());

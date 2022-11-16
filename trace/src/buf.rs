@@ -365,19 +365,19 @@ mod tests {
     }
 
     fn test_range_iters(buf: &LineBuf, expected: &[&str]) {
-        assert_slicelike("unbounded", &buf, &expected, ..);
+        assert_slicelike("unbounded", buf, expected, ..);
 
-        assert_slicelike("start inclusive", &buf, &expected, 2..);
-        assert_slicelike("start inclusive", &buf, &expected, 3..);
-        assert_slicelike("start inclusive", &buf, &expected, 4..);
-        assert_slicelike("start inclusive", &buf, &expected, 5..);
+        assert_slicelike("start inclusive", buf, expected, 2..);
+        assert_slicelike("start inclusive", buf, expected, 3..);
+        assert_slicelike("start inclusive", buf, expected, 4..);
+        assert_slicelike("start inclusive", buf, expected, 5..);
 
-        assert_slicelike("end inclusive", &buf, &expected, ..=2);
-        assert_slicelike("end inclusive", &buf, &expected, ..=5);
+        assert_slicelike("end inclusive", buf, expected, ..=2);
+        assert_slicelike("end inclusive", buf, expected, ..=5);
 
-        assert_slicelike("end exclusive", &buf, &expected, ..2);
-        assert_slicelike("end exclusive", &buf, &expected, ..5);
-        assert_slicelike("end exclusive", &buf, &expected, ..6)
+        assert_slicelike("end exclusive", buf, expected, ..2);
+        assert_slicelike("end exclusive", buf, expected, ..5);
+        assert_slicelike("end exclusive", buf, expected, ..6)
     }
 
     fn fill(mut buf: &mut LineBuf, strs: &[&str]) {

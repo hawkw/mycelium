@@ -1,3 +1,5 @@
+// this module is mostly not yet implemented...
+#![allow(dead_code)]
 use crate::{
     device::{self, CardBusDetails, PciBridgeDetails, StandardDetails},
     register,
@@ -21,6 +23,8 @@ impl<'device> MemoryMappedDevice<'device> {
     }
 
     pub fn send_command(&mut self, command: register::Command) {
+        // suppress unused warning
+        let _ = command;
         todo!()
     }
 }
