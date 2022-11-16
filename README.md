@@ -3,10 +3,13 @@
 someday this will do stuff
 
 [![Documentation (HEAD)][docs-main-badge]][docs-main-url]
+[![source on GitHub][source-badge]][source-url]
 [![MIT licensed][mit-badge]][mit-url]
 [![Test Status][tests-badge]][tests-url]
 [![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
 
+[source-badge]: https://img.shields.io/badge/src-github-blue?logo=github
+[source-url]: https://github.com/hawkw/mycelium/
 [docs-main-badge]: https://img.shields.io/netlify/3ec00bb5-251a-4f83-ac7f-3799d95db0e6?label=docs%20%28main%20branch%29
 [docs-main-url]: https://mycelium.elizas.website/
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg

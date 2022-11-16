@@ -1,7 +1,10 @@
 # contributing to mycelium
 
-thanks for your interest in contributing to Mycelium, an alleged "operating
-system"! please bear in mind that this is a hobby project that i work on in my
+> you have chosen, or have been chosen, to contribute to one of our finest
+> remaining operating systems...
+
+thanks for your interest in contributing to Mycelium, we're very happy to have
+you! please bear in mind that this is a hobby project that i work  on in my
 spare time, so pull requests may not always be reviewed in a timely manner.
 
 ## building & running

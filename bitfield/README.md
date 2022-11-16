@@ -5,10 +5,16 @@
 [![crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
 [![Documentation (HEAD)][docs-main-badge]][docs-main-url]
+[![changelog][changelog-badge]][changelog-url]
+[![source on GitHub][source-badge]][source-url]
 [![MIT licensed][mit-badge]][mit-url]
 [![Test Status][tests-badge]][tests-url]
 [![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
 
+[changelog-badge]: https://img.shields.io/crates/v/mycelium-bitfield?label=changelog
+[changelog-url]: https://github.com/hawkw/mycelium/tree/main/bitfield/CHANGELOG.md
+[source-badge]: https://img.shields.io/badge/src-github-blue?logo=github
+[source-url]: https://github.com/hawkw/mycelium/tree/main/bitfield
 [crates-badge]: https://img.shields.io/crates/v/mycelium-bitfield.svg
 [crates-url]: https://crates.io/crates/mycelium-bitfield
 [docs-badge]: https://docs.rs/mycelium-bitfield/badge.svg
