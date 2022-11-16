@@ -9,7 +9,7 @@ use hal_core::{
     PAddr,
 };
 use mycelium_alloc::{buddy, bump};
-use mycelium_util::{fmt, math::Logarithm};
+use mycelium_util::fmt;
 
 #[derive(Debug)]
 pub struct Allocator {
@@ -171,7 +171,10 @@ impl fmt::Display for State {
         if bump_mode {
             writeln!(f, "  bump allocator mode only")?;
         } else {
-            let digits = (heap_size).checked_ilog(10).unwrap_or(0) + 1;
+            let digits = {
+                let digits = (heap_size).checked_ilog(10).unwrap_or(0) + 1;
+                digits as usize
+            };
             let free = heap_size - allocated;
             writeln!(f, "buddy heap:")?;
 
@@ -188,7 +191,10 @@ impl fmt::Display for State {
         }
 
         writeln!(f, "bump region:")?;
-        let bump_digits = (bump_size).checked_ilog(10).unwrap_or(0) + 1;
+        let bump_digits = {
+            let digits = (bump_size).checked_ilog(10).unwrap_or(0) + 1;
+            digits as usize
+        };
         let bump_free = bump_size - bump_allocated;
 
         writeln!(f, "  {bump_free:>digits$} B free", digits = bump_digits)?;
