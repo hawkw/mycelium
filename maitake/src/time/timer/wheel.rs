@@ -49,7 +49,7 @@ struct Deadline {
 /// In loom mode, the slot arrays are apparently a bit too big to pass around
 /// (since loom's `UnsafeCell`s and atomics are larger than "real" ones), and we
 /// apparently segfault when trying to construct a timer wheel. Therefore, it's
-/// necessary to box the slot arrau when running under loom in order to reduce
+/// necessary to box the slot array when running under loom in order to reduce
 /// the stack size of the timer wheel.
 #[cfg(loom)]
 type SlotArray = alloc::boxed::Box<[List<sleep::Entry>; Wheel::SLOTS]>;
