@@ -68,8 +68,7 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
             Ok(platform) => {
                 tracing::debug!("found ACPI platform info");
                 interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
-                acpi::bringup_smp(&platform)
-                    .expect("failed to bring up application processors! this is bad news!");
+                let topo = cpu::topology::Topology::from_acpi(&platform).unwrap();
                 return;
             }
             Err(error) => tracing::warn!(?error, "missing ACPI platform info"),

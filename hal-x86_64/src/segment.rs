@@ -120,18 +120,10 @@ bits::bitfield! {
 // bug...)
 #[rustfmt::skip]
 pub struct Gdt<const SIZE: usize = 8> {
-    entries: [u64; SIZE],
-    sys_segments: [bool; SIZE],
-    push_at: usize,
-}
-
-#[derive(Clone)]
-#[repr(C)]
-pub struct LongModeGdt {
-    null_descriptor: Descriptor,
-    kernel_code: Descriptor,
-    kernel_data: Descriptor,
+    entries: [Descriptor; SIZE],
     tss_descrs: [SystemDescriptor; crate::cpu::topology::MAX_CPUS],
+    push_tss_at: usize,
+    push_at: usize,
 }
 
 /// A 64-bit mode descriptor for a system segment (such as an LDT or TSS
@@ -362,17 +354,19 @@ impl<const SIZE: usize> Gdt<SIZE> {
 
     /// Returns a new `Gdt` with all entries zeroed.
     pub const fn new() -> Self {
+        assert!(SIZE + (crate::cpu::topology::MAX_CPUS * 2) <= 65535);
         Gdt {
-            entries: [0; SIZE],
-            sys_segments: [false; SIZE],
+            entries: [Descriptor::new(); SIZE],
+            tss_descrs: [SystemDescriptor::null(); crate::cpu::topology::MAX_CPUS],
             push_at: 1,
+            push_tss_at: 1,
         }
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
     pub fn add_segment(&mut self, segment: Descriptor) -> Selector {
         let ring = segment.ring_bits();
-        let idx = self.push(segment.0);
+        let idx = self.push(segment);
         let selector = Selector::from_raw(Selector::from_index(idx).0 | ring as u16);
         tracing::trace!(idx, ?selector, "added segment");
         selector
@@ -381,9 +375,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
     #[tracing::instrument(level = "trace", skip(self))]
     pub fn add_sys_segment(&mut self, segment: SystemDescriptor) -> Selector {
         tracing::trace!(?segment, "Gdt::add_add_sys_segment");
-        let idx = self.push(segment.low);
-        self.sys_segments[idx as usize] = true;
-        self.push(segment.high);
+        let idx = self.push_tss(segment);
         // sys segments are always ring 0
         let selector = Selector::null()
             .with(Selector::INDEX, idx)
@@ -392,43 +384,28 @@ impl<const SIZE: usize> Gdt<SIZE> {
         selector
     }
 
-    const fn push(&mut self, entry: u64) -> u16 {
+    const fn push(&mut self, entry: Descriptor) -> u16 {
         let idx = self.push_at;
         self.entries[idx] = entry;
         self.push_at += 1;
+        idx as u16
+    }
+
+    const fn push_tss(&mut self, entry: SystemDescriptor) -> u16 {
+        let idx = self.push_tss_at;
+        self.tss_descrs[idx] = entry;
+        self.push_tss_at += 1;
         idx as u16
     }
 }
 
 impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct GdtEntries<'a, const SIZE: usize>(&'a Gdt<SIZE>);
-        impl<const SIZE: usize> fmt::Debug for GdtEntries<'_, SIZE> {
-            #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let mut sys0 = None;
-                let mut entries = f.debug_list();
-                for (&entry, &is_sys) in self.0.entries[..self.0.push_at]
-                    .iter()
-                    .zip(self.0.sys_segments.iter())
-                {
-                    if let Some(low) = sys0.take() {
-                        entries.entry(&SystemDescriptor { low, high: entry });
-                    } else if is_sys {
-                        sys0 = Some(entry);
-                    } else {
-                        entries.entry(&Descriptor(entry));
-                    }
-                }
-
-                entries.finish()
-            }
-        }
-
         f.debug_struct("Gdt")
             .field("capacity", &SIZE)
             .field("len", &(self.push_at - 1))
-            .field("entries", &GdtEntries(self))
+            .field("entries", &&self.entries[..self.push_at])
+            .field("tss_descrs", &&self.tss_descrs[..self.push_tss_at])
             .finish()
     }
 }
@@ -535,6 +512,10 @@ impl Descriptor {
 impl SystemDescriptor {
     const BASE_HIGH: bits::Pack64 = bits::Pack64::least_significant(32);
     const BASE_HIGH_PAIR: Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
+
+    const fn null() -> Self {
+        Self { high: 0, low: 0 }
+    }
 
     #[cfg(feature = "alloc")]
     pub fn boxed_tss(tss: alloc::boxed::Box<task::StateSegment>) -> Self {

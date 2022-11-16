@@ -18,6 +18,7 @@ pub struct Processor {
     pub id: Id,
     pub device_uid: u32,
     pub lapic_id: u32,
+    initialized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +46,7 @@ impl Topology {
             id: 0,
             device_uid: boot_processor.processor_uid,
             lapic_id: boot_processor.local_apic_id,
+            initialized: false,
         };
 
         if boot_processor.is_ap {
@@ -100,6 +102,7 @@ impl Topology {
                 id,
                 device_uid: ap.processor_uid,
                 lapic_id: ap.local_apic_id,
+                initialized: false,
             };
             tracing::debug!(
                 ap.id,
@@ -123,13 +126,23 @@ impl Topology {
             boot_processor: bsp,
         })
     }
+
+    pub fn init_boot_processor<const GDT_SIZE: usize>(&mut self, gdt: &mut segment::Gdt<GDT_SIZE>) {
+        self.boot_processor.init_processor(gdt);
+    }
 }
 
 impl Processor {
-    pub(crate) fn init_processor<const GDT_SIZE: usize>(&self, gdt: &mut segment::Gdt<GDT_SIZE>) {
+    pub(crate) fn init_processor<const GDT_SIZE: usize>(
+        &mut self,
+        gdt: &mut segment::Gdt<GDT_SIZE>,
+    ) {
         tracing::info!(self.id, "initializing processor");
+        assert!(!self.initialized, "processor already initialized");
+
         use super::local::GsLocalData;
         Box::pin(GsLocalData::new(self.clone())).init();
+        self.initialized = true;
     }
 }
 
