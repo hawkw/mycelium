@@ -334,9 +334,12 @@ impl<'list, T: Linked<Links<T>> + ?Sized> CursorMut<'list, T> {
         let split_at = self.core.index;
         self.core.index = 0;
 
-        let Some(split_node) = self.core.curr else {
+        // TODO(eliza): this could be rewritten to use `let ... else` when
+        // that's supported on `cordyceps`' MSRV.
+        let split_node = match self.core.curr {
+            Some(node) => node,
             // the split portion is the entire list. just return it.
-            return mem::replace(self.core.list, List::new())
+            None => return mem::replace(self.core.list, List::new()),
         };
 
         // the tail of the new list is the split node's `prev` node (which is
@@ -373,9 +376,12 @@ impl<'list, T: Linked<Links<T>> + ?Sized> CursorMut<'list, T> {
     /// If the cursor is pointing at the null element, then the contents of
     /// `spliced` are inserted at the beginning of the `List` the cursor points to.
     pub fn splice_after(&mut self, mut spliced: List<T>) {
-        let Some((splice_head, splice_tail, splice_len)) = spliced.take_all() else {
+        // TODO(eliza): this could be rewritten to use `let ... else` when
+        // that's supported on `cordyceps`' MSRV.
+        let (splice_head, splice_tail, splice_len) = match spliced.take_all() {
+            Some(splice) => splice,
             // the spliced list is empty, do nothing.
-            return;
+            None => return,
         };
 
         let next = self.core.next_link();
@@ -402,9 +408,12 @@ impl<'list, T: Linked<Links<T>> + ?Sized> CursorMut<'list, T> {
     /// If the cursor is pointing at the null element, then the contents of
     /// `spliced` are inserted at the end of the `List` the cursor points to.
     pub fn splice_before(&mut self, mut spliced: List<T>) {
-        let Some((splice_head, splice_tail, splice_len)) = spliced.take_all() else {
+        // TODO(eliza): this could be rewritten to use `let ... else` when
+        // that's supported on `cordyceps`' MSRV.
+        let (splice_head, splice_tail, splice_len) = match spliced.take_all() {
+            Some(splice) => splice,
             // the spliced list is empty, do nothing.
-            return;
+            None => return,
         };
 
         let prev = self.core.prev_link();
