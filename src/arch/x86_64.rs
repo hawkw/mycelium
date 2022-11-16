@@ -1,5 +1,3 @@
-use alloc::boxed::Box;
-use core::cell::RefCell;
 use hal_core::boot::BootInfo;
 use hal_x86_64::{
     cpu::{self, local::GsLocalData},
