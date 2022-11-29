@@ -6,7 +6,7 @@ pub const DUMP_ARCH: Command = Command::new("arch")
         Command::new("gdt")
             .with_help("print the global descriptor table (GDT)")
             .with_fn(|_| {
-                let gdt = super::interrupt::GDT.get();
+                let gdt = super::segmentation::GDT.lock();
                 tracing::info!(GDT = ?gdt);
                 Ok(())
             }),

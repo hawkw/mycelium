@@ -11,6 +11,7 @@ use mycelium_util::{fmt, sync::Lazy};
 
 #[repr(C)]
 #[derive(Debug)]
+#[pin_project]
 pub struct GsLocalData {
     /// This *must* be the first field of the local data struct, because we read
     /// from `gs:0x0` to get the local data's address.
@@ -19,6 +20,7 @@ pub struct GsLocalData {
     processor: Processor,
     /// Because this struct is self-referential, it may not be `Unpin`.
     _must_pin: PhantomPinned,
+
     /// Arbitrary user data.
     ///
     // TODO(eliza): consider storing this in some kind of heap allocated tree
