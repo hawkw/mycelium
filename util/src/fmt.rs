@@ -246,6 +246,22 @@ pub const fn opt<T>(value: &Option<T>) -> FmtOption<'_, T> {
     FmtOption::new(value)
 }
 
+/// Formats a list of `F`-typed values to the provided `writer`, delimited with commas.
+pub fn comma_delimited<F: Display>(
+    mut writer: impl Write,
+    values: impl IntoIterator<Item = F>,
+) -> Result {
+    let mut values = values.into_iter();
+    if let Some(value) = values.next() {
+        write!(writer, "{}", value)?;
+        for value in values {
+            write!(writer, ", {}", value)?;
+        }
+    }
+
+    Ok(())
+}
+
 impl<T, F> Debug for FormatWith<T, F>
 where
     F: Fn(&T, &mut Formatter<'_>) -> Result,
