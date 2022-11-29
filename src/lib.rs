@@ -14,6 +14,7 @@ pub mod allocator;
 pub mod arch;
 pub mod drivers;
 pub mod rt;
+pub mod shell;
 pub mod wasm;
 
 use core::fmt::Write;
@@ -165,16 +166,16 @@ fn kernel_main() -> ! {
         })
     }
 
-    rt::spawn(async move {
-        loop {
-            futures_util::try_join! {
-                spawn_sleep(time::Duration::from_secs(2)),
-                spawn_sleep(time::Duration::from_secs(5)),
-                spawn_sleep(time::Duration::from_secs(10)),
-            }
-            .expect("sleep futures failed!");
-        }
-    });
+    // rt::spawn(async move {
+    //     loop {
+    //         futures_util::try_join! {
+    //             spawn_sleep(time::Duration::from_secs(2)),
+    //             spawn_sleep(time::Duration::from_secs(5)),
+    //             spawn_sleep(time::Duration::from_secs(10)),
+    //         }
+    //         .expect("sleep futures failed!");
+    //     }
+    // });
 
     rt::spawn(keyboard_demo());
 
@@ -193,27 +194,6 @@ pub fn alloc_error(layout: core::alloc::Layout) -> ! {
 #[cfg_attr(target_os = "none", panic_handler)]
 #[cold]
 pub fn panic(panic: &core::panic::PanicInfo<'_>) -> ! {
-    // use core::fmt;
-    // struct PrettyPanic<'a>(&'a core::panic::PanicInfo<'a>);
-    // impl<'a> fmt::Display for PrettyPanic<'a> {
-    //     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    //         let message = self.0.message();
-    //         let location = self.0.location();
-    //         if let Some(message) = message {
-    //             writeln!(f, "  mycelium panicked: {}", message)?;
-    //             if let Some(loc) = location {
-    //                 writeln!(f, "  at: {}:{}:{}", loc.file(), loc.line(), loc.column(),)?;
-    //             } else {
-    //                 writeln!(f, "  at: ???")?;
-    //             }
-    //         } else {
-    //             writeln!(f, "  mycelium panicked: {}", self.0)?;
-    //         }
-    //         Ok(())
-    //     }
-    // }
-
-    // let pp = PrettyPanic(panic);
     arch::oops(arch::Oops::from(panic))
 }
 
@@ -243,17 +223,11 @@ async fn keyboard_demo() {
             | DecodedKey::Unicode('\u{0008}') => {
                 line.pop();
             }
-            DecodedKey::Unicode(c) => {
-                line.push(c);
-                if line.len() == 80 {
-                    tracing::info!("you typed 80 characters!");
-                    newline = true;
-                }
-            }
+            DecodedKey::Unicode(c) => line.push(c),
             DecodedKey::RawKey(key) => tracing::warn!(?key, "you typed something weird"),
         }
         if newline {
-            tracing::info!(?line, "you typed a line");
+            shell::eval(&line);
             line.clear();
         }
     }
