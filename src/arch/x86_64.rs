@@ -14,6 +14,7 @@ mod framebuf;
 pub mod interrupt;
 mod oops;
 pub mod pci;
+pub mod shell;
 pub use self::{
     boot::ArchInfo,
     oops::{oops, Oops},

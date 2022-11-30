@@ -54,7 +54,7 @@ static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
     tss
 });
 
-static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
+pub(in crate::arch) static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
 
 const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(10);
 pub(super) static TIMER: time::Timer = time::Timer::new(TIMER_INTERVAL);
