@@ -5,7 +5,10 @@ use core::{
     future::Future,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
 };
-use maitake::scheduler::{self, StaticScheduler, Stealer};
+use maitake::{
+    scheduler::{self, StaticScheduler, Stealer},
+    time,
+};
 use mycelium_util::sync::InitOnce;
 use rand::Rng;
 
@@ -49,6 +52,8 @@ struct Runtime {
 /// 512 CPU cores ought to be enough for anybody...
 pub const MAX_CORES: usize = 512;
 
+pub static TIMER: time::Timer = time::Timer::new(arch::interrupt::TIMER_INTERVAL);
+
 static RUNTIME: Runtime = {
     // This constant is used as an array initializer; the clippy warning that it
     // contains interior mutability is not actually a problem here, since we
@@ -83,6 +88,13 @@ where
     })
 }
 
+/// Initialize the kernel runtime.
+pub fn init() {
+    time::set_global_timer(&TIMER).expect("`rt::init` should only be called once!");
+
+    tracing::info!("kernel runtime initialized");
+}
+
 static SCHEDULER: arch::LocalKey<Cell<Option<&'static StaticScheduler>>> =
     arch::LocalKey::new(|| Cell::new(None));
 
@@ -108,7 +120,7 @@ impl Core {
 
         // turn the timer wheel if it wasn't turned recently and no one else is
         // holding a lock, ensuring any pending timer ticks are consumed.
-        arch::tick_timer();
+        TIMER.advance_ticks(0);
 
         // if there are remaining tasks to poll, continue without stealing.
         if tick.has_remaining {

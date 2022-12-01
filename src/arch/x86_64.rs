@@ -25,10 +25,6 @@ mod tests;
 
 pub type MinPageSize = mm::size::Size4Kb;
 
-pub fn tick_timer() {
-    interrupt::TIMER.advance_ticks(0);
-}
-
 #[cfg(target_os = "none")]
 bootloader::entry_point!(arch_entry);
 

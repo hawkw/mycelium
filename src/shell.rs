@@ -42,10 +42,10 @@ pub fn eval(line: &str) {
                 .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
             Command::new("timer")
                 .with_help("print the timer wheel")
-                .with_fn(crate::arch::shell::dump_timer),
-            Command::new("timer")
-                .with_help("print the timer wheel")
-                .with_fn(crate::arch::shell::dump_timer),
+                .with_fn(|_| {
+                    tracing::info!(timer = ?crate::rt::TIMER);
+                    Ok(())
+                }),
             crate::arch::shell::DUMP_ARCH,
             Command::new("heap")
                 .with_help("print kernel heap statistics")

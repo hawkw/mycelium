@@ -25,8 +25,6 @@ pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) {
     controller
         .start_periodic_timer(TIMER_INTERVAL)
         .expect("10ms should be a reasonable interval for the PIT or local APIC timer...");
-    time::set_global_timer(&TIMER)
-        .expect("`enable_hardware_interrupts` should only be called once!");
     tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized")
 }
 
@@ -56,8 +54,7 @@ static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
 
 pub(in crate::arch) static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
 
-const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(10);
-pub(super) static TIMER: time::Timer = time::Timer::new(TIMER_INTERVAL);
+pub const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(10);
 
 static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
 
@@ -96,7 +93,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
     }
 
     fn timer_tick() {
-        TIMER.pend_ticks(1);
+        crate::rt::TIMER.pend_ticks(1);
     }
 
     fn ps2_keyboard(scancode: u8) {
