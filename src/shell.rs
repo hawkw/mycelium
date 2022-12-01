@@ -46,6 +46,7 @@ pub fn eval(line: &str) {
                     tracing::info!(timer = ?crate::rt::TIMER);
                     Ok(())
                 }),
+            crate::rt::DUMP_RT,
             crate::arch::shell::DUMP_ARCH,
             Command::new("heap")
                 .with_help("print kernel heap statistics")
