@@ -290,7 +290,16 @@ macro_rules! bitfield {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 let mut dbg = f.debug_struct(stringify!($Name));
                 $(
-                    dbg.field(stringify!($Field), &self.get(Self::$Field));
+                    {
+                        // skip reserved fields (names starting with `_`).
+                        //
+                        // NOTE(eliza): i hope this `if` gets const-folded...we
+                        // could probably do this in a macro and guarantee that
+                        // it happens at compile-time, but this is fine for now.
+                        if !stringify!($Field).starts_with('_') {
+                            dbg.field(stringify!($Field), &self.get(Self::$Field));
+                        }
+                    }
                 )+
                 dbg.finish()
 
