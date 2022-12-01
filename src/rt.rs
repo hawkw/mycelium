@@ -9,7 +9,7 @@ use maitake::{
     scheduler::{self, StaticScheduler, Stealer},
     time,
 };
-use mycelium_util::sync::InitOnce;
+use mycelium_util::{fmt, sync::InitOnce};
 use rand::Rng;
 
 pub use maitake::task::JoinHandle;
@@ -94,6 +94,13 @@ pub fn init() {
 
     tracing::info!("kernel runtime initialized");
 }
+
+pub const DUMP_RT: crate::shell::Command = crate::shell::Command::new("rt")
+    .with_help("print the kernel's async runtime")
+    .with_fn(|_| {
+        tracing::info!(runtime = ?RUNTIME);
+        Ok(())
+    });
 
 static SCHEDULER: arch::LocalKey<Cell<Option<&'static StaticScheduler>>> =
     arch::LocalKey::new(|| Cell::new(None));
@@ -279,5 +286,16 @@ impl Runtime {
         idx: usize,
     ) -> Option<Stealer<'static, &'static StaticScheduler>> {
         self.cores[idx].try_get()?.try_steal().ok()
+    }
+}
+
+impl fmt::Debug for Runtime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let cores = self.active_cores();
+        f.debug_struct("Runtime")
+            .field("active_cores", &cores)
+            .field("cores", &&self.cores[..cores])
+            .field("injector", &self.injector)
+            .finish()
     }
 }
