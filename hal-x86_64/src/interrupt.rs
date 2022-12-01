@@ -100,6 +100,10 @@ static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 impl Controller {
     // const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
 
+    pub fn idt() -> spin::MutexGuard<'static, idt::Idt> {
+        IDT.lock()
+    }
+
     #[tracing::instrument(level = "info", name = "interrupt::Controller::init")]
     pub fn init<H: Handlers<Registers>>() {
         tracing::info!("intializing IDT...");
