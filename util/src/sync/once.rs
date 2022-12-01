@@ -205,12 +205,10 @@ impl<T> InitOnce<T> {
 
 impl<T: fmt::Debug> fmt::Debug for InitOnce<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut d = f.debug_struct("InitOnce");
-        d.field("type", &any::type_name::<T>());
         match self.state.load(Ordering::Acquire) {
-            INITIALIZED => d.field("value", self.get()).finish(),
-            INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
-            UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
+            INITIALIZED => self.get().fmt(f),
+            INITIALIZING => f.pad("<initializing>"),
+            UNINITIALIZED => f.pad("<uninitialized>"),
             _state => unsafe {
                 unreachable_unchecked!("unexpected state value {}, this is a bug!", _state)
             },
@@ -358,13 +356,13 @@ where
     T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut d = f.debug_struct("Lazy");
-        d.field("type", &any::type_name::<T>())
-            .field("initializer", &format_args!("..."));
         match self.state.load(Ordering::Acquire) {
-            INITIALIZED => d.field("value", self.get_if_present().unwrap()).finish(),
-            INITIALIZING => d.field("value", &format_args!("<initializing>")).finish(),
-            UNINITIALIZED => d.field("value", &format_args!("<uninitialized>")).finish(),
+            INITIALIZED => self
+                .get_if_present()
+                .expect("if state is `INITIALIZED`, value should be present")
+                .fmt(f),
+            INITIALIZING => f.pad("<initializing>"),
+            UNINITIALIZED => f.pad("<uninitialized>"),
             _state => unsafe {
                 unreachable_unchecked!("unexpected state value {}, this is a bug!", _state)
             },
