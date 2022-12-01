@@ -147,6 +147,9 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
     // tracing.
     arch::init(&bootinfo, &archinfo);
 
+    // initialize the kernel runtime.
+    rt::init();
+
     #[cfg(test)]
     arch::run_tests();
 

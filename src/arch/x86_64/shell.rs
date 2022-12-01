@@ -18,8 +18,3 @@ pub const DUMP_ARCH: Command = Command::new("arch")
                 Ok(())
             }),
     ]);
-
-pub fn dump_timer(_: &str) -> Result<(), shell::Error> {
-    tracing::info!(timer = ?super::interrupt::TIMER);
-    Ok(())
-}
