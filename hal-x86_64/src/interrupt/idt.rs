@@ -1,7 +1,9 @@
 use super::apic::IoApic;
-use crate::{cpu, segment};
-use core::fmt;
-use mycelium_util::bits;
+use crate::{
+    cpu::{self, DescriptorTable},
+    segment,
+};
+use mycelium_util::{bits, fmt};
 
 #[repr(C)]
 #[repr(align(16))]
@@ -205,7 +207,12 @@ impl Idt {
 impl fmt::Debug for Idt {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let Self { descriptors } = self;
-        f.debug_list().entries(descriptors[..].iter()).finish()
+        let descriptors = descriptors[..]
+            .iter()
+            .filter(|&descr| descr != &Descriptor::null())
+            .enumerate()
+            .map(|(i, descr)| (fmt::hex(i), descr));
+        f.debug_map().entries(descriptors).finish()
     }
 }
 
