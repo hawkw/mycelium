@@ -270,4 +270,5 @@ fn print_help(commands: &[Command]) {
     for Command { name, help, .. } in commands {
         tracing::info!(" - {name}: {help}");
     }
+    tracing::info!(" - help: prints this help message");
 }
