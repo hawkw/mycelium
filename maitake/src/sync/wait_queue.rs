@@ -852,6 +852,66 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
 
 // === impl Wait ===
 
+impl Wait<'_> {
+    /// Returns `true` if this `Wait` future is waiting for a notification from
+    /// the provided [`WaitQueue`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use maitake::sync::WaitQueue;
+    ///
+    /// let queue1 = WaitQueue::new();
+    /// let queue2 = WaitQueue::new();
+    ///
+    /// let wait = queue1.wait();
+    /// assert!(wait.waits_on(&queue1));
+    /// assert!(!wait.waits_on(&queue2));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn waits_on(&self, queue: &WaitQueue) -> bool {
+        ptr::eq(self.queue, queue)
+    }
+
+    /// Returns `true` if `self` and `other` are waiting on a notification from
+    /// the same [`WaitQueue`].
+    ///
+    /// # Examples
+    ///
+    /// Two [`Wait`] futures waiting on the same [`WaitQueue`] return `true`:
+    ///
+    /// ```
+    /// use maitake::sync::WaitQueue;
+    ///
+    /// let queue = WaitQueue::new();;
+    ///
+    /// let wait1 = queue.wait();
+    /// let wait2 = queue.wait();
+    /// assert!(wait1.same_queue(&wait2));
+    /// assert!(wait2.same_queue(&wait1));
+    /// ```
+    ///
+    /// Two [`Wait`] futures waiting on different [`WaitQueue`]s return `false`:
+    ///
+    /// ```
+    /// use maitake::sync::WaitQueue;
+    ///
+    /// let queue1 = WaitQueue::new();;
+    /// let queue2 = WaitQueue::new();;
+    ///
+    /// let wait1 = queue1.wait();
+    /// let wait2 = queue2.wait();
+    /// assert!(!wait1.same_queue(&wait2));
+    /// assert!(!wait2.same_queue(&wait1));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn same_queue(&self, other: &Wait<'_>) -> bool {
+        ptr::eq(self.queue, other.queue)
+    }
+}
+
 impl Future for Wait<'_> {
     type Output = WaitResult<()>;
 
