@@ -32,35 +32,7 @@ enum ErrorKind<'a> {
 }
 
 pub fn eval(line: &str) {
-    static COMMANDS: &[Command] = &[
-        Command::new("dump")
-            .with_help("print formatted representations of a kernel structure")
-            .with_subcommands(&[
-                Command::new("bootinfo")
-                    .with_help("print the boot information structure")
-                    .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
-                Command::new("archinfo")
-                    .with_help("print the architecture information structure")
-                    .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
-                Command::new("timer")
-                    .with_help("print the timer wheel")
-                    .with_fn(|_| {
-                        tracing::info!(timer = ?rt::TIMER);
-                        Ok(())
-                    }),
-                rt::DUMP_RT,
-                crate::arch::shell::DUMP_ARCH,
-                Command::new("heap")
-                    .with_help("print kernel heap statistics")
-                    .with_fn(|_| {
-                        tracing::info!(heap = ?crate::ALLOC.state());
-                        Ok(())
-                    }),
-            ]),
-        Command::new("sleep")
-            .with_help("spawns a task to sleep for the given number of seconds")
-            .with_fn(spawn_sleep),
-    ];
+    static COMMANDS: &[Command] = &[DUMP, SLEEP];
 
     tracing::info!("executing shell command: {line:?}\n");
 
@@ -87,6 +59,60 @@ pub fn handle_command<'cmd>(line: &'cmd str, commands: &'cmd [Command]) -> Resul
 
     Err(Error::unknown_command(line, commands))
 }
+
+// === commands ===
+
+const DUMP: Command = Command::new("dump")
+    .with_help("print formatted representations of a kernel structure")
+    .with_subcommands(&[
+        Command::new("bootinfo")
+            .with_help("print the boot information structure")
+            .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
+        Command::new("archinfo")
+            .with_help("print the architecture information structure")
+            .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
+        Command::new("timer")
+            .with_help("print the timer wheel")
+            .with_fn(|_| {
+                tracing::info!(timer = ?rt::TIMER);
+                Ok(())
+            }),
+        rt::DUMP_RT,
+        crate::arch::shell::DUMP_ARCH,
+        Command::new("heap")
+            .with_help("print kernel heap statistics")
+            .with_fn(|_| {
+                tracing::info!(heap = ?crate::ALLOC.state());
+                Ok(())
+            }),
+    ]);
+
+const SLEEP: Command = Command::new("sleep")
+    .with_help("spawns a task to sleep for the given number of seconds")
+    .with_fn(|line| {
+        use maitake::time;
+
+        let line = line.trim();
+        if line.is_empty() {
+            return Err(Error::invalid_argument(
+                line,
+                "expected a number of seconds to sleep for",
+            ));
+        }
+
+        let secs: u64 = line
+            .parse()
+            .map_err(|_| Error::invalid_argument(line, "number of seconds must be an integer"))?;
+        let duration = time::Duration::from_secs(secs);
+
+        tracing::info!(?duration, "spawning a sleep");
+        rt::spawn(async move {
+            time::sleep(duration).await;
+            tracing::info!(?duration, "slept");
+        });
+
+        Ok(())
+    });
 
 // === impl Error ===
 
@@ -244,29 +270,4 @@ fn print_help(commands: &[Command]) {
     for Command { name, help, .. } in commands {
         tracing::info!(" - {name}: {help}");
     }
-}
-
-fn spawn_sleep(line: &str) -> Result<'_> {
-    use maitake::time;
-
-    let line = line.trim();
-    if line.is_empty() {
-        return Err(Error::invalid_argument(
-            line,
-            "expected a number of seconds to sleep for",
-        ));
-    }
-
-    let secs: u64 = line
-        .parse()
-        .map_err(|_| Error::invalid_argument(line, "number of seconds must be an integer"))?;
-    let duration = time::Duration::from_secs(secs);
-
-    tracing::info!(?duration, "spawning a sleep");
-    rt::spawn(async move {
-        time::sleep(duration).await;
-        tracing::info!(?duration, "slept");
-    });
-
-    Ok(())
 }
