@@ -1,14 +1,13 @@
 //! A rudimentary kernel-mode command shell, primarily for debugging and testing
 //! purposes.
 //!
-use core::fmt::Write;
-
-use mycelium_util::fmt;
+use crate::rt;
+use mycelium_util::fmt::{self, Write};
 
 pub struct Command {
     pub name: &'static str,
     pub help: &'static str,
-    pub func: Option<fn(&str) -> Result<(), Error<'_>>>,
+    pub func: Option<fn(&str) -> Result<'_>>,
     pub subcommands: Option<&'static [Command]>,
 }
 
@@ -17,6 +16,8 @@ pub struct Error<'a> {
     line: &'a str,
     kind: ErrorKind<'a>,
 }
+
+pub type Result<'a> = core::result::Result<(), Error<'a>>;
 
 #[derive(Debug)]
 enum ErrorKind<'a> {
@@ -31,30 +32,35 @@ enum ErrorKind<'a> {
 }
 
 pub fn eval(line: &str) {
-    static COMMANDS: &[Command] = &[Command::new("dump")
-        .with_help("print formatted representations of a kernel structure")
-        .with_subcommands(&[
-            Command::new("bootinfo")
-                .with_help("print the boot information structure")
-                .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
-            Command::new("archinfo")
-                .with_help("print the architecture information structure")
-                .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
-            Command::new("timer")
-                .with_help("print the timer wheel")
-                .with_fn(|_| {
-                    tracing::info!(timer = ?crate::rt::TIMER);
-                    Ok(())
-                }),
-            crate::rt::DUMP_RT,
-            crate::arch::shell::DUMP_ARCH,
-            Command::new("heap")
-                .with_help("print kernel heap statistics")
-                .with_fn(|_| {
-                    tracing::info!(heap = ?crate::ALLOC.state());
-                    Ok(())
-                }),
-        ])];
+    static COMMANDS: &[Command] = &[
+        Command::new("dump")
+            .with_help("print formatted representations of a kernel structure")
+            .with_subcommands(&[
+                Command::new("bootinfo")
+                    .with_help("print the boot information structure")
+                    .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
+                Command::new("archinfo")
+                    .with_help("print the architecture information structure")
+                    .with_fn(|line| Err(Error::other(line, "not yet implemented"))),
+                Command::new("timer")
+                    .with_help("print the timer wheel")
+                    .with_fn(|_| {
+                        tracing::info!(timer = ?rt::TIMER);
+                        Ok(())
+                    }),
+                rt::DUMP_RT,
+                crate::arch::shell::DUMP_ARCH,
+                Command::new("heap")
+                    .with_help("print kernel heap statistics")
+                    .with_fn(|_| {
+                        tracing::info!(heap = ?crate::ALLOC.state());
+                        Ok(())
+                    }),
+            ]),
+        Command::new("sleep")
+            .with_help("spawns a task to sleep for the given number of seconds")
+            .with_fn(spawn_sleep),
+    ];
 
     tracing::info!("executing shell command: {line:?}\n");
 
@@ -70,7 +76,7 @@ pub fn eval(line: &str) {
     }
 }
 
-pub fn handle_command<'cmd>(line: &'cmd str, commands: &'cmd [Command]) -> Result<(), Error<'cmd>> {
+pub fn handle_command<'cmd>(line: &'cmd str, commands: &'cmd [Command]) -> Result<'cmd> {
     let line = line.trim();
     for cmd in commands {
         if let Some(line) = line.strip_prefix(cmd.name) {
@@ -105,14 +111,14 @@ impl Command {
         }
     }
 
-    pub const fn with_fn(self, func: fn(&str) -> Result<(), Error<'_>>) -> Self {
+    pub const fn with_fn(self, func: fn(&str) -> Result<'_>) -> Self {
         Self {
             func: Some(func),
             ..self
         }
     }
 
-    pub fn run<'cmd>(&self, line: &'cmd str) -> Result<(), Error<'cmd>> {
+    pub fn run<'cmd>(&self, line: &'cmd str) -> Result<'cmd> {
         let line = line.trim();
 
         if line == "help" {
@@ -238,4 +244,29 @@ fn print_help(commands: &[Command]) {
     for Command { name, help, .. } in commands {
         tracing::info!(" - {name}: {help}");
     }
+}
+
+fn spawn_sleep(line: &str) -> Result<'_> {
+    use maitake::time;
+
+    let line = line.trim();
+    if line.is_empty() {
+        return Err(Error::invalid_argument(
+            line,
+            "expected a number of seconds to sleep for",
+        ));
+    }
+
+    let secs: u64 = line
+        .parse()
+        .map_err(|_| Error::invalid_argument(line, "number of seconds must be an integer"))?;
+    let duration = time::Duration::from_secs(secs);
+
+    tracing::info!(?duration, "spawning a sleep");
+    rt::spawn(async move {
+        time::sleep(duration).await;
+        tracing::info!(?duration, "slept");
+    });
+
+    Ok(())
 }
