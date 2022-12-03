@@ -3,7 +3,6 @@
 //!
 use crate::rt;
 use mycelium_util::fmt::{self, Write};
-
 pub struct Command {
     name: &'static str,
     help: &'static str,

@@ -1,4 +1,4 @@
-use crate::shell::{self, Command};
+use crate::shell::Command;
 
 pub const DUMP_ARCH: Command = Command::new("arch")
     .with_help("dump architecture-specific structures")
