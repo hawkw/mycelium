@@ -4,6 +4,8 @@
 use crate::rt;
 use mycelium_util::fmt::{self, Write};
 
+/// Defines a shell command, including its name, help text, and how the command
+/// is executed.
 #[derive(Debug)]
 pub struct Command<'cmd> {
     name: &'cmd str,
@@ -152,6 +154,15 @@ const FAULT: Command = Command::new("fault")
 // === impl Command ===
 
 impl<'cmd> Command<'cmd> {
+    /// Constructs a new `Command` with the given `name`.
+    ///
+    /// By default, this command will have no help text, no subcommands, no
+    /// usage hints, and do nothing. Use the [`Command::with_help`] and
+    /// [`Command::with_usage`] to add help text to the command. Use
+    /// [`Command::with_subcommands`] to add subcommands, and/or
+    /// [`Command::with_fn`] or [`Command::with_runnable`] to add a function
+    /// that defines how to execute the command.
+    #[must_use]
     pub const fn new(name: &'cmd str) -> Self {
         Self {
             name,
@@ -162,10 +173,106 @@ impl<'cmd> Command<'cmd> {
         }
     }
 
+    /// Add help text to the command.
+    ///
+    /// This should define what the command does, and is printed when running
+    /// `help` commands.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use mycelium_kernel::shell::Command;
+    ///
+    /// const DUMP: Command = Command::new("dump")
+    ///     .with_help("print formatted representations of a kernel structure");
+    ///
+    /// // The shell will format this command's help text as:
+    /// let help_text = "dump --- print formatted representations of a kernel structure";
+    /// assert_eq!(format!("{DUMP}"), help_text);
+    /// ```
+    #[must_use]
     pub const fn with_help(self, help: &'cmd str) -> Self {
         Self { help, ..self }
     }
 
+    /// Add usage text to the command.
+    ///
+    /// This should define what, if any, arguments the command takes. If the
+    /// command does not take any arguments, it is not necessary to call this
+    /// method.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use mycelium_kernel::shell::Command;
+    ///
+    /// const ECHO: Command = Command::new("echo")
+    ///     .with_help("print the provided text")
+    ///     .with_usage("<TEXT>");
+    ///
+    /// // The shell will format this command's help text as:
+    /// let help_text = "echo <TEXT> --- print the provided text";
+    /// assert_eq!(format!("{ECHO}"), help_text);
+    /// ```
+    #[must_use]
+    pub const fn with_usage(self, usage: &'cmd str) -> Self {
+        Self { usage, ..self }
+    }
+
+    /// Add a list of subcommands to this command.
+    ///
+    /// If subcommands are added, they will be handled automatically by checking
+    /// if the next argument matches the name of a subcommand, before calling
+    /// the command's [function] or [runnable], if it has one.
+    ///
+    /// If the next argument matches the name of a subcommand, that subcommand
+    /// will be automatically executed. If it does *not* match a subcommand, and
+    /// the command has a function or runnable, that function or runnable will
+    /// be called with the remainder of the input. If the command does not have
+    /// a function or runnable, a "subcommand expected" error is returned.
+    ///
+    /// # Examples
+    ///
+    /// A command with only subcommands, and no root function/runnable:
+    ///
+    /// ```rust
+    /// use mycelium_kernel::shell::Command;
+    ///
+    /// // let's pretend we're implementing git (inside the mycelium kernel? for
+    /// // some reason????)...
+    /// const GIT: Command = Command::new("git")
+    ///     .with_subcommands(&[
+    ///         SUBCMD_ADD,
+    ///         SUBCMD_COMMIT,
+    ///         SUBCMD_PUSH,
+    ///         // more git commands ...
+    ///     ]);
+    ///
+    /// const SUBCMD_ADD: Command = Command::new("add")
+    ///     .with_help("add file contents to the index")
+    ///     .with_fn(|ctx| {
+    ///         // ...
+    ///         # drop(ctx); Ok(())
+    ///     });
+    /// const SUBCMD_COMMIT: Command = Command::new("commit")
+    ///     .with_help("record changes to the repository")
+    ///     .with_fn(|ctx| {
+    ///         // ...
+    ///         # drop(ctx); Ok(())
+    ///     });
+    /// const SUBCMD_PUSH: Command = Command::new("push")
+    ///     .with_help("update remote refs along with associated objects")
+    ///     .with_fn(|ctx| {
+    ///         // ...
+    ///         # drop(ctx); Ok(())
+    ///     });
+    /// // more git commands ...
+    /// # drop(GIT);
+    /// ```
+    ///
+    /// [function]: Command::with_fn
+    /// [runnable]: Command::with_runnable
+    #[must_use]
     pub const fn with_subcommands(self, subcommands: &'cmd [Self]) -> Self {
         Self {
             subcommands: Some(subcommands),
@@ -173,6 +280,11 @@ impl<'cmd> Command<'cmd> {
         }
     }
 
+    /// Add a function that's run to execute this command.
+    ///
+    /// If [`Command::with_fn`] or [`Command::with_runnable`] was previously
+    /// called, this overwrites the previously set value.
+    #[must_use]
     pub const fn with_fn(self, func: fn(Context<'_>) -> Result<'_>) -> Self {
         Self {
             run: Some(RunKind::Fn(func)),
@@ -180,6 +292,13 @@ impl<'cmd> Command<'cmd> {
         }
     }
 
+    /// Add a [runnable item] that's run to execute this command.
+    ///
+    /// If [`Command::with_fn`] or [`Command::with_runnable`] was previously
+    /// called, this overwrites the previously set value.
+    ///
+    /// [runnable item]: Run
+    #[must_use]
     pub const fn with_runnable(self, run: &'cmd dyn Run) -> Self {
         Self {
             run: Some(RunKind::Runnable(run)),
@@ -187,10 +306,7 @@ impl<'cmd> Command<'cmd> {
         }
     }
 
-    pub const fn with_usage(self, usage: &'cmd str) -> Self {
-        Self { usage, ..self }
-    }
-
+    /// Run this command in the provided [`Context`].
     pub fn run<'ctx>(&'cmd self, ctx: Context<'ctx>) -> Result<'ctx>
     where
         'cmd: 'ctx,
