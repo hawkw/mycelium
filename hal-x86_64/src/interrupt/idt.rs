@@ -1,8 +1,5 @@
 use super::apic::IoApic;
-use crate::{
-    cpu::{self, DescriptorTable},
-    segment,
-};
+use crate::{cpu, segment};
 use mycelium_util::{bits, fmt};
 
 #[repr(C)]
