@@ -4,10 +4,11 @@
 use crate::rt;
 use mycelium_util::fmt::{self, Write};
 
+#[derive(Debug)]
 pub struct Command<'cmd> {
     name: &'cmd str,
     help: &'cmd str,
-    func: Option<fn(Context<'_>) -> Result<'_>>,
+    run: Option<RunKind<'cmd>>,
     usage: &'cmd str,
     subcommands: Option<&'cmd [Command<'cmd>]>,
 }
@@ -20,6 +21,10 @@ pub struct Error<'a> {
 
 pub type Result<'a> = core::result::Result<(), Error<'a>>;
 
+pub trait Run: Send + Sync {
+    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx>;
+}
+
 #[derive(Debug)]
 enum ErrorKind<'a> {
     UnknownCommand(&'a [Command<'a>]),
@@ -27,6 +32,11 @@ enum ErrorKind<'a> {
     SubcommandRequired(&'a [Command<'a>]),
     InvalidArguments { help: &'a str, arg: &'a str },
     Other(&'static str),
+}
+
+enum RunKind<'a> {
+    Fn(fn(Context<'_>) -> Result<'_>),
+    Runnable(&'a dyn Run),
 }
 
 pub fn eval(line: &str) {
@@ -147,7 +157,7 @@ impl<'cmd> Command<'cmd> {
             name,
             help: "",
             usage: "",
-            func: None,
+            run: None,
             subcommands: None,
         }
     }
@@ -165,7 +175,14 @@ impl<'cmd> Command<'cmd> {
 
     pub const fn with_fn(self, func: fn(Context<'_>) -> Result<'_>) -> Self {
         Self {
-            func: Some(func),
+            run: Some(RunKind::Fn(func)),
+            ..self
+        }
+    }
+
+    pub const fn with_runnable(self, run: &'cmd dyn Run) -> Self {
+        Self {
+            run: Some(RunKind::Runnable(run)),
             ..self
         }
     }
@@ -174,7 +191,7 @@ impl<'cmd> Command<'cmd> {
         Self { usage, ..self }
     }
 
-    pub fn run<'ctx>(&self, ctx: Context<'ctx>) -> Result<'ctx>
+    pub fn run<'ctx>(&'cmd self, ctx: Context<'ctx>) -> Result<'ctx>
     where
         'cmd: 'ctx,
     {
@@ -195,8 +212,8 @@ impl<'cmd> Command<'cmd> {
         if let Some(subcommands) = self.subcommands {
             return match handle_command(ctx, subcommands) {
                 Err(e) if e.is_unknown_command() => {
-                    if let Some(func) = self.func {
-                        func(ctx)
+                    if let Some(ref run) = self.run {
+                        run.run(ctx)
                     } else if current.is_empty() {
                         Err(ctx.subcommand_required(subcommands))
                     } else {
@@ -207,36 +224,17 @@ impl<'cmd> Command<'cmd> {
             };
         }
 
-        match self.func {
-            Some(func) => func(ctx),
-            None => Err(ctx.subcommand_required(self.subcommands.unwrap_or(&[]))),
-        }
-    }
-}
-
-impl fmt::Debug for Command<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self {
-            func,
-            name,
-            help,
-            usage,
-            subcommands,
-        } = self;
-        f.debug_struct("Command")
-            .field("name", name)
-            .field("help", help)
-            .field("usage", usage)
-            .field("func", &func.map(|func| fmt::ptr(func as *const ())))
-            .field("subcommands", subcommands)
-            .finish()
+        self.run
+            .as_ref()
+            .ok_or_else(|| ctx.subcommand_required(self.subcommands.unwrap_or(&[])))
+            .and_then(|run| run.run(ctx))
     }
 }
 
 impl fmt::Display for Command<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
-            func: _func,
+            run: _func,
             name,
             help,
             usage,
@@ -343,6 +341,41 @@ impl<'cmd> Context<'cmd> {
             line: self.line,
             kind: ErrorKind::Other(msg),
         }
+    }
+}
+
+// === impl RunKind ===
+
+impl RunKind<'_> {
+    #[inline]
+    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx> {
+        match self {
+            Self::Fn(func) => func(ctx),
+            Self::Runnable(runnable) => runnable.run(ctx),
+        }
+    }
+}
+
+impl fmt::Debug for RunKind<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Fn(func) => f.debug_tuple("Run::Func").field(&fmt::ptr(func)).finish(),
+            Self::Runnable(runnable) => f
+                .debug_tuple("Run::Runnable")
+                .field(&fmt::ptr(runnable))
+                .finish(),
+        }
+    }
+}
+
+// === impl Run ===
+
+impl<F> Run for F
+where
+    F: Fn(Context<'_>) -> Result<'_> + Send + Sync,
+{
+    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx> {
+        self(ctx)
     }
 }
 
