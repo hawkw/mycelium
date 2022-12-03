@@ -3,6 +3,7 @@
 //!
 use crate::rt;
 use mycelium_util::fmt::{self, Write};
+
 pub struct Command {
     name: &'static str,
     help: &'static str,
@@ -29,7 +30,7 @@ enum ErrorKind<'a> {
 }
 
 pub fn eval(line: &str) {
-    static COMMANDS: &[Command] = &[DUMP, SLEEP];
+    static COMMANDS: &[Command] = &[DUMP, SLEEP, PANIC, FAULT];
 
     let _span = tracing::info_span!(target: "shell", "$", message = %line).entered();
     tracing::info!(target: "shell", "");
@@ -116,6 +117,25 @@ const SLEEP: Command = Command::new("sleep")
             tracing::info!(target: "shell", ?duration, "slept");
         });
 
+        Ok(())
+    });
+
+const PANIC: Command = Command::new("panic")
+    .with_usage("<MESSAGE>")
+    .with_help("cause a kernel panic with the given message. use with caution.")
+    .with_fn(|line| {
+        panic!("{}", line.current);
+    });
+
+const FAULT: Command = Command::new("fault")
+    .with_help("cause a CPU fault (divide-by-zero). use with caution.")
+    .with_fn(|_| {
+        unsafe {
+            core::arch::asm!(
+                "div {0:e}",
+                in(reg) 0,
+            )
+        }
         Ok(())
     });
 
