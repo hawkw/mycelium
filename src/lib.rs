@@ -153,11 +153,11 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
     #[cfg(test)]
     arch::run_tests();
 
-    kernel_main();
+    kernel_main(bootinfo, archinfo);
 }
 
-fn kernel_main() -> ! {
-    rt::spawn(keyboard_demo());
+fn kernel_main(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) -> ! {
+    rt::spawn(shell::shell_task(archinfo));
 
     let mut core = rt::Core::new();
     loop {
@@ -180,35 +180,4 @@ pub fn panic(panic: &core::panic::PanicInfo<'_>) -> ! {
 #[cfg(all(test, not(target_os = "none")))]
 pub fn main() {
     /* no host-platform tests in this crate */
-}
-
-/// Keyboard handler demo task: logs each line typed by the user.
-// TODO(eliza): let's do something Actually Useful with keyboard input...
-async fn keyboard_demo() {
-    #[cfg(target_os = "none")]
-    use alloc::string::String;
-    use drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
-
-    let mut line = String::new();
-    loop {
-        let key = ps2_keyboard::next_key().await;
-        let mut newline = false;
-        match key {
-            DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
-                newline = true;
-            }
-            // backspace
-            DecodedKey::RawKey(KeyCode::Backspace)
-            | DecodedKey::RawKey(KeyCode::Delete)
-            | DecodedKey::Unicode('\u{0008}') => {
-                line.pop();
-            }
-            DecodedKey::Unicode(c) => line.push(c),
-            DecodedKey::RawKey(key) => tracing::warn!(?key, "you typed something weird"),
-        }
-        if newline {
-            shell::eval(&line);
-            line.clear();
-        }
-    }
 }

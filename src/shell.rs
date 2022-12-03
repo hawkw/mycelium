@@ -1,7 +1,7 @@
 //! A rudimentary kernel-mode command shell, primarily for debugging and testing
 //! purposes.
 //!
-use crate::rt;
+use crate::{arch, rt};
 use mycelium_util::fmt::{self, Write};
 
 /// Defines a shell command, including its name, help text, and how the command
@@ -23,8 +23,8 @@ pub struct Error<'a> {
 
 pub type Result<'a> = core::result::Result<(), Error<'a>>;
 
-pub trait Run: Send + Sync {
-    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx>;
+pub trait Run<'ctx>: Send + Sync {
+    fn run(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx>;
 }
 
 #[derive(Debug)]
@@ -38,23 +38,57 @@ enum ErrorKind<'a> {
 
 enum RunKind<'a> {
     Fn(fn(Context<'_>) -> Result<'_>),
-    Runnable(&'a dyn Run),
+    Runnable(&'a dyn Run<'a>),
 }
 
-pub fn eval(line: &str) {
-    static COMMANDS: &[Command] = &[DUMP, SLEEP, PANIC, FAULT];
+/// Keyboard handler demo task: logs each line typed by the user.
+pub async fn shell_task(archinfo: crate::arch::ArchInfo) {
+    use crate::drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
+    #[cfg(target_os = "none")]
+    use alloc::string::String;
 
+    let archinfo = move |_| {
+        tracing::info!(target: "shell", ?archinfo);
+        Ok(())
+    };
+    let commands = [make_dump(&archinfo), SLEEP, PANIC, FAULT];
+
+    let mut line = String::new();
+    loop {
+        let key = ps2_keyboard::next_key().await;
+        let mut newline = false;
+        match key {
+            DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
+                newline = true;
+            }
+            // backspace
+            DecodedKey::RawKey(KeyCode::Backspace)
+            | DecodedKey::RawKey(KeyCode::Delete)
+            | DecodedKey::Unicode('\u{0008}') => {
+                line.pop();
+            }
+            DecodedKey::Unicode(c) => line.push(c),
+            DecodedKey::RawKey(key) => tracing::warn!(?key, "you typed something weird"),
+        }
+        if newline {
+            eval(&line, &commands[..]);
+            line.clear();
+        }
+    }
+}
+
+pub fn eval(line: &str, commands: &[Command<'_>]) {
     let _span = tracing::info_span!(target: "shell", "$", message = %line).entered();
     tracing::info!(target: "shell", "");
 
     if line == "help" {
         tracing::info!(target: "shell", "available commands:");
-        print_help("", COMMANDS);
+        print_help("", commands);
         tracing::info!(target: "shell", "");
         return;
     }
 
-    match handle_command(Context::new(line), COMMANDS) {
+    match handle_command(Context::new(line), commands) {
         Ok(_) => {}
         Err(error) => tracing::warn!(target: "shell", "error: {error}"),
     }
@@ -82,30 +116,29 @@ pub fn handle_command<'cmd>(ctx: Context<'cmd>, commands: &'cmd [Command]) -> Re
 
 // === commands ===
 
-const DUMP: Command = Command::new("dump")
-    .with_help("print formatted representations of a kernel structure")
-    .with_subcommands(&[
-        Command::new("bootinfo")
-            .with_help("print the boot information structure")
-            .with_fn(|ctx| Err(ctx.other_error("not yet implemented"))),
-        Command::new("archinfo")
-            .with_help("print the architecture information structure")
-            .with_fn(|ctx| Err(ctx.other_error("not yet implemented"))),
-        Command::new("timer")
-            .with_help("print the timer wheel")
-            .with_fn(|_| {
-                tracing::info!(target: "shell", timer = ?rt::TIMER);
-                Ok(())
-            }),
-        rt::DUMP_RT,
-        crate::arch::shell::DUMP_ARCH,
-        Command::new("heap")
-            .with_help("print kernel heap statistics")
-            .with_fn(|_| {
-                tracing::info!(target: "shell", heap = ?crate::ALLOC.state());
-                Ok(())
-            }),
-    ]);
+fn make_dump<'a>(archinfo: &'a dyn Fn(Context<'_>) -> Result<'_>) -> Command<'a> {
+    Command::new("dump" as &str)
+        .with_help("print formatted representations of a kernel structure")
+        .with_subcommands(&[
+            Command::new("archinfo" as &str)
+                .with_help("print the architecture information structure" as &str)
+                .with_runnable(archinfo),
+            Command::new("timer")
+                .with_help("print the timer wheel")
+                .with_fn(|_| {
+                    tracing::info!(target: "shell", timer = ?rt::TIMER);
+                    Ok(())
+                }),
+            rt::DUMP_RT,
+            crate::arch::shell::DUMP_ARCH,
+            Command::new("heap")
+                .with_help("print kernel heap statistics")
+                .with_fn(|_| {
+                    tracing::info!(target: "shell", heap = ?crate::ALLOC.state());
+                    Ok(())
+                }),
+        ])
+}
 
 const SLEEP: Command = Command::new("sleep")
     .with_help("spawns a task to sleep for SECONDS")
@@ -486,16 +519,23 @@ impl fmt::Debug for RunKind<'_> {
 
 // === impl Run ===
 
-impl<F> Run for F
+impl<'ctx, F> Run<'ctx> for F
 where
-    F: Fn(Context<'_>) -> Result<'_> + Send + Sync,
+    F: Fn(Context<'ctx>) -> Result<'ctx> + Send + Sync,
 {
-    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx> {
+    fn run(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx> {
         self(ctx)
     }
 }
 
-fn print_help(parent_cmd: &str, commands: &[Command]) {
+impl<'ctx> Run<'ctx> for arch::ArchInfo {
+    fn run(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx> {
+        tracing::info!(target: "shell", archinfo = ?self);
+        Ok(())
+    }
+}
+
+fn print_help(parent_cmd: &str, commands: &[Command<'_>]) {
     let parent_cmd_pad = if parent_cmd.is_empty() { "" } else { " " };
     for command in commands {
         tracing::info!(target: "shell", "  {parent_cmd}{parent_cmd_pad}{command}");
