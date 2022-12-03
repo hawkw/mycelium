@@ -4,12 +4,12 @@
 use crate::rt;
 use mycelium_util::fmt::{self, Write};
 
-pub struct Command {
-    name: &'static str,
-    help: &'static str,
+pub struct Command<'cmd> {
+    name: &'cmd str,
+    help: &'cmd str,
     func: Option<fn(Context<'_>) -> Result<'_>>,
-    usage: &'static str,
-    subcommands: Option<&'static [Command]>,
+    usage: &'cmd str,
+    subcommands: Option<&'cmd [Command<'cmd>]>,
 }
 
 #[derive(Debug)]
@@ -22,10 +22,10 @@ pub type Result<'a> = core::result::Result<(), Error<'a>>;
 
 #[derive(Debug)]
 enum ErrorKind<'a> {
-    UnknownCommand(&'a [Command]),
+    UnknownCommand(&'a [Command<'a>]),
 
-    SubcommandRequired(&'a [Command]),
-    InvalidArguments { help: &'static str, arg: &'a str },
+    SubcommandRequired(&'a [Command<'a>]),
+    InvalidArguments { help: &'a str, arg: &'a str },
     Other(&'static str),
 }
 
@@ -141,8 +141,8 @@ const FAULT: Command = Command::new("fault")
 
 // === impl Command ===
 
-impl Command {
-    pub const fn new(name: &'static str) -> Self {
+impl<'cmd> Command<'cmd> {
+    pub const fn new(name: &'cmd str) -> Self {
         Self {
             name,
             help: "",
@@ -152,11 +152,11 @@ impl Command {
         }
     }
 
-    pub const fn with_help(self, help: &'static str) -> Self {
+    pub const fn with_help(self, help: &'cmd str) -> Self {
         Self { help, ..self }
     }
 
-    pub const fn with_subcommands(self, subcommands: &'static [Command]) -> Self {
+    pub const fn with_subcommands(self, subcommands: &'cmd [Self]) -> Self {
         Self {
             subcommands: Some(subcommands),
             ..self
@@ -170,11 +170,14 @@ impl Command {
         }
     }
 
-    pub const fn with_usage(self, usage: &'static str) -> Self {
+    pub const fn with_usage(self, usage: &'cmd str) -> Self {
         Self { usage, ..self }
     }
 
-    pub fn run<'cmd>(&self, ctx: Context<'cmd>) -> Result<'cmd> {
+    pub fn run<'ctx>(&self, ctx: Context<'ctx>) -> Result<'ctx>
+    where
+        'cmd: 'ctx,
+    {
         let current = ctx.current.trim();
 
         if current == "help" {
@@ -211,7 +214,7 @@ impl Command {
     }
 }
 
-impl fmt::Debug for Command {
+impl fmt::Debug for Command<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
             func,
@@ -230,7 +233,7 @@ impl fmt::Debug for Command {
     }
 }
 
-impl fmt::Display for Command {
+impl fmt::Display for Command<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
             func: _func,
@@ -264,7 +267,9 @@ impl Error<'_> {
 
 impl fmt::Display for Error<'_> {
     fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn command_names(cmds: &[Command]) -> impl Iterator<Item = &str> + '_ {
+        fn command_names<'cmd>(
+            cmds: &'cmd [Command<'cmd>],
+        ) -> impl Iterator<Item = &'cmd str> + 'cmd {
             cmds.iter()
                 .map(|Command { name, .. }| *name)
                 .chain(core::iter::once("help"))
