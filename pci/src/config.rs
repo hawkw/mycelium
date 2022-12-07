@@ -6,7 +6,7 @@
 //! [wiki]: https://wiki.osdev.org/Pci#Configuration_Space_Access_Mechanism_.231
 use crate::{
     addr::AddressBits,
-    device,
+    class, device,
     error::{self, unexpected, UnexpectedValue},
     register, Address, Device,
 };
@@ -155,7 +155,7 @@ impl ConfigReg {
         let id = self.read_device_id()?;
         let (command, status) = self.read_command_status();
         let [revision_id, prog_if, subclass, class] = self.read_offset(0x8).to_le_bytes();
-        let class = device::RawClasses { class, subclass };
+        let class = class::RawClasses { class, subclass };
 
         let [cache_line_size, latency_timer, header_type, bist] =
             self.read_offset(0xC).to_le_bytes();
@@ -176,7 +176,7 @@ impl ConfigReg {
         })
     }
 
-    pub fn read_device_id(&self) -> Option<device::Id> {
+    pub fn read_device_id(&self) -> Option<device::RawIds> {
         let id = self.read_offset(0);
         let vendor_id = (id & 0xFFFF) as u16;
 
@@ -185,7 +185,7 @@ impl ConfigReg {
             return None;
         }
 
-        Some(device::Id {
+        Some(device::RawIds {
             vendor_id,
             device_id: (id >> 16) as u16,
         })

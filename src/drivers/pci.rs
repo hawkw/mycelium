@@ -1,15 +1,14 @@
 use alloc::collections::{
+    btree_map::{self, BTreeMap},
     btree_set::{self, BTreeSet},
-    BTreeMap,
 };
 pub use mycelium_pci::*;
 use mycelium_util::sync::InitOnce;
 
 #[derive(Debug, Default)]
 pub struct DeviceRegistry {
-    // TODO(eliza): maybe consider un-nesting the `Class` enum so you can just
-    // say "give me all mass storage devices"...
-    by_class: BTreeMap<Class, Devices>,
+    // TODO(eliza): these BTreeMaps could be `[T; 256]`...
+    by_class: BTreeMap<Class, BySubclass>,
     by_vendor: BTreeMap<u16, BTreeMap<u16, Devices>>,
     len: usize,
 }
@@ -17,25 +16,31 @@ pub struct DeviceRegistry {
 #[derive(Clone, Debug, Default)]
 pub struct Devices(BTreeSet<Address>);
 
+#[derive(Clone, Debug, Default)]
+pub struct BySubclass(BTreeMap<Subclass, Devices>);
+
 pub static DEVICES: InitOnce<DeviceRegistry> = InitOnce::uninitialized();
 
 impl DeviceRegistry {
     pub fn insert(
         &mut self,
         addr: Address,
-        class: Class,
-        device::Id {
-            vendor_id,
+        class: Classes,
+        device::RawIds {
             device_id,
-        }: device::Id,
+            vendor_id,
+        }: device::RawIds,
     ) -> bool {
-        let mut clobbered = self
+        let mut new = self
             .by_class
-            .entry(class)
+            .entry(class.class())
+            .or_insert_with(Default::default)
+            .0
+            .entry(class.subclass())
             .or_insert_with(Default::default)
             .0
             .insert(addr);
-        clobbered |= self
+        new &= self
             .by_vendor
             .entry(vendor_id)
             .or_insert_with(Default::default)
@@ -44,11 +49,11 @@ impl DeviceRegistry {
             .0
             .insert(addr);
         self.len += 1;
-        clobbered
+        new
     }
 
-    pub fn by_class(&self, class: Class) -> Option<&Devices> {
-        self.by_class.get(&class)
+    pub fn class(&self, class: &Class) -> Option<&BySubclass> {
+        self.by_class.get(class)
     }
 
     pub fn len(&self) -> usize {
@@ -62,6 +67,22 @@ impl DeviceRegistry {
         is_empty
     }
 }
+
+// === impl BySubclass ===
+
+impl BySubclass {
+    pub fn subclass(&self, subclass: class::Subclass) -> Option<&Devices> {
+        self.0.get(&subclass)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Subclass, Address)> + '_ {
+        self.0
+            .iter()
+            .flat_map(|(&subclass, devices)| devices.iter().map(move |device| (subclass, device)))
+    }
+}
+
+// === impl Devices ===
 
 impl Devices {
     pub fn iter(&self) -> core::iter::Copied<btree_set::Iter<'_, Address>> {

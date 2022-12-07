@@ -11,6 +11,7 @@ mycelium-util = { path = "../util" }
 mycelium-bitfield = { path = "../bitfield" }
 hal-x86_64 = { path = "../hal-x86_64" }
 volatile = "0.4.5"
+pci-ids = "0.2.5"
 
 [dependencies.tracing]
 default_features = false

@@ -1,5 +1,11 @@
-use crate::{class::Class, error, register};
+use crate::{
+    class::{Class, Classes, RawClasses, Subclass},
+    error, register,
+};
 pub use bar::BaseAddress;
+use core::fmt;
+pub use pci_ids::Device as Id;
+use pci_ids::FromId;
 mod bar;
 #[derive(Debug)]
 pub struct Device {
@@ -9,7 +15,7 @@ pub struct Device {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
-pub struct Id {
+pub struct RawIds {
     /// Identifies the manufacturer of the device.
     ///
     /// PCI vendor IDs are allocated by PCI-SIG to ensure uniqueness; a complete
@@ -96,7 +102,7 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
 #[repr(C)]
 pub struct Header {
     /// The device's vendor ID and device ID.
-    pub id: Id,
+    pub id: RawIds,
     /// The device's [`Command`] register.
     ///
     /// This register provides control over a device's ability to generate and
@@ -238,13 +244,6 @@ pub enum IrqPin {
     IntD = 0x4,
 }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(C)]
-pub(crate) struct RawClasses {
-    pub(crate) subclass: u8,
-    pub(crate) class: u8,
-}
-
 impl Header {
     pub fn header_type(&self) -> Result<HeaderType, error::UnexpectedValue<u8>> {
         self.header_type.try_get(HeaderTypeReg::TYPE)
@@ -254,8 +253,20 @@ impl Header {
         self.header_type.get(HeaderTypeReg::MULTIFUNCTION)
     }
 
+    pub fn id(&self) -> Result<&'static Id, error::UnexpectedValue<RawIds>> {
+        self.id.resolve()
+    }
+
+    pub fn classes(&self) -> Result<crate::Classes, error::UnexpectedValue<RawClasses>> {
+        self.class.resolve()
+    }
+
     pub fn class(&self) -> Result<Class, error::UnexpectedValue<u8>> {
-        (self.class, self.prog_if).try_into()
+        self.class.resolve_class()
+    }
+
+    pub fn subclass(&self) -> Result<Subclass, error::UnexpectedValue<u8>> {
+        self.class.resolve_subclass()
     }
 }
 
@@ -289,5 +300,30 @@ impl PciBridgeDetails {
     /// Returns this device's base address registers (BARs).
     pub fn base_addrs(&self) -> Result<[Option<bar::BaseAddress>; 2], error::UnexpectedValue<u32>> {
         bar::BaseAddress::decode_bars(&self.base_addrs)
+    }
+}
+
+// === impl RawIds ===
+
+impl RawIds {
+    pub fn resolve(&self) -> Result<&'static Id, error::UnexpectedValue<Self>> {
+        let Self {
+            device_id,
+            vendor_id,
+        } = *self;
+        Id::from_vid_pid(vendor_id, device_id)
+            .ok_or_else(|| error::unexpected(*self).named("PCI device IDs"))
+    }
+}
+
+impl fmt::LowerHex for RawIds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            device_id,
+            vendor_id,
+        } = self;
+        // should the formatted ID be prefaced with a leading `0x`?
+        let leading = if f.alternate() { "0x" } else { "" };
+        write!(f, "{leading}{device_id:x}:{vendor_id:x}")
     }
 }
