@@ -52,7 +52,7 @@ macro_rules! class_enum {
         }
     ) => {
         $(#[$m])*
-        #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
         $v enum $name {
             $(
                 $(#[$($mm)*])*
@@ -107,7 +107,7 @@ macro_rules! class_enum {
         }
     ) => {
         $(#[$m])*
-        #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
         #[repr(u8)]
         $v enum $name {
             $(
@@ -305,7 +305,7 @@ impl TryFrom<(RawClasses, u8)> for Class {
 pub mod iface {
     use super::*;
 
-    #[derive(Debug, Eq, PartialEq, Copy, Clone)]
+    #[derive(Debug, Eq, PartialEq, Copy, Clone, Ord, PartialOrd)]
     #[repr(transparent)]
     pub struct Ide(u8);
 
