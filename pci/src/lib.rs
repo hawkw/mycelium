@@ -1,6 +1,10 @@
 #![cfg_attr(not(test), no_std)]
 
-pub use self::{addr::Address, class::Class, device::Device};
+pub use self::{
+    addr::Address,
+    class::{Class, Classes, Subclass},
+    device::Device,
+};
 mod addr;
 pub mod class;
 pub mod config;
