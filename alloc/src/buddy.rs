@@ -703,13 +703,17 @@ impl Free {
             self.magic
         );
         debug_assert_eq!(
-            self.magic,
+            other.magic,
             Self::MAGIC,
-            "THEIR MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
-            self,
-            self.magic
+            "THEIR MAGIC WAS MESSED UP! other={:#?}, other.magic={:#x}",
+            other,
+            other.magic
         );
-        assert!(!other.links.is_linked());
+        assert!(
+            !other.links.is_linked(),
+            "tried to merge with a block that's already linked! other={:?}",
+            other
+        );
         self.meta.merge(&mut other.meta)
     }
 
