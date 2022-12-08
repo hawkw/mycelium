@@ -59,6 +59,18 @@ impl fmt::Display for Classes {
 // === impl Class ===
 
 impl Class {
+    pub fn from_id(id: u8) -> Result<Self, error::UnexpectedValue<u8>> {
+        let inner =
+            pci_ids::Class::from_id(id).ok_or_else(|| error::unexpected(id).named("PCI class"))?;
+        Ok(Self(inner))
+    }
+
+    pub fn subclass(self, id: u8) -> Result<Subclass, error::UnexpectedValue<u8>> {
+        let inner = pci_ids::Subclass::from_cid_sid(self.id(), id)
+            .ok_or_else(|| error::unexpected(id).named("PCI subclass"))?;
+        Ok(Subclass(inner))
+    }
+
     #[inline]
     #[must_use]
     pub fn name(self) -> &'static str {
