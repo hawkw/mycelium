@@ -42,7 +42,7 @@ enum RunKind<'a> {
 }
 
 pub fn eval(line: &str) {
-    static COMMANDS: &[Command] = &[DUMP, SLEEP, PANIC, FAULT];
+    static COMMANDS: &[Command] = &[DUMP, SLEEP, PANIC, FAULT, crate::drivers::pci::LSPCI_CMD];
 
     let _span = tracing::info_span!(target: "shell", "$", message = %line).entered();
     tracing::info!(target: "shell", "");
@@ -425,7 +425,7 @@ impl<'cmd> Context<'cmd> {
     }
 
     pub fn command(&self) -> &'cmd str {
-        self.current
+        self.current.trim()
     }
 
     fn unknown_command(&self, commands: &'cmd [Command]) -> Error<'cmd> {
