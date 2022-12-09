@@ -1,11 +1,11 @@
 use crate::{
-    class::{Class, Classes, RawClasses, Subclass},
+    class::{Class, RawClasses, Subclass},
     error, register,
 };
 pub use bar::BaseAddress;
-use core::fmt;
-pub use pci_ids::Device as Id;
-use pci_ids::FromId;
+use mycelium_util::fmt;
+pub use pci_ids::{Device as KnownId, Vendor};
+
 mod bar;
 #[derive(Debug)]
 pub struct Device {
@@ -13,7 +13,7 @@ pub struct Device {
     pub details: Kind,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(C)]
 pub struct RawIds {
     /// Identifies the manufacturer of the device.
@@ -28,6 +28,12 @@ pub struct RawIds {
     ///
     /// Device IDs are allocated by the device's vendor.
     pub device_id: u16,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum Id {
+    Known(&'static KnownId),
+    Unknown(RawIds),
 }
 
 mycelium_bitfield::bitfield! {
@@ -253,7 +259,9 @@ impl Header {
         self.header_type.get(HeaderTypeReg::MULTIFUNCTION)
     }
 
-    pub fn id(&self) -> Result<&'static Id, error::UnexpectedValue<RawIds>> {
+    #[inline]
+    #[must_use]
+    pub fn id(&self) -> Id {
         self.id.resolve()
     }
 
@@ -306,13 +314,11 @@ impl PciBridgeDetails {
 // === impl RawIds ===
 
 impl RawIds {
-    pub fn resolve(&self) -> Result<&'static Id, error::UnexpectedValue<Self>> {
-        let Self {
-            device_id,
-            vendor_id,
-        } = *self;
-        Id::from_vid_pid(vendor_id, device_id)
-            .ok_or_else(|| error::unexpected(*self).named("PCI device IDs"))
+    pub fn resolve(self) -> Id {
+        match KnownId::from_vid_pid(self.vendor_id, self.device_id) {
+            Some(known) => Id::Known(known),
+            None => Id::Unknown(self),
+        }
     }
 }
 
@@ -325,5 +331,78 @@ impl fmt::LowerHex for RawIds {
         // should the formatted ID be prefaced with a leading `0x`?
         let leading = if f.alternate() { "0x" } else { "" };
         write!(f, "{leading}{device_id:x}:{vendor_id:x}")
+    }
+}
+
+// === impl Id ===
+
+impl Id {
+    #[inline]
+    #[must_use]
+    pub fn name(&self) -> Option<&'static str> {
+        match self {
+            Self::Known(known) => Some(known.name()),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn vendor(&self) -> Option<&'static Vendor> {
+        match self {
+            Self::Known(known) => Some(known.vendor()),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn device_id(&self) -> u16 {
+        match self {
+            Self::Known(known) => known.id(),
+            Self::Unknown(unknown) => unknown.device_id,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn vendor_id(&self) -> u16 {
+        match self {
+            Self::Known(known) => known.vendor().id(),
+            Self::Unknown(unknown) => unknown.vendor_id,
+        }
+    }
+}
+
+impl fmt::Display for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Known(known) => write!(f, "{} {}", known.vendor().name(), known.name()),
+
+            Self::Unknown(RawIds {
+                vendor_id,
+                device_id,
+            }) => write!(f, "{vendor_id:#x}:{device_id:x}"),
+        }
+    }
+}
+
+impl fmt::Debug for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("Id");
+        match self {
+            Self::Known(known) => s
+                .field("vendor", known.vendor())
+                .field("device", known)
+                .finish(),
+
+            Self::Unknown(RawIds {
+                vendor_id,
+                device_id,
+            }) => s
+                .field("vendor", &fmt::hex(vendor_id))
+                .field("device", &fmt::hex(device_id))
+                .finish(),
+        }
     }
 }

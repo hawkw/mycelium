@@ -82,17 +82,17 @@ fn log_device(device: Address) {
         return;
     };
     match header.id() {
-        Ok(id) => tracing::info!(
+        device::Id::Known(id) => tracing::info!(
             target: "pci",
             vendor = %id.vendor().name(),
             device = %id.name(),
             prog_if = fmt::bin(header.prog_if),
             "[{device}]",
         ),
-        Err(_) => tracing::warn!(
+        device::Id::Unknown(id) => tracing::warn!(
             target: "pci",
-            vendor = fmt::hex(header.id.vendor_id),
-            device = fmt::hex(header.id.device_id),
+            vendor = fmt::hex(id.vendor_id),
+            device = fmt::hex(id.device_id),
             prog_if = fmt::bin(header.prog_if),
             "[{device}]: unknown ID or vendor"
         ),
@@ -100,15 +100,7 @@ fn log_device(device: Address) {
 }
 
 impl DeviceRegistry {
-    pub fn insert(
-        &mut self,
-        addr: Address,
-        class: Classes,
-        device::RawIds {
-            device_id,
-            vendor_id,
-        }: device::RawIds,
-    ) -> bool {
+    pub fn insert(&mut self, addr: Address, class: Classes, id: device::Id) -> bool {
         let mut new = self
             .by_class
             .entry(class.class())
@@ -120,13 +112,12 @@ impl DeviceRegistry {
             .insert(addr);
         new &= self
             .by_vendor
-            .entry(vendor_id)
+            .entry(id.vendor_id())
             .or_insert_with(Default::default)
-            .entry(device_id)
+            .entry(id.device_id())
             .or_insert_with(Default::default)
             .0
             .insert(addr);
-        self.len += 1;
         new
     }
 
