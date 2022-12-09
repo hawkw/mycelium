@@ -194,8 +194,16 @@ impl Devices {
         self.0.iter().copied()
     }
 
+    #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
