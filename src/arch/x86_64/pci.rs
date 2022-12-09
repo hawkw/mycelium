@@ -29,20 +29,20 @@ pub fn init_pci() {
         )
         .entered();
 
-        let id = config.header.id;
-        match config.header.id() {
-            Ok(ids) => {
+        let id = config.header.id();
+        match id {
+            device::Id::Known(ids) => {
                 tracing::info!(
                     target: "  pci",
                     vendor = %ids.vendor().name(),
                     device = %ids.name(),
                 );
             }
-            Err(_) => {
+            device::Id::Unknown(ids) => {
                 tracing::warn!(
                     target: "  pci",
-                    vendor = id.vendor_id,
-                    device = id.device_id,
+                    vendor = ids.vendor_id,
+                    device = ids.device_id,
                     "unrecognized vendor or device ID"
                 );
             }
