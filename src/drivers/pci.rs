@@ -3,6 +3,7 @@ use alloc::collections::{
     btree_map::{self, BTreeMap},
     btree_set::{self, BTreeSet},
 };
+use core::{iter, num::NonZeroU16};
 pub use mycelium_pci::*;
 use mycelium_util::{fmt, sync::InitOnce};
 
@@ -11,6 +12,7 @@ pub struct DeviceRegistry {
     // TODO(eliza): these BTreeMaps could be `[T; 256]`...
     by_class: BTreeMap<Class, BySubclass>,
     by_vendor: BTreeMap<u16, BTreeMap<u16, Devices>>,
+    by_bus_group: BTreeMap<u16, BusGroup>,
     len: usize,
 }
 
@@ -19,6 +21,14 @@ pub struct Devices(BTreeSet<Address>);
 
 #[derive(Clone, Debug, Default)]
 pub struct BySubclass(BTreeMap<Subclass, Devices>);
+
+#[derive(Clone, Debug, Default)]
+pub struct BusGroup(BTreeMap<u8, Bus>);
+
+#[derive(Clone, Debug, Default)]
+pub struct Bus([Option<BusDevice>; 32]);
+
+type BusDevice = [Option<(Subclass, device::Id)>; 8];
 
 pub static DEVICES: InitOnce<DeviceRegistry> = InitOnce::uninitialized();
 
@@ -70,10 +80,54 @@ pub const LSPCI_CMD: shell::Command = shell::Command::new("lspci")
         })])
     .with_fn(|ctx| {
         if !ctx.command().is_empty() {
-            return Err(ctx.other_error("listing an individual PCI device is not yet implemented"));
+            let _addr = match ctx.command().parse::<Address>() {
+                Ok(addr) => addr,
+                Err(error) => {
+                    tracing::error!(%error, "invalid PCI address");
+                    return Err(ctx.invalid_argument("invalid PCI address"));
+                }
+            };
+
+            return Err(ctx.other_error("looking up individual devices is not yet implemented"));
         }
 
-        return Err(ctx.other_error("listing PCI devices by address is not yet implemented."));
+        tracing::info!("listing all PCI devices by address");
+        for (bus_group, group) in DEVICES.get().bus_groups() {
+            let _span = tracing::info_span!("bus group", "{bus_group:04x}").entered();
+            for (bus_num, bus) in group.buses() {
+                let _span = tracing::info_span!("bus", "{bus_num:02x}").entered();
+                for (device_num, device) in bus.devices() {
+                    let _span = tracing::info_span!("device", "{device_num:02x}").entered();
+                    for (fn_num, (subclass, id)) in device
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(fn_num, func)| Some((fn_num, func.as_ref()?)))
+                    {
+                        match id {
+                            device::Id::Known(id) => tracing::info!(
+                                target: " pci",
+                                class = %subclass.class().name(),
+                                device = %subclass.name(),
+                                vendor = %id.vendor().name(),
+                                device = %id.name(),
+                                "[{bus_group:04x}:{bus_num:02x}:{device_num:02x}.{fn_num}]"
+                            ),
+                            device::Id::Unknown(id) => tracing::warn!(
+                                target: " pci",
+
+                                class = %subclass.class().name(),
+                                device = %subclass.name(),
+                                vendor = fmt::hex(id.vendor_id),
+                                device = fmt::hex(id.device_id),
+                                "[{bus_group:04x}:{bus_num:02x}:{device_num:02x}.{fn_num}]",
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     });
 
 fn log_device(device: Address) {
@@ -101,23 +155,42 @@ fn log_device(device: Address) {
 
 impl DeviceRegistry {
     pub fn insert(&mut self, addr: Address, class: Classes, id: device::Id) -> bool {
+        // class->subclass->addr registry
         let mut new = self
             .by_class
             .entry(class.class())
-            .or_insert_with(Default::default)
+            .or_default()
             .0
             .entry(class.subclass())
-            .or_insert_with(Default::default)
+            .or_default()
             .0
             .insert(addr);
+        // vendor->device->addr registry
         new &= self
             .by_vendor
             .entry(id.vendor_id())
-            .or_insert_with(Default::default)
+            .or_default()
             .entry(id.device_id())
-            .or_insert_with(Default::default)
+            .or_default()
             .0
             .insert(addr);
+        // address (bus group->bus->device->function) registry
+        let Bus(bus) = self
+            .by_bus_group
+            .entry(addr.group().map(Into::into).unwrap_or(0))
+            .or_default()
+            .0
+            .entry(addr.bus())
+            .or_default();
+        let bus_device = bus
+            .get_mut(addr.device() as usize)
+            .expect("invalid address: the device must be 5 bits")
+            .get_or_insert_with(|| [None; 8]);
+        new &= bus_device
+            .get_mut(addr.function() as usize)
+            .expect("invalid address: the function must be 3 bits")
+            .replace((class.subclass(), id))
+            .is_none();
         new
     }
 
@@ -130,7 +203,7 @@ impl DeviceRegistry {
     }
 
     pub fn is_empty(&self) -> bool {
-        let is_empty = self.len == 0;
+        let is_empty = self.len() == 0;
         debug_assert_eq!(is_empty, self.by_class.is_empty());
         debug_assert_eq!(is_empty, self.by_vendor.is_empty());
         is_empty
@@ -145,6 +218,31 @@ impl DeviceRegistry {
             }
         })
     }
+
+    pub fn bus_groups(&self) -> btree_map::Iter<'_, u16, BusGroup> {
+        self.by_bus_group.iter()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Address, Subclass, device::Id)> + '_ {
+        self.bus_groups().flat_map(|(&group_addr, group)| {
+            group.buses().flat_map(move |(&bus_addr, bus)| {
+                bus.devices().flat_map(move |(device_addr, device)| {
+                    device
+                        .iter()
+                        .enumerate()
+                        .filter_map(move |(func_num, func)| {
+                            let (subclass, id) = func.as_ref()?;
+                            let addr = Address::new()
+                                .with_group(NonZeroU16::new(group_addr))
+                                .with_bus(bus_addr)
+                                .with_device(device_addr as u8)
+                                .with_function(func_num as u8);
+                            Some((addr, *subclass, *id))
+                        })
+                })
+            })
+        })
+    }
 }
 
 // === impl BySubclass ===
@@ -156,22 +254,16 @@ impl BySubclass {
 
     pub fn iter(
         &self,
-    ) -> core::iter::Filter<
-        btree_map::Iter<'_, Subclass, Devices>,
-        fn(&(&Subclass, &Devices)) -> bool,
-    > {
-        self.0
-            .iter()
-            .filter(|&(subclass, devices)| !devices.is_empty())
+    ) -> iter::Filter<btree_map::Iter<'_, Subclass, Devices>, fn(&(&Subclass, &Devices)) -> bool>
+    {
+        self.0.iter().filter(|&(_, devices)| !devices.is_empty())
     }
 }
 
 impl<'a> IntoIterator for &'a BySubclass {
     type Item = (&'a Subclass, &'a Devices);
-    type IntoIter = core::iter::Filter<
-        btree_map::Iter<'a, Subclass, Devices>,
-        fn(&(&Subclass, &Devices)) -> bool,
-    >;
+    type IntoIter =
+        iter::Filter<btree_map::Iter<'a, Subclass, Devices>, fn(&(&Subclass, &Devices)) -> bool>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -181,7 +273,7 @@ impl<'a> IntoIterator for &'a BySubclass {
 // === impl Devices ===
 
 impl Devices {
-    pub fn iter(&self) -> core::iter::Copied<btree_set::Iter<'_, Address>> {
+    pub fn iter(&self) -> iter::Copied<btree_set::Iter<'_, Address>> {
         self.0.iter().copied()
     }
 
@@ -200,9 +292,33 @@ impl Devices {
 
 impl<'a> IntoIterator for &'a Devices {
     type Item = Address;
-    type IntoIter = core::iter::Copied<btree_set::Iter<'a, Address>>;
+    type IntoIter = iter::Copied<btree_set::Iter<'a, Address>>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+// === impl BusGroup ===
+
+impl BusGroup {
+    pub fn buses(&self) -> btree_map::Iter<'_, u8, Bus> {
+        self.0.iter()
+    }
+}
+
+// === impl Bus ===
+
+impl Bus {
+    pub fn devices(
+        &self,
+    ) -> iter::FilterMap<
+        iter::Enumerate<core::slice::Iter<'_, Option<BusDevice>>>,
+        fn((usize, &Option<BusDevice>)) -> Option<(usize, &BusDevice)>,
+    > {
+        self.0.iter().enumerate().filter_map(
+            (|(addr, device)| Some((addr, device.as_ref()?)))
+                as fn((usize, &Option<BusDevice>)) -> Option<(usize, &BusDevice)>,
+        )
     }
 }

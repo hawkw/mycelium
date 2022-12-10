@@ -50,8 +50,10 @@ pub fn init_pci() {
 
         assert!(
             devices.insert(addr, class, id),
-            "PCI device inserted twice! device={:?}",
-            config
+            "PCI device inserted twice! addr={:?}, id={:?}, class={:?}",
+            addr,
+            id,
+            class,
         );
     }
 
