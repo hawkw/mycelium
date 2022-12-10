@@ -56,7 +56,7 @@ pub fn eval(line: &str) {
 
     match handle_command(Context::new(line), COMMANDS) {
         Ok(_) => {}
-        Err(error) => tracing::warn!(target: "shell", "error: {error}"),
+        Err(error) => tracing::error!(target: "shell", "error: {error}"),
     }
 
     tracing::info!(target: "shell", "");
