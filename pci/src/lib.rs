@@ -5,7 +5,7 @@ pub use self::{
     class::{Class, Classes, Subclass},
     device::Device,
 };
-mod addr;
+pub mod addr;
 pub mod class;
 pub mod config;
 pub mod device;
