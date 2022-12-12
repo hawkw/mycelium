@@ -17,11 +17,19 @@ pub mod rt;
 pub mod shell;
 pub mod wasm;
 
+#[cfg(test)]
+mod tests;
+
 use core::fmt::Write;
 use hal_core::{boot::BootInfo, mem};
 
-#[cfg(test)]
-mod tests;
+pub const MYCELIUM_VERSION: &str = concat!(
+    env!("VERGEN_BUILD_SEMVER"),
+    "-",
+    env!("VERGEN_GIT_BRANCH"),
+    ".",
+    env!("VERGEN_GIT_SHA_SHORT")
+);
 
 #[cfg_attr(target_os = "none", global_allocator)]
 static ALLOC: allocator::Allocator = allocator::Allocator::new();
@@ -31,7 +39,7 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
     writeln!(
         writer,
         "hello from mycelium {} (on {})",
-        env!("CARGO_PKG_VERSION"),
+        MYCELIUM_VERSION,
         arch::NAME
     )
     .unwrap();
@@ -153,13 +161,22 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
     #[cfg(test)]
     arch::run_tests();
 
-    kernel_main();
+    kernel_main(bootinfo);
 }
 
-fn kernel_main() -> ! {
+fn kernel_main(bootinfo: impl BootInfo) -> ! {
     rt::spawn(keyboard_demo());
 
     let mut core = rt::Core::new();
+    tracing::info!(
+        version = %MYCELIUM_VERSION,
+        target = %env!("VERGEN_CARGO_TARGET_TRIPLE"),
+        arch = %arch::NAME,
+        profile = %env!("VERGEN_CARGO_PROFILE"),
+        bootloader = %bootinfo.bootloader_name(),
+        "welcome to the Glorious Mycelium Operating System",
+    );
+
     loop {
         core.run();
         tracing::warn!("someone stopped CPU 0's core! restarting it...");
