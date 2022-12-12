@@ -42,7 +42,14 @@ enum RunKind<'a> {
 }
 
 pub fn eval(line: &str) {
-    static COMMANDS: &[Command] = &[DUMP, SLEEP, PANIC, FAULT, crate::drivers::pci::LSPCI_CMD];
+    static COMMANDS: &[Command] = &[
+        DUMP,
+        SLEEP,
+        PANIC,
+        FAULT,
+        VERSION,
+        crate::drivers::pci::LSPCI_CMD,
+    ];
 
     let _span = tracing::info_span!(target: "shell", "$", message = %line).entered();
     tracing::info!(target: "shell", "");
@@ -148,6 +155,24 @@ const FAULT: Command = Command::new("fault")
                 in(reg) 0,
             )
         }
+        Ok(())
+    });
+
+const VERSION: Command = Command::new("version")
+    .with_help("print verbose build and version info.")
+    .with_fn(|_| {
+        tracing::info!("Mycelium v{}", env!("CARGO_PKG_VERSION"));
+        tracing::info!(build.version = %crate::MYCELIUM_VERSION);
+        tracing::info!(build.timestamp = %env!("VERGEN_BUILD_TIMESTAMP"));
+        tracing::info!(build.features = %env!("VERGEN_CARGO_FEATURES"));
+        tracing::info!(build.profile = %env!("VERGEN_CARGO_PROFILE"));
+        tracing::info!(build.target = %env!("VERGEN_CARGO_TARGET_TRIPLE"));
+        tracing::info!(commit.sha = %env!("VERGEN_GIT_SHA"));
+        tracing::info!(commit.branch = %env!("VERGEN_GIT_BRANCH"));
+        tracing::info!(commit.date = %env!("VERGEN_GIT_COMMIT_TIMESTAMP"));
+        tracing::info!(rustc.version = %env!("VERGEN_RUSTC_SEMVER"));
+        tracing::info!(rustc.channel = %env!("VERGEN_RUSTC_CHANNEL"));
+
         Ok(())
     });
 
