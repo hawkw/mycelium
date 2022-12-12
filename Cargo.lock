@@ -267,12 +267,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f1885697ee8a177096d42f158922251a41973117f6d8a234cee94b9509157b7"
 dependencies = [
  "backtrace",
- "color-spantrace",
+ "color-spantrace 0.1.6",
  "eyre",
  "indenter",
  "once_cell",
  "owo-colors 1.3.0",
  "tracing-error 0.1.2",
+]
+
+[[package]]
+name = "color-eyre"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a667583cca8c4f8436db8de46ea8233c42a7d9ae424a82d338f2e4675229204"
+dependencies = [
+ "backtrace",
+ "color-spantrace 0.2.0",
+ "eyre",
+ "indenter",
+ "once_cell",
+ "owo-colors 3.5.0",
+ "tracing-error 0.2.0",
 ]
 
 [[package]]
@@ -285,6 +300,18 @@ dependencies = [
  "owo-colors 1.3.0",
  "tracing-core 0.1.30",
  "tracing-error 0.1.2",
+]
+
+[[package]]
+name = "color-spantrace"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ba75b3d9449ecdccb27ecbc479fdc0b87fa2dd43d2f8298f9bf0e59aacc8dce"
+dependencies = [
+ "once_cell",
+ "owo-colors 3.5.0",
+ "tracing-core 0.1.30",
+ "tracing-error 0.2.0",
 ]
 
 [[package]]
@@ -758,7 +785,7 @@ dependencies = [
  "atty",
  "bootloader-locator",
  "clap",
- "color-eyre",
+ "color-eyre 0.5.11",
  "heck 0.3.3",
  "locate-cargo-manifest",
  "mycotest",
@@ -965,6 +992,7 @@ version = "0.0.1"
 dependencies = [
  "acpi",
  "bootloader",
+ "color-eyre 0.6.2",
  "embedded-graphics",
  "futures-util",
  "hal-core",
@@ -1124,6 +1152,12 @@ name = "owo-colors"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a61765925aec40abdb23812a3a1a01fafc6ffb9da22768b2ce665a9e84e527c"
+
+[[package]]
+name = "owo-colors"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 
 [[package]]
 name = "parity-wasm"
