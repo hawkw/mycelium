@@ -26,7 +26,7 @@ fn main() -> color_eyre::Result<()> {
 fn gen_version() -> Result<()> {
     use vergen::{vergen, Config, ShaKind};
     let mut config = Config::default();
-    *config.git_mut().sha_kind_mut() = ShaKind::Short;
+    *config.git_mut().sha_kind_mut() = ShaKind::Both;
     // since this is a monorepo with multiple crates, vergen will use whatever
     // the latest git tag for generating semver, which might be a `cordyceps` or
     // `maitake` tag rather than a `mycelium` tag...

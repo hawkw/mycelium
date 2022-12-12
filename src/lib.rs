@@ -170,9 +170,7 @@ fn kernel_main(bootinfo: impl BootInfo) -> ! {
     let mut core = rt::Core::new();
     tracing::info!(
         version = %MYCELIUM_VERSION,
-        target = %env!("VERGEN_CARGO_TARGET_TRIPLE"),
         arch = %arch::NAME,
-        profile = %env!("VERGEN_CARGO_PROFILE"),
         bootloader = %bootinfo.bootloader_name(),
         "welcome to the Glorious Mycelium Operating System",
     );
@@ -207,6 +205,7 @@ async fn keyboard_demo() {
     use drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
 
     let mut line = String::new();
+    tracing::info!("type `help` to list available commands");
     loop {
         let key = ps2_keyboard::next_key().await;
         let mut newline = false;
