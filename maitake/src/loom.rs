@@ -109,7 +109,11 @@ mod inner {
         pub use mycelium_util::sync::spin;
     }
 
-    pub(crate) use core::sync::atomic;
+    pub(crate) mod atomic {
+        pub use portable_atomic::*;
+    }
+
+    pub(crate) use portable_atomic::hint;
 
     #[cfg(test)]
     pub(crate) mod thread {
@@ -161,15 +165,6 @@ mod inner {
     pub(crate) fn model(f: impl FnOnce()) {
         let _trace = crate::util::test::trace_init();
         model::Builder::new().check(f)
-    }
-
-    pub(crate) mod hint {
-        #[inline(always)]
-        pub(crate) fn spin_loop() {
-            // MSRV: std::hint::spin_loop() stabilized in 1.49.0
-            #[allow(deprecated)]
-            super::atomic::spin_loop_hint()
-        }
     }
 
     pub(crate) mod cell {
