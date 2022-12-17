@@ -186,6 +186,60 @@ explicitly disable unwinding in that project's `Cargo.toml`.
 [`catch_unwind`]: https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
 [UnwindSafe]: https://doc.rust-lang.org/stable/std/panic/trait.UnwindSafe.html
 
+## platform support
+
+In general, `maitake` is a platform-agnostic library. It does not interact
+directly with the underlying hardware, or use platform-specific features (with
+one small exception). Instead, `maitake` provides portable implementations of
+core runtime components. In some cases, [such as the timer wheel][time-source],
+downstream code must integrate `maitake`'s APIs with hardware-specific code for
+in order to use them effectively.
+
+### support for atomic operations
+
+However, one aspect of `maitake`'s implementation may differ slightly across
+different target architectures: `maitake` relies on atomic operations integers.
+Sometimes, atomic operations on integers of specific widths are needed (e.g.,
+[`AtomicU64`]), which may not be available on all architectures.
+
+In order to work on architectures which lack atomic operations on 64-bit
+integers, `maitake` uses the [`portable-atomic`] crate by Taiki Endo. This crate
+crate polyfills atomic operations on integers larger than the platform's pointer
+width, when these are not supported in hardware.
+
+In most cases, users of `maitake` don't need to be aware of `maitake`'s use of
+`portable-atomic`. If compiling `maitake` for a target architecture that has
+native support for 64-bit atomic operations (such as `x86_64` or `aarch64`), the
+native atomics are used automatically. Similarly, if compiling `maitake` for any
+target that has atomic compare-and-swap operations on any size integer, but
+lacks 64-bit atomics (i.e., 32-bit x86 targets like `i686`, or 32-bit ARM
+targets with atomic operations), the `portable-atomic` polyfill is used
+automatically. Finally, when compiling for target architectures which lack
+atomic operations because they are *always* single-core, such as MSP430 or AVR
+microcontrollers, `portable-atomic` simply uses unsynchronized operations with
+interrupts temporarily disabled.
+
+**The only case where the user must be aware of `portable-atomic` is when
+compiling for targets which lack atomic operations but are not guaranteed to
+always be single-core**. This includes ARMv6-M (`thumbv6m`), pre-v6 ARM (e.g.,
+`thumbv4t`, `thumbv5te`), and RISC-V targets without the A extension. On these
+architectures, the user must manually enable the [`RUSTFLAGS`] configuration
+[`--cfg portable_atomic_unsafe_assume_single_core`][single-core] if (and **only
+if**) the specific target hardware is known to be single-core. Enabling this cfg
+is unsafe, as it will cause unsound behavior on multi-core systems using these
+architectures.
+
+Additional configurations for some single-core systems, which determine the
+specific sets of interrupts that `portable-atomic` will disable when entering a
+critical section, are described [here][interrupt-cfgs].
+
+[time-source]: https://mycelium.elizas.website/maitake/time/struct.timer#driving-timers
+[`AtomicU64`]: https://doc.rust-lang.org/stable/core/sync/atomic/struct.AtomicU64.html
+[`portable-atomic`]: https://crates.io/crates/portable-atomic
+[`RUSTFLAGS`]: https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags
+[single-core]: https://docs.rs/portable-atomic/latest/portable_atomic/#optional-cfg
+[interrupt-cfgs]: https://github.com/taiki-e/portable-atomic/blob/HEAD/src/imp/interrupt/README.md
+
 ## features
 
 The following features are available (this list is incomplete; you can help by [expanding it].)
