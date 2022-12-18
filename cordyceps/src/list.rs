@@ -786,7 +786,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         CursorMut::new(self, self.head, 0)
     }
 
-    /// Returns a [`CursorMut`] s+tarting at the last element.
+    /// Returns a [`CursorMut`] starting at the last element.
     ///
     /// The [`CursorMut`] type can be used as a mutable [`Iterator`]. In addition,
     /// however, it also permits modifying the *structure* of the list by
@@ -807,7 +807,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Cursor::new(self, self.head, 0)
     }
 
-    /// Returns a [`CursorMut`] s+tarting at the last element.
+    /// Returns a [`Cursor`] starting at the last element.
     ///
     /// The [`Cursor`] type can be used as [`Iterator`] over this list. In
     /// addition, it may be seeked back and forth to an arbitrary position in
