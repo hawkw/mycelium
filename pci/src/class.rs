@@ -8,9 +8,15 @@ pub struct Classes {
     subclass: Subclass,
 }
 
+/// A code describing a PCI device's device class.
+///
+/// This type represents a class code that exists in the PCI class database.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Class(&'static pci_ids::Class);
 
+/// A code describing a PCI device's subclass within its [`Class`].
+///
+/// This type represents a subclass code that exists in the PCI class database.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Subclass(&'static pci_ids::Subclass);
 

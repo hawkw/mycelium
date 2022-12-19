@@ -1,5 +1,5 @@
 use crate::{
-    class::{Class, RawClasses, Subclass},
+    class::{Class, Classes, RawClasses, Subclass},
     error, register,
 };
 pub use bar::BaseAddress;
@@ -7,74 +7,6 @@ use mycelium_util::fmt;
 pub use pci_ids::{Device as KnownId, Vendor};
 
 mod bar;
-#[derive(Debug)]
-pub struct Device {
-    pub header: Header,
-    pub details: Kind,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(C)]
-pub struct RawIds {
-    /// Identifies the manufacturer of the device.
-    ///
-    /// PCI vendor IDs are allocated by PCI-SIG to ensure uniqueness; a complete
-    /// list is available [here]. Vendor ID `0xFFFF` is reserved to indicate
-    /// that a device is not present.
-    ///
-    /// [here]: https://pcisig.com/membership/member-companies
-    pub vendor_id: u16,
-    /// Identifies the specific device.
-    ///
-    /// Device IDs are allocated by the device's vendor.
-    pub device_id: u16,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum Id {
-    Known(&'static KnownId),
-    Unknown(RawIds),
-}
-
-mycelium_bitfield::bitfield! {
-    #[derive(PartialEq, Eq)]
-    pub struct HeaderTypeReg<u8> {
-        /// Indicates the type of device and the layout of the header.
-        pub const TYPE: HeaderType;
-        const _RESERVED = 5;
-        /// Indicates that this device has multiple functions.
-        pub const MULTIFUNCTION: bool;
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum HeaderType {
-    /// This is a standard PCI device.
-    Standard = 0x00,
-    /// This is a PCI-to-PCI bridge.
-    PciBridge = 0x01,
-    /// This is a PCI-to-CardBus bridge
-    CardBusBridge = 0x02,
-}
-
-impl mycelium_bitfield::FromBits<u8> for HeaderType {
-    type Error = error::UnexpectedValue<u8>;
-    const BITS: u32 = 2;
-
-    fn try_from_bits(bits: u8) -> Result<Self, Self::Error> {
-        match bits {
-            bits if bits == Self::Standard as u8 => Ok(Self::Standard),
-            bits if bits == Self::PciBridge as u8 => Ok(Self::PciBridge),
-            bits if bits == Self::CardBusBridge as u8 => Ok(Self::CardBusBridge),
-            bits => Err(error::unexpected(bits)),
-        }
-    }
-
-    fn into_bits(self) -> u8 {
-        self as u8
-    }
-}
 
 /// A PCI device header.
 ///
@@ -84,18 +16,18 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
 ///
 /// The header has the following layout:
 ///
-/// | Bits 31-24      | Bits 23-16      | Bits 15-8       | Bits 7-0        |
-/// |-----------------|-----------------|-----------------|-----------------|
-/// | [Device ID]     |                 | [Vendor ID]     |                 |
-/// | [`Status`]      |                 | [`Command`]     |                 |
-/// | [`Class`] code  | Subclass code   | [Prog IF]       | [Revision ID]   |
-/// | [BIST] register | [`HeaderType`]  | [Latency timer] |[Cache line size]|
+/// | Word | Bits 31-24    | Bits 23-16    | Bits 15-8      | Bits 7-0        |
+/// |------|---------------|---------------|----------------|-----------------|
+/// | 0x0  |[Device ID]    |               |[Vendor ID]     |                 |
+/// | 0x1  |[`Status`]     |               |[`Command`]     |                 |
+/// | 0x2  |[`Class`]      |[`Subclass`]   |[Prog IF]       |[Revision ID]    |
+/// | 0x3  |[BIST] register|[`HeaderType`] |[Latency timer] |[Cache line size]|
 ///
 /// Much of the documentation for this struct's fields was copied from [the
 /// OSDev Wiki][wiki].
 ///
-/// [Device ID]: Id#structfield.device_id
-/// [Vendor ID]: Id#structfield.vendor_id
+/// [Device ID]: Id
+/// [Vendor ID]: Vendor
 /// [Prog IF]: #structfield.prog_if
 /// [Revision ID]: #structfield.revision_id
 /// [Latency timer]: #structfield.latency_timer
@@ -107,7 +39,10 @@ impl mycelium_bitfield::FromBits<u8> for HeaderType {
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Header {
-    /// The device's vendor ID and device ID.
+    /// The device's raw [vendor ID](Vendor) and [device ID](Id).
+    ///
+    /// Use the [`Header::id`] method to attempt to resolve the raw numeric IDs
+    /// to a known vendor and device in the PCI IDs database.
     pub id: RawIds,
     /// The device's [`Command`] register.
     ///
@@ -166,9 +101,114 @@ pub struct Header {
 }
 
 #[derive(Debug)]
+pub struct Device {
+    pub header: Header,
+    pub details: Kind,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(C)]
+pub struct RawIds {
+    /// Identifies the manufacturer of the device.
+    ///
+    /// PCI vendor IDs are allocated by PCI-SIG to ensure uniqueness; a complete
+    /// list is available [here]. Vendor ID `0xFFFF` is reserved to indicate
+    /// that a device is not present.
+    ///
+    /// [here]: https://pcisig.com/membership/member-companies
+    pub vendor_id: u16,
+    /// Identifies the specific device.
+    ///
+    /// Device IDs are allocated by the device's vendor.
+    pub device_id: u16,
+}
+
+/// Represents a device's [vendor ID] and [device ID].
+///
+/// [vendor ID]: Vendor
+/// [known ID]: KnownId
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum Id {
+    /// A known ID.
+    ///
+    /// This variant is returned if the device's vendor ID and device ID exist
+    /// in the PCI ID database, and information such as a string representing
+    /// the name of the vendor or device can be returned.
+    Known(&'static KnownId),
+
+    /// An unknown ID.
+    ///
+    /// This variant is returned if the device's vendor ID or device ID were not
+    /// found in the PCI ID database.
+    ///
+    /// This is not necessarily an error, as it may indicate that the database
+    /// has not been updated to include a newer device, the device is a
+    /// prototype that has not yet been registered with PCI-SIG, or the device
+    /// is not a "real" device but an emulated device provided by a virtual
+    /// machine. An unknown device may still be used, provided that its
+    /// [`Class`], [`Subclass`], and [prog IF] provide sufficient information to
+    /// program that device.
+    ///
+    /// [prog IF]: Header#structfield.prog_if
+    Unknown(RawIds),
+}
+
+mycelium_bitfield::bitfield! {
+    #[derive(PartialEq, Eq)]
+    pub struct HeaderTypeReg<u8> {
+        /// Indicates the type of device and the layout of the header.
+        pub const TYPE: HeaderType;
+        const _RESERVED = 5;
+        /// Indicates that this device has multiple functions.
+        pub const MULTIFUNCTION: bool;
+    }
+}
+
+/// Describes the type of device header.
+///
+/// This indicates whether the device is a [standard PCI
+/// device](StandardDetails), a [PCI-to-PCI bridge](PciBridgeDetails), or a
+/// [PCI-to-CardBus bridge](CardBusDetails).
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum HeaderType {
+    /// This is a [standard PCI device](StandardDetails).
+    Standard = 0x00,
+    /// This is a [PCI-to-PCI bridge device](PciBridgeDetails).
+    PciBridge = 0x01,
+    /// This is a [PCI-to-CardBus bridge device](CardBusDetails).
+    CardBusBridge = 0x02,
+}
+
+impl mycelium_bitfield::FromBits<u8> for HeaderType {
+    type Error = error::UnexpectedValue<u8>;
+    const BITS: u32 = 2;
+
+    fn try_from_bits(bits: u8) -> Result<Self, Self::Error> {
+        match bits {
+            bits if bits == Self::Standard as u8 => Ok(Self::Standard),
+            bits if bits == Self::PciBridge as u8 => Ok(Self::PciBridge),
+            bits if bits == Self::CardBusBridge as u8 => Ok(Self::CardBusBridge),
+            bits => Err(error::unexpected(bits)),
+        }
+    }
+
+    fn into_bits(self) -> u8 {
+        self as u8
+    }
+}
+
+/// Details describing specific types of device.
+#[derive(Debug)]
 pub enum Kind {
+    /// A standard PCI device (not a bridge)
     Standard(StandardDetails),
+
+    /// A PCI-to-PCI bridge device.
     PciBridge(PciBridgeDetails),
+
+    /// A PCI-to-CardBus bridge device.
     CardBus(CardBusDetails),
 }
 
@@ -251,28 +291,89 @@ pub enum IrqPin {
 }
 
 impl Header {
+    /// Returns the device's header type, or an error if the header type code is
+    /// invalid.
+    ///
+    /// This value identifies the [device kind], and the layout of the rest of
+    /// the device's PCI configuration space header.
+    ///
+    /// A device is one of the following:
+    ///
+    /// - A standard PCI device ([`StandardDetails`])
+    /// - A PCI-to-PCI bridge ([`PciBridgeDetails`])
+    /// - A PCI-to-CardBus bridge ([`CardBusDetails`])
+    ///
+    /// [device kind]: Kind
+    #[inline]
     pub fn header_type(&self) -> Result<HeaderType, error::UnexpectedValue<u8>> {
-        self.header_type.try_get(HeaderTypeReg::TYPE)
+        self.header_type
+            .try_get(HeaderTypeReg::TYPE)
+            .map_err(|e| e.named("header type"))
     }
 
+    /// Returns `true` if this device has multiple functions.
+    #[inline]
+    #[must_use]
     pub fn is_multifunction(&self) -> bool {
         self.header_type.get(HeaderTypeReg::MULTIFUNCTION)
     }
 
+    /// Returns the device's [`Id`].
+    ///
+    /// This will attempt to resolve the device's [vendor ID](Vendor) and
+    /// [device ID](KnownId) in the PCI IDs database. If the device ID can be
+    /// resolved, an [`Id::Known`] is returned. Otherwise, if the device's
+    /// vendor ID or device ID does not exist in the PCI ID database, an
+    /// [`Id::Unknown`] is returned.
     #[inline]
     #[must_use]
     pub fn id(&self) -> Id {
         self.id.resolve()
     }
 
-    pub fn classes(&self) -> Result<crate::Classes, error::UnexpectedValue<RawClasses>> {
+    /// Returns the device's [`Classes`] (its [`Class`] and [`Subclass`]), or an
+    /// error if this header's class or subclass code does not exist in the PCI
+    /// ID database.
+    #[inline]
+    pub fn classes(&self) -> Result<Classes, error::UnexpectedValue<RawClasses>> {
         self.class.resolve()
     }
 
+    /// Returns the device's [`Class`].
+    ///
+    /// The class indicates what general category of device (e.g. a display
+    /// controller, network controller, etc) this header describes. The class
+    /// value is used to determine the meaning of the [`Subclass`] code, which
+    /// describes a subcategory of device within that class.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`Class`]`)` if the header's class code exists in the PCI ID
+    ///   database.
+    /// - [`Err`]`(`[`error::UnexpectedValue`]`)` if the header's class code was
+    ///   not present in the PCI ID database. This generally indicates that the
+    ///   device header was read incorrectly or the device is malfunctioning, as
+    ///   all devices should have a known class code.
+    #[inline]
     pub fn class(&self) -> Result<Class, error::UnexpectedValue<u8>> {
         self.class.resolve_class()
     }
 
+    /// Returns the device's [`Subclass`].
+    ///
+    /// The subclass describes a more specific category of device within a
+    /// [`Class`].
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`Subclass`]`)` if the header's class and subclass codes
+    ///   exist in the PCI ID database.
+    /// - [`Err`]`(`[`error::UnexpectedValue`]`)` if the header's class or
+    ///   subclass code was not present in the PCI ID database. This generally
+    ///   indicates that the device header was read incorrectly or the device is
+    ///   malfunctioning, as all devices should have known class and subclass
+    ///   codes.
+    #[inline]
     pub fn subclass(&self) -> Result<Subclass, error::UnexpectedValue<u8>> {
         self.class.resolve_subclass()
     }
@@ -280,6 +381,15 @@ impl Header {
 
 impl StandardDetails {
     /// Returns this device's base address registers (BARs).
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`] containing an array of [`Option`]`<`[`BaseAddress`]`>` if the
+    ///   BARs were successfully decoded.
+    /// - [`Err`]`(`[`error::UnexpectedValue`]`)` if a BAR value is invalid.
+    ///
+    /// [`BaseAddress`]: bar::BaseAddress
+    #[inline]
     pub fn base_addrs(&self) -> Result<[Option<bar::BaseAddress>; 6], error::UnexpectedValue<u32>> {
         bar::BaseAddress::decode_bars(&self.base_addrs)
     }
