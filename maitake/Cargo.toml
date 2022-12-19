@@ -7,7 +7,7 @@ authors = [
 ]
 description = "Async runtime construction kit"
 repository = "https://github.com/hawkw/mycelium"
-documentation = "https://docs.rs/maitake"
+documentation = "https://mycelium.elizas.website/maitake"
 homepage = "https://mycelium.elizas.website"
 license = "MIT"
 readme = "README.md"
