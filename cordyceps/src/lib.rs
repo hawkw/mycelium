@@ -47,7 +47,7 @@ use core::ptr::NonNull;
 /// to ensure that types implementing this trait are valid intrusive collection
 /// nodes. In particular:
 ///
-/// - Implementations **must** ensure that implementorss are pinned in memory while they
+/// - Implementations **must** ensure that implementors are pinned in memory while they
 ///   are in an intrusive collection. While a given `Linked` type is in an intrusive
 ///   data structure, it may not be deallocated or moved to a different memory
 ///   location.
