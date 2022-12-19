@@ -1,4 +1,4 @@
-use crate::error;
+use crate::{device, error};
 use core::{cmp, fmt};
 use pci_ids::FromId;
 
@@ -123,6 +123,19 @@ impl Subclass {
     #[must_use]
     pub fn class(self) -> Class {
         Class(self.0.class())
+    }
+
+    /// Resolves a register-level programming interface code ("prog IF") for
+    /// this subclass.
+    ///
+    /// Note that this is an O(_N_) operation.
+    #[must_use]
+    pub fn prog_if(self, code: u8) -> device::ProgIf {
+        self.0
+            .prog_ifs()
+            .find(|prog_if| prog_if.id() == code)
+            .map(device::ProgIf::Known)
+            .unwrap_or(device::ProgIf::Unknown(code))
     }
 }
 

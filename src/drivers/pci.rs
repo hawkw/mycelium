@@ -41,6 +41,30 @@ pub const LSPCI_CMD: shell::Command = shell::Command::new("lspci")
         )
         .with_usage("[CLASS]")
         .with_fn(|ctx| {
+            fn log_device(device: Address, subclass: Subclass) {
+                let Some(header) = config::ConfigReg::new(device).read_header() else {
+                    tracing::error!(target: "pci", "[{device}]: invalid device header!");
+                    return;
+                };
+                let prog_if = subclass.prog_if(header.raw_prog_if());
+                match header.id() {
+                    device::Id::Known(id) => tracing::info!(
+                        target: "pci",
+                        vendor = %id.vendor().name(),
+                        device = %id.name(),
+                        %prog_if,
+                        "[{device}]",
+                    ),
+                    device::Id::Unknown(id) => tracing::warn!(
+                        target: "pci",
+                        vendor = fmt::hex(id.vendor_id),
+                        device = fmt::hex(id.device_id),
+                        %prog_if,
+                        "[{device}]: unknown ID or vendor"
+                    ),
+                }
+            }
+
             fn list_classes<'a>(classes: impl IntoIterator<Item = (Class, &'a BySubclass)>) {
                 for (class, subclasses) in classes {
                     let _span = tracing::info_span!("class", message = %class.name()).entered();
@@ -48,7 +72,7 @@ pub const LSPCI_CMD: shell::Command = shell::Command::new("lspci")
                         let _span =
                             tracing::info_span!("subclass", message = %subclass.name()).entered();
                         for device in devices {
-                            log_device(device)
+                            log_device(device, *subclass)
                         }
                     }
                 }
@@ -114,7 +138,6 @@ pub const LSPCI_CMD: shell::Command = shell::Command::new("lspci")
                             ),
                             device::Id::Unknown(id) => tracing::warn!(
                                 target: " pci",
-
                                 class = %subclass.class().name(),
                                 device = %subclass.name(),
                                 vendor = fmt::hex(id.vendor_id),
@@ -129,29 +152,6 @@ pub const LSPCI_CMD: shell::Command = shell::Command::new("lspci")
 
         Ok(())
     });
-
-fn log_device(device: Address) {
-    let Some(header) = config::ConfigReg::new(device).read_header() else {
-        tracing::error!(target: "pci", "[{device}]: invalid device header!");
-        return;
-    };
-    match header.id() {
-        device::Id::Known(id) => tracing::info!(
-            target: "pci",
-            vendor = %id.vendor().name(),
-            device = %id.name(),
-            prog_if = fmt::bin(header.prog_if),
-            "[{device}]",
-        ),
-        device::Id::Unknown(id) => tracing::warn!(
-            target: "pci",
-            vendor = fmt::hex(id.vendor_id),
-            device = fmt::hex(id.device_id),
-            prog_if = fmt::bin(header.prog_if),
-            "[{device}]: unknown ID or vendor"
-        ),
-    }
-}
 
 impl DeviceRegistry {
     pub fn insert(&mut self, addr: Address, class: Classes, id: device::Id) -> bool {
