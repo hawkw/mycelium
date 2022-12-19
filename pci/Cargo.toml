@@ -2,9 +2,18 @@
 name = "mycelium-pci"
 version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
+description = """
+    Mycelium's hardware abstraction layer for PCI and PCI Express busses.
+"""
+repository = "https://github.com/hawkw/mycelium"
+documentation = "https://mycelium.elizas.website/mycelium-pci"
+homepage = "https://mycelium.elizas.website"
+license = "MIT"
+readme = "README.md"
+keywords = ["no_std", "pci", "pcie"]
+categories = ["no-std",]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.61.0"
 
 [dependencies]
 mycelium-util = { path = "../util" }
