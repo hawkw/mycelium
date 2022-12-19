@@ -94,7 +94,7 @@ pub struct Header {
     /// - A PCI-to-CardBus bridge ([`CardBusDetails`])
     ///
     /// [device kind]: Kind
-    pub header_type: HeaderTypeReg,
+    pub(crate) header_type: HeaderTypeReg,
     /// A read-write register for running the device's Built-In Self Test
     /// (BIST).
     pub bist: register::Bist,
@@ -155,12 +155,12 @@ pub enum Id {
 
 mycelium_bitfield::bitfield! {
     #[derive(PartialEq, Eq)]
-    pub struct HeaderTypeReg<u8> {
+    pub(crate) struct HeaderTypeReg<u8> {
         /// Indicates the type of device and the layout of the header.
-        pub const TYPE: HeaderType;
+        pub(crate) const TYPE: HeaderType;
         const _RESERVED = 5;
         /// Indicates that this device has multiple functions.
-        pub const MULTIFUNCTION: bool;
+        pub(crate) const MULTIFUNCTION: bool;
     }
 }
 
