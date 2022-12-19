@@ -4,7 +4,7 @@ use crate::{
 };
 pub use bar::BaseAddress;
 use mycelium_util::fmt;
-pub use pci_ids::{Device as KnownId, Vendor};
+pub use pci_ids::{Device as KnownId, ProgIf as KnownProgIf, Vendor};
 
 mod bar;
 
@@ -18,9 +18,9 @@ mod bar;
 ///
 /// | Word | Bits 31-24    | Bits 23-16    | Bits 15-8      | Bits 7-0        |
 /// |------|---------------|---------------|----------------|-----------------|
-/// | 0x0  |[Device ID]    |               |[Vendor ID]     |                 |
-/// | 0x1  |[`Status`]     |               |[`Command`]     |                 |
-/// | 0x2  |[`Class`]      |[`Subclass`]   |[Prog IF]       |[Revision ID]    |
+/// | 0x0  |[Device ID]    | ...           |[Vendor ID]     | ...             |
+/// | 0x1  |[`Status`]     | ...           |[`Command`]     | ...             |
+/// | 0x2  |[`Class`]      |[`Subclass`]   |[`ProgIf`]      |[Revision ID]    |
 /// | 0x3  |[BIST] register|[`HeaderType`] |[Latency timer] |[Cache line size]|
 ///
 /// Much of the documentation for this struct's fields was copied from [the
@@ -28,7 +28,6 @@ mod bar;
 ///
 /// [Device ID]: Id
 /// [Vendor ID]: Vendor
-/// [Prog IF]: #structfield.prog_if
 /// [Revision ID]: #structfield.revision_id
 /// [Latency timer]: #structfield.latency_timer
 /// [Cache line size]: #structfield.cache_line_size
@@ -71,7 +70,7 @@ pub struct Header {
     ///
     /// This is often used alongside the device's class and subclass to
     /// determine how to interact with the device.
-    pub prog_if: u8,
+    pub(crate) prog_if: u8,
     /// The device's class and subclass.
     ///
     /// See the [`class`](crate::class) module for details.
@@ -210,6 +209,17 @@ pub enum Kind {
 
     /// A PCI-to-CardBus bridge device.
     CardBus(CardBusDetails),
+}
+
+/// Describes a device's register-level programming interface.
+#[derive(Debug, Copy, Clone)]
+pub enum ProgIf {
+    /// The device's prog IF code was found in the PCI IDs database, and is
+    /// associated with a named interface.
+    Known(&'static KnownProgIf),
+
+    /// The device's prog IF code was not found in the PCI IDs database.
+    Unknown(u8),
 }
 
 /// A header describing a standard PCI device (not a bridge).
@@ -377,6 +387,24 @@ impl Header {
     pub fn subclass(&self) -> Result<Subclass, error::UnexpectedValue<u8>> {
         self.class.resolve_subclass()
     }
+
+    /// Returns the [register-level programming interface](ProgIf) ("prog IF")
+    /// for this device, or an error if the device's class or subclass code
+    /// (which are necessary for determining the programming interface) could
+    /// not be resolved.
+    pub fn prog_if(&self) -> Result<ProgIf, error::UnexpectedValue<u8>> {
+        let prog_if = self.class.resolve_subclass()?.prog_if(self.prog_if);
+        Ok(prog_if)
+    }
+
+    /// Returns the raw programming interface code of this device.
+    ///
+    /// This can be used with the [`Subclass::prog_if`] method.
+    #[inline]
+    #[must_use]
+    pub fn raw_prog_if(&self) -> u8 {
+        self.prog_if
+    }
 }
 
 impl StandardDetails {
@@ -513,6 +541,51 @@ impl fmt::Debug for Id {
                 .field("vendor", &fmt::hex(vendor_id))
                 .field("device", &fmt::hex(device_id))
                 .finish(),
+        }
+    }
+}
+
+// === impl ProgIf ===
+
+impl ProgIf {
+    /// Returns the name of the device's register-level programming interface,
+    /// if it is known.
+    #[inline]
+    #[must_use]
+    pub fn name(&self) -> Option<&'static str> {
+        match self {
+            Self::Known(known) => Some(known.name()),
+            _ => None,
+        }
+    }
+
+    /// Returns the raw ID of the device's register-level programming interface.
+    #[inline]
+    #[must_use]
+    pub fn id(&self) -> u8 {
+        match *self {
+            Self::Known(known) => known.id(),
+            Self::Unknown(id) => id,
+        }
+    }
+}
+
+impl fmt::Display for ProgIf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Known(known) => write!(f, "{} ({:#x})", known.name(), known.id()),
+
+            Self::Unknown(id) => write!(f, "unknown ({id:#x})"),
+        }
+    }
+}
+
+impl From<ProgIf> for u8 {
+    #[inline]
+    fn from(value: ProgIf) -> Self {
+        match value {
+            ProgIf::Known(known) => known.id(),
+            ProgIf::Unknown(code) => code,
         }
     }
 }
