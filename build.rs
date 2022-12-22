@@ -11,7 +11,7 @@ fn main() -> color_eyre::Result<()> {
 
     // compile WASM modules
     let wasm_path = PathBuf::from("src/helloworld.wast");
-    build_wasm(&wasm_path, &out_dir)
+    build_wasm(&wasm_path, out_dir)
         .with_context(|| format!("building WASM `{}` failed!", wasm_path.display()))?;
 
     // generate version info env vars
