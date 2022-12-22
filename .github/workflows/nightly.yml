@@ -46,7 +46,7 @@ jobs:
         components: rust-src, llvm-tools-preview
         toolchain: nightly
         override: true
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: print current nightly
       run: rustc --version && cargo --version
     - run: cargo build-x64
@@ -62,11 +62,13 @@ jobs:
         components: clippy
         toolchain: nightly
         override: true
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: print current nightly
       run: rustc --version && cargo --version
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: cargo clippy
       run: just clippy
