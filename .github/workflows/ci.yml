@@ -103,6 +103,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustfmt
       run: just check-fmt
@@ -118,6 +120,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: cargo clippy
       run: just clippy
@@ -144,6 +148,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: cargo nextest run
@@ -195,6 +201,8 @@ jobs:
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: run rustdoc
       run: just check-docs
 
@@ -212,6 +220,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
@@ -229,6 +239,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run Miri tests
@@ -263,6 +275,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
@@ -282,6 +296,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: install Just
       uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: install nextest
       uses: taiki-e/install-action@nextest
     - name: run loom tests
