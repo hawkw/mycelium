@@ -32,6 +32,9 @@ type BusDevice = [Option<(Subclass, device::Id)>; 8];
 
 pub static DEVICES: InitOnce<DeviceRegistry> = InitOnce::uninitialized();
 
+type BusDeviceFilter = fn((usize, &Option<BusDevice>)) -> Option<(usize, &BusDevice)>;
+type SubclassDeviceFilter = fn(&(&Subclass, &Devices)) -> bool;
+
 pub const LSPCI_CMD: shell::Command = shell::Command::new("lspci")
     .with_help("list PCI devices")
     .with_usage("[ADDRESS]")
@@ -254,16 +257,14 @@ impl BySubclass {
 
     pub fn iter(
         &self,
-    ) -> iter::Filter<btree_map::Iter<'_, Subclass, Devices>, fn(&(&Subclass, &Devices)) -> bool>
-    {
+    ) -> iter::Filter<btree_map::Iter<'_, Subclass, Devices>, SubclassDeviceFilter> {
         self.0.iter().filter(|&(_, devices)| !devices.is_empty())
     }
 }
 
 impl<'a> IntoIterator for &'a BySubclass {
     type Item = (&'a Subclass, &'a Devices);
-    type IntoIter =
-        iter::Filter<btree_map::Iter<'a, Subclass, Devices>, fn(&(&Subclass, &Devices)) -> bool>;
+    type IntoIter = iter::Filter<btree_map::Iter<'a, Subclass, Devices>, SubclassDeviceFilter>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -312,13 +313,11 @@ impl BusGroup {
 impl Bus {
     pub fn devices(
         &self,
-    ) -> iter::FilterMap<
-        iter::Enumerate<core::slice::Iter<'_, Option<BusDevice>>>,
-        fn((usize, &Option<BusDevice>)) -> Option<(usize, &BusDevice)>,
-    > {
-        self.0.iter().enumerate().filter_map(
-            (|(addr, device)| Some((addr, device.as_ref()?)))
-                as fn((usize, &Option<BusDevice>)) -> Option<(usize, &BusDevice)>,
-        )
+    ) -> iter::FilterMap<iter::Enumerate<core::slice::Iter<'_, Option<BusDevice>>>, BusDeviceFilter>
+    {
+        self.0
+            .iter()
+            .enumerate()
+            .filter_map((|(addr, device)| Some((addr, device.as_ref()?))) as BusDeviceFilter)
     }
 }
