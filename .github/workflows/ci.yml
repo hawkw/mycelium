@@ -101,13 +101,9 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: actions/checkout@v2
-    - name: install Just
-      uses: extractions/setup-just@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustfmt
-      run: just check-fmt
+      run: cargo fmt --check --message-format=json | cargo-action-fmt
 
   # are there any annoying clippy lints we ought to clean up?
   clippy:
