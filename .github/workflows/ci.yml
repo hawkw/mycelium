@@ -73,7 +73,7 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: run cargo check (debug)
       run: |
         cargo check \
@@ -100,7 +100,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustfmt
       run: cargo fmt --check --message-format=json | cargo-action-fmt
@@ -113,7 +113,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: install Just
       uses: extractions/setup-just@v1
       env:
@@ -141,7 +141,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: install Just
       uses: extractions/setup-just@v1
       env:
@@ -160,7 +160,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: x86_64 boot image
       run: cargo build-x64
 
@@ -173,7 +173,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     # install QEMU
     - name: install qemu
@@ -193,7 +193,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: install Just
       uses: extractions/setup-just@v1
@@ -213,7 +213,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: install Just
       uses: extractions/setup-just@v1
       env:
@@ -232,7 +232,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: install Just
       uses: extractions/setup-just@v1
       env:
@@ -253,7 +253,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: run tests
       # don't run doctests with `no-default-features`, as some of them
       # require liballoc.
@@ -268,7 +268,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: install Just
       uses: extractions/setup-just@v1
       env:
@@ -289,7 +289,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: install Just
       uses: extractions/setup-just@v1
       env:
