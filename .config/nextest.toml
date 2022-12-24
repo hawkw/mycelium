@@ -7,10 +7,14 @@ slow-timeout = { period = "1m", terminate-after = 2 }
 # complete list of failing tests printed *after* all the logs.
 failure-output = "immediate"
 final-status-level = "fail"
+# Do not cancel the test run on the first failure.
+fail-fast = false
 
 [profile.loom]
 # loom tests might take a long time; don't have `nextest` print "slow" messages.
 slow-timeout = { period = "10m" }
+# Do not cancel the test run on the first failure.
+fail-fast = false
 
 [profile.ci]
 # Do not cancel the test run on the first failure.
