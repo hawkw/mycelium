@@ -117,13 +117,12 @@ bits::bitfield! {
 //   it to `usize` in the array, but this requires unstable const generics
 //   features and i didn't want to mess with it...
 #[derive(Clone)]
+#[repr(C)]
 // rustfmt eats default parameters in const generics for some reason (probably a
 // bug...)
 #[rustfmt::skip]
-pub struct Gdt<const SIZE: usize = 8> {
-    entries: [Descriptor; SIZE],
-    tss_descrs: [SystemDescriptor; crate::cpu::topology::MAX_CPUS],
-    push_tss_at: usize,
+pub struct Gdt {
+    entries: [u64; Self::SIZE as usize],
     push_at: usize,
 }
 
@@ -334,10 +333,8 @@ impl Selector {
 
 // === impl Gdt ===
 
-impl<const SIZE: usize> Gdt<SIZE> {
-    /// The total size of the GDT, including both the normal GDT descriptors and
-    /// system (TSS) descriptors.
-    const TOTAL_SIZE: usize = SIZE + (crate::cpu::topology::MAX_CPUS * 2);
+impl Gdt {
+    const SIZE: u16 = 8 + (crate::cpu::topology::MAX_CPUS as u16 * 2);
 
     /// Sets `self` as the current GDT.
     ///
@@ -372,12 +369,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
     ///
     /// `self` must point to a GDT that is valid for the `'static` lifetime.
     unsafe fn load_unchecked(&self) {
-        // Create the descriptor table pointer with *just* the actual table, so
-        // that the next push index isn't considered a segment descriptor!
-        let limit: u16 = ((Self::TOTAL_SIZE - 1) * mem::size_of::<Descriptor>())
-            .try_into()
-            .expect("GDT size would exceed a u16");
-        let ptr = cpu::DtablePtr::new_raw(self as *const _ as *const (), limit);
+        let ptr = cpu::DtablePtr::new_unchecked(&self.entries);
         tracing::trace!(?ptr, "loading GDT");
         cpu::intrinsics::lgdt(ptr);
         tracing::trace!("loaded GDT!");
@@ -385,12 +377,9 @@ impl<const SIZE: usize> Gdt<SIZE> {
 
     /// Returns a new `Gdt` with all entries zeroed.
     pub const fn new() -> Self {
-        assert!(Self::TOTAL_SIZE <= 65535);
         Gdt {
-            entries: [Descriptor::new(); SIZE],
-            tss_descrs: [SystemDescriptor::null(); crate::cpu::topology::MAX_CPUS],
+            entries: [Descriptor::new().bits(); Self::SIZE as usize],
             push_at: 1,
-            push_tss_at: 1,
         }
     }
 
@@ -417,26 +406,27 @@ impl<const SIZE: usize> Gdt<SIZE> {
 
     const fn push(&mut self, entry: Descriptor) -> u16 {
         let idx = self.push_at;
-        self.entries[idx] = entry;
+        self.entries[idx] = entry.bits();
         self.push_at += 1;
         idx as u16
     }
 
     const fn push_tss(&mut self, entry: SystemDescriptor) -> u16 {
-        let idx = self.push_tss_at;
-        self.tss_descrs[idx] = entry;
-        self.push_tss_at += 1;
+        let idx = self.push_at;
+        self.entries[idx] = entry.low;
+        self.entries[idx + 1] = entry.high;
+        self.push_at += 2;
         idx as u16
     }
 }
 
-impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
+impl fmt::Debug for Gdt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Gdt")
-            .field("capacity", &SIZE)
+            .field("capacity", &Self::SIZE)
             .field("len", &(self.push_at - 1))
-            .field("entries", &&self.entries[..self.push_at])
-            .field("tss_descrs", &&self.tss_descrs[..self.push_tss_at])
+            // .field("entries", &&self.entries[..self.push_at])
+            // .field("tss_descrs", &&self.tss_descrs[..self.push_tss_at])
             .finish()
     }
 }

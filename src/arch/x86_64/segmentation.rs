@@ -10,7 +10,7 @@ use mycelium_util::{
     sync::{self, spin},
 };
 
-pub(super) static GDT: spin::Mutex<Gdt<8>> = spin::Mutex::new(Gdt::new());
+pub(super) static GDT: spin::Mutex<Gdt> = spin::Mutex::new(Gdt::new());
 
 #[tracing::instrument(level = tracing::Level::DEBUG)]
 pub(super) fn init_gdt() {

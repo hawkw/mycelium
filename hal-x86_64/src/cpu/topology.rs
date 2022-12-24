@@ -127,16 +127,13 @@ impl Topology {
         })
     }
 
-    pub fn init_boot_processor<const GDT_SIZE: usize>(&mut self, gdt: &mut segment::Gdt<GDT_SIZE>) {
+    pub fn init_boot_processor(&mut self, gdt: &mut segment::Gdt) {
         self.boot_processor.init_processor(gdt);
     }
 }
 
 impl Processor {
-    pub(crate) fn init_processor<const GDT_SIZE: usize>(
-        &mut self,
-        gdt: &mut segment::Gdt<GDT_SIZE>,
-    ) {
+    pub(crate) fn init_processor(&mut self, gdt: &mut segment::Gdt) {
         tracing::info!(self.id, "initializing processor");
         assert!(!self.initialized, "processor already initialized");
 
