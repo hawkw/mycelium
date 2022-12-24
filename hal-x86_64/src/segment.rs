@@ -4,6 +4,7 @@ use core::{arch::asm, mem};
 use mycelium_util::{
     bits::{self, Pack64, Packing64, Pair64},
     fmt,
+    sync::spin::Mutex,
 };
 
 bits::bitfield! {
@@ -340,15 +341,38 @@ impl<const SIZE: usize> Gdt<SIZE> {
     /// the pointed GDT doesn't go away while it's active. Therefore, this
     /// method is a safe wrapper around the `lgdt` CPU instruction
     pub fn load(&'static self) {
-        // Create the descriptor table pointer with *just* the actual table, so
-        // that the next push index isn't considered a segment descriptor!
-        let ptr = cpu::DtablePtr::new(&self.entries);
-        tracing::trace!(?ptr, "loading GDT");
         unsafe {
             // Safety: the `'static` bound ensures the GDT isn't going away
             // unless you did something really evil.
-            cpu::intrinsics::lgdt(ptr)
+            self.load_unchecked();
         }
+    }
+
+    /// Sets a GDT inside of a [`Mutex`] as the current GDT.
+    ///
+    /// This method is safe, because the `'static` bound on `gdt` ensures that
+    /// the pointed GDT doesn't go away while it's active. Therefore, this
+    /// method is a safe wrapper around the `lgdt` CPU instruction
+    pub fn load_locked(gdt: &'static Mutex<Self>) {
+        let gdt = gdt.lock();
+        unsafe {
+            // Safety: the `'static` bound on the mutex ensures the GDT isn't
+            // going away unless you did something really evil.
+            gdt.load_unchecked();
+        }
+    }
+
+    /// Sets `self` as the current GDT.
+    ///
+    /// # Safety
+    ///
+    /// `self` must point to a GDT that is valid for the `'static` lifetime.
+    unsafe fn load_unchecked(&self) {
+        // Create the descriptor table pointer with *just* the actual table, so
+        // that the next push index isn't considered a segment descriptor!
+        let ptr = cpu::DtablePtr::new_unchecked(&self.entries);
+        tracing::trace!(?ptr, "loading GDT");
+        cpu::intrinsics::lgdt(ptr);
         tracing::trace!("loaded GDT!");
     }
 
