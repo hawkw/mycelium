@@ -243,7 +243,10 @@ impl DtablePtr {
     pub(crate) unsafe fn new_unchecked<T>(t: &T) -> Self {
         let limit = (mem::size_of::<T>() - 1) as u16;
         let base = t as *const _ as *const ();
+        Self { limit, base }
+    }
 
+    pub(crate) unsafe fn new_raw(base: *const (), limit: u16) -> Self {
         Self { limit, base }
     }
 }

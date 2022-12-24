@@ -1,6 +1,6 @@
 /// x86 memory segmentation structures.
 use crate::{cpu, task};
-use core::{arch::asm, mem};
+use core::{arch::asm, convert::TryInto, mem};
 use mycelium_util::{
     bits::{self, Pack64, Packing64, Pair64},
     fmt,
@@ -335,6 +335,10 @@ impl Selector {
 // === impl Gdt ===
 
 impl<const SIZE: usize> Gdt<SIZE> {
+    /// The total size of the GDT, including both the normal GDT descriptors and
+    /// system (TSS) descriptors.
+    const TOTAL_SIZE: usize = SIZE + (crate::cpu::topology::MAX_CPUS * 2);
+
     /// Sets `self` as the current GDT.
     ///
     /// This method is safe, because the `'static` bound on `self` ensures that
@@ -370,7 +374,10 @@ impl<const SIZE: usize> Gdt<SIZE> {
     unsafe fn load_unchecked(&self) {
         // Create the descriptor table pointer with *just* the actual table, so
         // that the next push index isn't considered a segment descriptor!
-        let ptr = cpu::DtablePtr::new_unchecked(&self.entries);
+        let limit: u16 = ((Self::TOTAL_SIZE - 1) * mem::size_of::<Descriptor>())
+            .try_into()
+            .expect("GDT size would exceed a u16");
+        let ptr = cpu::DtablePtr::new_raw(self as *const _ as *const (), limit);
         tracing::trace!(?ptr, "loading GDT");
         cpu::intrinsics::lgdt(ptr);
         tracing::trace!("loaded GDT!");
@@ -378,7 +385,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
 
     /// Returns a new `Gdt` with all entries zeroed.
     pub const fn new() -> Self {
-        assert!(SIZE + (crate::cpu::topology::MAX_CPUS * 2) <= 65535);
+        assert!(Self::TOTAL_SIZE <= 65535);
         Gdt {
             entries: [Descriptor::new(); SIZE],
             tss_descrs: [SystemDescriptor::null(); crate::cpu::topology::MAX_CPUS],
