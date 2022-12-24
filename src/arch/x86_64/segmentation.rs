@@ -1,11 +1,21 @@
-use hal_x86_64::segment::{self, Gdt};
-use mycelium_util::spin::Mutex;
+use hal_core::VAddr;
+use hal_x86_64::{
+    cpu::Ring,
+    interrupt::Idt,
+    segment::{self, Gdt},
+    task,
+};
+use mycelium_util::{
+    fmt,
+    sync::{self, spin},
+};
 
-pub(super) static GDT: Mutex<Gdt<8>> = Mutex::new(Gdt::new());
+pub(super) static GDT: spin::Mutex<Gdt<8>> = spin::Mutex::new(Gdt::new());
 
 #[tracing::instrument(level = tracing::Level::DEBUG)]
 pub(super) fn init_gdt() {
     tracing::trace!("initializing GDT...");
+    // populate the GDT.
     let mut gdt = GDT.lock();
 
     // add one kernel code segment
@@ -17,24 +27,21 @@ pub(super) fn init_gdt() {
         "added code segment"
     );
 
-    // add the TSS.
-
+    // add the boot processor's TSS.
     let tss = segment::SystemDescriptor::tss(&TSS);
     let tss_selector = gdt.add_sys_segment(tss);
     tracing::debug!(
         tss.descriptor = fmt::alt(tss),
         tss.selector = fmt::alt(tss_selector),
-        "added TSS"
+        "added boot processor's TSS"
     );
 
     // all done! long mode barely uses this thing lol.
-    GDT.init(gdt);
-
-    // load the GDT
-    let gdt = GDT.get();
     tracing::debug!(GDT = ?gdt, "GDT initialized");
-    gdt.load();
 
+    // time to load the GDT.
+    drop(gdt); // release the lock before calling `load_locked`.
+    Gdt::load_locked(&GDT);
     tracing::trace!("GDT loaded");
 
     // set new segment selectors
@@ -57,3 +64,27 @@ pub(super) fn init_gdt() {
 
     tracing::debug!("segment selectors set");
 }
+
+// TODO(eliza): put this somewhere good.
+type StackFrame = [u8; 4096];
+
+// chosen by fair dice roll, guaranteed to be random
+const DOUBLE_FAULT_STACK_SIZE: usize = 8;
+
+/// Stack used by ISRs during a double fault.
+///
+/// /!\ EXTREMELY SERIOUS WARNING: this has to be `static mut` or else it
+///     will go in `.bss` and we'll all die or something.
+static mut DOUBLE_FAULT_STACK: [StackFrame; DOUBLE_FAULT_STACK_SIZE] =
+    [[0; 4096]; DOUBLE_FAULT_STACK_SIZE];
+
+static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
+    tracing::trace!("initializing TSS..");
+    let mut tss = task::StateSegment::empty();
+    tss.interrupt_stacks[Idt::DOUBLE_FAULT_IST_OFFSET] = unsafe {
+        // safety: asdf
+        VAddr::of(&DOUBLE_FAULT_STACK).offset(DOUBLE_FAULT_STACK_SIZE as i32)
+    };
+    tracing::debug!(?tss, "TSS initialized");
+    tss
+});

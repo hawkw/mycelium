@@ -1,10 +1,8 @@
-use super::{oops, Oops};
+use super::{oops, segmentation, Oops};
 use core::sync::atomic::{AtomicUsize, Ordering};
-use hal_core::{interrupt, VAddr};
+use hal_core::interrupt;
 pub use hal_x86_64::interrupt::*;
-use hal_x86_64::{cpu::Ring, task};
 use maitake::time;
-use mycelium_util::{fmt, sync};
 
 #[tracing::instrument]
 pub fn enable_exceptions() {

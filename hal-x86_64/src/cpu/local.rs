@@ -11,7 +11,7 @@ use mycelium_util::{fmt, sync::Lazy};
 
 #[repr(C)]
 #[derive(Debug)]
-#[pin_project]
+#[pin_project::pin_project]
 pub struct GsLocalData {
     /// This *must* be the first field of the local data struct, because we read
     /// from `gs:0x0` to get the local data's address.
