@@ -5,7 +5,7 @@ authors = [
     "Nika Layzell <nika@thelayzells.com>",
     "Eliza Weisman <eliza@elizas.website>",
 ]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 
 [features]

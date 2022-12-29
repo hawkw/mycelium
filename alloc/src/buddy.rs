@@ -498,8 +498,7 @@ where
 
         debug_assert!(
             size.as_usize().is_power_of_two(),
-            "page size must be a power of 2; size={}",
-            size
+            "page size must be a power of 2; size={size}",
         );
 
         let actual_len = if len.is_power_of_two() {
@@ -523,10 +522,7 @@ where
 
         debug_assert!(
             total_size.is_power_of_two(),
-            "total size of page range must be a power of 2; total_size={} size={} len={}",
-            total_size,
-            size,
-            actual_len
+            "total size of page range must be a power of 2; total_size={total_size} size={size} len={actual_len}",
         );
 
         #[cfg(debug_assertions)]
@@ -611,8 +607,7 @@ unsafe impl<const FREE_LISTS: usize> GlobalAlloc for Alloc<FREE_LISTS> {
         let addr = match (ptr as usize).checked_sub(self.offset()) {
             Some(addr) => addr,
             None => panic!(
-                "pointer is not to a kernel VAddr! ptr={:p}; offset={:x}",
-                ptr,
+                "pointer is not to a kernel VAddr! ptr={ptr:p}; offset={:x}",
                 self.offset()
             ),
         };
@@ -621,8 +616,7 @@ unsafe impl<const FREE_LISTS: usize> GlobalAlloc for Alloc<FREE_LISTS> {
         match self.dealloc_inner(addr, layout) {
             Ok(_) => {}
             Err(_) => panic!(
-                "deallocating {:?} with layout {:?} failed! this shouldn't happen!",
-                addr, layout
+                "deallocating {addr:?} with layout {layout:?} failed! this shouldn't happen!",
             ),
         }
     }
@@ -673,8 +667,7 @@ impl Free {
         debug_assert_eq!(
             self.magic,
             Self::MAGIC,
-            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
-            self,
+            "MY MAGIC WAS MESSED UP! self={self:#?}, self.magic={:#x}",
             self.magic
         );
         debug_assert!(
@@ -698,21 +691,18 @@ impl Free {
         debug_assert_eq!(
             self.magic,
             Self::MAGIC,
-            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
-            self,
+            "MY MAGIC WAS MESSED UP! self={self:#?}, self.magic={:#x}",
             self.magic
         );
         debug_assert_eq!(
             other.magic,
             Self::MAGIC,
-            "THEIR MAGIC WAS MESSED UP! other={:#?}, other.magic={:#x}",
-            other,
+            "THEIR MAGIC WAS MESSED UP! other={other:#?}, other.magic={:#x}",
             other.magic
         );
         assert!(
             !other.links.is_linked(),
-            "tried to merge with a block that's already linked! other={:?}",
-            other
+            "tried to merge with a block that's already linked! other={other:?}",
         );
         self.meta.merge(&mut other.meta)
     }
