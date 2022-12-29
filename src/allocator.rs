@@ -178,16 +178,12 @@ impl fmt::Display for State {
             let free = heap_size - allocated;
             writeln!(f, "buddy heap:")?;
 
-            writeln!(f, "  {free:>digits$} B free", digits = digits)?;
+            writeln!(f, "  {free:>digits$} B free")?;
 
-            writeln!(f, "  {heap_size:>digits$} B total", digits = digits)?;
-            writeln!(f, "  {free:>digits$} B free", digits = digits)?;
-            writeln!(f, "  {allocated:>digits$} B busy", digits = digits)?;
-            writeln!(
-                f,
-                "  {min_size:>digits$} B minimum allocation",
-                digits = digits
-            )?;
+            writeln!(f, "  {heap_size:>digits$} B total")?;
+            writeln!(f, "  {free:>digits$} B free")?;
+            writeln!(f, "  {allocated:>digits$} B busy")?;
+            writeln!(f, "  {min_size:>digits$} B minimum allocation",)?;
         }
 
         writeln!(f, "bump region:")?;
@@ -197,12 +193,8 @@ impl fmt::Display for State {
         };
         let bump_free = bump_size - bump_allocated;
 
-        writeln!(f, "  {bump_free:>digits$} B free", digits = bump_digits)?;
-        writeln!(
-            f,
-            "  {bump_allocated:>digits$} B used",
-            digits = bump_digits
-        )?;
+        writeln!(f, "  {bump_free:>bump_digits$} B free",)?;
+        writeln!(f, "  {bump_allocated:>bump_digits$} B used",)?;
         Ok(())
     }
 }
