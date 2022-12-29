@@ -293,8 +293,7 @@ mod tests {
         assert_eq!(
             config_addr.get(ConfigAddress::FUNCTION),
             addr.bitfield().get(AddressBits::FUNCTION),
-            "\n{}",
-            config_addr
+            "\n{config_addr}"
         );
     }
 
