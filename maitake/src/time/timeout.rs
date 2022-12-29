@@ -138,6 +138,12 @@ impl Elapsed {
         self.0
     }
 }
+
+feature! {
+    #![maitake_unstable]
+    impl core::error::Error for Elapsed {}
+}
+
 // === impl Timer ===
 
 impl Timer {

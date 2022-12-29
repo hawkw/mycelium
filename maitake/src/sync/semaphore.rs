@@ -27,9 +27,7 @@ use core::{
     ptr::{self, NonNull},
     task::{Context, Poll, Waker},
 };
-#[cfg(any(test, feature = "tracing-01", feature = "tracing-02"))]
-use mycelium_util::fmt;
-use mycelium_util::sync::CachePadded;
+use mycelium_util::{fmt, sync::CachePadded};
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -776,6 +774,22 @@ impl Drop for Permit<'_> {
         trace!(?self.permits, "Permit::drop");
         self.semaphore.add_permits(self.permits);
     }
+}
+
+// === impl TryAcquireError ===
+
+impl fmt::Display for TryAcquireError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Closed => f.pad("semaphore closed"),
+            Self::InsufficientPermits => f.pad("semaphore has insufficient permits"),
+        }
+    }
+}
+
+feature! {
+    #![maitake_unstable]
+    impl core::error::Error for TryAcquireError {}
 }
 
 // === Owned variants when `Arc` is available ===

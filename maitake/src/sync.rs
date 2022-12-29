@@ -80,3 +80,14 @@ impl Closed {
         Self(())
     }
 }
+
+impl core::fmt::Display for Closed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.pad("closed")
+    }
+}
+
+feature! {
+    #![maitake_unstable]
+    impl core::error::Error for Closed {}
+}

@@ -308,3 +308,8 @@ impl<T> fmt::Debug for JoinError<T> {
             .finish()
     }
 }
+
+feature! {
+    #![maitake_unstable]
+    impl core::error::Error for JoinError {}
+}

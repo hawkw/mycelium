@@ -624,6 +624,24 @@ pub enum WakeOutcome<V> {
     Closed(V),
 }
 
+// === impl WaitError ===
+
+impl fmt::Display for WaitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Closed => f.pad("WaitMap closed"),
+            Self::Duplicate => f.pad("duplicate key"),
+            &Self::AlreadyConsumed => f.pad("received data has already been consumed"),
+            Self::NeverAdded => f.pad("Wait was never added to WaitMap"),
+        }
+    }
+}
+
+feature! {
+    #![maitake_unstable]
+    impl core::error::Error for TimerError {}
+}
+
 // === impl Waiter ===
 
 /// A future that ensures a [`Wait`] has been added to a [`WaitMap`].

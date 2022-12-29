@@ -540,3 +540,8 @@ impl fmt::Display for TimerError {
         }
     }
 }
+
+feature! {
+    #![maitake_unstable]
+    impl core::error::Error for TimerError {}
+}
