@@ -224,11 +224,7 @@ impl IoApic {
     }
 
     fn set_offset(&mut self, offset: u32) {
-        assert!(
-            offset <= 0xff,
-            "invalid IOAPIC register offset {:#x}",
-            offset
-        );
+        assert!(offset <= 0xff, "invalid IOAPIC register offset {offset:#x}",);
         self.registers
             .map_mut(|ioapic| &mut ioapic.address)
             .write(offset);
@@ -300,7 +296,7 @@ mod test {
             .with(RedirectionEntry::MASKED, true)
             .with(RedirectionEntry::DESTINATION, 0xff)
             .with(RedirectionEntry::VECTOR, 0x30);
-        println!("{}", entry);
+        println!("{entry}");
     }
 
     #[test]

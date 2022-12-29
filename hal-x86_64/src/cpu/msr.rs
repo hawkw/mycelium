@@ -237,7 +237,7 @@ impl<V: FromBits<u64>> Msr<V> {
     pub fn read(self) -> V {
         match self.try_read() {
             Ok(value) => value,
-            Err(error) => panic!("invalid value for {}: {}", self, error),
+            Err(error) => panic!("invalid value for {self}: {error}"),
         }
     }
 

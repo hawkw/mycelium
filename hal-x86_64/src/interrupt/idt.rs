@@ -310,8 +310,7 @@ mod tests {
         // Gate Type: 32-bit interrupt gate is 0b1110. that's just how it is.
         assert_eq!(
             present_32bit_interrupt.0, 0b1000_1110,
-            "\n attrs: {:#?}",
-            present_32bit_interrupt
+            "\n attrs: {present_32bit_interrupt:#?}",
         );
     }
 
@@ -332,6 +331,6 @@ mod tests {
             0x00, 0x00, 0x00, 0x00,
         ];
 
-        assert_eq!(idt_bytes, &expected_idt, "\n entry: {:#?}", idt_entry);
+        assert_eq!(idt_bytes, &expected_idt, "\n entry: {idt_entry:#?}",);
     }
 }

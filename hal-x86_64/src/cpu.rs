@@ -183,7 +183,7 @@ impl Ring {
             0b01 => Ring::Ring1,
             0b10 => Ring::Ring2,
             0b11 => Ring::Ring3,
-            bits => panic!("invalid ring {:#02b}", bits),
+            bits => panic!("invalid ring {bits:#02b}"),
         }
     }
 }
