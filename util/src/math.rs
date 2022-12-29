@@ -82,7 +82,7 @@ impl Logarithm for usize {
     fn log(self, base: usize) -> Self {
         match self.checked_log(base) {
             Some(log) => log,
-            None => panic!("cannot take log base {} of {}", base, self),
+            None => panic!("cannot take log base {base} of {self}"),
         }
     }
 }
