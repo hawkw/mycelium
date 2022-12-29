@@ -170,7 +170,7 @@ impl Core {
     pub(super) fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {
         let deadline = sleep.deadline;
         trace!(
-            sleep.addr = ?format_args!("{:p}", sleep),
+            sleep.addr = ?format_args!("{sleep:p}"),
             sleep.ticks = *sleep.as_ref().project_ref().ticks,
             sleep.deadline = deadline,
             now = self.now,

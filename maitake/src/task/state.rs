@@ -588,6 +588,6 @@ mod tests {
     #[test]
     fn debug_alt() {
         let state = StateCell::new();
-        println!("{:#?}", state);
+        println!("{state:#?}");
     }
 }
