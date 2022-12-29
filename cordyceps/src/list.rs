@@ -1121,8 +1121,7 @@ impl<T: ?Sized> Links<T> {
             assert_eq!(
                 self.prev(),
                 None,
-                "head node must not have a prev link; node={:#?}",
-                self
+                "head node must not have a prev link; node={self:#?}",
             );
         }
 
@@ -1130,32 +1129,28 @@ impl<T: ?Sized> Links<T> {
             assert_eq!(
                 self.next(),
                 None,
-                "tail node must not have a next link; node={:#?}",
-                self
+                "tail node must not have a next link; node={self:#?}",
             );
         }
 
         assert_ne!(
             self.next(),
             self.prev(),
-            "node cannot be linked in a loop; node={:#?}",
-            self
+            "node cannot be linked in a loop; node={self:#?}",
         );
 
         if let Some(next) = self.next() {
             assert_ne!(
                 unsafe { T::links(next) },
                 NonNull::from(self),
-                "node's next link cannot be to itself; node={:#?}",
-                self
+                "node's next link cannot be to itself; node={self:#?}",
             );
         }
         if let Some(prev) = self.prev() {
             assert_ne!(
                 unsafe { T::links(prev) },
                 NonNull::from(self),
-                "node's prev link cannot be to itself; node={:#?}",
-                self
+                "node's prev link cannot be to itself; node={self:#?}",
             );
         }
     }
@@ -1170,7 +1165,7 @@ impl<T: ?Sized> Default for Links<T> {
 impl<T: ?Sized> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Links")
-            .field("self", &format_args!("{:p}", self))
+            .field("self", &format_args!("{self:p}"))
             .field("next", &FmtOption::new(&self.next()))
             .field("prev", &FmtOption::new(&self.prev()))
             .finish()
