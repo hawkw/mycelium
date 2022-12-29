@@ -485,7 +485,7 @@ mod inner {
 
     #[cfg(test)]
     pub(crate) fn traceln(args: std::fmt::Arguments) {
-        eprintln!("{}", args);
+        eprintln!("{args}");
     }
 
     #[cfg(not(test))]
