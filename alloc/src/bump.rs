@@ -103,7 +103,7 @@ impl<const SIZE: usize> fmt::Debug for Alloc<SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { free, heap: _ } = self;
         f.debug_struct("bump::Alloc")
-            .field("heap", &format_args!("[u8; {}]", SIZE))
+            .field("heap", &format_args!("[u8; {SIZE}]"))
             .field("free", &free)
             .field("allocated_size", &self.allocated_size())
             .finish()
