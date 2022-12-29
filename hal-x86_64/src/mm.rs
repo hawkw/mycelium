@@ -1,7 +1,6 @@
 use self::size::*;
 use crate::{PAddr, VAddr};
 use core::{
-    fmt,
     marker::PhantomData,
     ops,
     ptr::NonNull,
@@ -14,6 +13,7 @@ use hal_core::{
     },
     Address,
 };
+use mycelium_util::fmt;
 pub const MIN_PAGE_SIZE: usize = Size4Kb::SIZE;
 const ENTRIES: usize = 512;
 
@@ -756,8 +756,8 @@ pub trait Level {
 impl<L: Level> fmt::Debug for PageTable<L> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("PageTable")
-            .field("level", &format_args!("{}", L::NAME))
-            .field("addr", &format_args!("{:p}", self))
+            .field("level", &fmt::display(L::NAME))
+            .field("addr", &fmt::ptr(self))
             .finish()
     }
 }
