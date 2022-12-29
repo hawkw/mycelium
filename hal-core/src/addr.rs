@@ -106,8 +106,7 @@ pub trait Address:
         let align = align.into();
         debug_assert!(
             align.is_power_of_two(),
-            "align must be a power of two (actual align: {})",
-            align
+            "align must be a power of two (actual align: {align})",
         );
         self.as_usize() & (align - 1) == 0
     }
@@ -128,9 +127,8 @@ pub trait Address:
         // dereferencing a pointer that isn't type-aligned to be UB.
         assert!(
             self.is_aligned_for::<T>(),
-            "assertion failed: self.is_aligned_for::<{}>();\n\tself={:?}",
+            "assertion failed: self.is_aligned_for::<{}>();\n\tself={self:?}",
             core::any::type_name::<T>(),
-            self
         );
         self.as_usize() as *mut T
     }
@@ -464,26 +462,22 @@ mod tests {
         let addr = (0xFFFFF << 47) | 123;
         assert!(
             VAddr::from_usize_checked(addr).is_ok(),
-            "{:#016x} is valid",
-            addr
+            "{addr:#016x} is valid",
         );
         let addr = 123;
         assert!(
             VAddr::from_usize_checked(addr).is_ok(),
-            "{:#016x} is valid",
-            addr
+            "{addr:#016x} is valid",
         );
         let addr = 123 | (1 << 47);
         assert!(
             VAddr::from_usize_checked(addr).is_err(),
-            "{:#016x} is invalid",
-            addr
+            "{addr:#016x} is invalid",
         );
         let addr = (0x10101 << 47) | 123;
         assert!(
             VAddr::from_usize_checked(addr).is_err(),
-            "{:#016x} is invalid",
-            addr
+            "{addr:#016x} is invalid",
         );
     }
 
@@ -493,26 +487,22 @@ mod tests {
         let addr = 123;
         assert!(
             PAddr::from_usize_checked(addr).is_ok(),
-            "{:#016x} is valid",
-            addr
+            "{addr:#016x} is valid",
         );
         let addr = 0xFFF0_0000_0000_0000 | 123;
         assert!(
             PAddr::from_usize_checked(addr).is_err(),
-            "{:#016x} is invalid",
-            addr
+            "{addr:#016x} is invalid",
         );
         let addr = 0x1000_0000_0000_0000 | 123;
         assert!(
             PAddr::from_usize_checked(addr).is_err(),
-            "{:#016x} is invalid",
-            addr
+            "{addr:#016x} is invalid",
         );
         let addr = 0x0010_0000_0000_0000 | 123;
         assert!(
             PAddr::from_usize_checked(addr).is_err(),
-            "{:#016x} is invalid",
-            addr
+            "{addr:#016x} is invalid",
         );
     }
 }
