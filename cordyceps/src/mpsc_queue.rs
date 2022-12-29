@@ -1475,7 +1475,7 @@ mod tests {
                 thread::spawn(move || {
                     for i in 0..MSGS {
                         q.enqueue(entry(i));
-                        println!("thread {}; msg {}/{}", thread, i, MSGS);
+                        println!("thread {thread}; msg {i}/{MSGS}");
                     }
                 })
             })
@@ -1486,13 +1486,13 @@ mod tests {
             match q.try_dequeue() {
                 Ok(msg) => {
                     i += 1;
-                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
+                    println!("recv {msg:?} ({i}/{})", THREADS * MSGS);
                 }
                 Err(TryDequeueError::Busy) => {
                     panic!("the queue should never be busy, as there is only one consumer")
                 }
                 Err(e) => {
-                    println!("recv error {:?}", e);
+                    println!("recv error {e:?}");
                     thread::yield_now();
                 }
             }
