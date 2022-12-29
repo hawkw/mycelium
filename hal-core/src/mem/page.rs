@@ -1,5 +1,6 @@
 use crate::{Address, PAddr, VAddr};
-use core::{cmp, fmt, ops, slice};
+use core::{cmp, ops, slice};
+use mycelium_util::fmt;
 
 pub trait Size: Copy + Eq + PartialEq + fmt::Display {
     /// Returns the size (in bytes) of this page.
@@ -660,7 +661,7 @@ impl<S: Size + fmt::Display> fmt::Debug for NotAligned<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { size } = self;
         f.debug_struct("NotAligned")
-            .field("size", &format_args!("{size}"))
+            .field("size", &fmt::display(size))
             .finish()
     }
 }
@@ -682,7 +683,7 @@ impl<S: Size + fmt::Display> fmt::Debug for TranslateError<S> {
             TranslateError::NotMapped => f.debug_tuple("TranslateError::NotMapped").finish(),
             TranslateError::WrongSize(s) => f
                 .debug_tuple("TranslateError::WrongSize")
-                .field(&format_args!("{}", s))
+                .field(&format_args!("{s}"))
                 .finish(),
         }
     }
@@ -691,7 +692,7 @@ impl<S: Size + fmt::Display> fmt::Debug for TranslateError<S> {
 impl<S: Size> fmt::Display for TranslateError<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            TranslateError::Other(msg) => write!(f, "error translating page/address: {}", msg),
+            TranslateError::Other(msg) => write!(f, "error translating page/address: {msg}"),
             TranslateError::NotMapped => f.pad("error translating page/address: not mapped"),
             TranslateError::WrongSize(_) => write!(
                 f,
