@@ -148,7 +148,7 @@ impl fmt::LowerHex for Address {
 impl fmt::Debug for Address {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Address({:x})", self)
+        write!(f, "Address({self:x})")
     }
 }
 
