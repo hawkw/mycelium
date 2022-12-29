@@ -103,16 +103,16 @@ pub fn oops(oops: Oops<'_>) -> ! {
             kind,
             details: Some(deets),
             ..
-        } => writeln!(mk_writer.make_writer(), "a {} occurred: {}\n", kind, deets).unwrap(),
+        } => writeln!(mk_writer.make_writer(), "a {kind} occurred: {deets}\n").unwrap(),
         OopsSituation::Fault {
             kind,
             details: None,
             ..
-        } => writeln!(mk_writer.make_writer(), "a {} occurred!\n", kind).unwrap(),
+        } => writeln!(mk_writer.make_writer(), "a {kind} occurred!\n").unwrap(),
         OopsSituation::Panic(panic) => {
             let mut writer = mk_writer.make_writer();
             match panic.message() {
-                Some(msg) => writeln!(writer, "mycelium panicked: {}", msg).unwrap(),
+                Some(msg) => writeln!(writer, "mycelium panicked: {msg}").unwrap(),
                 None => writeln!(writer, "mycelium panicked!").unwrap(),
             }
             if let Some(loc) = panic.location() {
@@ -344,7 +344,7 @@ impl fmt::Debug for OopsSituation<'_> {
                 dbg.field("kind", kind)
                     .field("registers", fault.registers());
                 if let Some(deets) = details {
-                    dbg.field("details", &format_args!("\"{}\"", deets));
+                    dbg.field("details", &format_args!("\"{deets}\""));
                 }
                 dbg.finish()
             }
@@ -369,16 +369,16 @@ fn disassembly<'a>(rip: usize, mk_writer: &'a impl MakeWriter<'a>) {
         // memory. whoopsie.
         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
         let indent = if i == 0 { "> " } else { "  " };
-        let _ = write!(mk_writer.make_writer(), "{}{:016x}: ", indent, ptr);
+        let _ = write!(mk_writer.make_writer(), "{indent}{ptr:016x}: ");
         match decoder.decode_slice(bytes) {
             Ok(inst) => {
-                let _ = writeln!(mk_writer.make_writer(), "{}", inst);
-                tracing::debug!(target: "oops", "{:016x}: {}", ptr, inst);
+                let _ = writeln!(mk_writer.make_writer(), "{inst}");
+                tracing::debug!(target: "oops", "{ptr:016x}: {inst}");
                 ptr += inst.len();
             }
             Err(e) => {
-                let _ = writeln!(mk_writer.make_writer(), "{}", e);
-                tracing::debug!(target: "oops", "{:016x}: {}", ptr, e);
+                let _ = writeln!(mk_writer.make_writer(), "{e}");
+                tracing::debug!(target: "oops", "{ptr:016x}: {e}");
                 break;
             }
         }
