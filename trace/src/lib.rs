@@ -537,9 +537,9 @@ where
 
         if field.name() == "message" {
             if self.seen {
-                let _ = write!(writer.with_bold(), "{}{:?}", nl, val);
+                let _ = write!(writer.with_bold(), "{nl}{val:?}");
             } else {
-                let _ = write!(writer.with_bold(), "{:?}", val);
+                let _ = write!(writer.with_bold(), "{val:?}");
                 self.comma = !writer.has_written_punct;
             }
             self.seen = true;
