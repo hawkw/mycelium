@@ -221,7 +221,7 @@ impl Options {
         }
 
         let bin_name = self.kernel_bin.file_name().unwrap().to_str().unwrap();
-        let image = out_dir.join(format!("boot-bios-{}.img", bin_name));
+        let image = out_dir.join(format!("boot-bios-{bin_name}.img"));
         ensure!(
             image.exists(),
             "disk image should probably exist after running bootloader build command"

@@ -163,7 +163,7 @@ impl Cmd {
                     let stderr = String::from_utf8_lossy(&out.stderr);
                     let status = out.status.code();
                     Err(format_err!("qemu exited with a non-zero status code"))
-                        .with_section(move || format!("{:?}", status).header("status code:"))
+                        .with_section(move || format!("{status:?}").header("status code:"))
                         .with_section(move || stdout.trim().to_string().header("stdout:"))
                         .with_section(move || stderr.trim().to_string().header("stderr:"))
                 } else {
@@ -174,7 +174,7 @@ impl Cmd {
                     }
                     let status = status.code();
                     Err(format_err!("qemu exited with a non-zero status code"))
-                        .with_section(move || format!("{:?}", status).header("status code:"))
+                        .with_section(move || format!("{status:?}").header("status code:"))
                 }
             }
 
@@ -240,7 +240,7 @@ impl Cmd {
                 if let Some(res) = stdout {
                     tracing::trace!("collecting stdout");
                     let res = res.join().unwrap()?;
-                    eprintln!("{}", res);
+                    eprintln!("{res}");
                     // exit with an error if the tests failed.
                     if !res.failed.is_empty() {
                         std::process::exit(1);
@@ -318,7 +318,7 @@ impl TestResults {
                 let _span =
                     tracing::debug_span!("test", "{}::{}", test.module(), test.name()).entered();
                 tracing::debug!(?test, "found a test");
-                eprint!("test {} ...", test);
+                eprint!("test {test} ...");
                 results.tests += 1;
 
                 let mut curr_output = Vec::new();
@@ -339,10 +339,7 @@ impl TestResults {
                         Ok(Some((completed_test, outcome))) => {
                             ensure!(
                                 test == completed_test,
-                                "an unexpected test completed (actual: {}, expected: {}, outcome={:?})",
-                                completed_test,
-                                test,
-                                outcome,
+                                "an unexpected test completed (actual: {completed_test}, expected: {test}, outcome={outcome:?})",
                             );
                             tracing::trace!(?outcome);
                             curr_outcome = Some(outcome);
@@ -350,9 +347,10 @@ impl TestResults {
                         }
                         Err(err) => {
                             tracing::error!(?line, ?err, "failed to parse test outcome!");
-                            return Err(format_err!("failed to parse test outcome")
-                                .note(format!("{}", err)))
-                            .note(format!("line: {:?}", line));
+                            return Err(
+                                format_err!("failed to parse test outcome").note(err.to_string())
+                            )
+                            .note(format!("line: {line:?}"));
                         }
                     }
 
@@ -400,16 +398,11 @@ impl fmt::Display for TestResults {
         if num_failed > 0 {
             writeln!(f, "\nfailures:")?;
             for (test, output) in &self.failed {
-                writeln!(
-                    f,
-                    "\n---- {} serial ----\n{}\n",
-                    test,
-                    &output[..].join("\n")
-                )?;
+                writeln!(f, "\n---- {test} serial ----\n{}\n", &output[..].join("\n"))?;
             }
             writeln!(f, "\nfailures:\n")?;
             for test in self.failed.keys() {
-                writeln!(f, "\t{}", test,)?;
+                writeln!(f, "\t{test}")?;
             }
         }
         let colors = ColorMode::default();
@@ -427,21 +420,16 @@ impl fmt::Display for TestResults {
         };
         writeln!(
             f,
-            "\ntest result: {}. {} passed{}; {} failed; {} missed; {} total",
-            res,
+            "\ntest result: {res}. {} passed{panicked_faulted}; {num_failed} failed; {num_missed} missed; {} total",
             self.completed - num_failed,
-            panicked_faulted,
-            num_failed,
-            num_missed,
             self.total
         )?;
 
         if num_missed > 0 {
             writeln!(
                 f,
-                "\n{}: {} tests didn't get to run due to a panic/fault",
+                "\n{}: {num_missed} tests didn't get to run due to a panic/fault",
                 "warning".style(colors.if_color(owo_colors::style().yellow().bold())),
-                num_missed
             )?;
         }
 
