@@ -743,16 +743,16 @@ mod tests {
             .with(TestBitfield::LOTS, 0b11010)
             .with(TestBitfield::OF, 0)
             .with(TestBitfield::FUN, 9);
-        println!("{}", test_bitfield);
+        println!("{test_bitfield}");
 
         let test_debug = TestDebug {
             value: 42,
             bits: test_bitfield,
         };
 
-        println!("test_debug(alt): {:#?}", test_debug);
+        println!("test_debug(alt): {test_debug:#?}");
 
-        println!("test_debug: {:?}", test_debug)
+        println!("test_debug: {test_debug:?}")
     }
 
     #[test]
