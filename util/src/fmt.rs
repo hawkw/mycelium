@@ -140,7 +140,7 @@ pub fn ptr<T: Pointer>(value: T) -> DebugValue<FormatWith<T>> {
 pub fn hex<T: LowerHex>(value: T) -> DebugValue<FormatWith<T>> {
     tracing::field::debug(FormatWith {
         value,
-        fmt: |value, f: &mut Formatter<'_>| write!(f, "{:#x}", value),
+        fmt: |value, f: &mut Formatter<'_>| write!(f, "{value:#x}"),
     })
 }
 
@@ -162,7 +162,7 @@ pub fn hex<T: LowerHex>(value: T) -> DebugValue<FormatWith<T>> {
 pub fn bin<T: Binary>(value: T) -> DebugValue<FormatWith<T>> {
     tracing::field::debug(FormatWith {
         value,
-        fmt: |value, f: &mut Formatter<'_>| write!(f, "{:#b}", value),
+        fmt: |value, f: &mut Formatter<'_>| write!(f, "{value:#b}"),
     })
 }
 
@@ -193,7 +193,7 @@ pub fn bin<T: Binary>(value: T) -> DebugValue<FormatWith<T>> {
 pub fn alt<T: Debug>(value: T) -> DebugValue<FormatWith<T>> {
     tracing::field::debug(FormatWith {
         value,
-        fmt: |value, f: &mut Formatter<'_>| write!(f, "{:#?}", value),
+        fmt: |value, f: &mut Formatter<'_>| write!(f, "{value:#?}"),
     })
 }
 
@@ -253,9 +253,9 @@ pub fn comma_delimited<F: Display>(
 ) -> Result {
     let mut values = values.into_iter();
     if let Some(value) = values.next() {
-        write!(writer, "{}", value)?;
+        write!(writer, "{value}")?;
         for value in values {
-            write!(writer, ", {}", value)?;
+            write!(writer, ", {value}")?;
         }
     }
 

@@ -2,7 +2,7 @@
 name = "mycelium-util"
 version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>"]
-edition = "2018"
+edition = "2021"
 rust-version = "1.61.0"
 readme = "README.md"
 

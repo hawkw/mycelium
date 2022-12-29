@@ -387,8 +387,7 @@ impl<T> CheckedMaybeUninit<T> {
         #[cfg(debug_assertions)]
         debug_assert!(
             self.initialized,
-            "`MaybeUninit::{}` called on a `MaybeUninit` cell that was not initialized! this is a bug!",
-            _method,
+            "`MaybeUninit::{_method}` called on a `MaybeUninit` cell that was not initialized! this is a bug!",
         );
         &self.value
     }
@@ -399,8 +398,7 @@ impl<T> CheckedMaybeUninit<T> {
         #[cfg(debug_assertions)]
         debug_assert!(
             self.initialized,
-            "`MaybeUninit::{}` called on a `MaybeUninit` cell that was not initialized! this is a bug!",
-            _method,
+            "`MaybeUninit::{_method}` called on a `MaybeUninit` cell that was not initialized! this is a bug!",
         );
         &mut self.value
     }
@@ -411,8 +409,7 @@ impl<T> CheckedMaybeUninit<T> {
         #[cfg(debug_assertions)]
         debug_assert!(
             self.initialized,
-            "`MaybeUninit::{}` called on a `MaybeUninit` cell that was not initialized! this is a bug!",
-            _method,
+            "`MaybeUninit::{_method}` called on a `MaybeUninit` cell that was not initialized! this is a bug!",
         );
         self.value
     }
