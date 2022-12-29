@@ -141,7 +141,7 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
             // shaped like a cargo log tag, emit the cargo tag followed by the
             // rest of the message.
             if self.level == Level::INFO && field.name() == Self::MESSAGE {
-                let message = format!("{:?}", value);
+                let message = format!("{value:?}");
                 if let Some((tag, message)) = message.as_str().split_once(' ') {
                     if tag.len() <= Self::INDENT {
                         let tag = tag.to_title_case();
