@@ -788,7 +788,7 @@ impl fmt::Display for TryAcquireError {
 }
 
 feature! {
-    #![maitake_unstable]
+    #![mycelium_core_error]
     impl core::error::Error for TryAcquireError {}
 }
 

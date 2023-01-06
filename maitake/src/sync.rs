@@ -88,6 +88,6 @@ impl core::fmt::Display for Closed {
 }
 
 feature! {
-    #![maitake_unstable]
+    #![mycelium_core_error]
     impl core::error::Error for Closed {}
 }

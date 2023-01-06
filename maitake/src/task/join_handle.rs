@@ -310,6 +310,6 @@ impl<T> fmt::Debug for JoinError<T> {
 }
 
 feature! {
-    #![maitake_unstable]
+    #![mycelium_core_error]
     impl core::error::Error for JoinError {}
 }

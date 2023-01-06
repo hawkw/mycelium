@@ -638,7 +638,7 @@ impl fmt::Display for WaitError {
 }
 
 feature! {
-    #![maitake_unstable]
+    #![mycelium_core_error]
     impl core::error::Error for TimerError {}
 }
 
