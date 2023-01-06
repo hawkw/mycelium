@@ -138,6 +138,12 @@ impl Elapsed {
         self.0
     }
 }
+
+feature! {
+    #![feature = "core-error"]
+    impl core::error::Error for Elapsed {}
+}
+
 // === impl Timer ===
 
 impl Timer {

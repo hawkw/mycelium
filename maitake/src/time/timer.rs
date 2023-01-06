@@ -540,3 +540,8 @@ impl fmt::Display for TimerError {
         }
     }
 }
+
+feature! {
+    #![feature = "core-error"]
+    impl core::error::Error for TimerError {}
+}

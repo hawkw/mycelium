@@ -308,3 +308,8 @@ impl<T> fmt::Debug for JoinError<T> {
             .finish()
     }
 }
+
+feature! {
+    #![feature = "core-error"]
+    impl<T> core::error::Error for JoinError<T> {}
+}
