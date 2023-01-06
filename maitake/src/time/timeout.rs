@@ -140,7 +140,7 @@ impl Elapsed {
 }
 
 feature! {
-    #![mycelium_core_error]
+    #![feature = "core-error"]
     impl core::error::Error for Elapsed {}
 }
 

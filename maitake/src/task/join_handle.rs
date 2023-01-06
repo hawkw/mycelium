@@ -310,6 +310,6 @@ impl<T> fmt::Debug for JoinError<T> {
 }
 
 feature! {
-    #![mycelium_core_error]
+    #![feature = "core-error"]
     impl<T> core::error::Error for JoinError<T> {}
 }

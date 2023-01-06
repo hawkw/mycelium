@@ -88,6 +88,6 @@ impl core::fmt::Display for Closed {
 }
 
 feature! {
-    #![mycelium_core_error]
+    #![feature = "core-error"]
     impl core::error::Error for Closed {}
 }

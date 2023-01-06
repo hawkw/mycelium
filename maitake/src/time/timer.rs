@@ -542,6 +542,6 @@ impl fmt::Display for TimerError {
 }
 
 feature! {
-    #![mycelium_core_error]
+    #![feature = "core-error"]
     impl core::error::Error for TimerError {}
 }

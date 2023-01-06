@@ -638,8 +638,8 @@ impl fmt::Display for WaitError {
 }
 
 feature! {
-    #![mycelium_core_error]
-    impl core::error::Error for TimerError {}
+    #![feature = "core-error"]
+    impl core::error::Error for WaitError {}
 }
 
 // === impl Waiter ===

@@ -250,9 +250,11 @@ The following features are available (this list is incomplete; you can help by [
 | :---           | :---    | :---        |
 | `alloc`        | `true`  | Enables [`liballoc`] dependency |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
-| `tracing-01`   | `false`  | Enables support for v0.1.x of [`tracing`] (the current release version). Requires `liballoc`.|
-| `tracing-02`   | `false`  | Enables support for the upcoming v0.2 of [`tracing`] (via a Git dependency). |
+| `tracing-01`   | `false` | Enables support for v0.1.x of [`tracing`] (the current release version). Requires `liballoc`.|
+| `tracing-02`   | `false` | Enables support for the upcoming v0.2 of [`tracing`] (via a Git dependency). |
+| `core-error`   | `false` | Enables implementations of the [`core::error::Error` trait][core-error] for `maitake`'s error types. *Requires a nightly Rust toolchain*. |
 
 [`liballoc`]: https://doc.rust-lang.org/alloc/
 [`CachePadded`]: https://mycelium.elizas.website/mycelium_util/sync/struct.cachepadded
 [`tracing`]: https://crates.io/crates/tracing
+[core-error]: https://doc.rust-lang.org/stable/core/error/index.html
