@@ -311,5 +311,5 @@ impl<T> fmt::Debug for JoinError<T> {
 
 feature! {
     #![mycelium_core_error]
-    impl core::error::Error for JoinError {}
+    impl<T> core::error::Error for JoinError<T> {}
 }
