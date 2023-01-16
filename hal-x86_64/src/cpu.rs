@@ -8,7 +8,7 @@ pub mod local;
 pub mod msr;
 pub mod smp;
 pub mod topology;
-pub use self::msr::Msr;
+pub use self::{msr::Msr, topology::Topology};
 
 #[repr(transparent)]
 pub struct Port {

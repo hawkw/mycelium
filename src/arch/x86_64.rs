@@ -1,5 +1,5 @@
 use bootloader_api::config::{BootloaderConfig, Mapping};
-use hal_core::boot::BootInfo;
+use hal_core::{boot::BootInfo, PAddr};
 use hal_x86_64::{
     cpu::{self, local::GsLocalData},
     vga,
@@ -63,25 +63,41 @@ pub fn arch_entry(info: &'static mut bootloader_api::BootInfo) -> ! {
 pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
-    if let Some(rsdp) = archinfo.rsdp_addr {
-        let acpi = acpi::acpi_tables(rsdp);
-        let platform_info = acpi.and_then(|acpi| acpi.platform_info());
-        match platform_info {
-            Ok(platform) => {
-                tracing::debug!("found ACPI platform info");
-                interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
-                let topo = cpu::topology::Topology::from_acpi(&platform).unwrap();
-                return;
-            }
-            Err(error) => tracing::warn!(?error, "missing ACPI platform info"),
+    let mut topo = match archinfo.rsdp_addr {
+        Some(rsdp_addr) => {
+            tracing::info!(?rsdp_addr);
+            init_acpi(rsdp_addr).expect("failed to detect topology from ACPI")
         }
-    } else {
-        // TODO(eliza): try using MP Table to bringup application processors?
-        tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
-    }
+        None => {
+            // TODO(eliza): try using MP Table to bringup application processors?
+            tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
 
-    // no ACPI
-    interrupt::enable_hardware_interrupts(None);
+            // no ACPI
+            interrupt::enable_hardware_interrupts(None);
+            return;
+        }
+    };
+
+    topo.init_boot_processor(&mut segmentation::GDT.lock());
+    tracing::info!("initialized boot processor");
+}
+
+fn init_acpi(rsdp_addr: PAddr) -> Result<cpu::Topology, acpi::AcpiError> {
+    let tables = acpi::acpi_tables(rsdp_addr)?;
+
+    let platform = tables.platform_info()?;
+    tracing::debug!("found ACPI platform info");
+
+    // enable hardware interrupts
+    interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
+
+    // detect CPU topology
+    let topology = cpu::topology::Topology::from_acpi(&platform).unwrap();
+    tracing::debug!(?topology);
+
+    // TODO(eliza): initialize APs
+
+    Ok(topology)
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be
