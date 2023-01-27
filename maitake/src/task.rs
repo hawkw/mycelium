@@ -26,7 +26,12 @@ mod storage;
 #[cfg(test)]
 mod tests;
 
-use crate::{loom::cell::UnsafeCell, scheduler::Schedule, trace, util::non_null};
+use crate::{
+    loom::{cell::UnsafeCell, sync::atomic::Ordering},
+    scheduler::Schedule,
+    trace,
+    util::non_null,
+};
 
 use core::{
     any::{type_name, TypeId},
@@ -625,6 +630,16 @@ where
         result
     }
 
+    /// Deallocates the task pointed to by `ptr`.
+    ///
+    /// This is a type-erased function called through the task's [`Vtable`].
+    ///
+    /// # Safety
+    ///
+    /// - `ptr` must point to the [`Header`] of a task of type `Self` (i.e. the
+    ///   pointed header must have the same `S`, `F`, and `STO` type parameters
+    ///   as `Self`)
+    /// - the pointed task must have zero active references.
     unsafe fn deallocate(ptr: NonNull<Header>) {
         trace!(
             task.addr = ?ptr,
@@ -633,9 +648,30 @@ where
             "Task::deallocate"
         );
         let this = ptr.cast::<Self>();
+        debug_assert_eq!(
+            ptr.as_ref().state.load(Ordering::Acquire).ref_count(),
+            0,
+            "a task may not be deallocated if its ref count is greater than zero!"
+        );
         drop(STO::from_raw(this));
     }
 
+    /// Poll to join the task pointed to by `ptr`, taking its output if it has
+    /// completed.
+    ///
+    /// If the task has completed, this method returns [`Poll::Ready`], and the
+    /// task's output is stored at the memory location pointed to by `outptr`.
+    /// This function is called by [`JoinHandle`]s o poll the task they
+    /// correspond to.
+    ///
+    /// This is a type-erased function called through the task's [`Vtable`].
+    ///
+    /// # Safety
+    ///
+    /// - `ptr` must point to the [`Header`] of a task of type `Self` (i.e. the
+    ///   pointed header must have the same `S`, `F`, and `STO` type parameters
+    ///   as `Self`).
+    /// - `outptr` must point to a valid `MaybeUninit<F::Output>`.
     unsafe fn poll_join(
         ptr: NonNull<Header>,
         outptr: NonNull<()>,
@@ -653,14 +689,22 @@ where
                 // if the task has completed before it was canceled, also try to
                 // read the output, so that it can be returned in the `JoinError`.
                 if completed {
-                    task.take_output(outptr);
+                    unsafe {
+                        // safety: if the state transition returned `Canceled`
+                        // with `completed` set, this indicates that we have
+                        // exclusive permission to take the output.
+                        task.take_output(outptr);
+                    }
                 }
                 return JoinError::canceled(completed, task.id());
             }
-            JoinAction::TakeOutput => {
+            JoinAction::TakeOutput => unsafe {
+                // safety: if the state transition returns
+                // `JoinAction::TakeOutput`, this indicates that we have
+                // exclusive permission to read the task output.
                 task.take_output(outptr);
                 return Poll::Ready(Ok(()));
-            }
+            },
             JoinAction::Register => {
                 task.join_waker.with_mut(|waker| unsafe {
                     // safety: we now have exclusive permission to write to the
@@ -705,6 +749,12 @@ where
         })
     }
 
+    /// Wakes the task's [`JoinHandle`], if it has one.
+    ///
+    /// # Safety
+    ///
+    /// - The caller must have exclusive access to the task's `JoinWaker`. This
+    ///   is ensured by the task's state management.
     unsafe fn wake_join_waker(&self) {
         self.join_waker.with_mut(|join_waker| unsafe {
             let join_waker = (*join_waker).assume_init_read();
@@ -713,10 +763,26 @@ where
         })
     }
 
+    /// Takes the task's output, storing it at the memory location pointed to by
+    /// `outptr`.
+    ///
+    /// This function panics if the task has not completed (i.e., its `Cell`
+    /// must be in the [`Cell::Ready`] state).
+    ///
+    /// # Safety
+    ///
+    /// - `outptr` *must* point to a `MaybeUninit<F::Output>`!
+    /// - The the caller must have exclusive access to `self.inner`.
     unsafe fn take_output(&self, outptr: NonNull<()>) {
         self.inner.with_mut(|cell| {
             match mem::replace(&mut *cell, Cell::Joined) {
-                Cell::Ready(output) => outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut().write(output),
+                Cell::Ready(output) => {
+                    // safety: the caller is responsible for ensuring that this
+                    // points to a `MaybeUninit<F::Output>`.
+                    let outptr = outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut();
+                    // that's right, it goes in the `NonNull<()>` hole!
+                    outptr.write(output)
+                },
                 state => unreachable!("attempted to take join output on a task that has not completed! task: {self:?}; state: {state:?}"),
             }
         });
