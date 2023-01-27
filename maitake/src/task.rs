@@ -33,8 +33,10 @@ use crate::{
     util::non_null,
 };
 
+#[cfg(debug_assertions)]
+use core::any::TypeId;
 use core::{
-    any::{type_name, TypeId},
+    any::type_name,
     future::Future,
     marker::PhantomData,
     mem,
