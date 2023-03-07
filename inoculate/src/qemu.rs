@@ -31,7 +31,7 @@ pub enum Cmd {
         ///
         /// If a test run doesn't complete before this timeout has elapsed, it's
         /// considered to have failed.
-        #[clap(long, parse(try_from_str = parse_secs), default_value = "60")]
+        #[clap(long, value_parser = parse_secs, default_value = "60")]
         timeout_secs: Duration,
 
         /// Disables capturing test serial output.
