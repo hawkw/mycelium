@@ -489,6 +489,10 @@ impl WaitQueue {
         }
     }
 
+    pub(crate) fn is_closed(&self) -> bool {
+        self.load().get(QueueState::STATE) == State::Closed
+    }
+
     pub(crate) fn try_wait(&self) -> Poll<WaitResult<()>> {
         let mut state = self.load();
         let initial_wake_alls = state.get(QueueState::WAKE_ALLS);
