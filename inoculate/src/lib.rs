@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueHint};
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help,
@@ -29,25 +29,32 @@ pub struct Options {
     pub log: String,
 
     /// The path to the kernel binary.
-    #[clap(parse(from_os_str))]
+    #[clap(value_hint = ValueHint::FilePath)]
     pub kernel_bin: PathBuf,
 
     /// The path to the `bootloader` crate's Cargo manifest. If this is not
     /// provided, it will be located automatically.
-    #[clap(long, parse(from_os_str))]
+    /// The path to the kernel binary.
+    #[clap(value_hint = ValueHint::FilePath)]
     pub bootloader_manifest: Option<PathBuf>,
 
     /// The path to the kernel's Cargo manifest. If this is not
     /// provided, it will be located automatically.
-    #[clap(long, parse(from_os_str))]
+    #[clap(value_hint = ValueHint::FilePath)]
+    #[clap(long)]
     pub kernel_manifest: Option<PathBuf>,
 
     /// Overrides the directory in which to build the output image.
-    #[clap(short, long, parse(from_os_str), env = "OUT_DIR")]
+    #[clap(short, long, env = "OUT_DIR", value_hint = ValueHint::DirPath)]
     pub out_dir: Option<PathBuf>,
 
     /// Overrides the target directory for the kernel build.
-    #[clap(short, long, parse(from_os_str), env = "CARGO_TARGET_DIR")]
+    #[clap(
+        short,
+        long,
+        env = "CARGO_TARGET_DIR",
+        value_hint = ValueHint::DirPath,
+    )]
     pub target_dir: Option<PathBuf>,
 
     /// Overrides the path to the `cargo` executable.
@@ -55,19 +62,14 @@ pub struct Options {
     /// By default, this is read from the `CARGO` environment variable.
     #[clap(
         long = "cargo",
-        parse(from_os_str),
         env = "CARGO",
-        default_value = "cargo"
+        default_value = "cargo",
+        value_hint = ValueHint::ExecutablePath,
     )]
     pub cargo_path: PathBuf,
 
     /// Whether to emit colors in output.
-    #[clap(
-        long,
-        possible_values(&["auto", "always", "never"]),
-        env = "CARGO_TERM_COLORS",
-        default_value = "auto"
-    )]
+    #[clap(long, env = "CARGO_TERM_COLORS", default_value_t = term::ColorMode::Auto)]
     pub color: term::ColorMode,
 }
 

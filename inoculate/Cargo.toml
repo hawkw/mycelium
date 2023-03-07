@@ -11,7 +11,7 @@ license = "MIT"
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3", features = ["derive", "env"] }
+clap = { version = "4.1.8", features = ["derive", "env"] }
 tracing = "0.1.23"
 tracing-subscriber = { version = "0.3.1", features = ["env-filter"] }
 tracing-error = "0.2"

@@ -1,15 +1,14 @@
-use color_eyre::eyre::format_err;
 use std::{
     fmt,
-    str::FromStr,
     sync::atomic::{AtomicU8, Ordering},
 };
 
 pub const CARGO_LOG_WIDTH: usize = 12;
 pub use owo_colors::{style, OwoColorize, Style};
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum)]
 #[repr(u8)]
+#[clap(rename_all = "lower")]
 pub enum ColorMode {
     Auto = 0,
     Always = 1,
@@ -19,21 +18,6 @@ pub enum ColorMode {
 // === impl ColorMode ===
 
 static GLOBAL_COLOR_MODE: AtomicU8 = AtomicU8::new(0);
-
-impl FromStr for ColorMode {
-    type Err = color_eyre::Report;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim() {
-            s if s.eq_ignore_ascii_case("auto") => Ok(ColorMode::Auto),
-            s if s.eq_ignore_ascii_case("always") => Ok(ColorMode::Always),
-            s if s.eq_ignore_ascii_case("never") => Ok(ColorMode::Never),
-            _ => Err(format_err!(
-                "invalid color mode {:?}, expected one of \"auto\", \"always\", or \"never\"",
-                s
-            )),
-        }
-    }
-}
 
 impl fmt::Display for ColorMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
