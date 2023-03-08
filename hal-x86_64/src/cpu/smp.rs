@@ -2,13 +2,16 @@ use crate::{
     control_regs::{Cr0, Cr4},
     cpu::{
         msr::{Efer, Msr},
-        topology, Ring,
+        topology::Topology,
+        Ring,
     },
     segment,
 };
 use core::arch::global_asm;
 use mycelium_util::bits;
-pub fn bringup() -> Result<(), ()> {
+
+#[tracing::instrument(name = "smp::bringup", skip(topology))]
+pub fn bringup(topology: &Topology) -> Result<(), &'static str> {
     unsafe {
         tracing::info!(
             "AP trampoline: {:p} .. {:p}",

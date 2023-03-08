@@ -8,6 +8,7 @@ pub use hal_x86_64::{
     cpu::{entropy::seed_rng, local::LocalKey, wait_for_interrupt},
     mm, NAME,
 };
+use mycelium_util::sync::spin::Mutex;
 
 mod acpi;
 mod boot;
@@ -60,6 +61,8 @@ pub fn arch_entry(info: &'static mut bootloader_api::BootInfo) -> ! {
     crate::kernel_start(boot_info, archinfo);
 }
 
+static TOPOLOGY: Mutex<Option<cpu::Topology>> = Mutex::new(None);
+
 pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
@@ -80,6 +83,15 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
 
     topo.init_boot_processor(&mut segmentation::GDT.lock());
     tracing::info!("initialized boot processor");
+
+    tracing::info!("starting application processors");
+    match hal_x86_64::cpu::smp::bringup(&topo) {
+        Ok(_) => tracing::info!("all application processors started"),
+        Err(error) => tracing::error!(%error, "failed to start application processors"),
+    }
+
+    // store the topology for later
+    *TOPOLOGY.lock() = Some(topo);
 }
 
 fn init_acpi(rsdp_addr: PAddr) -> Result<cpu::Topology, acpi::AcpiError> {
@@ -87,6 +99,8 @@ fn init_acpi(rsdp_addr: PAddr) -> Result<cpu::Topology, acpi::AcpiError> {
 
     let platform = tables.platform_info()?;
     tracing::debug!("found ACPI platform info");
+
+    tracing::info!(?platform.power_profile);
 
     // enable hardware interrupts
     interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));

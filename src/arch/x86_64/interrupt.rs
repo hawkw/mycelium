@@ -13,9 +13,9 @@ pub fn enable_exceptions() {
     tracing::info!("IDT initialized!");
 }
 
-#[tracing::instrument(skip(acpi))]
-pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) {
-    let controller = Controller::enable_hardware_interrupts(acpi, &crate::ALLOC);
+#[tracing::instrument(skip(interrupt_model))]
+pub fn enable_hardware_interrupts(interrupt_model: Option<&acpi::InterruptModel>) {
+    let controller = Controller::enable_hardware_interrupts(interrupt_model, &crate::ALLOC);
     controller
         .start_periodic_timer(TIMER_INTERVAL)
         .expect("10ms should be a reasonable interval for the PIT or local APIC timer...");

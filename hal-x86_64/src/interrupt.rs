@@ -143,7 +143,7 @@ impl Controller {
     }
 
     pub fn enable_hardware_interrupts(
-        acpi: Option<&acpi::InterruptModel>,
+        interrupt_model: Option<&acpi::InterruptModel>,
         frame_alloc: &impl hal_core::mem::page::Alloc<mm::size::Size4Kb>,
     ) -> &'static Self {
         let mut pics = pic::CascadedPic::new();
@@ -159,7 +159,7 @@ impl Controller {
             pics.set_irq_address(Idt::PIC_BIG_START as u8, Idt::PIC_LITTLE_START as u8);
         }
 
-        let model = match acpi {
+        let model = match interrupt_model {
             Some(acpi::InterruptModel::Apic(apic_info)) => {
                 tracing::info!("detected APIC interrupt model");
 

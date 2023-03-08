@@ -8,8 +8,9 @@ pub type Id = usize;
 
 #[derive(Debug)]
 pub struct Topology {
-    pub(crate) boot_processor: Processor,
-    pub(crate) application_processors: Vec<Processor>,
+    pub boot_processor: Processor,
+    pub application_processors: Vec<Processor>,
+    _noconstruct: (),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -124,6 +125,7 @@ impl Topology {
         Ok(Self {
             application_processors: aps,
             boot_processor: bsp,
+            _noconstruct: (),
         })
     }
 
