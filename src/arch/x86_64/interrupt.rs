@@ -6,7 +6,7 @@ use maitake::time;
 
 #[tracing::instrument]
 pub fn enable_exceptions() {
-    segmentation::init_gdt();
+    segmentation::init();
     tracing::info!("GDT initialized!");
 
     Controller::init::<InterruptHandlers>();

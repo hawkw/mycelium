@@ -13,34 +13,11 @@ use mycelium_util::{
 pub(super) static GDT: spin::Mutex<Gdt> = spin::Mutex::new(Gdt::new());
 
 #[tracing::instrument(level = tracing::Level::DEBUG)]
-pub(super) fn init_gdt() {
-    tracing::trace!("initializing GDT...");
+pub(super) fn init() {
     // populate the GDT.
-    let mut gdt = GDT.lock();
-
-    // add one kernel code segment
-    let code_segment = segment::Descriptor::code().with_ring(Ring::Ring0);
-    let code_selector = gdt.add_segment(code_segment);
-    tracing::debug!(
-        descriptor = fmt::alt(code_segment),
-        selector = fmt::alt(code_selector),
-        "added code segment"
-    );
-
-    // add the boot processor's TSS.
-    let tss = segment::SystemDescriptor::tss(&TSS);
-    let tss_selector = gdt.add_sys_segment(tss);
-    tracing::debug!(
-        tss.descriptor = fmt::alt(tss),
-        tss.selector = fmt::alt(tss_selector),
-        "added boot processor's TSS"
-    );
-
-    // all done! long mode barely uses this thing lol.
-    tracing::debug!(GDT = ?gdt, "GDT initialized");
+    populate_gdt(gdt.lock());
 
     // time to load the GDT.
-    drop(gdt); // release the lock before calling `load_locked`.
     Gdt::load_locked(&GDT);
     tracing::trace!("GDT loaded");
 
@@ -63,6 +40,31 @@ pub(super) fn init_gdt() {
     }
 
     tracing::debug!("segment selectors set");
+}
+
+#[inline(always)]
+fn populate_gdt(gdt: &mut Gdt) {
+    tracing::trace!("initializing GDT...");
+    // add one kernel code segment
+    let code_segment = segment::Descriptor::code().with_ring(Ring::Ring0);
+    let code_selector = gdt.add_segment(code_segment);
+    tracing::debug!(
+        descriptor = fmt::alt(code_segment),
+        selector = fmt::alt(code_selector),
+        "added code segment"
+    );
+
+    // add the boot processor's TSS.
+    let tss = segment::SystemDescriptor::tss(&TSS);
+    let tss_selector = gdt.add_sys_segment(tss);
+    tracing::debug!(
+        tss.descriptor = fmt::alt(tss),
+        tss.selector = fmt::alt(tss_selector),
+        "added boot processor's TSS"
+    );
+
+    // all done! long mode barely uses this thing lol.
+    tracing::debug!(GDT = ?gdt, "GDT initialized");
 }
 
 // TODO(eliza): put this somewhere good.
