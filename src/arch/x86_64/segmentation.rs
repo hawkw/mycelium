@@ -14,8 +14,35 @@ pub(super) static GDT: spin::Mutex<Gdt> = spin::Mutex::new(Gdt::new());
 
 #[tracing::instrument(level = tracing::Level::DEBUG)]
 pub(super) fn init() {
+    tracing::trace!("initializing GDT...");
+
+    let mut tss_selector;
+
     // populate the GDT.
-    populate_gdt(gdt.lock());
+    {
+        let mut gdt = GDT.lock();
+
+        // add one kernel code segment
+        let code_segment = segment::Descriptor::code().with_ring(Ring::Ring0);
+        let code_selector = gdt.add_segment(code_segment);
+        tracing::debug!(
+            descriptor = fmt::alt(code_segment),
+            selector = fmt::alt(code_selector),
+            "added code segment"
+        );
+
+        // add the boot processor's TSS.
+        let tss = segment::SystemDescriptor::tss(&TSS);
+        tss_selector = gdt.add_sys_segment(tss);
+        tracing::debug!(
+            tss.descriptor = fmt::alt(tss),
+            tss.selector = fmt::alt(tss_selector),
+            "added boot processor's TSS"
+        );
+
+        // all done! long mode barely uses this thing lol.
+        tracing::debug!(GDT = ?gdt, "GDT initialized");
+    };
 
     // time to load the GDT.
     Gdt::load_locked(&GDT);
@@ -24,6 +51,7 @@ pub(super) fn init() {
     // set new segment selectors
     let code_selector = segment::Selector::current_cs();
     tracing::trace!(code_selector = fmt::alt(code_selector));
+
     unsafe {
         // set the code segment selector
         code_selector.set_cs();
@@ -40,31 +68,6 @@ pub(super) fn init() {
     }
 
     tracing::debug!("segment selectors set");
-}
-
-#[inline(always)]
-fn populate_gdt(gdt: &mut Gdt) {
-    tracing::trace!("initializing GDT...");
-    // add one kernel code segment
-    let code_segment = segment::Descriptor::code().with_ring(Ring::Ring0);
-    let code_selector = gdt.add_segment(code_segment);
-    tracing::debug!(
-        descriptor = fmt::alt(code_segment),
-        selector = fmt::alt(code_selector),
-        "added code segment"
-    );
-
-    // add the boot processor's TSS.
-    let tss = segment::SystemDescriptor::tss(&TSS);
-    let tss_selector = gdt.add_sys_segment(tss);
-    tracing::debug!(
-        tss.descriptor = fmt::alt(tss),
-        tss.selector = fmt::alt(tss_selector),
-        "added boot processor's TSS"
-    );
-
-    // all done! long mode barely uses this thing lol.
-    tracing::debug!(GDT = ?gdt, "GDT initialized");
 }
 
 // TODO(eliza): put this somewhere good.
