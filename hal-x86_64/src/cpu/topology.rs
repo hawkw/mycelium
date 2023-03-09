@@ -19,6 +19,7 @@ pub struct Processor {
     pub id: Id,
     pub device_uid: u32,
     pub lapic_id: u32,
+    pub is_boot_processor: bool,
     initialized: bool,
 }
 
@@ -47,6 +48,7 @@ impl Topology {
             id: 0,
             device_uid: boot_processor.processor_uid,
             lapic_id: boot_processor.local_apic_id,
+            is_boot_processor: true,
             initialized: false,
         };
 
@@ -103,6 +105,7 @@ impl Topology {
                 id,
                 device_uid: ap.processor_uid,
                 lapic_id: ap.local_apic_id,
+                is_boot_processor: false,
                 initialized: false,
             };
             tracing::debug!(
@@ -131,6 +134,26 @@ impl Topology {
 
     pub fn init_boot_processor(&mut self, gdt: &mut segment::Gdt) {
         self.boot_processor.init_processor(gdt);
+    }
+
+    pub fn by_id(&self, id: Id) -> Option<&Processor> {
+        if id == 0 {
+            Some(&self.boot_processor)
+        } else {
+            self.application_processors.get(id - 1)
+        }
+    }
+
+    pub fn by_device_uid(&self, uid: u32) -> Option<&Processor> {
+        self.processors().find(|p| p.device_uid == uid as u32)
+    }
+
+    pub fn by_local_apic_id(&self, lapic_id: u32) -> Option<&Processor> {
+        self.processors().find(|p| p.lapic_id == lapic_id as u32)
+    }
+
+    pub fn processors(&self) -> impl Iterator<Item = &Processor> {
+        core::iter::once(&self.boot_processor).chain(self.application_processors.iter())
     }
 }
 
