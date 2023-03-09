@@ -8,9 +8,8 @@ pub type Id = usize;
 
 #[derive(Debug)]
 pub struct Topology {
-    pub boot_processor: Processor,
-    pub application_processors: Vec<Processor>,
-    _noconstruct: (),
+    boot_processor: Processor,
+    application_processors: Vec<Processor>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -20,7 +19,7 @@ pub struct Processor {
     pub device_uid: u32,
     pub lapic_id: u32,
     pub is_boot_processor: bool,
-    initialized: bool,
+    pub state: State,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +27,14 @@ pub struct Processor {
 pub enum TopologyError {
     NoTopology,
     Weird(&'static str),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    Running,
+    Idle,
+    FirmwareDisabled,
+    Error(&'static str),
 }
 
 impl Topology {
@@ -49,7 +56,7 @@ impl Topology {
             device_uid: boot_processor.processor_uid,
             lapic_id: boot_processor.local_apic_id,
             is_boot_processor: true,
-            initialized: false,
+            state: State::Idle,
         };
 
         if boot_processor.is_ap {
@@ -73,6 +80,7 @@ impl Topology {
 
         let mut id = 1;
         let mut disabled = 0;
+        let mut errors = 0;
         let mut aps = Vec::with_capacity(application_processors.len());
         for ap in application_processors {
             if !ap.is_ap {
@@ -81,7 +89,7 @@ impl Topology {
                 ))?;
             }
 
-            match ap.state {
+            let state = match ap.state {
                 // if the firmware disabled a processor, just skip it
                 platform::ProcessorState::Disabled => {
                     tracing::warn!(
@@ -89,29 +97,29 @@ impl Topology {
                         "application processor disabled by firmware, skipping it"
                     );
                     disabled += 1;
-                    continue;
+                    State::FirmwareDisabled
                 }
                 // if a processor claims it's already running, that seems messed up!
                 platform::ProcessorState::Running => {
-                    return Err(TopologyError::Weird(
-                        "application processors should not be running yet",
-                    ));
+                    errors += 1;
+                    State::Error("application processor claimed to be running before SIPI!")
                 }
                 // otherwise, add it to the topology
-                platform::ProcessorState::WaitingForSipi => {}
-            }
+                platform::ProcessorState::WaitingForSipi => State::Idle,
+            };
 
             let ap = Processor {
                 id,
                 device_uid: ap.processor_uid,
                 lapic_id: ap.local_apic_id,
                 is_boot_processor: false,
-                initialized: false,
+                state,
             };
             tracing::debug!(
                 ap.id,
                 ap.device_uid,
                 ap.lapic_id,
+                ?ap.state,
                 "found application processor"
             );
 
@@ -120,15 +128,13 @@ impl Topology {
         }
 
         tracing::info!(
-            "found {} application processors ({} disabled)",
+            "found {} application processors ({disabled} disabled, {errors} errors)",
             application_processors.len(),
-            disabled,
         );
 
         Ok(Self {
             application_processors: aps,
             boot_processor: bsp,
-            _noconstruct: (),
         })
     }
 
@@ -148,31 +154,41 @@ impl Topology {
         self.application_processors.len() + 1
     }
 
-    pub fn initialized_cpus(&self) -> usize {
-        self.cpus().filter(|p| p.initialized).count()
+    pub fn running_cpus(&self) -> usize {
+        self.all_cpus()
+            .filter(|p| p.state == State::Running)
+            .count()
     }
 
     pub fn by_device_uid(&self, uid: u32) -> Option<&Processor> {
-        self.cpus().find(|p| p.device_uid == uid as u32)
+        self.all_cpus().find(|p| p.device_uid == uid as u32)
     }
 
     pub fn by_local_apic_id(&self, lapic_id: u32) -> Option<&Processor> {
-        self.cpus().find(|p| p.lapic_id == lapic_id as u32)
+        self.all_cpus().find(|p| p.lapic_id == lapic_id as u32)
     }
 
-    pub fn cpus(&self) -> impl Iterator<Item = &Processor> {
+    pub fn boot_cpu(&self) -> &Processor {
+        &self.boot_processor
+    }
+
+    pub fn application_cpus(&self) -> &[Processor] {
+        &&self.application_processors[..]
+    }
+
+    pub fn all_cpus(&self) -> impl Iterator<Item = &Processor> {
         core::iter::once(&self.boot_processor).chain(self.application_processors.iter())
     }
 }
 
 impl Processor {
     pub(crate) fn init_processor(&mut self, gdt: &mut segment::Gdt) {
-        tracing::info!(self.id, "initializing processor");
-        assert!(!self.initialized, "processor already initialized");
+        tracing::info!(self.id, ?self.state, "initializing processor");
+        assert_eq!(self.state, State::Idle);
 
         use super::local::GsLocalData;
         Box::pin(GsLocalData::new(self.clone())).init();
-        self.initialized = true;
+        self.state = State::Running;
     }
 }
 

@@ -33,13 +33,10 @@ pub const DUMP_ARCH: Command = Command::new("arch")
 
                 // no CPU number, dump the whole topology
                 if line.is_empty() {
-                    tracing::info!(boot_processor = ?topology.boot_processor);
-                    for application_processor in topology.cpus() {
-                        tracing::info!(?application_processor);
-                    }
                     tracing::info!(
-                        cpus.total = topology.total_cpus(),
-                        cpu.running = topology.initialized_cpus()
+                        topology = ?topology,
+                        topology.total = topology.total_cpus(),
+                        topology.running = topology.running_cpus()
                     );
                     return Ok(());
                 }
