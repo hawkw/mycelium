@@ -144,15 +144,23 @@ impl Topology {
         }
     }
 
+    pub fn total_cpus(&self) -> usize {
+        self.application_processors.len() + 1
+    }
+
+    pub fn initialized_cpus(&self) -> usize {
+        self.cpus().filter(|p| p.initialized).count()
+    }
+
     pub fn by_device_uid(&self, uid: u32) -> Option<&Processor> {
-        self.processors().find(|p| p.device_uid == uid as u32)
+        self.cpus().find(|p| p.device_uid == uid as u32)
     }
 
     pub fn by_local_apic_id(&self, lapic_id: u32) -> Option<&Processor> {
-        self.processors().find(|p| p.lapic_id == lapic_id as u32)
+        self.cpus().find(|p| p.lapic_id == lapic_id as u32)
     }
 
-    pub fn processors(&self) -> impl Iterator<Item = &Processor> {
+    pub fn cpus(&self) -> impl Iterator<Item = &Processor> {
         core::iter::once(&self.boot_processor).chain(self.application_processors.iter())
     }
 }

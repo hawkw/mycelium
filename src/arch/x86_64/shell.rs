@@ -33,7 +33,14 @@ pub const DUMP_ARCH: Command = Command::new("arch")
 
                 // no CPU number, dump the whole topology
                 if line.is_empty() {
-                    tracing::info!(?topology);
+                    tracing::info!(boot_processor = ?topology.boot_processor);
+                    for application_processor in topology.cpus() {
+                        tracing::info!(?application_processor);
+                    }
+                    tracing::info!(
+                        cpus.total = topology.total_cpus(),
+                        cpu.running = topology.initialized_cpus()
+                    );
                     return Ok(());
                 }
 
@@ -41,12 +48,7 @@ pub const DUMP_ARCH: Command = Command::new("arch")
                     .parse()
                     .map_err(|_| ctx.invalid_argument("CPU number must be an integer"))?;
 
-                if cpu_num == 0 {
-                    tracing::info!(?topology.boot_processor);
-                    return Ok(());
-                }
-
-                match topology.application_processors.get(cpu_num - 1) {
+                match topology.by_id(cpu_num) {
                     Some(cpu) => tracing::info!(cpu_num, ?cpu),
                     None => tracing::warn!("CPU {} not found", cpu_num),
                 }
