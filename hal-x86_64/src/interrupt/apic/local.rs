@@ -414,8 +414,32 @@ pub mod register {
         /// *Access**: read/write
         LVT_CMCI = 0x2f0, ReadWrite;
 
-        ICR_LOW = 0x300, ReadWrite;
-        ICR_HIGH = 0x310, ReadWrite;
+        /// Interrupt Command Register (ICR), Low Half (Flags)
+        ///
+        /// The interrupt command register (ICR) is used for sending
+        /// inter-processor interrupts (IPIs) to other processors. It consists
+        /// of two separate 32-bit registers, the low half ([`ICR_FLAGS`]) at
+        /// 0x300, and the high half ([`ICR_TARGET`]) at 0x310. The low half
+        /// contains flags describing the / inter-processor interrupt, while the
+        /// high half contains the local APIC ID of the target processor.
+        ///
+        /// Note that the interrupt is sent when 0x300 ([`ICR_FLAGS`]) is
+        /// written to, so in order to send an interrupt, 0x310 should be
+        /// written prior to writing to 0x300.
+        ICR_FLAGS = 0x300, ReadWrite;
+        /// Interrupt Command Register (ICR), High Half (Target)
+        ///
+        /// The interrupt command register (ICR) is used for sending
+        /// inter-processor interrupts (IPIs) to other processors. It consists
+        /// of two separate 32-bit registers, the low half ([`ICR_FLAGS`]) at
+        /// 0x300, and the high half ([`ICR_TARGET`]) at 0x310. The low half
+        /// contains flags describing the / inter-processor interrupt, while the
+        /// high half contains the local APIC ID of the target processor.
+        ///
+        /// Note that the interrupt is sent when 0x300 ([`ICR_FLAGS`]) is
+        /// written to, so in order to send an interrupt, 0x310 should be
+        /// written prior to writing to 0x300.
+        ICR_TARGET = 0x310, ReadWrite;
 
         LVT_TIMER<LvtTimer> = 0x320, ReadWrite;
         LVT_THERMAL<LvtEntry> = 0x330, ReadWrite;
@@ -453,6 +477,8 @@ pub mod register {
         }
     }
 
+    // === TimerMode ===
+
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     #[repr(u8)]
     pub enum TimerMode {
@@ -474,6 +500,145 @@ pub mod register {
                 bits if bits as u8 == Self::Periodic as u8 => Ok(Self::Periodic),
                 bits if bits as u8 == Self::TscDeadline as u8 => Ok(Self::TscDeadline),
                 _ => Err("0b11 is not a valid local APIC timer mode"),
+            }
+        }
+
+        fn into_bits(self) -> u32 {
+            self as u8 as u32
+        }
+    }
+
+    bitfield! {
+        /// Interrupt Command Register (ICR) flags.
+        ///
+        /// This is the value of the ([`ICR_FLAGS`]) register.
+        pub struct IcrFlags<u32> {
+            /// The vector number, or starting page number for SIPIs.
+            pub const VECTOR: u8;
+            /// The destination mode.
+            ///
+            /// 0 is normal, 1 is lowest priority, 2 is SMI, 4 is NMI, 5 can be
+            /// INIT or INIT level de-assert, 6 is a SIPI.
+            pub const MODE: IpiMode;
+            /// The destination mode.
+            ///
+            /// Clear for a physical destination, or set for a logical
+            /// destination. If the bit is clear, then the destination field in
+            /// 0x310 is treated normally.
+            /// XXX(eliza): what does "normally" mean? this came from osdev wiki
+            /// lol.
+            pub const IS_LOGICAL: bool;
+            /// Delivery status.
+            ///
+            /// Cleared when the interrupt has been accepted by the target. You
+            /// should usually wait until this bit clears after sending an
+            /// interrupt.
+            pub const SEND_PENDING: bool;
+            const _RESERVED = 1;
+            pub const INIT_ASSERT_DEASSERT: IpiInit;
+
+            /// Destination selection.
+            ///
+            /// If this is > 0 then the destination field in 0x310 is ignored. 1
+            /// will always send the interrupt to itself, 2 will send it to all
+            /// processors, and 3 will send it to all processors aside from the
+            /// current one. It is best to avoid using modes 1, 2 and 3, and stick with 0.
+            pub const DESTINATION: IpiDest;
+        }
+    }
+
+    /// Inter-processor Interrupt (IPI) Destination Modes.
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u8)]
+    pub enum IpiMode {
+        /// Normal priority.
+        Normal = 0,
+        /// Lowest priority.
+        LowPrio = 1,
+        /// System Management Interrupt (SMI)
+        Smi = 2,
+        /// Non-Maskable Interrupt (NMI)
+        Nmi = 4,
+        // INIT or INIT level de-assert
+        InitDeinit = 5,
+        /// SIPI
+        Sipi = 6,
+    }
+
+    /// Inter-processor Interrupt (IPI) Init level assert/de-assert.
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u8)]
+    pub enum IpiInit {
+        /// Assert INIT level (or any other ICR command if not sending an INIT).
+        Assert = 0x01,
+        /// Deassert INIT level.
+        Deassert = 0x10,
+    }
+
+    /// Inter-processor Interrupt (IPI) destination selection.
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u8)]
+    pub enum IpiDest {
+        /// The interrupt is sent to the target local APIC in the [`ICR_TARGET`]
+        /// register.
+        Target = 0,
+        /// The interrupt is sent to this processor.
+        Current = 1,
+        /// The interrupt is sent to all processors, *including* the current one.
+        All = 2,
+        /// The interrupt is sent to all processors *except* the current one.
+        Others = 3,
+    }
+
+    impl FromBits<u32> for IpiMode {
+        const BITS: u32 = 3;
+        type Error = &'static str;
+
+        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+            match bits {
+                bits if bits as u8 == Self::Normal as u8 => Ok(Self::Normal),
+                bits if bits as u8 == Self::LowPrio as u8 => Ok(Self::LowPrio),
+                bits if bits as u8 == Self::Smi as u8 => Ok(Self::Smi),
+                bits if bits as u8 == Self::Nmi as u8 => Ok(Self::Nmi),
+                bits if bits as u8 == Self::InitDeinit as u8 => Ok(Self::InitDeinit),
+                bits if bits as u8 == Self::Sipi as u8 => Ok(Self::Sipi),
+                _ => Err("not a valid IPI mode"),
+            }
+        }
+
+        fn into_bits(self) -> u32 {
+            self as u8 as u32
+        }
+    }
+
+    impl FromBits<u32> for IpiInit {
+        const BITS: u32 = 2;
+        type Error = &'static str;
+
+        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+            match bits {
+                bits if bits as u8 == Self::Assert as u8 => Ok(Self::Assert),
+                bits if bits as u8 == Self::Deassert as u8 => Ok(Self::Deassert),
+                _ => Err("not a valid ICR INIT assert/deassert mode"),
+            }
+        }
+
+        fn into_bits(self) -> u32 {
+            self as u8 as u32
+        }
+    }
+
+    impl FromBits<u32> for IpiDest {
+        const BITS: u32 = 2;
+        type Error = &'static str;
+
+        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+            match bits {
+                bits if bits as u8 == Self::Target as u8 => Ok(Self::Target),
+                bits if bits as u8 == Self::Current as u8 => Ok(Self::Current),
+                bits if bits as u8 == Self::All as u8 => Ok(Self::All),
+                bits if bits as u8 == Self::Others as u8 => Ok(Self::Others),
+                _ => unreachable!("2 bits has 4 possible values!"),
             }
         }
 
