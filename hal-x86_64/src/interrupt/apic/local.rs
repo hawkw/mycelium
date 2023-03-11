@@ -218,11 +218,12 @@ impl LocalApic {
         match target {
             IpiTarget::Target(target) => {
                 flags.set(IcrFlags::DESTINATION, register::IpiDest::Target);
-                todo!("eliza: set 0x310");
+                todo!("eliza: set 0x310 to {target}...");
             }
             // TODO(eliza): there are probably some IPIs that are invalid to
             // send to yourself...should we handle them here? e.g. i assume you
-            // can't send yourself a SIPI.
+            // can't send yourself a SIPI. tbqh, sending any IPI to yourself
+            // feels..onanic, at best.
             IpiTarget::Current => {
                 flags.set(IcrFlags::DESTINATION, register::IpiDest::Current);
             }
