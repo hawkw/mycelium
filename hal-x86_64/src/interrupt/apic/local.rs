@@ -24,6 +24,30 @@ pub struct LocalApicRegister<T = u32, A = access::ReadWrite> {
     _ty: PhantomData<fn(T, A)>,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum IpiTarget {
+    /// The interrupt is sent to the processor with the provided Local APIC ID.
+    Target(usize),
+    /// The interrupt is sent to this processor.
+    Current,
+    /// The interrupt is sent to all processors, *including* the current one.
+    All,
+    /// The interrupt is sent to all processors *except* the current one.
+    Others,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum IpiKind {
+    /// A Startup IPI (SIPI) is used to start an AP processor.
+    Startup { page: u8 },
+
+    /// An IPI is used to send an interrupt to another processor.
+    Interrupt {
+        /// The interrupt vector to trigger.
+        vector: u8,
+        // TODO(eliza): rest of this.
+    },
+}
 pub trait RegisterAccess {
     type Access;
     type Target;
@@ -114,6 +138,128 @@ impl LocalApic {
         tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
     }
 
+    #[tracing::instrument(
+        level = tracing::Level::DEBUG,
+        name = "LocalApic::start_periodic_timer",
+        skip(self, interval),
+        fields(?interval, vector),
+        err
+    )]
+    pub fn start_periodic_timer(
+        &self,
+        interval: Duration,
+        vector: u8,
+    ) -> Result<(), InvalidDuration> {
+        let timer_frequency_hz = self.timer_frequency_hz();
+        let ticks_per_ms = timer_frequency_hz / 1000;
+        tracing::trace!(
+            timer_frequency_hz,
+            ticks_per_ms,
+            "starting local APIC timer"
+        );
+        let interval_ms: u32 = interval.as_millis().try_into().map_err(|_| {
+            InvalidDuration::new(
+                interval,
+                "local APIC periodic timer interval exceeds a `u32`",
+            )
+        })?;
+        let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).ok_or_else(|| {
+            InvalidDuration::new(
+                interval,
+                "local APIC periodic timer interval requires a number of ticks that exceed a `u32`",
+            )
+        })?;
+
+        unsafe {
+            let lvt_entry = register::LvtTimer::new()
+                .with(register::LvtTimer::VECTOR, vector)
+                .with(register::LvtTimer::MODE, register::TimerMode::Periodic);
+            // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
+            self.write_register(register::TIMER_DIVISOR, 0b11);
+            self.write_register(register::LVT_TIMER, lvt_entry);
+            self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
+        }
+
+        tracing::info!(
+            ?interval,
+            timer_frequency_hz,
+            ticks_per_ms,
+            vector,
+            "started local APIC timer"
+        );
+
+        Ok(())
+    }
+
+    /// Sends an IPI (inter-processor interrupt) to another CPU.
+    #[tracing::instrument(
+        level = tracing::Level::DEBUG,
+        name = "LocalApic::send_ipi",
+        skip(self),
+    )]
+    pub fn send_ipi(&self, target: IpiTarget, kind: IpiKind) {
+        use register::IcrFlags;
+
+        let mut flags = IcrFlags::new();
+        match kind {
+            IpiKind::Startup { page } => {
+                flags
+                    .set(IcrFlags::VECTOR, page)
+                    .set(IcrFlags::MODE, register::IpiMode::Sipi)
+                    .set(IcrFlags::IS_LOGICAL, false)
+                    // This is set for all IPIs except INIT level deassert.
+                    .set(IcrFlags::INIT_ASSERT_DEASSERT, register::IpiInit::Assert);
+            }
+            IpiKind::Interrupt { vector: _ } => {
+                unreachable!("non-SIPI inter-processor interrupts are not currently implemented...")
+            }
+        }
+
+        match target {
+            IpiTarget::Target(target) => {
+                flags.set(IcrFlags::DESTINATION, register::IpiDest::Target);
+                todo!("eliza: set 0x310");
+            }
+            // TODO(eliza): there are probably some IPIs that are invalid to
+            // send to yourself...should we handle them here? e.g. i assume you
+            // can't send yourself a SIPI.
+            IpiTarget::Current => {
+                flags.set(IcrFlags::DESTINATION, register::IpiDest::Current);
+            }
+            IpiTarget::All => {
+                flags.set(IcrFlags::DESTINATION, register::IpiDest::All);
+            }
+            IpiTarget::Others => {
+                flags.set(IcrFlags::DESTINATION, register::IpiDest::Others);
+            }
+        };
+        todo!("eliza: write the IPI registers...")
+    }
+
+    /// Sends an End of Interrupt (EOI) to the local APIC.
+    ///
+    /// This should be called by an interrupt handler after handling a local
+    /// APIC interrupt.
+    ///
+    /// # Safety
+    ///
+    /// This should only be called when an interrupt has been triggered by this
+    /// local APIC.
+    pub unsafe fn end_interrupt(&self) {
+        // Write a 0 to the EOI register.
+        self.register(register::END_OF_INTERRUPT).write(0);
+    }
+
+    unsafe fn write_register<T, A>(&self, register: LocalApicRegister<T, A>, value: T)
+    where
+        LocalApicRegister<T, A>: RegisterAccess<Target = T, Access = A>,
+        A: access::Writable,
+        T: Copy + fmt::Debug + 'static,
+    {
+        tracing::trace!(%register, write = ?value);
+        self.register(register).write(value);
+    }
+
     fn timer_frequency_hz(&self) -> u32 {
         use register::*;
 
@@ -189,83 +335,6 @@ impl LocalApic {
         let frequency_hz = ticks_per_10ms * 100;
         tracing::debug!(frequency_hz, "calibrated local APIC timer using PIT");
         frequency_hz
-    }
-
-    #[tracing::instrument(
-        level = tracing::Level::DEBUG,
-        name = "LocalApic::start_periodic_timer",
-        skip(self, interval),
-        fields(?interval, vector),
-        err
-    )]
-    pub fn start_periodic_timer(
-        &self,
-        interval: Duration,
-        vector: u8,
-    ) -> Result<(), InvalidDuration> {
-        let timer_frequency_hz = self.timer_frequency_hz();
-        let ticks_per_ms = timer_frequency_hz / 1000;
-        tracing::trace!(
-            timer_frequency_hz,
-            ticks_per_ms,
-            "starting local APIC timer"
-        );
-        let interval_ms: u32 = interval.as_millis().try_into().map_err(|_| {
-            InvalidDuration::new(
-                interval,
-                "local APIC periodic timer interval exceeds a `u32`",
-            )
-        })?;
-        let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).ok_or_else(|| {
-            InvalidDuration::new(
-                interval,
-                "local APIC periodic timer interval requires a number of ticks that exceed a `u32`",
-            )
-        })?;
-
-        unsafe {
-            let lvt_entry = register::LvtTimer::new()
-                .with(register::LvtTimer::VECTOR, vector)
-                .with(register::LvtTimer::MODE, register::TimerMode::Periodic);
-            // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
-            self.write_register(register::TIMER_DIVISOR, 0b11);
-            self.write_register(register::LVT_TIMER, lvt_entry);
-            self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
-        }
-
-        tracing::info!(
-            ?interval,
-            timer_frequency_hz,
-            ticks_per_ms,
-            vector,
-            "started local APIC timer"
-        );
-
-        Ok(())
-    }
-
-    /// Sends an End of Interrupt (EOI) to the local APIC.
-    ///
-    /// This should be called by an interrupt handler after handling a local
-    /// APIC interrupt.
-    ///
-    /// # Safety
-    ///
-    /// This should only be called when an interrupt has been triggered by this
-    /// local APIC.
-    pub unsafe fn end_interrupt(&self) {
-        // Write a 0 to the EOI register.
-        self.register(register::END_OF_INTERRUPT).write(0);
-    }
-
-    unsafe fn write_register<T, A>(&self, register: LocalApicRegister<T, A>, value: T)
-    where
-        LocalApicRegister<T, A>: RegisterAccess<Target = T, Access = A>,
-        A: access::Writable,
-        T: Copy + fmt::Debug + 'static,
-    {
-        tracing::trace!(%register, write = ?value);
-        self.register(register).write(value);
     }
 
     #[must_use]
