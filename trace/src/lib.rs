@@ -151,31 +151,40 @@ where
 
     fn new_span(&self, span: &span::Attributes) -> span::Id {
         let meta = span.metadata();
+        let id = {
+            let mut id = self.next_id.fetch_add(1, Ordering::Acquire);
+            if id & SERIAL_BIT != 0 {
+                // we have used a _lot_ of span IDs...presumably the low-numbered
+                // spans are gone by now.
+                self.next_id.store(0, Ordering::Release);
+            }
+
+            if self.display.enabled(meta) {
+                // mark that this span should be written to the VGA buffer.
+                id |= VGA_BIT;
+            }
+
+            if self.serial.enabled(meta) {
+                // mark that this span should be written to the serial port buffer.
+                id |= SERIAL_BIT;
+            }
+            span::Id::from_u64(id)
+        };
+
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent_initial(IndentKind::NewSpan);
         let _ = writer.with_bold().write_str(meta.name());
         let _ = writer.with_fg_color(Color::BrightBlack).write_str(": ");
 
+        // ensure the span's fields are nicely indented if they wrap by
+        // "entering" and then "exiting"
+        // the span.
+        self.enter(&id);
         span.record(&mut Visitor::new(&mut writer));
+        self.exit(&id);
 
-        let mut id = self.next_id.fetch_add(1, Ordering::Acquire);
-        if id & SERIAL_BIT != 0 {
-            // we have used a _lot_ of span IDs...presumably the low-numbered
-            // spans are gone by now.
-            self.next_id.store(0, Ordering::Release);
-        }
-
-        if self.display.enabled(meta) {
-            // mark that this span should be written to the VGA buffer.
-            id |= VGA_BIT;
-        }
-
-        if self.serial.enabled(meta) {
-            // mark that this span should be written to the serial port buffer.
-            id |= SERIAL_BIT;
-        }
-        span::Id::from_u64(id)
+        id
     }
 
     fn record(&self, _span: &span::Id, _values: &span::Record) {
