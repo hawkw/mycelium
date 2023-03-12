@@ -70,6 +70,7 @@ struct Visitor<'writer, W> {
     seen: bool,
     newline: bool,
     comma: bool,
+    altmode: bool,
 }
 
 // === impl Subscriber ===
@@ -181,7 +182,7 @@ where
         // "entering" and then "exiting"
         // the span.
         self.enter(&id);
-        span.record(&mut Visitor::new(&mut writer));
+        span.record(&mut Visitor::new(&mut writer, false));
         self.exit(&id);
 
         id
@@ -205,7 +206,7 @@ where
             "{}: ",
             meta.target()
         );
-        event.record(&mut Visitor::new(&mut writer));
+        event.record(&mut Visitor::new(&mut writer, true));
     }
 
     fn enter(&self, span: &span::Id) {
@@ -492,12 +493,13 @@ where
     W: fmt::Write,
     &'writer mut W: SetColor,
 {
-    fn new(writer: &'writer mut W) -> Self {
+    fn new(writer: &'writer mut W, altmode: bool) -> Self {
         Self {
             writer,
             seen: false,
             comma: false,
             newline: false,
+            altmode,
         }
     }
 
@@ -613,6 +615,10 @@ where
     }
 
     fn record_debug(&mut self, field: &field::Field, val: &dyn fmt::Debug) {
-        self.record_inner(field, &fmt::alt(val))
+        if self.altmode {
+            self.record_inner(field, &fmt::alt(val))
+        } else {
+            self.record_inner(field, val)
+        }
     }
 }
