@@ -752,8 +752,11 @@ pub mod register {
         /// Interrupt Command Register (ICR) target register.
         ///
         /// This is the value of the ([`ICR_TARGET`]) register.
+        #[derive(Eq, PartialEq)]
         pub struct IcrTarget<u32> {
-            const _RESERVED_0 = 23;
+            /// XXX(eliza): if this is an x2APIC, the destination starts at bit
+            /// 0 i think?
+            const _RESERVED_0 = 24;
 
             /// The local APIC ID of the target processor.
             pub const APIC_ID = 4;
@@ -863,7 +866,7 @@ pub mod register {
 
 #[cfg(test)]
 mod tests {
-    use super::register::{IcrFlags, IpiInit, IpiMode};
+    use super::register::{IcrFlags, IcrTarget, IpiInit, IpiMode};
     use super::*;
 
     #[test]
@@ -923,5 +926,11 @@ mod tests {
             .with(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
         println!("{icr}");
         assert_eq!(icr, IcrFlags::from_bits(0x4600 | 8))
+    }
+
+    #[test]
+    fn icr_target() {
+        let icr = IcrTarget::new().with(IcrTarget::APIC_ID, 1);
+        assert_eq!(icr, IcrTarget::from_bits(1 << 24));
     }
 }
