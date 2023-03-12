@@ -2,16 +2,17 @@ use crate::{
     control_regs::{Cr0, Cr4},
     cpu::{
         msr::{Efer, Msr},
-        topology::Topology,
+        topology::{State, Topology},
         Ring,
     },
+    interrupt::apic::local::{IpiKind, IpiTarget, LocalApic},
     segment,
 };
 use core::arch::global_asm;
 use mycelium_util::bits;
 
 #[tracing::instrument(name = "smp::bringup", skip(topology))]
-pub fn bringup(topology: &Topology) -> Result<(), &'static str> {
+pub fn bringup(bsp_lapic: &LocalApic, topology: &mut Topology) -> Result<(), &'static str> {
     unsafe {
         tracing::info!(
             "AP trampoline: {:p} .. {:p}",
@@ -22,6 +23,33 @@ pub fn bringup(topology: &Topology) -> Result<(), &'static str> {
             &AP_TRAMPOLINE_START as *const _ as usize,
             AP_TRAMPOLINE_ADDR
         );
+    }
+
+    for ap in &mut topology.application_processors {
+        tracing::info!(?ap, "bringing up application processor...");
+        if ap.state != State::Idle {
+            tracing::info!("AP is not idle, skipping it.");
+            continue;
+        }
+        tracing::info!("sending INIT IPI to AP {}...", ap.lapic_id);
+        bsp_lapic.send_ipi(
+            IpiTarget::ApicId(ap.lapic_id as u8),
+            IpiKind::Init { assert: true },
+        );
+
+        tracing::info!("sending SIPI to AP {}...", ap.lapic_id);
+        bsp_lapic.send_ipi(
+            IpiTarget::ApicId(ap.lapic_id as u8),
+            IpiKind::Startup {
+                page: (AP_TRAMPOLINE_ADDR >> 12) as u8,
+            },
+        );
+        // TODO(eliza): spin waiting for AP to start...
+
+        ap.state = State::Running;
+        // TODO(eliza): AP should call init processor on itself...
+        // ap.init_processor(gdt)
+        return Ok(());
     }
 
     Ok(())

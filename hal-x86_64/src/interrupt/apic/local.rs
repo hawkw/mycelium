@@ -27,13 +27,10 @@ pub struct LocalApicRegister<T = u32, A = access::ReadWrite> {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IpiTarget {
     /// The interrupt is sent to the processor with the provided local APIC ID.
-    Target {
-        /// The local APIC ID of the target processor.
-        ///
-        /// This must be a valid local APIC ID for the current system, and may
-        /// not exceed 4 bits in length.
-        apic_id: u8,
-    },
+    ///
+    /// This must be a valid local APIC ID for the current system, and may
+    /// not exceed 4 bits in length.
+    ApicId(u8),
     /// The interrupt is sent to this processor.
     Current,
     /// The interrupt is sent to all processors, *including* the current one.
@@ -46,6 +43,12 @@ pub enum IpiTarget {
 pub enum IpiKind {
     /// A Startup IPI (SIPI) is used to start an AP processor.
     Startup { page: u8 },
+
+    /// INIT assert or de-assert.
+    Init {
+        /// Whether the INIT line should be asserted or deasserted.
+        assert: bool,
+    },
 
     /// An IPI is used to send an interrupt to another processor.
     Interrupt {
@@ -204,17 +207,26 @@ impl LocalApic {
         skip(self),
     )]
     pub fn send_ipi(&self, target: IpiTarget, kind: IpiKind) {
-        use register::{IcrFlags, IcrTarget};
+        use register::{IcrFlags, IcrTarget, IpiInit, IpiMode};
 
         let mut flags = IcrFlags::new();
         match kind {
             IpiKind::Startup { page } => {
                 flags
                     .set(IcrFlags::VECTOR, page)
-                    .set(IcrFlags::MODE, register::IpiMode::Sipi)
-                    .set(IcrFlags::IS_LOGICAL, false)
+                    .set(IcrFlags::MODE, IpiMode::Sipi)
                     // This is set for all IPIs except INIT level deassert.
-                    .set(IcrFlags::INIT_ASSERT_DEASSERT, register::IpiInit::Assert);
+                    .set(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
+            }
+            IpiKind::Init { assert } => {
+                let assert = match assert {
+                    true => IpiInit::Assert,
+                    false => IpiInit::Deassert,
+                };
+
+                flags
+                    .set(IcrFlags::MODE, IpiMode::InitDeinit)
+                    .set(IcrFlags::INIT_ASSERT_DEASSERT, assert);
             }
             IpiKind::Interrupt { vector: _ } => {
                 unreachable!("non-SIPI inter-processor interrupts are not currently implemented...")
@@ -222,7 +234,7 @@ impl LocalApic {
         }
 
         match target {
-            IpiTarget::Target { apic_id } => {
+            IpiTarget::ApicId(apic_id) => {
                 flags
                     .set(IcrFlags::DESTINATION, register::IpiDest::Target)
                     // when targeting a local APIC ID, the destination mode is
@@ -251,7 +263,21 @@ impl LocalApic {
         };
 
         tracing::debug!(?flags, "sending IPI...");
-        unsafe { self.write_register(register::ICR_FLAGS, flags) };
+        unsafe {
+            // write the ICR flags
+            self.write_register(register::ICR_FLAGS, flags);
+
+            // wait for the interrupt to be delivered.
+            while self
+                .register(register::ICR_FLAGS)
+                .read()
+                .get(IcrFlags::SEND_PENDING)
+            {
+                // spin
+                core::hint::spin_loop();
+            }
+        };
+        tracing::info!(?flags, ?target, "IPI sent!")
     }
 
     /// Sends an End of Interrupt (EOI) to the local APIC.
@@ -686,6 +712,7 @@ pub mod register {
         /// Interrupt Command Register (ICR) flags.
         ///
         /// This is the value of the ([`ICR_FLAGS`]) register.
+        #[derive(Eq, PartialEq)]
         pub struct IcrFlags<u32> {
             /// The vector number, or starting page number for SIPIs.
             pub const VECTOR: u8;
@@ -836,6 +863,7 @@ pub mod register {
 
 #[cfg(test)]
 mod tests {
+    use super::register::{IcrFlags, IpiInit, IpiMode};
     use super::*;
 
     #[test]
@@ -875,5 +903,25 @@ mod tests {
             17,
             "mode LSB"
         );
+    }
+
+    #[test]
+    fn init_icr() {
+        let icr = IcrFlags::new()
+            .with(IcrFlags::VECTOR, 0)
+            .with(IcrFlags::MODE, IpiMode::InitDeinit)
+            .with(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
+        println!("{icr}");
+        assert_eq!(icr, IcrFlags::from_bits(0x4500))
+    }
+
+    #[test]
+    fn sipi_icr() {
+        let icr = IcrFlags::new()
+            .with(IcrFlags::VECTOR, 8) // page 8
+            .with(IcrFlags::MODE, IpiMode::Sipi)
+            .with(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
+        println!("{icr}");
+        assert_eq!(icr, IcrFlags::from_bits(0x4600 | 8))
     }
 }

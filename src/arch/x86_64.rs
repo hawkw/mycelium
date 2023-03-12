@@ -66,7 +66,7 @@ static TOPOLOGY: Mutex<Option<cpu::Topology>> = Mutex::new(None);
 pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
-    let mut topo = match archinfo.rsdp_addr {
+    let (mut topo, irq_ctrl) = match archinfo.rsdp_addr {
         Some(rsdp_addr) => {
             tracing::info!(?rsdp_addr);
             init_acpi(rsdp_addr).expect("failed to detect topology from ACPI")
@@ -85,7 +85,10 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     tracing::info!("initialized boot processor");
 
     tracing::info!("starting application processors");
-    match hal_x86_64::cpu::smp::bringup(&topo) {
+    let bsp_lapic = irq_ctrl
+        .local_apic()
+        .expect("if we are starting application processors, the interrupt model must be APIC");
+    match hal_x86_64::cpu::smp::bringup(bsp_lapic, &mut topo) {
         Ok(_) => tracing::info!("all application processors started"),
         Err(error) => tracing::error!(%error, "failed to start application processors"),
     }
@@ -94,7 +97,9 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     *TOPOLOGY.lock() = Some(topo);
 }
 
-fn init_acpi(rsdp_addr: PAddr) -> Result<cpu::Topology, acpi::AcpiError> {
+fn init_acpi(
+    rsdp_addr: PAddr,
+) -> Result<(cpu::Topology, &'static interrupt::Controller), acpi::AcpiError> {
     let tables = acpi::acpi_tables(rsdp_addr)?;
 
     let platform = tables.platform_info()?;
@@ -103,7 +108,7 @@ fn init_acpi(rsdp_addr: PAddr) -> Result<cpu::Topology, acpi::AcpiError> {
     tracing::info!(?platform.power_profile);
 
     // enable hardware interrupts
-    interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
+    let irq_ctrl = interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
 
     // detect CPU topology
     let topology = cpu::topology::Topology::from_acpi(&platform).unwrap();
@@ -111,7 +116,7 @@ fn init_acpi(rsdp_addr: PAddr) -> Result<cpu::Topology, acpi::AcpiError> {
 
     // TODO(eliza): initialize APs
 
-    Ok(topology)
+    Ok((topology, irq_ctrl))
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be

@@ -131,6 +131,13 @@ impl Controller {
         IDT.lock()
     }
 
+    pub fn local_apic(&self) -> Option<&apic::LocalApic> {
+        match &self.model {
+            InterruptModel::Apic { local, .. } => Some(local),
+            _ => None,
+        }
+    }
+
     #[tracing::instrument(level = "info", name = "interrupt::Controller::init")]
     pub fn init<H: Handlers<Registers>>() {
         tracing::info!("intializing IDT...");

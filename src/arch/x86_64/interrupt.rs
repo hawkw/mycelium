@@ -14,12 +14,15 @@ pub fn enable_exceptions() {
 }
 
 #[tracing::instrument(skip(interrupt_model))]
-pub fn enable_hardware_interrupts(interrupt_model: Option<&acpi::InterruptModel>) {
+pub fn enable_hardware_interrupts(
+    interrupt_model: Option<&acpi::InterruptModel>,
+) -> &'static Controller {
     let controller = Controller::enable_hardware_interrupts(interrupt_model, &crate::ALLOC);
     controller
         .start_periodic_timer(TIMER_INTERVAL)
         .expect("10ms should be a reasonable interval for the PIT or local APIC timer...");
-    tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized")
+    tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized");
+    controller
 }
 
 pub const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(10);

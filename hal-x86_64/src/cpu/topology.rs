@@ -9,7 +9,7 @@ pub type Id = usize;
 #[derive(Debug)]
 pub struct Topology {
     boot_processor: Processor,
-    application_processors: Vec<Processor>,
+    pub(in crate::cpu) application_processors: Vec<Processor>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -173,7 +173,7 @@ impl Topology {
     }
 
     pub fn application_cpus(&self) -> &[Processor] {
-        &&self.application_processors[..]
+        &self.application_processors[..]
     }
 
     pub fn all_cpus(&self) -> impl Iterator<Item = &Processor> {
