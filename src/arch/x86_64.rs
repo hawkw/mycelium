@@ -88,9 +88,8 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     let bsp_lapic = irq_ctrl
         .local_apic()
         .expect("if we are starting application processors, the interrupt model must be APIC");
-    match hal_x86_64::cpu::smp::bringup(bsp_lapic, &mut topo) {
-        Ok(_) => tracing::info!("all application processors started"),
-        Err(error) => tracing::error!(%error, "failed to start application processors"),
+    for ap in topo.application_cpus_mut() {
+        ap.bringup_ap(bsp_lapic);
     }
 
     // store the topology for later

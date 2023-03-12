@@ -176,6 +176,10 @@ impl Topology {
         &self.application_processors[..]
     }
 
+    pub fn application_cpus_mut(&mut self) -> &mut [Processor] {
+        &mut self.application_processors[..]
+    }
+
     pub fn all_cpus(&self) -> impl Iterator<Item = &Processor> {
         core::iter::once(&self.boot_processor).chain(self.application_processors.iter())
     }

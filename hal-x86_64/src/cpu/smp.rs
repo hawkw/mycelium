@@ -2,7 +2,7 @@ use crate::{
     control_regs::{Cr0, Cr4},
     cpu::{
         msr::{Efer, Msr},
-        topology::{State, Topology},
+        topology::{self, Processor},
         Ring,
     },
     interrupt::apic::local::{IpiKind, IpiTarget, LocalApic},
@@ -11,48 +11,43 @@ use crate::{
 use core::arch::global_asm;
 use mycelium_util::bits;
 
-#[tracing::instrument(name = "smp::bringup", skip(topology))]
-pub fn bringup(bsp_lapic: &LocalApic, topology: &mut Topology) -> Result<(), &'static str> {
-    unsafe {
-        tracing::info!(
-            "AP trampoline: {:p} .. {:p}",
-            &AP_TRAMPOLINE_START,
-            &AP_TRAMPOLINE_END
-        );
-        assert_eq!(
-            &AP_TRAMPOLINE_START as *const _ as usize,
-            AP_TRAMPOLINE_ADDR
-        );
-    }
+impl Processor {
+    #[tracing::instrument(name = "bringup_ap", skip(bsp_lapic), err(Display))]
+    pub fn bringup_ap(&mut self, bsp_lapic: &LocalApic) -> Result<(), &'static str> {
+        tracing::info!("bringing up application processor...");
+        // TODO(eliza): check that this is only called by the BSP
 
-    for ap in &mut topology.application_processors {
-        tracing::info!(?ap, "bringing up application processor...");
-        if ap.state != State::Idle {
-            tracing::info!("AP is not idle, skipping it.");
-            continue;
+        if self.is_boot_processor {
+            return Err(
+                "called `bringup_ap` on the BSP! what are you doing and how did this happen?",
+            );
         }
-        tracing::info!("sending INIT IPI to AP {}...", ap.lapic_id);
+
+        if self.state != topology::State::Idle {
+            return Err("AP is not idle");
+        }
+
+        tracing::info!("sending INIT IPI to AP {}...", self.lapic_id);
         bsp_lapic.send_ipi(
-            IpiTarget::ApicId(ap.lapic_id as u8),
+            IpiTarget::ApicId(self.lapic_id as u8),
             IpiKind::Init { assert: true },
         );
 
-        tracing::info!("sending SIPI to AP {}...", ap.lapic_id);
+        tracing::info!("sending SIPI to AP {}...", self.lapic_id);
         bsp_lapic.send_ipi(
-            IpiTarget::ApicId(ap.lapic_id as u8),
+            IpiTarget::ApicId(self.lapic_id as u8),
             IpiKind::Startup {
                 page: (AP_TRAMPOLINE_ADDR >> 12) as u8,
             },
         );
         // TODO(eliza): spin waiting for AP to start...
 
-        ap.state = State::Running;
+        self.state = topology::State::Running;
         // TODO(eliza): AP should call init processor on itself...
         // ap.init_processor(gdt)
-        return Ok(());
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 extern "C" {
@@ -78,6 +73,7 @@ global_asm! {
     ".align 4096",
     ".global ap_trampoline",
     ".global ap_trampoline_end",
+    ".global ap_spinlock",
     "ap_trampoline:",
     "   jmp short ap_start",
     "   .nops 8",
