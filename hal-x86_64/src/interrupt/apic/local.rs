@@ -26,8 +26,14 @@ pub struct LocalApicRegister<T = u32, A = access::ReadWrite> {
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IpiTarget {
-    /// The interrupt is sent to the processor with the provided Local APIC ID.
-    Target(usize),
+    /// The interrupt is sent to the processor with the provided local APIC ID.
+    Target {
+        /// The local APIC ID of the target processor.
+        ///
+        /// This must be a valid local APIC ID for the current system, and may
+        /// not exceed 4 bits in length.
+        apic_id: u8,
+    },
     /// The interrupt is sent to this processor.
     Current,
     /// The interrupt is sent to all processors, *including* the current one.
@@ -198,7 +204,7 @@ impl LocalApic {
         skip(self),
     )]
     pub fn send_ipi(&self, target: IpiTarget, kind: IpiKind) {
-        use register::IcrFlags;
+        use register::{IcrFlags, IcrTarget};
 
         let mut flags = IcrFlags::new();
         match kind {
@@ -216,9 +222,18 @@ impl LocalApic {
         }
 
         match target {
-            IpiTarget::Target(target) => {
-                flags.set(IcrFlags::DESTINATION, register::IpiDest::Target);
-                todo!("eliza: set 0x310 to {target}...");
+            IpiTarget::Target { apic_id } => {
+                flags
+                    .set(IcrFlags::DESTINATION, register::IpiDest::Target)
+                    // when targeting a local APIC ID, the destination mode is
+                    // "physical" (per osdev wiki).
+                    .set(IcrFlags::IS_LOGICAL, false);
+                assert!(
+                    apic_id < 0b0000_1111,
+                    "target APIC ID may not be more than 4 bits, got {apic_id:#b}"
+                );
+                let target_reg = IcrTarget::new().with(IcrTarget::APIC_ID, apic_id as u32);
+                unsafe { self.write_register(register::ICR_TARGET, target_reg) };
             }
             // TODO(eliza): there are probably some IPIs that are invalid to
             // send to yourself...should we handle them here? e.g. i assume you
@@ -234,7 +249,9 @@ impl LocalApic {
                 flags.set(IcrFlags::DESTINATION, register::IpiDest::Others);
             }
         };
-        todo!("eliza: write the IPI registers...")
+
+        tracing::debug!(?flags, "sending IPI...");
+        unsafe { self.write_register(register::ICR_FLAGS, flags) };
     }
 
     /// Sends an End of Interrupt (EOI) to the local APIC.
@@ -512,7 +529,7 @@ pub mod register {
         /// Note that the interrupt is sent when 0x300 ([`ICR_FLAGS`]) is
         /// written to, so in order to send an interrupt, 0x310 should be
         /// written prior to writing to 0x300.
-        ICR_TARGET = 0x310, ReadWrite;
+        ICR_TARGET<IcrTarget> = 0x310, ReadWrite;
 
         /// LVT Local APIC Timer
         ///
@@ -701,6 +718,18 @@ pub mod register {
             /// processors, and 3 will send it to all processors aside from the
             /// current one. It is best to avoid using modes 1, 2 and 3, and stick with 0.
             pub const DESTINATION: IpiDest;
+        }
+    }
+
+    bitfield! {
+        /// Interrupt Command Register (ICR) target register.
+        ///
+        /// This is the value of the ([`ICR_TARGET`]) register.
+        pub struct IcrTarget<u32> {
+            const _RESERVED_0 = 23;
+
+            /// The local APIC ID of the target processor.
+            pub const APIC_ID = 4;
         }
     }
 
