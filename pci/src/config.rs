@@ -191,12 +191,6 @@ impl ConfigReg {
         })
     }
 
-    pub(crate) fn read_header_type(&self) -> device::HeaderTypeReg {
-        let bits = self.read_offset(0x0C);
-        let bits = bits & 0xffff << 16;
-        device::HeaderTypeReg::from_bits(bits as u8)
-    }
-
     pub fn send_command(
         &self,
         f: impl FnOnce(register::Status, register::Command) -> register::Command,
