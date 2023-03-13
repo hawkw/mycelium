@@ -6,16 +6,23 @@ use crate::{
         Ring,
     },
     interrupt::apic::local::{IpiKind, IpiTarget, LocalApic},
+    mm::PhysPage,
     segment,
 };
 use core::arch::global_asm;
+use hal_core::PAddr;
 use mycelium_util::bits;
 
 impl Processor {
     #[tracing::instrument(name = "bringup_ap", skip(bsp_lapic), err(Display))]
     pub fn bringup_ap(&mut self, bsp_lapic: &LocalApic) -> Result<(), &'static str> {
         tracing::info!("bringing up application processor...");
+
         // TODO(eliza): check that this is only called by the BSP
+        let trampoline_page = PhysPage::starting_at_fixed(AP_TRAMPOLINE_ADDR).map_err(|error| {
+            tracing::error!(addr = ?AP_TRAMPOLINE_ADDR, %error, "AP trampoline address invalid!");
+            "AP trampoline address invalid"
+        })?;
 
         if self.is_boot_processor {
             return Err(
@@ -28,18 +35,22 @@ impl Processor {
         }
 
         tracing::info!("sending INIT IPI to AP {}...", self.lapic_id);
-        bsp_lapic.send_ipi(
-            IpiTarget::ApicId(self.lapic_id as u8),
-            IpiKind::Init { assert: true },
-        );
+        bsp_lapic
+            .send_ipi(
+                IpiTarget::ApicId(self.lapic_id as u8),
+                IpiKind::Init { assert: true },
+            )
+            // TODO(eliza): do nice error contexts some day...
+            .map_err(|_| "failed to send INIT IPI")?;
 
-        tracing::info!("sending SIPI to AP {}...", self.lapic_id);
-        bsp_lapic.send_ipi(
-            IpiTarget::ApicId(self.lapic_id as u8),
-            IpiKind::Startup {
-                page: (AP_TRAMPOLINE_ADDR >> 12) as u8,
-            },
-        );
+        tracing::info!(?trampoline_page, "sending SIPI to AP {}...", self.lapic_id);
+        bsp_lapic
+            .send_ipi(
+                IpiTarget::ApicId(self.lapic_id as u8),
+                IpiKind::Startup(trampoline_page),
+            )
+            .map_err(|_| "failed to send SIPI")?;
+
         // TODO(eliza): spin waiting for AP to start...
 
         self.state = topology::State::Running;
@@ -50,14 +61,11 @@ impl Processor {
     }
 }
 
-extern "C" {
-    #[link_name = "ap_trampoline"]
-    static AP_TRAMPOLINE_START: u8;
-    #[link_name = "ap_trampoline_end"]
-    static AP_TRAMPOLINE_END: u8;
-}
+const AP_TRAMPOLINE_ADDR: PAddr = match PAddr::from_usize_checked(0x8000) {
+    Ok(addr) => addr,
+    Err(_) => panic!("invalid AP trampoline address!"),
+};
 
-const AP_TRAMPOLINE_ADDR: usize = 0x8000;
 global_asm! {
     // /!\ EXTREMELY MESSED UP HACK: stick this in the `.boot-first-stage`
     // section that's defined by the `bootloader` crate's linker script, so that
@@ -133,7 +141,7 @@ global_asm! {
     "   .word gdt32", // offset
     "ap_trampoline_end:",
     // ".code64", // reset to 64 bit code when exiting the asm block
-    trampoline_addr = const AP_TRAMPOLINE_ADDR,
+    trampoline_addr = const AP_TRAMPOLINE_ADDR.as_usize(),
     cr4flags = const AP_CR4,
     cr0flags = const AP_CR0,
     efer_num = const Msr::ia32_efer().num,

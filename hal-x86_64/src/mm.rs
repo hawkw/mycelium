@@ -933,3 +933,16 @@ mycotest::decl_test! {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_size() {
+        let addr = 0x8000;
+        let page =
+            PhysPage::<Size4Kb>::starting_at_fixed(PAddr::from_usize(addr)).expect("page is valid");
+        assert_eq!(page.number(), addr >> 12)
+    }
+}

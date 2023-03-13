@@ -42,7 +42,7 @@ pub enum IpiTarget {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IpiKind {
     /// A Startup IPI (SIPI) is used to start an AP processor.
-    Startup { page: u8 },
+    Startup(mm::PhysPage<mm::size::Size4Kb>),
 
     /// INIT assert or de-assert.
     Init {
@@ -205,15 +205,20 @@ impl LocalApic {
         level = tracing::Level::DEBUG,
         name = "LocalApic::send_ipi",
         skip(self),
+        err(Display)
     )]
-    pub fn send_ipi(&self, target: IpiTarget, kind: IpiKind) {
+    pub fn send_ipi(&self, target: IpiTarget, kind: IpiKind) -> Result<(), &'static str> {
         use register::{IcrFlags, IcrTarget, IpiInit, IpiMode};
 
         let mut flags = IcrFlags::new();
         match kind {
-            IpiKind::Startup { page } => {
+            IpiKind::Startup(page) => {
+                let page_num: u8 = page
+                    .number()
+                    .try_into()
+                    .map_err(|_| "SIPI page number must be <= 255")?;
                 flags
-                    .set(IcrFlags::VECTOR, page)
+                    .set(IcrFlags::VECTOR, page_num)
                     .set(IcrFlags::MODE, IpiMode::Sipi)
                     // This is set for all IPIs except INIT level deassert.
                     .set(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
@@ -277,7 +282,9 @@ impl LocalApic {
                 core::hint::spin_loop();
             }
         };
-        tracing::info!(?flags, ?target, "IPI sent!")
+        tracing::info!(?flags, ?target, "IPI sent!");
+
+        Ok(())
     }
 
     /// Sends an End of Interrupt (EOI) to the local APIC.
