@@ -11,7 +11,7 @@ use embedded_graphics::{
 };
 use hal_core::{
     framebuffer::{Draw, RgbColor},
-    interrupt, Address,
+    interrupt,
 };
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
 use mycelium_trace::{embedded_graphics::TextWriterBuilder, writer::MakeWriter};

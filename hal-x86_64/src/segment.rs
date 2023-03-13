@@ -1,6 +1,6 @@
 /// x86 memory segmentation structures.
 use crate::{cpu, task};
-use core::{arch::asm, convert::TryInto, mem};
+use core::{arch::asm, mem};
 use mycelium_util::{
     bits::{self, Pack64, Packing64, Pair64},
     fmt,

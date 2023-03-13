@@ -5,7 +5,7 @@ use mycelium_util::bits::bitfield;
 pub mod cr3 {
     use super::*;
     use crate::{mm::size::Size4Kb, PAddr};
-    use hal_core::{mem::page::Page, Address};
+    use hal_core::mem::page::Page;
 
     #[derive(Copy, Clone, Eq, PartialEq)]
     pub struct Flags(u64);

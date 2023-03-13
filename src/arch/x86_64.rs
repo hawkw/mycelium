@@ -88,9 +88,18 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     let bsp_lapic = irq_ctrl
         .local_apic()
         .expect("if we are starting application processors, the interrupt model must be APIC");
+    let mut started = 0;
     for ap in topo.application_cpus_mut() {
-        ap.bringup_ap(bsp_lapic);
+        match ap.bringup_ap(bsp_lapic) {
+            Ok(()) => {
+                tracing::info!(?ap, "started application processor");
+                started += 1;
+            }
+            Err(error) => tracing::error!(?ap, %error, "failed to start application processor"),
+        }
     }
+
+    tracing::info!("started {started} application processors");
 
     // store the topology for later
     *TOPOLOGY.lock() = Some(topo);

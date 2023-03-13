@@ -16,7 +16,7 @@ pub(super) static GDT: spin::Mutex<Gdt> = spin::Mutex::new(Gdt::new());
 pub(super) fn init() {
     tracing::trace!("initializing GDT...");
 
-    let mut tss_selector;
+    let tss_selector;
 
     // populate the GDT.
     {

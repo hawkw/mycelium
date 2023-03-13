@@ -1,7 +1,7 @@
 pub use acpi::AcpiError;
 use acpi::{AcpiHandler, AcpiTables};
 use core::{fmt, ptr::NonNull};
-use hal_core::{Address, PAddr};
+use hal_core::PAddr;
 use hal_x86_64::mm;
 
 #[derive(Debug)]

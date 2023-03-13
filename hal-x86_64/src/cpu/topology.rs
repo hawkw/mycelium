@@ -161,11 +161,11 @@ impl Topology {
     }
 
     pub fn by_device_uid(&self, uid: u32) -> Option<&Processor> {
-        self.all_cpus().find(|p| p.device_uid == uid as u32)
+        self.all_cpus().find(|p| p.device_uid == uid)
     }
 
     pub fn by_local_apic_id(&self, lapic_id: u32) -> Option<&Processor> {
-        self.all_cpus().find(|p| p.lapic_id == lapic_id as u32)
+        self.all_cpus().find(|p| p.lapic_id == lapic_id)
     }
 
     pub fn boot_cpu(&self) -> &Processor {
