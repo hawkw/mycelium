@@ -19,7 +19,7 @@ color-eyre = "0.5"
 bootloader-locator = "0.0.4"
 locate-cargo-manifest = "0.2"
 wait-timeout = "0.2"
-owo-colors = "2.0.0"
+owo-colors = "3.5.0"
 atty = "0.2"
 mycotest = { path = "../mycotest", features = ["alloc"] }
 heck = "0.3.3"
