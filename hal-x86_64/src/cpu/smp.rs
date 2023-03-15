@@ -1,6 +1,7 @@
 use crate::{
     control_regs::{Cr0, Cr4},
     cpu::{
+        self,
         msr::{Efer, Msr},
         topology::{self, Processor},
         Ring,
@@ -9,7 +10,10 @@ use crate::{
     mm::PhysPage,
     segment,
 };
-use core::arch::global_asm;
+use core::{
+    arch::global_asm,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use hal_core::PAddr;
 use mycelium_util::bits;
 
@@ -44,6 +48,12 @@ impl Processor {
             .map_err(|_| "failed to send INIT IPI")?;
 
         tracing::info!(?trampoline_page, "sending SIPI to AP {}...", self.lapic_id);
+
+        // TODO(eliza): ensure trampoline page is mapped nicely.
+        unsafe {
+            AP_SPINLOCK.store(0, Ordering::SeqCst);
+        };
+
         bsp_lapic
             .send_ipi(
                 IpiTarget::ApicId(self.lapic_id as u8),
@@ -52,6 +62,12 @@ impl Processor {
             .map_err(|_| "failed to send SIPI")?;
 
         // TODO(eliza): spin waiting for AP to start...
+        tracing::info!("waiting for AP to start...");
+        while unsafe { AP_SPINLOCK.load(Ordering::SeqCst) == 0 } {
+            // spin
+            tracing::trace!("waiting...");
+            core::hint::spin_loop();
+        }
 
         self.state = topology::State::Running;
         // TODO(eliza): AP should call init processor on itself...
@@ -65,6 +81,11 @@ const AP_TRAMPOLINE_ADDR: PAddr = match PAddr::from_usize_checked(0x8000) {
     Ok(addr) => addr,
     Err(_) => panic!("invalid AP trampoline address!"),
 };
+
+extern "C" {
+    #[link_name = "ap_spinlock"]
+    static AP_SPINLOCK: AtomicU64;
+}
 
 global_asm! {
     // /!\ EXTREMELY MESSED UP HACK: stick this in the `.boot-first-stage`
@@ -83,7 +104,7 @@ global_asm! {
     ".global ap_trampoline_end",
     ".global ap_spinlock",
     "ap_trampoline:",
-    "   jmp short ap_start",
+    "   jmp ap_start",
     "   .nops 8",
     "ap_spinlock: .quad 0",
     "ap_pml4: .quad 0",
@@ -92,55 +113,68 @@ global_asm! {
     "   cli",
 
      // zero segment registers
-    "   xor ax, ax",
-    "   mov ds, ax",
-    "   mov es, ax",
-    "   mov ss, ax",
+    "   xor %ax, %ax",
+    "   mov %ax, %ds",
+    "   mov %ax, %es",
+    "   mov %ax, %ss",
 
     // initialize stack pointer to an invalid (null) value
-    "   mov sp, 0x0",
+    "   mov $0x0, %sp",
 
     // setup page table
-    "mov eax, [ap_pml4]",
-    "mov edi, [eax]",
-    "mov cr3, edi",
+    "mov (ap_pml4), %eax ",
+    "mov (%eax), %edi",
+    "mov %edi, %cr3",
 
     // init FPU
     "   fninit",
 
     // load 32-bit GDT
-    "   lgdt [gdt32_ptr]",
+    "   lgdt (gdt32_ptr)",
 
     // set CR4 flags
-    "   mov eax, cr4",
-    "   or eax, {cr4flags}",
-    "   mov cr4, eax",
+    "   mov %cr4, %eax",
+    "   or {cr4flags}, %eax",
+    "   mov %eax, %cr4",
 
     // enable long mode in EFER
-    "   mov ecx, {efer_num}",
+    "   mov {efer_num}, %ecx",
     "   rdmsr",
-    "   or eax, {efer_bits}",
+    "   or {efer_bits}, %eax",
     "   wrmsr",
 
     // set CR0 flags to enable paging and write protection
-    "   mov ebx, cr0",
-    "   or ebx, {cr0flags}",
-    "   mov cr0, ebx",
+    "   mov %cr0, %ebx",
+    "   or {cr0flags}, %ebx",
+    "   mov %ebx, %cr0",
 
+    // far jump to enable Long Mode and load CS with 64 bit segment
+    "   jmp $gdt32_kernel_code, $ap_long_mode",
     // 32-bit GDT
     ".align 16",
     "gdt32:",
-    // TODO(eliza): would be nice to build the bits of the GDT entries in
-    // Rust...
     "   .long 0, 0",
+    "gdt32_kernel_code:",
     "   .quad {gdt32_code}", // code segment
+    "gdt32_kernel_data:",
     "   .quad {gdt32_data}", // data segment
     "   .long 0x00000068, 0x00CF8900", // TSS
     "gdt32_ptr:",
     "   .word gdt32_ptr - gdt32 - 1", // size
     "   .word gdt32", // offset
     "ap_trampoline_end:",
-    // ".code64", // reset to 64 bit code when exiting the asm block
+    ".code64",
+    "ap_long_mode:",
+    "   mov %rax, %ds",
+    "   mov %rax, %es",
+    "   mov %rax, %fs",
+    "   mov %rax, %fs",
+    "   mov %rax, %gs",
+    "   mov %rax, %ss",
+
+    // set spinlock ready
+    // "   movq $1, (ap_spinlock)",
+    // TODO(eliza): setup ap stack
     trampoline_addr = const AP_TRAMPOLINE_ADDR.as_usize(),
     cr4flags = const AP_CR4,
     cr0flags = const AP_CR0,
@@ -150,6 +184,8 @@ global_asm! {
         .with_ring(Ring::Ring0).bits(),
     gdt32_data = const segment::Descriptor::data_flat_16()
         .bits(),
+    // spinlock_ready = const 1,
+    options(att_syntax)
 }
 
 /// Initial CR4 flags to set for an application processor.
