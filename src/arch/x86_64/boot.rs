@@ -1,14 +1,14 @@
 //! Glue for the `bootloader` crate
 
 use super::framebuf::{self, FramebufWriter};
-use bootloader::boot_info;
+use bootloader_api::info;
 use hal_core::{boot::BootInfo, mem, PAddr, VAddr};
 use hal_x86_64::{mm, serial, vga};
 use mycelium_util::sync::InitOnce;
 
 #[derive(Debug)]
-pub struct RustbootBootInfo {
-    inner: &'static boot_info::BootInfo,
+pub struct BootloaderApiBootInfo {
+    inner: &'static info::BootInfo,
     has_framebuffer: bool,
 }
 
@@ -17,11 +17,11 @@ pub struct ArchInfo {
     pub(in crate::arch) rsdp_addr: Option<PAddr>,
 }
 
-type MemRegionIter = core::slice::Iter<'static, boot_info::MemoryRegion>;
+type MemRegionIter = core::slice::Iter<'static, info::MemoryRegion>;
 
-impl BootInfo for RustbootBootInfo {
+impl BootInfo for BootloaderApiBootInfo {
     // TODO(eliza): implement
-    type MemoryMap = core::iter::Map<MemRegionIter, fn(&boot_info::MemoryRegion) -> mem::Region>;
+    type MemoryMap = core::iter::Map<MemRegionIter, fn(&info::MemoryRegion) -> mem::Region>;
 
     type Writer = vga::Writer;
 
@@ -29,18 +29,18 @@ impl BootInfo for RustbootBootInfo {
 
     /// Returns the boot info's memory map.
     fn memory_map(&self) -> Self::MemoryMap {
-        fn convert_region_kind(kind: boot_info::MemoryRegionKind) -> mem::RegionKind {
+        fn convert_region_kind(kind: info::MemoryRegionKind) -> mem::RegionKind {
             match kind {
-                boot_info::MemoryRegionKind::Usable => mem::RegionKind::FREE,
+                info::MemoryRegionKind::Usable => mem::RegionKind::FREE,
                 // TODO(eliza): make known
-                boot_info::MemoryRegionKind::UnknownUefi(_) => mem::RegionKind::UNKNOWN,
-                boot_info::MemoryRegionKind::UnknownBios(_) => mem::RegionKind::UNKNOWN,
-                boot_info::MemoryRegionKind::Bootloader => mem::RegionKind::BOOT,
+                info::MemoryRegionKind::UnknownUefi(_) => mem::RegionKind::UNKNOWN,
+                info::MemoryRegionKind::UnknownBios(_) => mem::RegionKind::UNKNOWN,
+                info::MemoryRegionKind::Bootloader => mem::RegionKind::BOOT,
                 _ => mem::RegionKind::UNKNOWN,
             }
         }
 
-        fn convert_region(region: &boot_info::MemoryRegion) -> mem::Region {
+        fn convert_region(region: &info::MemoryRegion) -> mem::Region {
             let start = PAddr::from_u64(region.start);
             let size = {
                 let end = PAddr::from_u64(region.end).offset(1);
@@ -119,7 +119,7 @@ impl BootInfo for RustbootBootInfo {
     }
 
     fn bootloader_name(&self) -> &str {
-        "rust-bootloader"
+        "rust-osdev/bootloader"
     }
 
     fn init_paging(&self) {
@@ -127,7 +127,7 @@ impl BootInfo for RustbootBootInfo {
     }
 }
 
-impl RustbootBootInfo {
+impl BootloaderApiBootInfo {
     fn vm_offset(&self) -> VAddr {
         VAddr::from_u64(
             self.inner
@@ -137,7 +137,7 @@ impl RustbootBootInfo {
         )
     }
 
-    pub(super) fn from_bootloader(inner: &'static mut boot_info::BootInfo) -> (Self, ArchInfo) {
+    pub(super) fn from_bootloader(inner: &'static mut info::BootInfo) -> (Self, ArchInfo) {
         let has_framebuffer = framebuf::init(inner);
         let archinfo = ArchInfo {
             rsdp_addr: inner.rsdp_addr.into_option().map(PAddr::from_u64),

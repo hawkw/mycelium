@@ -14,10 +14,10 @@ fn main() -> Result<()> {
     tracing::trace!(
         ?opts.cmd,
         ?opts.kernel_bin,
-        ?opts.bootloader_manifest,
         ?opts.kernel_manifest,
         ?opts.target_dir,
         ?opts.out_dir,
+        ?opts.uefi,
         "inoculate configuration"
     );
 
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
         .note("this sucks T_T")?;
 
     if let Some(cmd) = opts.cmd {
-        return cmd.run(image.as_ref(), &paths);
+        return cmd.run(image.as_ref(), &paths, opts.uefi);
     }
 
     Ok(())

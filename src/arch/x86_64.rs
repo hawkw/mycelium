@@ -1,3 +1,4 @@
+use bootloader_api::config::{BootloaderConfig, Mapping};
 use hal_core::boot::BootInfo;
 use hal_x86_64::{
     cpu::{self, local::GsLocalData},
@@ -25,10 +26,20 @@ mod tests;
 
 pub type MinPageSize = mm::size::Size4Kb;
 
-#[cfg(target_os = "none")]
-bootloader::entry_point!(arch_entry);
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    // the kernel is mapped into the higher half of the virtual address space.
+    config.mappings.dynamic_range_start = Some(0xFFFF_8000_0000_0000);
+    config.mappings.page_table_recursive = Some(Mapping::Dynamic);
 
-pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
+    config
+};
+
+#[cfg(target_os = "none")]
+bootloader_api::entry_point!(arch_entry, config = &BOOTLOADER_CONFIG);
+
+pub fn arch_entry(info: &'static mut bootloader_api::BootInfo) -> ! {
     unsafe {
         cpu::intrinsics::cli();
     }
@@ -43,7 +54,7 @@ pub fn arch_entry(info: &'static mut bootloader::BootInfo) -> ! {
         // lol we're hosed
     } */
 
-    let (boot_info, archinfo) = boot::RustbootBootInfo::from_bootloader(info);
+    let (boot_info, archinfo) = boot::BootloaderApiBootInfo::from_bootloader(info);
     crate::kernel_start(boot_info, archinfo);
 }
 

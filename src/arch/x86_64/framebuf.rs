@@ -1,4 +1,4 @@
-use bootloader::boot_info::{self, BootInfo};
+use bootloader_api::{info, BootInfo};
 use core::{
     mem,
     ops::{Deref, DerefMut},
@@ -7,7 +7,7 @@ use hal_x86_64::framebuffer::{self, Framebuffer};
 use mycelium_util::sync::{spin, InitOnce};
 
 #[derive(Debug)]
-pub struct FramebufGuard(spin::MutexGuard<'static, boot_info::FrameBuffer>);
+pub struct FramebufGuard(spin::MutexGuard<'static, info::FrameBuffer>);
 pub type FramebufWriter = Framebuffer<'static, FramebufGuard>;
 
 /// Locks the framebuffer and returns a [`FramebufWriter`].
@@ -47,7 +47,7 @@ pub(super) unsafe fn force_unlock() {
 ///
 /// If the framebuffer has already been initialized, this does nothing.
 pub(super) fn init(bootinfo: &mut BootInfo) -> bool {
-    use boot_info::Optional;
+    use info::Optional;
     // Has the framebuffer already been initialized?
     if FRAMEBUFFER.try_get().is_some() {
         return true;
@@ -62,14 +62,14 @@ pub(super) fn init(bootinfo: &mut BootInfo) -> bool {
 
     let info = framebuffer.info();
     let cfg = framebuffer::Config {
-        height: info.vertical_resolution,
-        width: info.horizontal_resolution,
+        height: info.height,
+        width: info.width,
         px_bytes: info.bytes_per_pixel,
         line_len: info.stride,
         px_kind: match info.pixel_format {
-            boot_info::PixelFormat::RGB => framebuffer::PixelKind::Rgb,
-            boot_info::PixelFormat::BGR => framebuffer::PixelKind::Bgr,
-            boot_info::PixelFormat::U8 => framebuffer::PixelKind::Gray,
+            info::PixelFormat::Rgb => framebuffer::PixelKind::Rgb,
+            info::PixelFormat::Bgr => framebuffer::PixelKind::Bgr,
+            info::PixelFormat::U8 => framebuffer::PixelKind::Gray,
             x => unimplemented!("hahaha wtf, found a weird pixel format: {:?}", x),
         },
     };
@@ -77,7 +77,7 @@ pub(super) fn init(bootinfo: &mut BootInfo) -> bool {
     true
 }
 
-static FRAMEBUFFER: InitOnce<(framebuffer::Config, spin::Mutex<boot_info::FrameBuffer>)> =
+static FRAMEBUFFER: InitOnce<(framebuffer::Config, spin::Mutex<info::FrameBuffer>)> =
     InitOnce::uninitialized();
 
 impl Deref for FramebufGuard {
