@@ -128,11 +128,14 @@ impl Cmd {
     }
 
     #[tracing::instrument(skip(self, paths), level = "debug")]
-    pub fn run_qemu(&self, image: &Path, paths: &crate::Paths) -> Result<()> {
+    pub fn run_qemu(&self, image: &Path, paths: &crate::Paths, uefi: bool) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
             .arg(format!("format=raw,file={}", image.display()))
             .arg("-no-reboot");
+        if uefi {
+            qemu.arg("-bios").arg(ovmf_prebuilt::ovmf_pure_efi());
+        }
 
         match self {
             Cmd::Run {
