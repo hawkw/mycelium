@@ -74,7 +74,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
         oops(Oops::fault_with_details(
             &cx,
             "PAGE FAULT",
-            &format_args!("{:?}", cx.debug_error_code()),
+            &format_args!("\n{}", cx.display_error_code()),
         ))
     }
 

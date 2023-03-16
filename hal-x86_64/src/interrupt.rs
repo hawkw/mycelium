@@ -66,9 +66,36 @@ enum InterruptModel {
     },
 }
 
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct PageFaultCode(u32);
+bits::bitfield! {
+    pub struct PageFaultCode<u32> {
+        /// When set, the page fault was caused by a page-protection violation.
+        /// When not set, it was caused by a non-present page.
+        pub const PRESENT: bool;
+        /// When set, the page fault was caused by a write access. When not set,
+        /// it was caused by a read access.
+        pub const WRITE: bool;
+        /// When set, the page fault was caused while CPL = 3. This does not
+        /// necessarily mean that the page fault was a privilege violation.
+        pub const USER: bool;
+        /// When set, one or more page directory entries contain reserved bits
+        /// which are set to 1. This only applies when the PSE or PAE flags in
+        /// CR4 are set to 1.
+        pub const RESERVED_WRITE: bool;
+        /// When set, the page fault was caused by an instruction fetch. This
+        /// only applies when the No-Execute bit is supported and enabled.
+        pub const INSTRUCTION_FETCH: bool;
+        /// When set, the page fault was caused by a protection-key violation.
+        /// The PKRU register (for user-mode accesses) or PKRS MSR (for
+        /// supervisor-mode accesses) specifies the protection key rights.
+        pub const PROTECTION_KEY: bool;
+        /// When set, the page fault was caused by a shadow stack access.
+        pub const SHADOW_STACK: bool;
+        const _RESERVED0 = 8;
+        /// When set, the fault was due to an SGX violation. The fault is
+        /// unrelated to ordinary paging.
+        pub const SGX: bool;
+    }
+}
 
 bits::bitfield! {
     /// Error code set by the "Invalid TSS", "Segment Not Present", "Stack-Segment
@@ -148,6 +175,7 @@ impl Controller {
                     let io_apic = &apic_info.io_apics[0];
                     let paddr = PAddr::from_u64(io_apic.address as u64);
                     let vaddr = mm::kernel_vaddr_of(paddr);
+                    tracing::debug!(?paddr, ?vaddr, "IOAPIC");
                     IoApic::new(vaddr)
                 };
 
@@ -236,6 +264,10 @@ impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
     }
 
     fn debug_error_code(&self) -> &dyn fmt::Debug {
+        &self.code
+    }
+
+    fn display_error_code(&self) -> &dyn fmt::Display {
         &self.code
     }
 }
@@ -594,12 +626,6 @@ impl fmt::Display for Registers {
 
 pub fn fire_test_interrupt() {
     unsafe { asm!("int {0}", const 69) }
-}
-
-impl fmt::Debug for PageFaultCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PageFaultCode({:#b})", self.0)
-    }
 }
 
 // === impl SelectorErrorCode ===
