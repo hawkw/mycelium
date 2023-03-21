@@ -375,7 +375,7 @@ enum Cell<F: Future> {
 ///
 ///   This method returns [`Poll::Ready`]`(Ok(()))` when the task has joined,
 ///   [`Poll::Ready`]`(Err(`[`JoinError`]`))` if the task has been cancelled, or
-///   [`Poll::Pending`]` when the task is still running.
+///   [`Poll::Pending`] when the task is still running.
 ///
 /// * **`unsafe fn `[`deallocate`]`(`[`NonNull`]`<`[`Header`]`>)`**
 ///
