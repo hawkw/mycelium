@@ -1015,6 +1015,26 @@ impl TaskRef {
         canceled
     }
 
+    /// Returns `true` if this task has completed.
+    ///
+    /// Tasks are considered completed when the spawned [`Future`] has returned
+    /// [`Poll::Ready`], or if the task has been canceled by the [`cancel()`]
+    /// method.
+    ///
+    /// **Note**: This method can return `false` after [`cancel()`] has
+    /// been called. This is because calling `cancel` *begins* the process of
+    /// cancelling a task. The task is not considered canceled until it has been
+    /// polled by the scheduler after calling [`cancel()`].
+    ///
+    /// [`cancel()`]: Self::cancel
+    #[inline]
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.state()
+            .load(Ordering::Acquire)
+            .get(state::State::COMPLETED)
+    }
+
     /// Wakes the task.
     ///
     /// TODO(eliza): would this be better if we just added an `Into<Waker>` impl
