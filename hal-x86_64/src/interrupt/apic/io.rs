@@ -1,9 +1,14 @@
 use super::{PinPolarity, TriggerMode};
-use hal_core::VAddr;
+use crate::{
+    cpu::FeatureNotSupported,
+    mm::{self, page, size::Size4Kb, PhysPage, VirtPage},
+};
+use hal_core::PAddr;
 use mycelium_util::bits::{bitfield, FromBits};
 use volatile::Volatile;
 
 #[derive(Debug)]
+#[must_use]
 pub struct IoApic {
     registers: Volatile<&'static mut MmioRegisters>,
 }
@@ -80,33 +85,67 @@ impl IoApic {
     pub(crate) const PS2_KEYBOARD_IRQ: u8 = 0x1;
     pub(crate) const PIT_TIMER_IRQ: u8 = 0x2;
     const REDIRECTION_ENTRY_BASE: u32 = 0x10;
+
     /// Try to construct an `IoApic`.
+    ///
+    /// # Arguments
+    ///
+    /// - `base_addr`: The [`PAddr`] of the I/O APIC's memory-mapped register
+    ///   page.
+    /// - `pagectrl`: a [page mapper](page::Map) used to ensure that the MMIO
+    ///   register page is mapped and writable.
+    /// - `frame_alloc`: a [frame allocator](page::Alloc) used to allocate page
+    ///   frame(s) while mapping the MMIO register page.
     ///
     /// # Returns
     /// - `Some(IoApic)` if this CPU supports the APIC interrupt model.
     /// - `None` if this CPU does not support APIC interrupt handling.
-    #[must_use]
-    pub fn try_new(addr: VAddr) -> Option<Self> {
+    pub fn try_new<A>(
+        base_paddr: PAddr,
+        pagectrl: &mut impl page::Map<Size4Kb, A>,
+        frame_alloc: &A,
+    ) -> Result<Self, FeatureNotSupported>
+    where
+        A: page::Alloc<Size4Kb>,
+    {
         if !super::is_supported() {
             tracing::warn!("tried to construct an IO APIC, but the CPU does not support the APIC interrupt model");
-            return None;
+            return Err(FeatureNotSupported::new("APIC interrupt model"));
         }
 
-        let registers = unsafe { Volatile::new(&mut *addr.as_ptr::<MmioRegisters>()) };
+        let base = mm::kernel_vaddr_of(base_paddr);
+        tracing::debug!(?base, ?base_paddr, "found I/O APIC base address");
+
+        unsafe {
+            // ensure the I/O APIC's MMIO page is mapped and writable.
+            let virt = VirtPage::<Size4Kb>::containing_fixed(base);
+            let phys = PhysPage::<Size4Kb>::containing_fixed(base_paddr);
+            tracing::debug!(?virt, ?phys, "mapping I/O APIC MMIO page...");
+            pagectrl
+                .map_page(virt, phys, frame_alloc)
+                .set_writable(true)
+                .commit();
+            tracing::debug!("mapped I/O APIC MMIO page!");
+        }
+
+        let registers = unsafe { Volatile::new(&mut *base.as_ptr::<MmioRegisters>()) };
         let mut ioapic = Self { registers };
         tracing::info!(
-            ?addr,
+            addr = ?base,
             id = ioapic.id(),
             version = ioapic.version(),
             max_entries = ioapic.max_entries(),
-            "IO APIC"
+            "I/O APIC enabled"
         );
-        Some(ioapic)
+        Ok(ioapic)
     }
 
-    #[must_use]
-    pub fn new(addr: VAddr) -> Self {
-        Self::try_new(addr).expect("CPU does not support APIC interrupt model!")
+    #[inline]
+    pub fn new<A>(addr: PAddr, pagectrl: &mut impl page::Map<Size4Kb, A>, frame_alloc: &A) -> Self
+    where
+        A: page::Alloc<Size4Kb>,
+    {
+        Self::try_new(addr, pagectrl, frame_alloc).unwrap()
     }
 
     /// Map all ISA interrupts starting at `base`.

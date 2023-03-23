@@ -1,7 +1,7 @@
 use super::{PinPolarity, TriggerMode};
 use crate::{
     cpu::{FeatureNotSupported, Msr},
-    mm,
+    mm::{self, page, size::Size4Kb, PhysPage, VirtPage},
     time::{Duration, InvalidDuration},
 };
 use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32};
@@ -43,11 +43,25 @@ impl LocalApic {
 
     /// Try to construct a `LocalApic`.
     ///
+    /// # Arguments
+    ///
+    /// - `pagectrl`: a [page mapper](page::Map) used to ensure that the local
+    ///   APIC's memory-mapped register page is mapped and writable.
+    /// - `frame_alloc`: a [frame allocator](page::Alloc) used to allocate page
+    ///   frame(s) while mapping the MMIO register page.
+    ///
     /// # Returns
+    ///
     /// - [`Ok`]`(LocalApic)` if this CPU supports the APIC interrupt model.
     /// - [`Err`]`(`[`FeatureNotSupported`]`)` if this CPU does not support APIC
     ///   interrupt handling.
-    pub fn try_new() -> Result<Self, FeatureNotSupported> {
+    pub fn try_new<A>(
+        pagectrl: &mut impl page::Map<Size4Kb, A>,
+        frame_alloc: &A,
+    ) -> Result<Self, FeatureNotSupported>
+    where
+        A: page::Alloc<Size4Kb>,
+    {
         if !super::is_supported() {
             return Err(FeatureNotSupported::new("APIC interrupt model"));
         }
@@ -58,12 +72,28 @@ impl LocalApic {
         tracing::debug!(?base, "found local APIC base address");
         assert_ne!(base, VAddr::from_u64(0));
 
+        unsafe {
+            // ensure the local APIC's MMIO page is mapped and writable.
+            let virt = VirtPage::<Size4Kb>::containing_fixed(base);
+            let phys = PhysPage::<Size4Kb>::containing_fixed(base_paddr);
+            tracing::debug!(?virt, ?phys, "mapping local APIC MMIO page...");
+            pagectrl
+                .map_page(virt, phys, frame_alloc)
+                .set_writable(true)
+                .commit();
+            tracing::debug!("mapped local APIC MMIO page");
+        }
+
         Ok(Self { msr, base })
     }
 
     #[must_use]
-    pub fn new() -> Self {
-        Self::try_new().unwrap()
+    #[inline]
+    pub fn new<A>(pagectrl: &mut impl page::Map<Size4Kb, A>, frame_alloc: &A) -> Self
+    where
+        A: page::Alloc<Size4Kb>,
+    {
+        Self::try_new(pagectrl, frame_alloc).unwrap()
     }
 
     pub fn enable(&self, spurious_vector: u8) {
@@ -253,12 +283,6 @@ impl LocalApic {
         );
         let reference = &mut *addr.as_ptr::<T>();
         LocalApicRegister::<T, A>::volatile(reference)
-    }
-}
-
-impl Default for LocalApic {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

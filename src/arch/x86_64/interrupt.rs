@@ -21,7 +21,7 @@ pub fn enable_exceptions() {
 
 #[tracing::instrument(skip(acpi))]
 pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) {
-    let controller = Controller::enable_hardware_interrupts(acpi);
+    let controller = Controller::enable_hardware_interrupts(acpi, &crate::ALLOC);
     controller
         .start_periodic_timer(TIMER_INTERVAL)
         .expect("10ms should be a reasonable interval for the PIT or local APIC timer...");

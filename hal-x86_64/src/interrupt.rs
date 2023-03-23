@@ -142,7 +142,10 @@ impl Controller {
         }
     }
 
-    pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) -> &'static Self {
+    pub fn enable_hardware_interrupts(
+        acpi: Option<&acpi::InterruptModel>,
+        frame_alloc: &impl hal_core::mem::page::Alloc<mm::size::Size4Kb>,
+    ) -> &'static Self {
         let mut pics = pic::CascadedPic::new();
         // regardless of whether APIC or PIC interrupt handling will be used,
         // the PIC interrupt vectors must be remapped so that they do not
@@ -160,6 +163,8 @@ impl Controller {
             Some(acpi::InterruptModel::Apic(apic_info)) => {
                 tracing::info!("detected APIC interrupt model");
 
+                let mut pagectrl = mm::PageCtrl::current();
+
                 // disable the 8259 PICs so that we can use APIC interrupts instead
                 unsafe {
                     pics.disable();
@@ -173,10 +178,10 @@ impl Controller {
                     tracing::trace!(?apic_info.io_apics, "found {} IO APICs", apic_info.io_apics.len());
 
                     let io_apic = &apic_info.io_apics[0];
-                    let paddr = PAddr::from_u64(io_apic.address as u64);
-                    let vaddr = mm::kernel_vaddr_of(paddr);
-                    tracing::debug!(?paddr, ?vaddr, "IOAPIC");
-                    IoApic::new(vaddr)
+                    let addr = PAddr::from_u64(io_apic.address as u64);
+
+                    tracing::debug!(ioapic.paddr = ?addr, "IOAPIC");
+                    IoApic::new(addr, &mut pagectrl, frame_alloc)
                 };
 
                 // map the standard ISA hardware interrupts to I/O APIC
@@ -191,7 +196,7 @@ impl Controller {
                 io.set_masked(IoApic::PS2_KEYBOARD_IRQ, false);
 
                 // enable the local APIC
-                let local = LocalApic::new();
+                let local = LocalApic::new(&mut pagectrl, frame_alloc);
                 local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
 
                 InterruptModel::Apic {
