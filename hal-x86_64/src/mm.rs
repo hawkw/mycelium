@@ -6,10 +6,10 @@ use core::{
     ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
+pub use hal_core::mem::page;
 use hal_core::{
     mem::page::{
-        self, Map, Page, Size, StaticSize, TranslateAddr, TranslateError, TranslatePage,
-        TranslateResult,
+        Map, Page, Size, StaticSize, TranslateAddr, TranslateError, TranslatePage, TranslateResult,
     },
     Address,
 };
