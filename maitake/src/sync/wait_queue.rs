@@ -88,7 +88,7 @@ mod tests;
 ///
 ///     // Tick the scheduler.
 ///     let tick = scheduler.tick();
-///     
+///
 ///     // A single task should have completed on this tick.
 ///     completed += tick.completed;
 ///     assert_eq!(completed, i);
@@ -372,9 +372,47 @@ impl WaitQueue {
     /// Wake the next task in the queue.
     ///
     /// If the queue is empty, a wakeup is stored in the `WaitQueue`, and the
-    /// next call to [`wait`] will complete immediately.
+    /// **next** call to [`wait().await`] will complete immediately. If one or more
+    /// tasks are currently in the queue, the first task in the queue is woken.
     ///
-    /// [`wait`]: Self::wait
+    /// At most one wakeup will be stored in the queue at any time. If `wake()`
+    /// is called many times while there are no tasks in the queue, only a
+    /// single wakeup is stored.
+    ///
+    /// [`wait().await`]: Self::wait()
+    ///
+    /// # Examples
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+    ///
+    /// // In order to spawn tasks, we need a `Scheduler` instance.
+    /// let scheduler = Scheduler::new();
+    ///
+    /// let queue = Arc::new(WaitQueue::new());
+    ///
+    /// scheduler.spawn({
+    ///     // clone the queue to move into the spawned task
+    ///     let queue = queue.clone();
+    ///     async move {
+    ///         queue.wait().await;
+    ///         println!("received wakeup!");
+    ///     }
+    /// });
+    ///
+    /// let waiter = scheduler.spawn(async move {
+    ///     println!("waking task...");
+    ///     queue.wake();
+    /// });
+    ///
+    /// // run the scheduler so that the spawned tasks can run.
+    /// scheduler.tick();
+    ///
+    /// assert!(waiter.is_complete());
+    /// ```
     #[inline]
     pub fn wake(&self) {
         // snapshot the queue's current state.
@@ -417,6 +455,62 @@ impl WaitQueue {
     }
 
     /// Wake *all* tasks currently in the queue.
+    ///
+    /// All tasks currently waiting on the queue are woken. Unlike [`wake()`], a
+    /// wakeup is *not* stored in the queue to wake the next call to [`wait()`]
+    /// if the queue is empty. Instead, this method only wakes all currently
+    /// registered waiters. Registering a task to be woken is done by calling
+    /// the [`wait()`] method on this queue.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+    /// use std::sync::Arc;
+    ///
+    /// // In order to spawn tasks, we need a `Scheduler` instance.
+    /// let scheduler = Scheduler::new();
+    ///
+    /// let queue = Arc::new(WaitQueue::new());
+    ///
+    /// // spawn multiple tasks to wait on the queue.
+    /// let task1 = scheduler.spawn({
+    ///     let queue = queue.clone();
+    ///     async move {
+    ///         println!("task 1 waiting...");
+    ///         queue.wait().await;
+    ///         println!("task 1 woken")
+    ///     }
+    /// });
+    ///
+    /// let task2 = scheduler.spawn({
+    ///     let queue = queue.clone();
+    ///     async move {
+    ///         println!("task 2 waiting...");
+    ///         queue.wait().await;
+    ///         println!("task 2 woken")
+    ///     }
+    /// });
+    ///
+    /// // tick the scheduler so that both tasks register
+    /// // themselves to wait on the queue.
+    /// scheduler.tick();
+    ///
+    /// // neither task will have been woken.
+    /// assert!(!task1.is_complete());
+    /// assert!(!task2.is_complete());
+    ///
+    /// // wake all tasks waiting on the queue.
+    /// queue.wake_all();
+    ///
+    /// // tick the scheduler again so that the tasks can execute.
+    /// scheduler.tick();
+    /// assert!(task1.is_complete());
+    /// assert!(task2.is_complete());
+    /// ```
+    ///
+    /// [`wake()`]: Self::wake
+    /// [`wait()`]: Self::wait
     pub fn wake_all(&self) {
         let mut queue = self.queue.lock();
         let state = self.load();
@@ -452,14 +546,14 @@ impl WaitQueue {
 
     /// Close the queue, indicating that it may no longer be used.
     ///
-    /// Once a queue is closed, all [`wait`] calls (current or future) will
+    /// Once a queue is closed, all [`wait()`] calls (current or future) will
     /// return an error.
     ///
     /// This method is generally used when implementing higher-level
     /// synchronization primitives or resources: when an event makes a resource
     /// permanently unavailable, the queue can be closed.
     ///
-    /// [`wait`]: Self::wait
+    /// [`wait()`]: Self::wait
     pub fn close(&self) {
         let state = self.state.fetch_or(State::Closed.into_usize(), SeqCst);
         let state = test_dbg!(QueueState::from_bits(state));
@@ -476,12 +570,66 @@ impl WaitQueue {
 
     /// Wait to be woken up by this queue.
     ///
-    /// This returns a [`Wait`] future that will complete when the task is
-    /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitQueue` is
-    /// dropped.
+    /// Equivalent to:
     ///
-    /// [`wake`]: Self::wake
-    /// [`wake_all`]: Self::wake_all
+    /// ```ignore
+    /// async fn wait(&self);
+    /// ```
+    ///
+    /// This returns a [`Wait`] future that will complete when the task is
+    /// woken by a call to [`wake()`] or [`wake_all()`], or when the `WaitQueue`
+    /// is dropped.
+    ///
+    /// Each `WaitQueue` holds a single wakeup. If [`wake()`] was previously
+    /// called while no tasks were waiting on the queue, then `wait().await`
+    /// will complete immediately, consuming the stored wakeup. Otherwise,
+    /// `wait().await` waits to be woken by the next call to [`wake()`] or
+    /// [`wake_all()`].
+    ///
+    /// The [`Wait`] future is not guaranteed to receive wakeups from calls to
+    /// [`wake()`] if it has not yet been polled. However, it is guaranteed to
+    /// recieve wakeups from calls to [`wake_all()`] as soon as it is created,
+    /// even if it has not yet been polled.
+    ///
+    /// # Cancellation
+    ///
+    /// A `WaitQueue` fairly distributes wakeups to waiting tasks in the order
+    /// that they started to wait. If a [`Wait`] future is dropped, the task
+    /// will forfeit its position in the queue.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+    ///
+    /// // In order to spawn tasks, we need a `Scheduler` instance.
+    /// let scheduler = Scheduler::new();
+    ///
+    /// let queue = Arc::new(WaitQueue::new());
+    ///
+    /// scheduler.spawn({
+    ///     // clone the queue to move into the spawned task
+    ///     let queue = queue.clone();
+    ///     async move {
+    ///         queue.wait().await;
+    ///         println!("received wakeup!");
+    ///     }
+    /// });
+    ///
+    /// let waiter = scheduler.spawn(async move {
+    ///     println!("waking task...");
+    ///     queue.wake();
+    /// });
+    ///
+    /// // run the scheduler so that the spawned tasks can run.
+    /// scheduler.tick();
+    ///
+    /// assert!(waiter.is_complete());
+    /// ```
+    ///
+    /// [`wake()`]: Self::wake
+    /// [`wake_all()`]: Self::wake_all
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             queue: self,
