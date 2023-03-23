@@ -71,7 +71,11 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
     where
         C: interrupt::Context<Registers = Registers> + hal_core::interrupt::ctx::PageFault,
     {
-        oops(Oops::fault(&cx, "PAGE FAULT"))
+        oops(Oops::fault_with_details(
+            &cx,
+            "PAGE FAULT",
+            &format_args!("\n{}", cx.display_error_code()),
+        ))
     }
 
     fn code_fault<C>(cx: C)
