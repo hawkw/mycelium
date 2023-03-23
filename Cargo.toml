@@ -47,7 +47,7 @@ rlibc = "1.0"
 # NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`
 # instead of normal [dependencies]. don't move this.
-bootloader = { version = "0.10.13" }
+bootloader = { version = "0.11.2" }
 embedded-graphics = "0.7"
 mycotest = { path = "mycotest" }
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "async-await-macro"] }
