@@ -27,7 +27,7 @@ _fmt := if env_var_or_default("GITHUB_ACTIONS", "") != "true" { "" } else {
 }
 
 # arguments to pass to all RustDoc invocations
-_rustdoc := _cargo + " doc --no-deps --all-features --document-private-items"
+_rustdoc := _cargo + " doc --no-deps --all-features"
 
 # default recipe to display help information
 default:
