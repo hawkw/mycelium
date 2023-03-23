@@ -84,6 +84,30 @@ impl<T> JoinHandle<T> {
             .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
     }
 
+    /// Returns `true` if this task has completed.
+    ///
+    /// Tasks are considered completed when the spawned [`Future`] has returned
+    /// [`Poll::Ready`], or if the task has been canceled by the [`cancel()`]
+    /// method.
+    ///
+    /// **Note**: This method can return `false` after [`cancel()`] has
+    /// been called. This is because calling `cancel` *begins* the process of
+    /// cancelling a task. The task is not considered canceled until it has been
+    /// polled by the scheduler after calling [`cancel()`].
+    ///
+    /// [`cancel()`]: Self::cancel
+    #[inline]
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.task
+            .as_ref()
+            .map(TaskRef::is_complete)
+            // if the `JoinHandle`'s `TaskRef` has been taken, we know the
+            // `Future` impl for `JoinHandle` completed, and the task has
+            // _definitely_ completed.
+            .unwrap_or(true)
+    }
+
     /// Forcibly cancel the task.
     ///
     /// Canceling a task sets a flag indicating that it has been canceled and
