@@ -1072,7 +1072,7 @@ impl Wait<'_> {
     /// ```
     /// use maitake::sync::WaitQueue;
     ///
-    /// let queue = WaitQueue::new();;
+    /// let queue = WaitQueue::new();
     ///
     /// let wait1 = queue.wait();
     /// let wait2 = queue.wait();
@@ -1085,8 +1085,8 @@ impl Wait<'_> {
     /// ```
     /// use maitake::sync::WaitQueue;
     ///
-    /// let queue1 = WaitQueue::new();;
-    /// let queue2 = WaitQueue::new();;
+    /// let queue1 = WaitQueue::new();
+    /// let queue2 = WaitQueue::new();
     ///
     /// let wait1 = queue1.wait();
     /// let wait2 = queue2.wait();
@@ -1299,6 +1299,69 @@ feature! {
     // === impl WaitOwned ===
 
     impl WaitOwned {
+                /// Returns `true` if this `WaitOwned` future is waiting for a
+        /// notification from the provided [`WaitQueue`].
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use maitake::sync::WaitQueue;
+        /// use std::sync::Arc;
+        ///
+        /// let queue1 = Arc::new(WaitQueue::new());
+        /// let queue2 = Arc::new(WaitQueue::new());
+        ///
+        /// let wait = queue1.clone().wait_owned();
+        /// assert!(wait.waits_on(&queue1));
+        /// assert!(!wait.waits_on(&queue2));
+        /// ```
+        #[inline]
+        #[must_use]
+        pub fn waits_on(&self, queue: &WaitQueue) -> bool {
+            ptr::eq(&*self.queue, queue)
+        }
+
+        /// Returns `true` if `self` and `other` are waiting on a notification
+        /// from the same [`WaitQueue`].
+        ///
+        /// # Examples
+        ///
+        /// Two [`WaitOwned`] futures waiting on the same [`WaitQueue`] return
+        /// `true`:
+        ///
+        /// ```
+        /// use maitake::sync::WaitQueue;
+        /// use std::sync::Arc;
+        ///
+        /// let queue = Arc::new(WaitQueue::new());
+        ///
+        /// let wait1 = queue.clone().wait_owned();
+        /// let wait2 = queue.clone().wait_owned();
+        /// assert!(wait1.same_queue(&wait2));
+        /// assert!(wait2.same_queue(&wait1));
+        /// ```
+        ///
+        /// Two [`WaitOwned`] futures waiting on different [`WaitQueue`]s return
+        /// `false`:
+        ///
+        /// ```
+        /// use maitake::sync::WaitQueue;
+        /// use std::sync::Arc;
+        ///
+        /// let queue1 = Arc::new(WaitQueue::new());
+        /// let queue2 = Arc::new(WaitQueue::new());
+        ///
+        /// let wait1 = queue1.wait_owned();
+        /// let wait2 = queue2.wait_owned();
+        /// assert!(!wait1.same_queue(&wait2));
+        /// assert!(!wait2.same_queue(&wait1));
+        /// ```
+        #[inline]
+        #[must_use]
+        pub fn same_queue(&self, other: &WaitOwned) -> bool {
+            Arc::ptr_eq(&self.queue, &other.queue)
+        }
+
         /// Eagerly subscribe this future to wakeups from [`WaitQueue::wake()`].
         ///
         /// Polling a `WaitOwned` future adds that future to the list of waiters
