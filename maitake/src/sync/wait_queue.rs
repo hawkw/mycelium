@@ -587,9 +587,13 @@ impl WaitQueue {
     /// [`wake_all()`].
     ///
     /// The [`Wait`] future is not guaranteed to receive wakeups from calls to
-    /// [`wake()`] if it has not yet been polled. However, it is guaranteed to
-    /// recieve wakeups from calls to [`wake_all()`] as soon as it is created,
-    /// even if it has not yet been polled.
+    /// [`wake()`] if it has not yet been polled. See the documentation for the
+    /// [`Wait::subscribe()`] method for details on receiving wakeups from the
+    /// queue prior to polling the `Wait` future for the first time.
+    ///
+    /// A `Wait` future **is** is guaranteed to recieve wakeups from calls to
+    /// [`wake_all()`] as soon as it is created, even if it has not yet been
+    /// polled.
     ///
     /// # Cancellation
     ///
@@ -735,7 +739,7 @@ impl WaitQueue {
             self.store(curr.with_state(State::Empty));
         }
 
-        Some(waker)
+        waker
     }
 
     /// Drain the queue of all waiters, and push them to `batch`.
@@ -755,7 +759,12 @@ impl WaitQueue {
         wakeup: Wakeup,
     ) -> MutexGuard<'q, List<Waiter>> {
         while let Some(node) = queue.pop_back() {
-            let waker = Waiter::wake(node, &mut queue, wakeup.clone());
+            let Some(waker) = Waiter::wake(node, &mut queue, wakeup.clone()) else {
+                // this waiter was enqueued by `Wait::register` and doesn't have
+                // a waker, just keep going.
+                continue
+            };
+
             if batch.add_waker(waker) {
                 // there's still room in the wake set, just keep adding to it.
                 continue;
@@ -776,7 +785,7 @@ impl WaitQueue {
 // === impl Waiter ===
 
 impl Waiter {
-    /// Wake the task that owns this `Waiter`.
+    /// Returns the [`Waker`] for the task that owns this `Waiter`.
     ///
     /// # Safety
     ///
@@ -788,11 +797,18 @@ impl Waiter {
     /// and currently, there is no way to ensure that...
     #[inline(always)]
     #[cfg_attr(loom, track_caller)]
-    fn wake(this: NonNull<Self>, list: &mut List<Self>, wakeup: Wakeup) -> Waker {
+    fn wake(this: NonNull<Self>, list: &mut List<Self>, wakeup: Wakeup) -> Option<Waker> {
         Waiter::with_node(this, list, |node| {
             let waker = test_dbg!(mem::replace(&mut node.waker, wakeup));
             match waker {
-                Wakeup::Waiting(waker) => waker,
+                // the node has a registered waker, so wake the task.
+                Wakeup::Waiting(waker) => Some(waker),
+                // do nothing: the node was registered by `Wait::register`
+                // without a waker, so the future will already be woken when it is
+                // actually polled.
+                Wakeup::Empty => None,
+                // the node was already woken? this should not happen and
+                // probably indicates a race!
                 _ => unreachable!("tried to wake a waiter in the {:?} state!", waker),
             }
         })
@@ -823,7 +839,7 @@ impl Waiter {
     fn poll_wait(
         mut self: Pin<&mut Self>,
         queue: &WaitQueue,
-        cx: &mut Context<'_>,
+        waker: Option<&Waker>,
     ) -> Poll<WaitResult<()>> {
         test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
@@ -892,13 +908,17 @@ impl Waiter {
 
                 // enqueue the node
                 this.state.set(WaitStateBits::STATE, WaitState::Waiting);
-                this.node.as_mut().with_mut(|node| {
-                    unsafe {
-                        // safety: we may mutate the node because we are
-                        // holding the lock.
-                        (*node).waker = Wakeup::Waiting(cx.waker().clone());
-                    }
-                });
+                if let Some(waker) = waker {
+                    this.node.as_mut().with_mut(|node| {
+                        unsafe {
+                            // safety: we may mutate the node because we are
+                            // holding the lock.
+                            debug_assert!(matches!((*node).waker, Wakeup::Empty));
+                            (*node).waker = Wakeup::Waiting(waker.clone());
+                        }
+                    });
+                }
+
                 let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self)) };
                 waiters.push_front(ptr);
 
@@ -911,9 +931,12 @@ impl Waiter {
                     // holding the lock.
                     let node = &mut *node;
                     match node.waker {
-                        Wakeup::Waiting(ref mut waker) => {
-                            if !waker.will_wake(cx.waker()) {
-                                *waker = cx.waker().clone();
+                        Wakeup::Waiting(ref mut curr_waker) => {
+                            match waker {
+                                Some(waker) if !curr_waker.will_wake(waker) => {
+                                    *curr_waker = waker.clone()
+                                }
+                                _ => {}
                             }
                             Poll::Pending
                         }
@@ -925,7 +948,13 @@ impl Waiter {
                             this.state.set(WaitStateBits::STATE, WaitState::Woken);
                             sync::closed()
                         }
-                        Wakeup::Empty => unreachable!(),
+                        Wakeup::Empty => {
+                            if let Some(waker) = waker {
+                                node.waker = Wakeup::Waiting(waker.clone());
+                            }
+
+                            Poll::Pending
+                        }
                     }
                 })
             }
@@ -1058,6 +1087,53 @@ impl Wait<'_> {
     pub fn same_queue(&self, other: &Wait<'_>) -> bool {
         ptr::eq(self.queue, other.queue)
     }
+
+    /// Eagerly subscribe this future to wakeups from [`WaitQueue::wake()`].
+    ///
+    /// Polling a `Wait` future adds that future to the list of waiters that may
+    /// receive a wakeup from a `WaitQueue`. However, in some cases, it is
+    /// desirable to subscribe to wakeups *prior* to actually waiting for one.
+    /// This method should be used when it is necessary to ensure a `Wait`
+    /// future is in the list of waiters before the future is `poll`ed for the
+    /// first time.
+    ///
+    /// In general, this method is used in cases where a [`WaitQueue`] must
+    /// synchronize with some additional state, such as an `AtomicBool` or
+    /// counter. If a task first checks that state, and then chooses whether or
+    /// not to wait on the `WaitQueue` based on that state, then a race
+    /// condition may occur where the `WaitQueue` wakes waiters *between* when
+    /// the task checked the external state and when it first polled its `Wait`
+    /// future to wait on the queue. This method allows registering the `Wait`
+    /// future with the queue *prior* to checking the external state, without
+    /// actually sleeping, so that when the task does wait for the `Wait` future
+    /// to complete, it will have received any wakeup that was sent between when
+    /// the external state was checked and the `Wait` future was first polled.
+    ///
+    /// This method returns a [`Poll`]`<`[`WaitResult`]`>` which is `Ready` a wakeup was
+    /// already received. This method returns [`Poll::Ready`] in the following
+    /// cases:
+    ///
+    ///  1. The [`WaitQueue::wake()`] method was called between the creation of the
+    ///     `Wait` and the call to this method.
+    ///  2. This is the first call to `subscribe` or `poll` on this future, and the
+    ///     `WaitQueue` was holding a stored wakeup from a previous call to
+    ///     [`wake()`]. This method consumes the wakeup in that case.
+    ///  3. The future has previously been `subscribe`d or polled, and it has since
+    ///     then been marked ready by either consuming a wakeup from the
+    ///     `WaitQueue`, or by a call to [`wake()`] or [`wake_all()`] that
+    ///     removed it from the list of futures ready to receive wakeups.
+    ///  4. The `WaitQueue` has been [`close`d](WaitQueue::close), in which case
+    ///     this method returns `Poll::Ready(Err(Closed))`.
+    ///
+    /// If this method returns [`Poll::Ready`], any subsequent `poll`s of this
+    /// `Wait` future will also immediately return [`Poll::Ready`].
+    ///
+    /// [`wake()`]: WaitQueue::wake
+    /// [`wake_all()`]: WaitQueue::wake_all
+    pub fn subscribe(self: Pin<&mut Self>) -> Poll<WaitResult<()>> {
+        let this = self.project();
+        this.waiter.poll_wait(this.queue, None)
+    }
 }
 
 impl Future for Wait<'_> {
@@ -1065,7 +1141,7 @@ impl Future for Wait<'_> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        this.waiter.poll_wait(this.queue, cx)
+        this.waiter.poll_wait(this.queue, Some(cx.waker()))
     }
 }
 
@@ -1172,7 +1248,8 @@ feature! {
         ///
         /// This is identical to the [`wait`] method, except that it takes a
         /// [`Arc`] reference to the [`WaitQueue`], allowing the returned future to
-        /// live for the `'static` lifetime.
+        /// live for the `'static` lifetime. See the documentation for [`wait`]
+        /// for details on how to use the future returned by this method.
         ///
         /// [`wake`]: Self::wake
         /// [`wake_all`]: Self::wake_all
@@ -1184,12 +1261,65 @@ feature! {
         }
     }
 
+    // === impl WaitOwned ===
+
+    impl WaitOwned {
+        /// Eagerly subscribe this future to wakeups from [`WaitQueue::wake()`].
+        ///
+        /// Polling a `WaitOwned` future adds that future to the list of waiters
+        /// that may receive a wakeup from a `WaitQueue`. However, in some
+        /// cases, it is desirable to subscribe to wakeups *prior* to actually
+        /// waiting for one. This method should be used when it is necessary to
+        /// ensure a `WaitOwned` future is in the list of waiters before the
+        /// future is `poll`ed for the rst time.
+        ///
+        /// In general, this method is used in cases where a [`WaitQueue`] must
+        /// synchronize with some additional state, such as an `AtomicBool` or
+        /// counter. If a task first checks that state, and then chooses whether or
+        /// not to wait on the `WaitQueue` based on that state, then a race
+        /// condition may occur where the `WaitQueue` wakes waiters *between* when
+        /// the task checked the external state and when it first polled its
+        /// `WaitOwned` future to wait on the queue. This method allows
+        /// registering the `WaitOwned`  future with the queue *prior* to
+        /// checking the external state, without actually sleeping, so that when
+        /// the task does wait for the `WaitOwned` future to complete, it will
+        /// have received any wakeup that was sent between when the external
+        /// state was checked and the `WaitOwned` future was first polled.
+        ///
+        /// This method returns a [`Poll`]`<`[`WaitResult`]`>` which is `Ready`
+        /// a wakeup was already received. This method returns [`Poll::Ready`]
+        /// in the following cases:
+        ///
+        ///  1. The [`WaitQueue::wake()`] method was called between the creation
+        ///     of the `WaitOwned` future and the call to this method.
+        ///  2. This is the first call to `subscribe` or `poll` on this future,
+        ///     and the `WaitQueue` was holding a stored wakeup from a previous
+        ///     call to [`wake()`]. This method consumes the wakeup in that case.
+        ///  3. The future has previously been `subscribe`d or polled, and it
+        ///     has since then been marked ready by either consuming a wakeup
+        ///     from the `WaitQueue`, or by a call to [`wake()`] or
+        ///     [`wake_all()`] that removed it from the list of futures ready to
+        ///     receive wakeups.
+        ///  4. The `WaitQueue` has been [`close`d](WaitQueue::close), in which
+        ///     case this method returns `Poll::Ready(Err(Closed))`.
+        ///
+        /// If this method returns [`Poll::Ready`], any subsequent `poll`s of this
+        /// `Wait` future will also immediately return [`Poll::Ready`].
+        ///
+        /// [`wake()`]: WaitQueue::wake
+        /// [`wake_all()`]: WaitQueue::wake_all
+        pub fn subscribe(self: Pin<&mut Self>) -> Poll<WaitResult<()>> {
+            let this = self.project();
+            this.waiter.poll_wait(this.queue, None)
+        }
+    }
+
     impl Future for WaitOwned {
         type Output = WaitResult<()>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
-            this.waiter.poll_wait(&*this.queue, cx)
+            this.waiter.poll_wait(&*this.queue, Some(cx.waker()))
         }
     }
 
