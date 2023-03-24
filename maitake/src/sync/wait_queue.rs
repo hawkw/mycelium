@@ -459,8 +459,8 @@ impl WaitQueue {
     /// All tasks currently waiting on the queue are woken. Unlike [`wake()`], a
     /// wakeup is *not* stored in the queue to wake the next call to [`wait()`]
     /// if the queue is empty. Instead, this method only wakes all currently
-    /// registered waiters. Registering a task to be woken is done by calling
-    /// the [`wait()`] method on this queue.
+    /// registered waiters. Registering a task to be woken is done by `await`ing
+    /// the [`Future`] returned by the [`wait()`] method on this queue.
     ///
     /// # Examples
     ///
@@ -576,7 +576,7 @@ impl WaitQueue {
     /// async fn wait(&self);
     /// ```
     ///
-    /// This returns a [`Wait`] future that will complete when the task is
+    /// This returns a [`Wait`] [`Future`] that will complete when the task is
     /// woken by a call to [`wake()`] or [`wake_all()`], or when the `WaitQueue`
     /// is dropped.
     ///
@@ -594,6 +594,16 @@ impl WaitQueue {
     /// A `Wait` future **is** is guaranteed to recieve wakeups from calls to
     /// [`wake_all()`] as soon as it is created, even if it has not yet been
     /// polled.
+    ///
+    /// # Returns
+    ///
+    /// The [`Future`] returned by this method completes with one of the
+    /// following [outputs](Future::Output):
+    ///
+    /// - [`Ok`]`(())` if the task was woken by a call to [`wake()`] or
+    ///   [`wake_all()`].
+    /// - [`Err`]`(`[`Closed`]`)` if the task was woken by the `WaitQueue` being
+    ///   [`close`d](WaitQueue::close).
     ///
     /// # Cancellation
     ///
@@ -634,6 +644,7 @@ impl WaitQueue {
     ///
     /// [`wake()`]: Self::wake
     /// [`wake_all()`]: Self::wake_all
+    /// [`Closed`]: crate::sync::Closed
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             queue: self,
@@ -1109,6 +1120,8 @@ impl Wait<'_> {
     /// to complete, it will have received any wakeup that was sent between when
     /// the external state was checked and the `Wait` future was first polled.
     ///
+    /// # Returns
+    ///
     /// This method returns a [`Poll`]`<`[`WaitResult`]`>` which is `Ready` a wakeup was
     /// already received. This method returns [`Poll::Ready`] in the following
     /// cases:
@@ -1127,6 +1140,9 @@ impl Wait<'_> {
     ///
     /// If this method returns [`Poll::Ready`], any subsequent `poll`s of this
     /// `Wait` future will also immediately return [`Poll::Ready`].
+    ///
+    /// If the [`Wait`] future subscribed to wakeups from the queue, and
+    /// has not been woken, this method returns [`Poll::Pending`].
     ///
     /// [`wake()`]: WaitQueue::wake
     /// [`wake_all()`]: WaitQueue::wake_all
@@ -1242,18 +1258,37 @@ feature! {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
-        /// This returns a [`WaitOwned`] future that will complete when the task is
-        /// woken by a call to [`wake`] or [`wake_all`], or when the `WaitQueue` is
-        /// dropped.
+        /// This returns a [`WaitOwned`] future that will complete when the task
+        /// is woken by a call to [`wake()`] or [`wake_all()`], or when the
+        /// `WaitQueue` is [closed].
         ///
-        /// This is identical to the [`wait`] method, except that it takes a
-        /// [`Arc`] reference to the [`WaitQueue`], allowing the returned future to
-        /// live for the `'static` lifetime. See the documentation for [`wait`]
-        /// for details on how to use the future returned by this method.
+        /// This is identical to the [`wait()`] method, except that it takes a
+        /// [`Arc`] reference to the [`WaitQueue`], allowing the returned future
+        /// to live for the `'static` lifetime. See the documentation for
+        /// [`wait()`] for details on how to use the future returned by this
+        /// method.
         ///
-        /// [`wake`]: Self::wake
-        /// [`wake_all`]: Self::wake_all
-        /// [`wait`]: Self::wait
+        /// # Returns
+        ///
+        /// The [`Future`] returned by this method completes with one of the
+        /// following [outputs](Future::Output):
+        ///
+        /// - [`Ok`]`(())` if the task was woken by a call to [`wake()`] or
+        ///   [`wake_all()`].
+        /// - [`Err`]`(`[`Closed`]`)` if the task was woken by the `WaitQueue`
+        ///   being [closed].
+        ///
+        /// # Cancellation
+        ///
+        /// A `WaitQueue` fairly distributes wakeups to waiting tasks in the
+        /// order that they started to wait. If a [`WaitOwned`] future is
+        /// dropped, the task will forfeit its position in the queue.
+        ///
+        /// [`wake()`]: Self::wake
+        /// [`wake_all()`]: Self::wake_all
+        /// [`wait()`]: Self::wait
+        /// [closed]: Self::close
+        /// [`Closed`]: crate::sync::Closed
         pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
             let waiter = self.waiter();
             let queue = self.clone();
@@ -1286,6 +1321,8 @@ feature! {
         /// have received any wakeup that was sent between when the external
         /// state was checked and the `WaitOwned` future was first polled.
         ///
+        /// # Returns
+        ///
         /// This method returns a [`Poll`]`<`[`WaitResult`]`>` which is `Ready`
         /// a wakeup was already received. This method returns [`Poll::Ready`]
         /// in the following cases:
@@ -1303,8 +1340,11 @@ feature! {
         ///  4. The `WaitQueue` has been [`close`d](WaitQueue::close), in which
         ///     case this method returns `Poll::Ready(Err(Closed))`.
         ///
-        /// If this method returns [`Poll::Ready`], any subsequent `poll`s of this
-        /// `Wait` future will also immediately return [`Poll::Ready`].
+        /// If this method returns [`Poll::Ready`], any subsequent `poll`s of
+        /// this `Wait` future will also immediately return [`Poll::Ready`].
+        ///
+        /// If the [`WaitOwned`] future subscribed to wakeups from the queue,
+        /// and has not been woken, this method returns [`Poll::Pending`].
         ///
         /// [`wake()`]: WaitQueue::wake
         /// [`wake_all()`]: WaitQueue::wake_all
