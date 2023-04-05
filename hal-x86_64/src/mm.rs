@@ -148,7 +148,7 @@ where
         &mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> page::Handle<'_, Size4Kb, Self::Entry> {
         // XXX(eliza): most of this fn is *internally* safe and should be
         // factored out into a safe function...
@@ -356,7 +356,7 @@ impl<R: level::Recursive> PageTable<R> {
     fn create_next_table<S: Size>(
         &mut self,
         idx: VirtPage<S>,
-        alloc: &mut impl page::Alloc<Size4Kb>,
+        alloc: &impl page::Alloc<Size4Kb>,
     ) -> &mut PageTable<R::Next> {
         let span = tracing::trace_span!("create_next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
         let _e = span.enter();
@@ -913,13 +913,13 @@ mycotest::decl_test! {
     fn basic_map() -> mycotest::TestResult {
         let mut ctrl = PageCtrl::current();
         // We shouldn't need to allocate page frames for this test.
-        let mut frame_alloc = page::EmptyAlloc::default();
+        let frame_alloc = page::EmptyAlloc::default();
 
         let frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
         let page = Page::containing_fixed(VAddr::from_usize(0));
 
         let page = unsafe {
-            let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
+            let mut flags = ctrl.map_page(page, frame, &frame_alloc);
             flags.set_writable(true);
             flags.commit()
         };
@@ -939,10 +939,10 @@ mycotest::decl_test! {
         let mut ctrl = PageCtrl::current();
 
         // We shouldn't need to allocate page frames for this test.
-        let mut frame_alloc = page::EmptyAlloc::default();
+        let frame_alloc = page::EmptyAlloc::default();
         let actual_frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
         unsafe {
-            let mut flags = ctrl.identity_map(actual_frame, &mut frame_alloc);
+            let mut flags = ctrl.identity_map(actual_frame, &frame_alloc);
             flags.set_writable(true);
             flags.commit()
         };

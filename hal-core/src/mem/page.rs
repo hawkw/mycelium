@@ -98,7 +98,7 @@ where
         &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry>;
 
     fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Handle<'_, S, Self::Entry>;
@@ -123,7 +123,7 @@ where
     fn identity_map(
         &mut self,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry> {
         let base_paddr = phys.base_addr().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
@@ -173,7 +173,7 @@ where
         virt: PageRange<VAddr, S>,
         phys: PageRange<PAddr, S>,
         mut set_flags: F,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
         F: FnMut(&mut Handle<'_, S, Self::Entry>),
@@ -257,7 +257,7 @@ where
         &mut self,
         phys: PageRange<PAddr, S>,
         set_flags: F,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
         F: FnMut(&mut Handle<'_, S, Self::Entry>),
@@ -285,7 +285,7 @@ where
         &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry> {
         (*self).map_page(virt, phys, frame_alloc)
     }
@@ -304,7 +304,7 @@ where
     fn identity_map(
         &mut self,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry> {
         (*self).identity_map(phys, frame_alloc)
     }
