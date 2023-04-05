@@ -93,7 +93,7 @@ where
     VAddr: From<A>,
 {
     let vaddr = VAddr::from(it);
-    let paddr = vaddr.as_usize() + vm_offset().as_usize();
+    let paddr = vaddr.as_usize() - vm_offset().as_usize();
     PAddr::from_u64(paddr as u64)
 }
 
