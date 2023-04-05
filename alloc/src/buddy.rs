@@ -216,8 +216,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
         while let Some(mut region) = next_region.take() {
             let size = region.size();
             let base = region.base_addr();
-            let _span = tracing::trace_span!("adding_region", size, ?base).entered();
-            tracing::info!(region.size = size, region.base_addr = ?base, "adding region");
+            let _span = tracing::debug_span!("adding_region", size, ?base).entered();
 
             // Is the region aligned on the heap's minimum page size? If not, we
             // need to align it.
