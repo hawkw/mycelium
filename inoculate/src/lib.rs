@@ -1,11 +1,11 @@
 use clap::{Parser, ValueHint};
 use color_eyre::{
-    eyre::{ensure, format_err, WrapErr},
+    eyre::{format_err, WrapErr},
     Help,
 };
 use std::{
+    fmt,
     path::{Path, PathBuf},
-    process::Stdio,
 };
 
 pub use color_eyre::eyre::Result;
@@ -78,9 +78,20 @@ pub struct Options {
     )]
     pub color: term::ColorMode,
 
-    /// Whether to build a UEFI image.
-    #[clap(long, global = true)]
-    pub uefi: bool,
+    /// How to boot Mycelium.
+    ///
+    /// This determines which type of image is built, and (if a QEMU subcommand
+    /// is executed) how QEMU will boot Mycelium.
+    #[clap(long, short, default_value_t = BootMode::Uefi, global = true)]
+    pub boot: BootMode,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum)]
+#[repr(u8)]
+#[clap(rename_all = "upper")]
+pub enum BootMode {
+    Uefi,
+    Bios,
 }
 
 #[derive(Debug, Parser)]
@@ -104,9 +115,9 @@ pub struct Paths {
 }
 
 impl Subcommand {
-    pub fn run(&self, image: &Path, paths: &Paths, uefi: bool) -> Result<()> {
+    pub fn run(&self, image: &Path, paths: &Paths, boot: BootMode) -> Result<()> {
         match self {
-            Subcommand::Qemu(qemu) => qemu.run_qemu(image, paths, uefi),
+            Subcommand::Qemu(qemu) => qemu.run_qemu(image, paths, boot),
             Subcommand::Gdb => crate::gdb::run_gdb(paths.kernel_bin(), 1234).map(|_| ()),
         }
     }
@@ -179,8 +190,9 @@ impl Options {
         let _span = tracing::info_span!("make_image").entered();
 
         tracing::info!(
-            "Building kernel disk image ({})",
-            paths.relative(paths.kernel_bin()).display()
+            img = %paths.relative(paths.kernel_bin()).display(),
+            boot = %self.boot,
+            "Building kernel disk image",
         );
 
         // TODO(eliza): make the bootloader config configurable via the CLI...
@@ -189,30 +201,31 @@ impl Options {
         bootcfg.frame_buffer_logging = true;
         bootcfg.serial_logging = true;
 
-        let path = if self.uefi {
-            tracing::info!("Building UEFI image");
-            let path = paths.uefi_img();
-            let mut builder = bootloader::UefiBoot::new(paths.kernel_bin());
-            builder.set_boot_config(&bootcfg);
-            builder
-                .create_disk_image(&path)
-                .map_err(|error| format_err!("failed to build UEFI image: {error}"))
-                .with_note(|| format!("output path: {}", path.display()))?;
-            path
-        } else {
-            tracing::info!("Building BIOS image");
-            let path = paths.bios_img();
-            let mut builder = bootloader::BiosBoot::new(paths.kernel_bin());
-            builder.set_boot_config(&bootcfg);
-            builder
-                .create_disk_image(&path)
-                .map_err(|error| format_err!("failed to build BIOS image: {error}"))
-                .with_note(|| format!("output path: {}", path.display()))?;
-            path
+        let path = match self.boot {
+            BootMode::Uefi => {
+                let path = paths.uefi_img();
+                let mut builder = bootloader::UefiBoot::new(paths.kernel_bin());
+                builder.set_boot_config(&bootcfg);
+                builder
+                    .create_disk_image(&path)
+                    .map_err(|error| format_err!("failed to build UEFI image: {error}"))
+                    .with_note(|| format!("output path: {}", path.display()))?;
+                path
+            }
+            BootMode::Bios => {
+                let path = paths.bios_img();
+                let mut builder = bootloader::BiosBoot::new(paths.kernel_bin());
+                builder.set_boot_config(&bootcfg);
+                builder
+                    .create_disk_image(&path)
+                    .map_err(|error| format_err!("failed to build BIOS image: {error}"))
+                    .with_note(|| format!("output path: {}", path.display()))?;
+                path
+            }
         };
 
         tracing::info!(
-            "created bootable disk image ({})",
+            "Created bootable disk image ({})",
             paths.relative(&path).display()
         );
 
@@ -245,5 +258,16 @@ impl Paths {
 
     pub fn relative<'path>(&self, path: &'path Path) -> &'path Path {
         path.strip_prefix(self.pwd()).unwrap_or(path)
+    }
+}
+
+// === impl BootMode ===
+
+impl fmt::Display for BootMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BootMode::Uefi => f.pad("UEFI"),
+            BootMode::Bios => f.pad("BIOS"),
+        }
     }
 }

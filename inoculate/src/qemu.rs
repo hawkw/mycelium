@@ -1,5 +1,7 @@
-use crate::term::{ColorMode, OwoColorize};
-use crate::Result;
+use crate::{
+    term::{ColorMode, OwoColorize},
+    BootMode, Result,
+};
 use color_eyre::{
     eyre::{ensure, format_err, WrapErr},
     Help, SectionExt,
@@ -128,12 +130,12 @@ impl Cmd {
     }
 
     #[tracing::instrument(skip(self, paths), level = "debug")]
-    pub fn run_qemu(&self, image: &Path, paths: &crate::Paths, uefi: bool) -> Result<()> {
+    pub fn run_qemu(&self, image: &Path, paths: &crate::Paths, boot: BootMode) -> Result<()> {
         let mut qemu = Command::new("qemu-system-x86_64");
         qemu.arg("-drive")
             .arg(format!("format=raw,file={}", image.display()))
             .arg("-no-reboot");
-        if uefi {
+        if boot == BootMode::Uefi {
             qemu.arg("-bios").arg(ovmf_prebuilt::ovmf_pure_efi());
         }
 
