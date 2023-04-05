@@ -754,7 +754,7 @@ where
     /// page table (i.e. it has multiple page table entries pointing to it) may
     /// also cause undefined behavior.
     #[inline]
-    pub unsafe fn set_writable(&mut self, writable: bool) -> &mut Self {
+    pub unsafe fn set_writable(self, writable: bool) -> Self {
         self.entry.set_writable(writable);
         self
     }
@@ -768,7 +768,7 @@ where
     /// undefined behavior. Also, this can be used to execute the contents of
     /// arbitrary memory, which (of course) is wildly unsafe.
     #[inline]
-    pub unsafe fn set_executable(&mut self, executable: bool) -> &mut Self {
+    pub unsafe fn set_executable(self, executable: bool) -> Self {
         self.entry.set_executable(executable);
         self
     }
@@ -779,7 +779,7 @@ where
     ///
     /// Manual control of page flags can be used to violate Rust invariants.
     #[inline]
-    pub unsafe fn set_present(&mut self, present: bool) -> &mut Self {
+    pub unsafe fn set_present(self, present: bool) -> Self {
         self.entry.set_present(present);
         self
     }

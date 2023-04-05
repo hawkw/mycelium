@@ -903,9 +903,7 @@ mycotest::decl_test! {
         let page = Page::containing_fixed(VAddr::from_usize(0));
 
         let page = unsafe {
-            let mut flags = ctrl.map_page(page, frame, &frame_alloc);
-            flags.set_writable(true);
-            flags.commit()
+            ctrl.map_page(page, frame, &frame_alloc).set_writable(true).commit()
         };
         tracing::info!(?page, "page mapped!");
 
@@ -926,9 +924,7 @@ mycotest::decl_test! {
         let frame_alloc = page::EmptyAlloc::default();
         let actual_frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
         unsafe {
-            let mut flags = ctrl.identity_map(actual_frame, &frame_alloc);
-            flags.set_writable(true);
-            flags.commit()
+            ctrl.identity_map(actual_frame, &frame_alloc).set_writable(true).commit()
         };
 
         let page = VirtPage::<Size4Kb>::containing_fixed(VAddr::from_usize(0xb8000));
