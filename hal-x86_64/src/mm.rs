@@ -360,11 +360,7 @@ impl<R: level::Recursive> PageTable<R> {
     ) -> &mut PageTable<R::Next> {
         let span = tracing::trace_span!("create_next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
         let _e = span.enter();
-        for (idx, entry) in self.entries[..].iter().enumerate() {
-            if entry.is_present() {
-                tracing::trace!(idx, ?entry);
-            }
-        }
+
         if self.next_table(idx).is_some() {
             tracing::trace!("next table already exists");
             return self
@@ -394,30 +390,24 @@ impl<R: level::Recursive> PageTable<R> {
         };
 
         tracing::trace!(?frame, "allocated page table frame");
-
-        let table = PageTable::<R::Next>::new(frame);
         entry
-            .set_next_table(table)
             .set_present(true)
-            .set_writable(true);
-        tracing::trace!(?entry, "set entry to point at new page table");
-        unsafe { &mut *table }
+            .set_writable(true)
+            .set_phys_addr(frame.base_addr());
+        tracing::trace!(?entry, ?frame, "set page table entry to point to frame");
+
+        self.next_table_mut(idx)
+            .expect("we should have just created this table!")
+            .zero()
     }
 }
 
 impl<L: Level> PageTable<L> {
-    pub fn zero(&mut self) {
+    pub fn zero(&mut self) -> &mut Self {
         for e in &mut self.entries[..] {
             *e = Entry::none();
         }
-    }
-
-    fn new(frame: Page<PAddr, Size4Kb>) -> *mut Self {
-        let this = frame.base_addr().as_ptr::<Self>();
-        unsafe {
-            (*this).zero();
-        }
-        this
+        self
     }
 }
 
@@ -567,12 +557,6 @@ impl<L: level::PointsToPage> Entry<L> {
     fn set_phys_page(&mut self, page: Page<PAddr, L::Size>) -> &mut Self {
         self.set_phys_addr(page.base_addr());
         self
-    }
-}
-
-impl<L: level::Recursive> Entry<L> {
-    fn set_next_table(&mut self, table: *mut PageTable<L::Next>) -> &mut Self {
-        self.set_phys_addr(PAddr::from_u64(table as u64))
     }
 }
 
