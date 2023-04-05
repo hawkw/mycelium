@@ -219,12 +219,16 @@ impl Controller {
         };
         tracing::trace!(interrupt_model = ?model);
 
+        let controller = INTERRUPT_CONTROLLER.init(Self { model });
+
+        // `sti` may not be called until the interrupt controller static is
+        // fully initialized, as an interrupt that occurs before it is
+        // initialized may attempt to access the static to finish the interrupt!
         unsafe {
             crate::cpu::intrinsics::sti();
         }
 
-        let controller = Self { model };
-        INTERRUPT_CONTROLLER.init(controller)
+        controller
     }
 
     /// Starts a periodic timer which fires the `timer_tick` interrupt of the
