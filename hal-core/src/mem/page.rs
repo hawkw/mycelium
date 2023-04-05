@@ -318,7 +318,7 @@ pub trait TranslateAddr {
     fn translate_addr(&self, addr: VAddr) -> Option<PAddr>;
 }
 
-pub trait PageFlags<S: Size> {
+pub trait PageFlags<S: Size>: fmt::Debug {
     /// Set whether or not this page is writable.
     ///
     /// # Safety
@@ -801,6 +801,11 @@ where
 
     #[inline]
     pub fn commit(self) -> Page<VAddr, S> {
+        tracing::debug!(
+            page = ?self.page,
+            entry = ?self.entry,
+            "commiting page table update"
+        );
         self.entry.commit(self.page);
         self.page
     }
