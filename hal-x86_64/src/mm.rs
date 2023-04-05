@@ -313,16 +313,15 @@ impl<R: level::Recursive> PageTable<R> {
     }
 
     #[inline]
-    #[tracing::instrument(skip(self))]
     fn next_table_mut<S: Size>(&mut self, idx: VirtPage<S>) -> Option<&mut PageTable<R::Next>> {
-        let span = tracing::debug_span!(
+        let _span = tracing::debug_span!(
             "next_table_mut",
             ?idx,
             self.level = %R::NAME,
             next.level = %<R::Next>::NAME,
             self.addr = ?&self as *const _,
-        );
-        let _e = span.enter();
+        )
+        .entered();
         let entry = &mut self[idx];
         tracing::trace!(?entry);
         if !entry.is_present() {
