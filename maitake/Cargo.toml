@@ -39,7 +39,7 @@ mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }
 cordyceps = { path = "../cordyceps" }
 pin-project = "1"
-portable-atomic = "1.0"
+portable-atomic = "1.2"
 
 [dependencies.tracing-02]
 package = "tracing"
