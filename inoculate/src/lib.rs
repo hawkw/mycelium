@@ -113,7 +113,13 @@ pub struct BootloaderOptions {
 #[repr(u8)]
 #[clap(rename_all = "upper")]
 pub enum BootMode {
+    /// Boot mycelium using the UEFI bootloader.
+    ///
+    /// The kernel image will be output to `<OUT_DIR>/uefi.img`.
     Uefi,
+    /// Boot mycelium using the legacy BIOS bootloader.
+    ///
+    /// The kernel image will be output to `<OUT_DIR>/bios.img`.
     Bios,
 }
 
