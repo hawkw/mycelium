@@ -24,16 +24,6 @@ pub struct Options {
     #[clap(subcommand)]
     pub cmd: Option<Subcommand>,
 
-    /// Configures build logging.
-    #[clap(
-        short,
-        long,
-        env = "RUST_LOG",
-        default_value = "inoculate=info,warn",
-        global = true
-    )]
-    pub log: String,
-
     /// The path to the kernel binary.
     #[clap(value_hint = ValueHint::FilePath)]
     pub kernel_bin: PathBuf,
@@ -69,21 +59,15 @@ pub struct Options {
     )]
     pub cargo_path: PathBuf,
 
-    /// Whether to emit colors in output.
-    #[clap(
-        long,
-        env = "CARGO_TERM_COLORS",
-        default_value_t = term::ColorMode::Auto,
-        global = true,
-    )]
-    pub color: term::ColorMode,
-
     /// How to boot Mycelium.
     ///
     /// This determines which type of image is built, and (if a QEMU subcommand
     /// is executed) how QEMU will boot Mycelium.
     #[clap(long, short, default_value_t = BootMode::Uefi, global = true)]
     pub boot: BootMode,
+
+    #[clap(flatten)]
+    pub output: term::OutputOptions,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum)]
@@ -124,10 +108,6 @@ impl Subcommand {
 }
 
 impl Options {
-    pub fn trace_init(&self) -> Result<()> {
-        trace::try_init(self)
-    }
-
     pub fn is_test(&self) -> bool {
         matches!(self.cmd, Some(Subcommand::Qemu(qemu::Cmd::Test { .. })))
     }
