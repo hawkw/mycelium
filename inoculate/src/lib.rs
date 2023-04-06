@@ -1,4 +1,4 @@
-use clap::{Parser, ValueHint};
+use clap::{ArgGroup, Args, Parser, ValueHint};
 use color_eyre::{
     eyre::{format_err, WrapErr},
     Help,
@@ -43,7 +43,8 @@ pub struct Options {
         short,
         long,
         env = "CARGO_TARGET_DIR",
-        value_hint = ValueHint::DirPath, global = true
+        value_hint = ValueHint::DirPath,
+        global = true
     )]
     pub target_dir: Option<PathBuf>,
 
@@ -59,15 +60,53 @@ pub struct Options {
     )]
     pub cargo_path: PathBuf,
 
+    #[clap(flatten)]
+    pub output: term::OutputOptions,
+
+    /// Configures the bootloader.
+    #[clap(flatten)]
+    pub bootloader: BootloaderOptions,
+}
+
+#[derive(Clone, Debug, Args)]
+#[command(
+    next_help_heading = "Bootloader Options",
+    group = ArgGroup::new(Self::ARG_GROUP).multiple(true),
+)]
+pub struct BootloaderOptions {
     /// How to boot Mycelium.
     ///
     /// This determines which type of image is built, and (if a QEMU subcommand
     /// is executed) how QEMU will boot Mycelium.
-    #[clap(long, short, default_value_t = BootMode::Uefi, global = true)]
-    pub boot: BootMode,
+    #[clap(
+        long = "boot",
+        short = 'b',
+        default_value_t = BootMode::Uefi,
+        global = true,
+        group = Self::ARG_GROUP,
+    )]
+    pub mode: BootMode,
 
-    #[clap(flatten)]
-    pub output: term::OutputOptions,
+    /// Log level for the bootloader.
+    #[clap(
+        long,
+        default_value_t = BootLogLevel::Info,
+        global = true,
+        group = Self::ARG_GROUP,
+    )]
+    boot_log: BootLogLevel,
+
+    /// Instructs the bootloader to set up a framebuffer format that has at least the given height.
+    ///
+    /// If this is not possible, the bootloader will fall back to a smaller format.
+    #[clap(long, global = true, group = Self::ARG_GROUP)]
+    framebuffer_height: Option<u64>,
+
+    /// Instructs the bootloader to set up a framebuffer format that has at least the given width.
+    ///
+    /// If this is not possible, the bootloader will fall back to a smaller format.
+    #[clap(long, global = true, group = Self::ARG_GROUP)]
+    framebuffer_width: Option<u64>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum)]
@@ -96,6 +135,23 @@ pub struct Paths {
     pub kernel_bin: PathBuf,
     pub kernel_manifest: PathBuf,
     pub out_dir: PathBuf,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum)]
+#[repr(u8)]
+enum BootLogLevel {
+    /// A level lower than all log levels.
+    Off,
+    /// Corresponds to the `Error` log level.
+    Error,
+    /// Corresponds to the `Warn` log level.
+    Warn,
+    /// Corresponds to the `Info` log level.
+    Info,
+    /// Corresponds to the `Debug` log level.
+    Debug,
+    /// Corresponds to the `Trace` log level.
+    Trace,
 }
 
 impl Subcommand {
@@ -171,17 +227,12 @@ impl Options {
 
         tracing::info!(
             img = %paths.relative(paths.kernel_bin()).display(),
-            boot = %self.boot,
+            boot = %self.bootloader.mode,
             "Building kernel disk image",
         );
 
-        // TODO(eliza): make the bootloader config configurable via the CLI...
-        let mut bootcfg = bootloader::BootConfig::default();
-        bootcfg.log_level = bootloader_boot_config::LevelFilter::Trace;
-        bootcfg.frame_buffer_logging = true;
-        bootcfg.serial_logging = true;
-
-        let path = match self.boot {
+        let bootcfg = self.bootloader.boot_config();
+        let path = match self.bootloader.mode {
             BootMode::Uefi => {
                 let path = paths.uefi_img();
                 let mut builder = bootloader::UefiBoot::new(paths.kernel_bin());
@@ -241,6 +292,32 @@ impl Paths {
     }
 }
 
+// === impl BootloaderOptions ===
+
+impl BootloaderOptions {
+    const ARG_GROUP: &str = "boot-opts";
+
+    fn boot_config(&self) -> bootloader_boot_config::BootConfig {
+        let mut bootcfg = bootloader::BootConfig::default();
+        bootcfg.log_level = self.boot_log.into();
+        bootcfg.frame_buffer_logging = true;
+        bootcfg.serial_logging = true;
+        if self.framebuffer_height.is_some() {
+            bootcfg.frame_buffer.minimum_framebuffer_height = self.framebuffer_height;
+        }
+        if self.framebuffer_width.is_some() {
+            bootcfg.frame_buffer.minimum_framebuffer_width = self.framebuffer_width;
+        }
+        tracing::debug!(
+            ?bootcfg.log_level,
+            bootcfg.frame_buffer_logging,
+            bootcfg.serial_logging,
+            ?bootcfg.frame_buffer
+        );
+        bootcfg
+    }
+}
+
 // === impl BootMode ===
 
 impl fmt::Display for BootMode {
@@ -248,6 +325,36 @@ impl fmt::Display for BootMode {
         match self {
             BootMode::Uefi => f.pad("UEFI"),
             BootMode::Bios => f.pad("BIOS"),
+        }
+    }
+}
+
+// === impl BootLogLevel ===
+
+impl fmt::Display for BootLogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Off => "off",
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Info => "info",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+        }
+        .fmt(f)
+    }
+}
+
+impl From<BootLogLevel> for bootloader_boot_config::LevelFilter {
+    fn from(level: BootLogLevel) -> bootloader_boot_config::LevelFilter {
+        use bootloader_boot_config::LevelFilter;
+        match level {
+            BootLogLevel::Off => LevelFilter::Off,
+            BootLogLevel::Error => LevelFilter::Error,
+            BootLogLevel::Warn => LevelFilter::Warn,
+            BootLogLevel::Info => LevelFilter::Info,
+            BootLogLevel::Debug => LevelFilter::Debug,
+            BootLogLevel::Trace => LevelFilter::Trace,
         }
     }
 }
