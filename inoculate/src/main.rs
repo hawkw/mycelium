@@ -6,9 +6,7 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     let opts = Options::parse();
-    opts.trace_init()?;
-    let color = opts.color;
-    color.set_global();
+    opts.output.init()?;
 
     tracing::info!("inoculating mycelium!");
     tracing::trace!(
