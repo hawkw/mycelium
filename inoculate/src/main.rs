@@ -15,7 +15,7 @@ fn main() -> Result<()> {
         ?opts.kernel_manifest,
         ?opts.target_dir,
         ?opts.out_dir,
-        %opts.boot,
+        %opts.bootloader.mode,
         "inoculate configuration"
     );
 
@@ -27,7 +27,7 @@ fn main() -> Result<()> {
         .note("this sucks T_T")?;
 
     if let Some(cmd) = opts.cmd {
-        return cmd.run(image.as_ref(), &paths, opts.boot);
+        return cmd.run(image.as_ref(), &paths, opts.bootloader.mode);
     }
 
     Ok(())
