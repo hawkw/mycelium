@@ -40,8 +40,12 @@ pub struct OutputOptions {
 #[repr(u8)]
 #[clap(rename_all = "lower")]
 pub enum ColorMode {
+    /// Determine whether to color output based on whether or not stderr is a
+    /// TTY.
     Auto = 0,
+    /// Always color output.
     Always = 1,
+    /// Never color output.
     Never = 2,
 }
 
