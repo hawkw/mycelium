@@ -24,7 +24,8 @@
 /// | `fn get<U>(&self, packer: Self::Packer<U>) -> U` | Given one of this type's generated packing specs for a `U`-typed value, unpacks the bit range represented by that value as a `U` and returns it. This method panics if the requested bit range does not contain a valid bit pattern for a `U`-typed value, as determined by `U`'s implementation of the [`FromBits`] trait. |
 /// | `fn try_get<U>(&self, packer: Self::Packer<U>) -> Result<U, <U as FromBits>::Error>` | Like `get`, but returns a `Result` instead of panicking. |
 /// | `fn assert_valid()` | Asserts that the generated bitfield type is valid. This is primarily intended to be used in tests; the macro cannot generate tests for a bitfield type on its own, so a test that simply calls `assert_valid` can be added to check the bitfield type's validity. |
-/// | `fn display_ascii(&self) -> impl core::fmt::Display` | Returns a `Display` implementation that formats the bitfield in a multi-line format, using only ASCII characters. See [here](#example-ascii-display-output) for examples of this format. |
+/// | `fn display_ascii(&self) -> impl core::fmt::Display` | Returns a `Display` implementation that formats the bitfield in a multi-line format, using only ASCII characters. See [here](#example-display-output) for examples of this format. |
+/// | `fn display_unicode(&self) -> impl core::fmt::Display` | Returns a `Display` implementation that formats the bitfield in a multi-line format, always using Unicode box-drawing characters. See [here](#example-display-output) for examples of this format. |
 ///
 /// The visibility of these methods depends on the visibility of the bitfield
 /// struct --- if the struct is defined as `pub(crate) struct MyBitfield<u16> {
@@ -207,74 +208,12 @@
 ///
 /// ## Example `Display` Output
 ///
-/// Bitfields will automatically generate a pretty [`fmt::Display`]
-/// implementation:
-///
-/// ```
-/// # use mycelium_bitfield::{bitfield, FromBits};
-/// #
-/// # #[repr(u8)]
-/// # #[derive(Debug, Eq, PartialEq)]
-/// # enum MyEnum {
-/// #     Foo = 0b00,
-/// #     Bar = 0b01,
-/// #     Baz = 0b10,
-/// # }
-/// #
-/// # impl FromBits<u32> for MyEnum {
-/// #     const BITS: u32 = 2;
-/// #     type Error = &'static str;
-/// #
-/// #     fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
-/// #         match bits as u8 {
-/// #             bits if bits == Self::Foo as u8 => Ok(Self::Foo),
-/// #             bits if bits == Self::Bar as u8 => Ok(Self::Bar),
-/// #             bits if bits == Self::Baz as u8 => Ok(Self::Baz),
-/// #             _ => Err("expected one of 0b00, 0b01, or 0b10"),
-/// #         }
-/// #     }
-/// #
-/// #     fn into_bits(self) -> u32 {
-/// #         self as u8 as u32
-/// #     }
-/// # }
-/// # bitfield! {
-/// #      pub struct TypedBitfield<u32> {
-/// #          const ENUM_VALUE: MyEnum;
-/// #          pub const SOME_BITS = 6;
-/// #          pub const FLAG_1: bool;
-/// #          pub const FLAG_2: bool;
-/// #          pub const A_BYTE: u8;
-/// #      }
-/// # }
-///
-/// let my_bitfield = TypedBitfield::from_bits(0b0011_0101_1001_1110);
-/// let formatted = format!("{my_bitfield}");
-/// let expected = r#"
-/// 00000000000000000011010110011110
-///               └┬─────┘││└┬───┘└┤
-///                │      ││ │     └ ENUM_VALUE: Baz (10)
-///                │      ││ └────── SOME_BITS: 39 (100111)
-///                │      │└─────────── FLAG_1: true (1)
-///                │      └──────────── FLAG_2: false (0)
-///                └─────────────────── A_BYTE: 13 (00001101)
-/// "#.trim_start();
-/// assert_eq!(formatted, expected);
-/// ```
-///
-/// ## Example ASCII-Only `Display` Output
-///
-/// The [`fmt::Display`] implementation for bitfields uses Unicode box-drawing
-/// characters. In some contexts, where unicode is not supported or box-drawing
-/// characters are not rendered nicely, it may be desirable to use an ASCII-only
-/// version of the multi-line format, instead. Therefore, in addition to the
-/// `Display` implementation, bitfield types also generate a `display_ascii`
-/// method, which returns an `impl fmt::Display` value that renders the bitfield
-/// in an ASCII-only format.
-///
-/// The ASCII-only format also uses slightly fewer horizontal characters than
-/// the Unicode box-drawing format, so it may also be useful in cases where
-/// text fields have limited width.
+/// Bitfields will automatically generate a pretty, multi-line [`fmt::Display`]
+/// implementation. The default [`fmt::Display`] specifier uses only ASCII
+/// characters, but when Unicode box-drawing characters are also available, the
+/// alternate (`{:#}`) [`fmt::Display`] specifier may be used to select a
+/// `Display` implementation that uses those characters, and is (in my opinion)
+/// even prettier than the default.
 ///
 /// For example:
 ///
@@ -315,9 +254,11 @@
 /// #          pub const A_BYTE: u8;
 /// #      }
 /// # }
+/// // Create an example bitfield.
 /// let my_bitfield = TypedBitfield::from_bits(0b0011_0101_1001_1110);
-/// let formatted = format!("{}", my_bitfield.display_ascii());
-/// println!("{}", formatted);
+///
+/// // The default `Display` implementation uses only ASCII characters:
+/// let formatted_ascii = format!("{my_bitfield}");
 /// let expected = r#"
 /// 00000000000000000011010110011110
 ///..............................10 ENUM_VALUE: Baz
@@ -326,8 +267,31 @@
 ///......................0......... FLAG_2: false
 ///..............00001101.......... A_BYTE: 13
 /// "#.trim_start();
-/// assert_eq!(formatted, expected);
+/// assert_eq!(formatted_ascii, expected);
+///
+/// // The alternate `Display` format uses Unicode box-drawing characters,
+/// // and looks even nicer:
+/// let formatted_unicode = format!("{my_bitfield:#}");
+/// let expected = r#"
+/// 00000000000000000011010110011110
+///               └┬─────┘││└┬───┘└┤
+///                │      ││ │     └ ENUM_VALUE: Baz (10)
+///                │      ││ └────── SOME_BITS: 39 (100111)
+///                │      │└─────────── FLAG_1: true (1)
+///                │      └──────────── FLAG_2: false (0)
+///                └─────────────────── A_BYTE: 13 (00001101)
+/// "#.trim_start();
+/// assert_eq!(formatted_unicode, expected);
 /// ```
+///
+/// For situations where the use of ASCII or Unicode formats is always desired
+/// regardless of the behavior of an upstream formatter (e.g., when returning a
+/// `fmt::Display` value that doesn't know what format specifier will be used),
+/// bitfield types also generate `display_ascii()` and `display_unicode()`
+/// methods. These methods return `impl fmt::Display` values that *always*
+/// select either the ASCII or Unicode `Display` implementations explicitly,
+/// regardless of whether or not the alternate formatting specifier is used.
+///
 /// [`fmt::Debug`]: core::fmt::Debug
 /// [`fmt::Display`]: core::fmt::Display
 /// [`fmt::Binary`]: core::fmt::Binary
@@ -471,6 +435,12 @@ macro_rules! bitfield {
 
             /// Returns a value that formats this bitfield in a multi-line
             /// format, using only ASCII characters.
+            ///
+            /// This is equivalent to formatting this bitfield using a `{}`
+            /// display specifier, but will *never* use Unicode box-drawing
+            /// characters, even when an upstream formatter uses the `{:#}`
+            /// `fmt::Display` specifier. This is intended for use on platforms
+            /// where Unicode box drawing characters are never available.
             $vis fn display_ascii(&self) -> impl core::fmt::Display {
                 struct DisplayAscii($Name);
                 impl core::fmt::Display for DisplayAscii {
@@ -480,6 +450,24 @@ macro_rules! bitfield {
                 }
                 DisplayAscii(*self)
             }
+
+            /// Returns a value that formats this bitfield in a multi-line
+            /// format, always using Unicode box-drawing characters.
+            ///
+            /// This is equivalent to formatting this bitfield using a `{:#}`
+            /// format specifier, but will *always* use Unicode box-drawing
+            /// characters, even when an upstream formatter uses the `{}`
+            /// `fmt::Display` specifier.
+            $vis fn display_unicode(&self) -> impl core::fmt::Display {
+                struct DisplayUnicode($Name);
+                impl core::fmt::Display for DisplayUnicode {
+                    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        self.0.fmt_unicode(f)
+                    }
+                }
+                DisplayUnicode(*self)
+            }
+
 
             fn fmt_ascii(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.pad("")?;
@@ -507,11 +495,8 @@ macro_rules! bitfield {
 
                 Ok(())
             }
-        }
 
-        #[automatically_derived]
-        impl core::fmt::Display for $Name {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn fmt_unicode(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.pad("")?;
                 writeln!(f, "{:0width$b}", self.0, width = $T::BITS as usize)?;
                 f.pad("")?;
@@ -607,6 +592,17 @@ macro_rules! bitfield {
                 )+
 
                 Ok(())
+            }
+        }
+
+        #[automatically_derived]
+        impl core::fmt::Display for $Name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                if f.alternate() {
+                    self.fmt_unicode(f)
+                } else {
+                    self.fmt_ascii(f)
+                }
             }
         }
 
@@ -850,7 +846,12 @@ mod tests {
             .with(TestBitfield::LOTS, 0b11010)
             .with(TestBitfield::OF, 0)
             .with(TestBitfield::FUN, 9);
-        println!("{test_bitfield}\n");
+
+        let ascii = test_bitfield.to_string();
+        assert_eq!(ascii, test_bitfield.display_ascii().to_string());
+
+        println!("test ASCII display:\n{ascii}");
+        println!("test unicode display:\n{test_bitfield:#}\n");
 
         let test_debug = TestDebug {
             value: 42,
@@ -860,8 +861,6 @@ mod tests {
         println!("test_debug(alt): {test_debug:#?}\n");
 
         println!("test_debug: {test_debug:?}\n");
-
-        println!("test ASCII display:\n{}", test_bitfield.display_ascii());
     }
 
     #[test]
