@@ -1,4 +1,5 @@
 use core::arch::asm;
+use hal_core::VAddr;
 use mycelium_util::bits::bitfield;
 
 pub mod cr3 {
@@ -15,7 +16,7 @@ pub mod cr3 {
             asm!("mov {0}, cr3", out(reg) val, options(readonly));
         };
         let addr = PAddr::from_u64(val);
-        tracing::debug!(?addr);
+        tracing::trace!(rax = ?addr, "mov rax, cr3");
         let pml4_page = Page::starting_at_fixed(addr)
             .expect("PML4 physical addr not aligned! this is very bad");
         (pml4_page, Flags(val))
@@ -233,6 +234,20 @@ impl Cr4 {
     pub unsafe fn update(f: impl FnOnce(Self) -> Self) {
         let curr = Self::read();
         Self::write(f(curr));
+    }
+}
+
+/// Control Register 2 (CR2) contains the Page Fault Linear Address (PFLA).
+pub struct Cr2;
+
+impl Cr2 {
+    /// Returns the 32-bit Page Fault Linear Address (PFLA) stored in CR2.
+    pub fn read() -> VAddr {
+        let addr: u64;
+        unsafe {
+            asm!("mov {0}, cr2", out(reg) addr, options(readonly));
+        };
+        VAddr::from_u64(addr)
     }
 }
 
