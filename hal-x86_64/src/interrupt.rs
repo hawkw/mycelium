@@ -269,7 +269,7 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
 
 impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
     fn fault_vaddr(&self) -> crate::VAddr {
-        unimplemented!("eliza")
+        crate::control_regs::Cr2::read()
     }
 
     fn debug_error_code(&self) -> &dyn fmt::Debug {
