@@ -24,6 +24,7 @@
 /// | `fn get<U>(&self, packer: Self::Packer<U>) -> U` | Given one of this type's generated packing specs for a `U`-typed value, unpacks the bit range represented by that value as a `U` and returns it. This method panics if the requested bit range does not contain a valid bit pattern for a `U`-typed value, as determined by `U`'s implementation of the [`FromBits`] trait. |
 /// | `fn try_get<U>(&self, packer: Self::Packer<U>) -> Result<U, <U as FromBits>::Error>` | Like `get`, but returns a `Result` instead of panicking. |
 /// | `fn assert_valid()` | Asserts that the generated bitfield type is valid. This is primarily intended to be used in tests; the macro cannot generate tests for a bitfield type on its own, so a test that simply calls `assert_valid` can be added to check the bitfield type's validity. |
+/// | `fn display_ascii(&self) -> impl core::fmt::Display` | Returns a `Display` implementation that formats the bitfield in a multi-line format, using only ASCII characters. See [here](#example-ascii-display-output) for examples of this format. |
 ///
 /// The visibility of these methods depends on the visibility of the bitfield
 /// struct --- if the struct is defined as `pub(crate) struct MyBitfield<u16> {
@@ -260,6 +261,73 @@
 /// "#.trim_start();
 /// assert_eq!(formatted, expected);
 /// ```
+///
+/// ## Example ASCII-Only `Display` Output
+///
+/// The [`fmt::Display`] implementation for bitfields uses Unicode box-drawing
+/// characters. In some contexts, where unicode is not supported or box-drawing
+/// characters are not rendered nicely, it may be desirable to use an ASCII-only
+/// version of the multi-line format, instead. Therefore, in addition to the
+/// `Display` implementation, bitfield types also generate a `display_ascii`
+/// method, which returns an `impl fmt::Display` value that renders the bitfield
+/// in an ASCII-only format.
+///
+/// The ASCII-only format also uses slightly fewer horizontal characters than
+/// the Unicode box-drawing format, so it may also be useful in cases where
+/// text fields have limited width.
+///
+/// For example:
+///
+/// ```
+/// # use mycelium_bitfield::{bitfield, FromBits};
+/// #
+/// # #[repr(u8)]
+/// # #[derive(Debug, Eq, PartialEq)]
+/// # enum MyEnum {
+/// #     Foo = 0b00,
+/// #     Bar = 0b01,
+/// #     Baz = 0b10,
+/// # }
+/// #
+/// # impl FromBits<u32> for MyEnum {
+/// #     const BITS: u32 = 2;
+/// #     type Error = &'static str;
+/// #
+/// #     fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+/// #         match bits as u8 {
+/// #             bits if bits == Self::Foo as u8 => Ok(Self::Foo),
+/// #             bits if bits == Self::Bar as u8 => Ok(Self::Bar),
+/// #             bits if bits == Self::Baz as u8 => Ok(Self::Baz),
+/// #             _ => Err("expected one of 0b00, 0b01, or 0b10"),
+/// #         }
+/// #     }
+/// #
+/// #     fn into_bits(self) -> u32 {
+/// #         self as u8 as u32
+/// #     }
+/// # }
+/// # bitfield! {
+/// #      pub struct TypedBitfield<u32> {
+/// #          const ENUM_VALUE: MyEnum;
+/// #          pub const SOME_BITS = 6;
+/// #          pub const FLAG_1: bool;
+/// #          pub const FLAG_2: bool;
+/// #          pub const A_BYTE: u8;
+/// #      }
+/// # }
+/// let my_bitfield = TypedBitfield::from_bits(0b0011_0101_1001_1110);
+/// let formatted = format!("{}", my_bitfield.display_ascii());
+/// println!("{}", formatted);
+/// let expected = r#"
+/// 00000000000000000011010110011110
+///..............................10 ENUM_VALUE: Baz
+///........................100111.. SOME_BITS: 39
+///.......................1........ FLAG_1: true
+///......................0......... FLAG_2: false
+///..............00001101.......... A_BYTE: 13
+/// "#.trim_start();
+/// assert_eq!(formatted, expected);
+/// ```
 /// [`fmt::Debug`]: core::fmt::Debug
 /// [`fmt::Display`]: core::fmt::Display
 /// [`fmt::Binary`]: core::fmt::Binary
@@ -399,6 +467,45 @@ macro_rules! bitfield {
             /// This is intended to be used in unit tests.
             $vis fn assert_valid() {
                 <$crate::bitfield! { @t $T, $T, Self }>::assert_all_valid(&Self::FIELDS);
+            }
+
+            /// Returns a value that formats this bitfield in a multi-line
+            /// format, using only ASCII characters.
+            $vis fn display_ascii(&self) -> impl core::fmt::Display {
+                struct DisplayAscii($Name);
+                impl core::fmt::Display for DisplayAscii {
+                    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        self.0.fmt_ascii(f)
+                    }
+                }
+                DisplayAscii(*self)
+            }
+
+            fn fmt_ascii(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.pad("")?;
+                writeln!(f, "{:0width$b}", self.0, width = $T::BITS as usize)?;
+                f.pad("")?;
+                $({
+                    let field = Self::$Field;
+                    const NAME: &str = stringify!($Field);
+                    if !NAME.starts_with("_") {
+                        f.pad("")?;
+                        let mut cur_pos = $T::BITS;
+                        while cur_pos > field.most_significant_index() {
+                            f.write_str(".")?;
+                            cur_pos -= 1;
+                        }
+                        write!(f, "{:0width$b}", field.unpack_bits(self.0), width = field.bits() as usize)?;
+                        cur_pos -= field.bits();
+                        while cur_pos > 0 {
+                            f.write_str(".")?;
+                            cur_pos -= 1;
+                        }
+                        writeln!(f, " {NAME}: {:?}", field.unpack(self.0))?
+                    }
+                })+
+
+                Ok(())
             }
         }
 
@@ -743,16 +850,18 @@ mod tests {
             .with(TestBitfield::LOTS, 0b11010)
             .with(TestBitfield::OF, 0)
             .with(TestBitfield::FUN, 9);
-        println!("{test_bitfield}");
+        println!("{test_bitfield}\n");
 
         let test_debug = TestDebug {
             value: 42,
             bits: test_bitfield,
         };
 
-        println!("test_debug(alt): {test_debug:#?}");
+        println!("test_debug(alt): {test_debug:#?}\n");
 
-        println!("test_debug: {test_debug:?}")
+        println!("test_debug: {test_debug:?}\n");
+
+        println!("test ASCII display:\n{}", test_bitfield.display_ascii());
     }
 
     #[test]
