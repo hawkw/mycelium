@@ -33,7 +33,7 @@ pub struct OutputOptions {
         global = true,
         group = ARG_GROUP,
     )]
-    pub log: String,
+    pub log: tracing_subscriber::filter::Targets,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, clap::ValueEnum)]

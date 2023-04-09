@@ -23,7 +23,7 @@ impl OutputOptions {
         tracing_subscriber::registry()
             .with(fmt)
             .with(tracing_error::ErrorLayer::default())
-            .with(self.log.parse::<tracing_subscriber::EnvFilter>()?)
+            .with(self.log.clone())
             .try_init()?;
         Ok(())
     }
