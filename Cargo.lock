@@ -310,9 +310,9 @@ dependencies = [
 
 [[package]]
 name = "bootloader-boot-config"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "199fa89ba30cc564760e8882bd18f9d50a08060d62fbc0adb0a21f1bbfe5d707"
+checksum = "8ae5f1e50b39501e5402f68c154c01a58047af0c9fb8df7553c4594ef64955fa"
 dependencies = [
  "serde",
 ]
