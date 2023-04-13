@@ -23,6 +23,6 @@ wait-timeout = "0.2"
 owo-colors = "3.5.0"
 atty = "0.2"
 mycotest = { path = "../mycotest", features = ["alloc"] }
-heck = "0.3.3"
+heck = "0.4.1"
 # used for UEFI booting in QEMU
 ovmf-prebuilt = "0.1.0-alpha.1"
