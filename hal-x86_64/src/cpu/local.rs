@@ -8,6 +8,7 @@ use core::{
     sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
 };
 use mycelium_util::{fmt, sync::Lazy};
+use hal_core::CoreLocal;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -140,6 +141,8 @@ impl GsLocalData {
     }
 }
 
+// === impl LocalKey ===
+
 impl<T: 'static> LocalKey<T> {
     #[must_use]
     #[track_caller]
@@ -175,5 +178,19 @@ impl<T> fmt::Debug for LocalKey<T> {
             .field("initializer", &fmt::ptr(self.initializer))
             .field("idx", &self.idx)
             .finish()
+    }
+}
+
+impl<T: 'static> CoreLocal<T> for LocalKey<T> {
+    #[must_use]
+    fn new(initializer: fn() -> T) -> Self {
+        Self::new(initializer)
+    }
+
+
+    #[track_caller]
+    fn with<F, U>(&self, f: F) -> U
+    where F: FnOnce(&T) -> U {
+        self.with(f)
     }
 }
