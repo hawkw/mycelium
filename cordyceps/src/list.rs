@@ -310,7 +310,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// This reuses all the nodes from `other` and moves them into `self`. After
     /// this operation, `other` becomes empty.
     ///
-    /// This operation should compute in *O*(1) time and *O*(1) memory.
+    /// This operation should complete in *O*(1) time and *O*(1) memory.
     pub fn append(&mut self, other: &mut Self) {
         // TODO(eliza): this could be rewritten to use `let ... else` when
         // that's supported on `cordyceps`' MSRV.
@@ -345,7 +345,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Returns everything after the given index (including the node at that
     /// index), or `None` if the index is greater than the list's [length].
     ///
-    /// This operation should compute in *O*(*n*) time.
+    /// This operation should complete in *O*(*n*) time.
     ///
     /// # Returns
     ///
@@ -397,7 +397,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Returns everything after the given index (including the node at that
     /// index).
     ///
-    /// This operation should compute in *O*(1) time and *O*(1) memory.
+    /// This operation should complete in *O*(*n*) time.
     ///
     /// # Panics
     ///
@@ -520,7 +520,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
     /// Removes an item from the tail of the list.
     ///
-    /// This operation should compute in *O*(*n*) time.
+    /// This operation should complete in *O*(1) time.
     ///
     /// This returns a [`Handle`] that owns the popped element. Dropping the
     /// [`Handle`] will drop the element.
@@ -554,7 +554,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
     /// Remove an item from the head of the list.
     ///
-    /// This operation should compute in *O*(*n*) time.
+    /// This operation should complete in *O*(1) time.
     ///
     /// This returns a [`Handle`] that owns the popped element. Dropping the
     /// [`Handle`] will drop the element.
@@ -580,7 +580,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
     /// Appends an item to the tail of the list.
     ///
-    /// This operation should compute in *O*(*n*) time.
+    /// This operation should complete in *O*(1) time.
     ///
     /// This takes a [`Handle`] that owns the appended `item`. While the element
     /// is in the list, it is owned by the list, and will be dropped when the
@@ -609,7 +609,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
     /// Appends an item to the head of the list.
     ///
-    /// This operation should compute in *O*(*n*) time.
+    /// This operation should complete in *O*(1) time.
     ///
     /// This takes a [`Handle`] that owns the appended `item`. While the element
     /// is in the list, it is owned by the list, and will be dropped when the
@@ -726,6 +726,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     }
 
     /// Remove an arbitrary node from the list.
+    ///
+    /// This operation should complete in *O*(1) time.
     ///
     /// This returns a [`Handle`] that owns the popped element. Dropping the
     /// [`Handle`] will drop the element.
