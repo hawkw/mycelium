@@ -349,7 +349,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     ///
     /// # Returns
     ///
-    /// - [`Some`]`(List<T>)` with a new list containing every element after
+    /// - [`Some`]`(`[`List`]`<T>)` with a new list containing every element after
     ///   `at`, if `at` <= `self.len()`
     /// - [`None`] if `at > self.len()`
     ///
@@ -394,10 +394,15 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
 
     /// Split the list into two at the given index (inclusive).
     ///
-    /// Returns everything after the given index (including the node at that
-    /// index).
+    /// Every element after the given index, including the node at that
+    /// index, is removed from this list, and returned as a new list.
     ///
     /// This operation should complete in *O*(*n*) time.
+    ///
+    /// # Returns
+    ///
+    /// A new [`List`]`<T>` containing every element after the index `at` in
+    /// this list.
     ///
     /// # Panics
     ///
@@ -525,6 +530,12 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// This returns a [`Handle`] that owns the popped element. Dropping the
     /// [`Handle`] will drop the element.
     ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(T::Handle)` containing the last element of this list, if the
+    ///   list was not empty.
+    /// - [`None`] if this list is empty.
+    ///
     /// [`Handle`]: crate::Linked::Handle
     pub fn pop_back(&mut self) -> Option<T::Handle> {
         let tail = self.tail?;
@@ -552,12 +563,18 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
-    /// Remove an item from the head of the list.
+    /// Removes an item from the head of the list.
     ///
     /// This operation should complete in *O*(1) time.
     ///
     /// This returns a [`Handle`] that owns the popped element. Dropping the
     /// [`Handle`] will drop the element.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(T::Handle)` containing the last element of this list, if the
+    ///   list was not empty.
+    /// - [`None`] if this list is empty.
     ///
     /// [`Handle`]: crate::Linked::Handle
     pub fn pop_front(&mut self) -> Option<T::Handle> {
@@ -641,14 +658,19 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         // tracing::trace!(?self, "push_front: pushed");
     }
 
-    /// Returns a reference to the first element in the list, or `None`
-    /// if the list is empty.
+    /// Returns an immutable reference to the first element in the list.
+    ///
+    /// This operation should complete in *O*(1) time.
     ///
     /// The node is [`Pin`]ned in memory, as moving it to a different memory
     /// location while it is in the list would corrupt the links pointing to
     /// that node.
     ///
-    /// This operation should complete in *O*(1) time.
+    /// # Returns
+    ///
+    /// - [`Some`]`(`[`Pin`]`<&mut T>)` containing a pinned immutable reference to
+    ///   the first element of the list, if the list is non-empty.
+    /// - [`None`] if the list is empty.
     #[must_use]
     pub fn front(&self) -> Option<Pin<&T>> {
         let head = self.head?;
@@ -662,14 +684,19 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Some(pin)
     }
 
-    /// Returns a mutable reference to the first element in the list, or `None`
-    /// if the list is empty.
+    /// Returns a mutable reference to the first element in the list.
     ///
     /// The node is [`Pin`]ned in memory, as moving it to a different memory
     /// location while it is in the list would corrupt the links pointing to
     /// that node.
     ///
     /// This operation should complete in *O*(1) time.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(`[`Pin`]`<&mut T>)` containing a pinned mutable reference to
+    ///   the first element of the list, if the list is non-empty.
+    /// - [`None`] if the list is empty.
     #[must_use]
     pub fn front_mut(&mut self) -> Option<Pin<&mut T>> {
         let mut node = self.head?;
@@ -683,14 +710,19 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         Some(pin)
     }
 
-    /// Returns a reference to the last element in the list, or `None`
-    /// if the list is empty.
+    /// Returns a reference to the last element in the list/
     ///
     /// The node is [`Pin`]ned in memory, as moving it to a different memory
     /// location while it is in the list would corrupt the links pointing to
     /// that node.
     ///
     /// This operation should complete in *O*(1) time.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(`[`Pin`]`<&T>)` containing a pinned immutable reference to
+    ///   the last element of the list, if the list is non-empty.
+    /// - [`None`] if the list is empty.
     #[must_use]
     pub fn back(&self) -> Option<Pin<&T>> {
         let node = self.tail?;
@@ -712,6 +744,12 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// that node.
     ///
     /// This operation should complete in *O*(1) time.
+    /// 
+    /// # Returns
+    ///
+    /// - [`Some`]`(`[`Pin`]`<&T>)` containing a pinned mutable reference to
+    ///   the last element of the list, if the list is non-empty.
+    /// - [`None`] if the list is empty.
     #[must_use]
     pub fn back_mut(&mut self) -> Option<Pin<&mut T>> {
         let mut node = self.tail?;
@@ -731,6 +769,12 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     ///
     /// This returns a [`Handle`] that owns the popped element. Dropping the
     /// [`Handle`] will drop the element.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(T::Handle)` containing a [`Handle`] that owns `item`, if
+    ///   `item` is currently linked into this list.
+    /// - [`None`] if `item` is not an element of this list.
     ///
     /// [`Handle`]: crate::Linked::Handle
     ///
