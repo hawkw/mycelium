@@ -2,7 +2,7 @@ use crate::{
     term::{style, ColorMode, OutputOptions, OwoColorize, Style},
     Result,
 };
-use heck::TitleCase;
+use heck::ToTitleCase;
 use std::fmt;
 use tracing::{field::Field, Event, Level, Subscriber};
 use tracing_subscriber::{
