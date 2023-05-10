@@ -82,6 +82,7 @@ where
         }
     }
 
+    #[must_use]
     pub fn drain(&self) -> Drain<T> {
         let head = self.head.swap(ptr::null_mut(), AcqRel);
         let next = NonNull::new(head);
@@ -125,6 +126,24 @@ impl<T> Links<T> {
         }
     }
 }
+
+/// # Safety
+///
+/// Types containing [`Links`] may be `Send`: the pointers within the `Links` may
+/// mutably alias another value, but the links can only be _accessed_ by the
+/// owner of the [`TransferStack`] itself, because the pointers are private. As
+/// long as [`TransferStack`] upholds its own invariants, `Links` should not
+/// make a type `!Send`.
+unsafe impl<T: Send> Send for Links<T> {}
+
+/// # Safety
+///
+/// Types containing [`Links`] may be `Send`: the pointers within the `Links` may
+/// mutably alias another value, but the links can only be _accessed_ by the
+/// owner of the [`TransferStack`] itself, because the pointers are private. As
+/// long as [`TransferStack`] upholds its own invariants, `Links` should not
+/// make a type `!Send`.
+unsafe impl<T: Sync> Sync for Links<T> {}
 
 // === impl Drain ===
 
@@ -339,6 +358,21 @@ mod loom {
             tracing::info!("dropping drain");
             drop(drain);
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{*, test_util::Entry};
+
+    #[test]
+    fn stack_is_send_sync() {
+        crate::util::assert_send_sync::<TransferStack<Entry>>()
+    }
+
+    #[test]
+    fn links_are_send_sync() {
+        crate::util::assert_send_sync::<Links<Entry>>()
     }
 }
 

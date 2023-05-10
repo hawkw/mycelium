@@ -150,3 +150,6 @@ impl<T: fmt::Display> fmt::Display for FmtOption<'_, T> {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) fn assert_send_sync<T: Send + Sync>() {}
