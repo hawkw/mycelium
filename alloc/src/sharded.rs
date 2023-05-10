@@ -67,20 +67,24 @@ impl LocalHeap {
     #[inline]
     unsafe fn small_alloc(&mut self, size: usize) -> NonNull<BlockHeader> {
         let bucket = (size + SMALL_BUCKET - 1) >> SMALL_BUCKET_SHIFT;
-        let pg = self.direct_pages[bucket].as_mut();
-
-        if let Some(block) = pg.local_free_list.pop_front() {
-            pg.used_blocks += 1;
-            return block;
-        }
-
-        self.alloc_generic(size)
+        let page = self.direct_pages[bucket].as_mut();
+        page.malloc_in_page(size)
+            .unwrap_or_else(|| self.alloc_generic(size))
     }
 
     unsafe fn alloc_generic(&mut self, _size: usize) -> NonNull<BlockHeader> {
         // shared free list
         // or make a new pg from a larger sz class
         todo!("eliza")
+    }
+}
+
+impl PageHeader {
+    #[inline(always)]
+    fn malloc_in_page(&mut self, size: usize) -> Option<NonNull<BlockHeader>> {
+        let block = self.local_free_list.pop_front()?;
+        self.used_blocks += 1;
+        Some(block)
     }
 }
 
