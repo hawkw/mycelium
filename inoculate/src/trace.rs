@@ -1,6 +1,6 @@
 use crate::{
-    term::{style, ColorMode, OwoColorize, Style},
-    Options, Result,
+    term::{style, ColorMode, OutputOptions, OwoColorize, Style},
+    Result,
 };
 use heck::TitleCase;
 use std::fmt;
@@ -11,20 +11,22 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-pub(crate) fn try_init(opts: &Options) -> Result<()> {
-    use tracing_subscriber::prelude::*;
-    let fmt = tracing_subscriber::fmt::layer()
-        .event_format(CargoFormatter {
-            styles: Styles::new(opts.color),
-        })
-        .with_writer(std::io::stderr);
+impl OutputOptions {
+    pub fn trace_init(&self) -> Result<()> {
+        use tracing_subscriber::prelude::*;
+        let fmt = tracing_subscriber::fmt::layer()
+            .event_format(CargoFormatter {
+                styles: Styles::new(self.color),
+            })
+            .with_writer(std::io::stderr);
 
-    tracing_subscriber::registry()
-        .with(fmt)
-        .with(tracing_error::ErrorLayer::default())
-        .with(opts.log.parse::<tracing_subscriber::EnvFilter>()?)
-        .try_init()?;
-    Ok(())
+        tracing_subscriber::registry()
+            .with(fmt)
+            .with(tracing_error::ErrorLayer::default())
+            .with(self.log.clone())
+            .try_init()?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -141,7 +143,7 @@ impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
             // shaped like a cargo log tag, emit the cargo tag followed by the
             // rest of the message.
             if self.level == Level::INFO && field.name() == Self::MESSAGE {
-                let message = format!("{:?}", value);
+                let message = format!("{value:?}");
                 if let Some((tag, message)) = message.as_str().split_once(' ') {
                     if tag.len() <= Self::INDENT {
                         let tag = tag.to_title_case();

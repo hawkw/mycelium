@@ -41,12 +41,9 @@ use core::{
 ///
 /// // This example uses the Rust standard library for convenience, but
 /// // the MPSC queue itself does not require std.
-/// use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 ///
 /// /// A simple queue entry that stores an `i32`.
-/// // This type must be `repr(C)` in order for the cast in `Linked::links`
-/// // to be sound.
-/// #[repr(C)]
 /// #[derive(Debug, Default)]
 /// struct Entry {
 ///    links: mpsc_queue::Links<Entry>,
@@ -84,9 +81,14 @@ use core::{
 ///
 ///     /// Access an element's `Links`.
 ///     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-///         // Safety: this cast is safe only because `Entry` `is repr(C)` and
-///         // the links is the first field.
-///         target.cast()
+///         // Using `ptr::addr_of_mut!` permits us to avoid creating a temporary
+///         // reference without using layout-dependent casts.
+///         let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+///
+///         // `NonNull::new_unchecked` is safe to use here, because the pointer that
+///         // we offset was not null, implying that the pointer produced by offsetting
+///         // it will also not be null.
+///         NonNull::new_unchecked(links)
 ///     }
 /// }
 ///
@@ -160,9 +162,8 @@ use core::{
 /// #     Linked,
 /// #     mpsc_queue::{self, MpscQueue},
 /// # };
-/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
-/// # #[repr(C)]
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: mpsc_queue::Links<Entry>,
@@ -181,7 +182,8 @@ use core::{
 /// #     }
 /// #
 /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-/// #         target.cast()
+/// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+/// #        NonNull::new_unchecked(links)
 /// #     }
 /// # }
 /// #
@@ -233,9 +235,8 @@ use core::{
 /// #     Linked,
 /// #     mpsc_queue::{self, MpscQueue},
 /// # };
-/// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+/// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
 /// #
-/// # #[repr(C)]
 /// # #[derive(Debug, Default)]
 /// # struct Entry {
 /// #    links: mpsc_queue::Links<Entry>,
@@ -254,7 +255,8 @@ use core::{
 /// #     }
 /// #
 /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-/// #         target.cast()
+/// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+/// #        NonNull::new_unchecked(links)
 /// #     }
 /// # }
 /// #
@@ -404,10 +406,12 @@ pub enum TryDequeueError {
     /// No element was dequeued because the queue was empty.
     Empty,
 
-    /// The queue is currently in an inconsistent state.
+    /// The queue is currently in an [inconsistent state].
     ///
     /// Since inconsistent states are very short-lived, the caller may want to
     /// try dequeueing a second time.
+    ///
+    /// [inconsistent state]: MpscQueue#inconsistent-states
     Inconsistent,
 
     /// Another thread is currently calling [`MpscQueue::try_dequeue`]  or
@@ -463,16 +467,17 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     ///
     /// # Usage notes
     ///
-    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub` item will NOT be
-    /// dropped when the `MpscQueue` is dropped. This is fine if you are
-    /// ALSO statically creating the `stub`, however if it is necessary to
-    /// recover that memory after the `MpscQueue` has been dropped, that will
-    /// need to be done by the user manually.
+    /// Unlike [`MpscQueue::new`] or [`MpscQueue::new_with_stub`], the `stub`
+    /// item will NOT be dropped when the `MpscQueue` is dropped. This is fine
+    /// if you are ALSO statically creating the `stub`. However, if it is
+    /// necessary to recover that memory after the `MpscQueue` has been dropped,
+    /// that will need to be done by the user manually.
     ///
     /// # Safety
     ///
-    /// The "stub" provided must ONLY EVER be used for a single MpscQueue. Re-using
-    /// the stub for multiple queues may lead to undefined behavior.
+    /// The `stub` provided must ONLY EVER be used for a single `MpscQueue`
+    /// instance. Re-using the stub for multiple queues may lead to undefined
+    /// behavior.
     ///
     /// ## Example usage
     ///
@@ -481,13 +486,12 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// #     Linked,
     /// #     mpsc_queue::{self, MpscQueue},
     /// # };
-    /// # use std::{pin::Pin, ptr::NonNull, thread, sync::Arc};
+    /// # use std::{pin::Pin, ptr::{self, NonNull}, thread, sync::Arc};
     /// #
     /// #
     ///
     /// // This is our same `Entry` from the parent examples. It has implemented
     /// // the `Links` trait as above.
-    /// #[repr(C)]
     /// #[derive(Debug, Default)]
     /// struct Entry {
     ///    links: mpsc_queue::Links<Entry>,
@@ -507,7 +511,8 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     /// #     }
     /// #
     /// #     unsafe fn links(target: NonNull<Entry>) -> NonNull<mpsc_queue::Links<Entry>> {
-    /// #         target.cast()
+    /// #        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+    /// #        NonNull::new_unchecked(links)
     /// #     }
     /// # }
     /// #
@@ -560,6 +565,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
     pub fn enqueue(&self, element: T::Handle) {
         let ptr = T::into_ptr(element);
 
+        #[cfg(debug_assertions)]
         debug_assert!(!unsafe { T::links(ptr).as_ref() }.is_stub());
 
         self.enqueue_inner(ptr)
@@ -716,6 +722,7 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
             let mut next = links(tail_node).next.load(Acquire);
 
             if tail_node == self.stub {
+                #[cfg(debug_assertions)]
                 debug_assert!(links(tail_node).is_stub());
                 let next_node = NonNull::new(next).ok_or(TryDequeueError::Empty)?;
 
@@ -744,7 +751,9 @@ impl<T: Linked<Links<T>>> MpscQueue<T> {
 
             *tail = next;
 
+            #[cfg(debug_assertions)]
             debug_assert!(!links(tail_node).is_stub());
+
             Ok(T::from_ptr(tail_node))
         })
     }
@@ -825,9 +834,11 @@ impl<T: Linked<Links<T>>> Drop for MpscQueue<T> {
                 // here, that would cause a double free!
                 if node != self.stub {
                     // Convert the pointer to the owning handle and drop it.
-                    debug_assert!(!links.is_stub());
+                    #[cfg(debug_assertions)]
+                    debug_assert!(!links.is_stub(), "stub: {:p}, node: {node:p}", self.stub);
                     drop(T::from_ptr(node));
                 } else {
+                    #[cfg(debug_assertions)]
                     debug_assert!(links.is_stub());
                 }
 
@@ -850,16 +861,24 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            head,
+            tail: _,
+            has_consumer,
+            stub,
+            stub_is_static,
+        } = self;
         f.debug_struct("MpscQueue")
-            .field("head", &format_args!("{:p}", self.head.load(Acquire)))
+            .field("head", &format_args!("{:p}", head.load(Acquire)))
             // only the consumer can load the tail; trying to print it here
             // could be racy.
             // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
             // and then it would be okay to print the tail...but then we would
             // lose loom checking for tail accesses...
             .field("tail", &format_args!("..."))
-            .field("has_consumer", &self.has_consumer.load(Acquire))
-            .field("stub", &self.stub)
+            .field("has_consumer", &has_consumer.load(Acquire))
+            .field("stub", stub)
+            .field("stub_is_static", stub_is_static)
             .finish()
     }
 }
@@ -958,20 +977,15 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let tail = self.q.tail.with(|tail| unsafe {
+        let Self { q } = self;
+        let tail = q.tail.with(|tail| unsafe {
             // Safety: it's okay for the consumer to access the tail cell, since
             // we have exclusive access to it.
             *tail
         });
         f.debug_struct("Consumer")
-            .field("head", &format_args!("{:p}", tail))
-            // only the consumer can load the tail; trying to print it here
-            // could be racy.
-            // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
-            // and then it would be okay to print the tail...but then we would
-            // lose loom checking for tail accesses...
+            .field("q", &q)
             .field("tail", &tail)
-            .field("has_consumer", &self.q.has_consumer.load(Acquire))
             .finish()
     }
 }
@@ -1169,20 +1183,15 @@ feature! {
 
     impl<T: Linked<Links<T>>> fmt::Debug for OwnedConsumer<T> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let tail = self.q.tail.with(|tail| unsafe {
+            let Self { q } = self;
+            let tail = q.tail.with(|tail| unsafe {
                 // Safety: it's okay for the consumer to access the tail cell, since
                 // we have exclusive access to it.
-               *tail
+                *tail
             });
             f.debug_struct("OwnedConsumer")
-                .field("head", &self.q.head.load(Acquire))
-                // only the consumer can load the tail; trying to print it here
-                // could be racy.
-                // XXX(eliza): we could replace the `UnsafeCell` with an atomic,
-                // and then it would be okay to print the tail...but then we would
-                // lose loom checking for tail accesses...
+                .field("q", &q)
                 .field("tail", &tail)
-                .field("has_consumer", &self.q.has_consumer.load(Acquire))
                 .finish()
         }
     }
@@ -1342,6 +1351,34 @@ mod loom {
             }
         })
     }
+
+    #[test]
+    fn crosses_queues() {
+        loom::model(|| {
+            let stub1 = entry(666);
+            let q1 = Arc::new(MpscQueue::<Entry>::new_with_stub(stub1));
+
+            let thread = thread::spawn({
+                let q1 = q1.clone();
+                move || {
+                    let stub2 = entry(420);
+                    let q2 = Arc::new(MpscQueue::<Entry>::new_with_stub(stub2));
+                    // let mut dequeued = false;
+                    for entry in q1.consume() {
+                        tracing::info!("dequeued");
+                        q2.enqueue(entry);
+                        q2.try_dequeue().unwrap();
+                    }
+                    tracing::info!("consumer done\nq1={q1:#?}\nq2={q2:#?}");
+                }
+            });
+
+            q1.enqueue(entry(1));
+            drop(q1);
+
+            thread.join().unwrap();
+        })
+    }
 }
 
 #[cfg(all(test, not(loom)))]
@@ -1439,7 +1476,7 @@ mod tests {
                 thread::spawn(move || {
                     for i in 0..MSGS {
                         q.enqueue(entry(i));
-                        println!("thread {}; msg {}/{}", thread, i, MSGS);
+                        println!("thread {thread}; msg {i}/{MSGS}");
                     }
                 })
             })
@@ -1450,13 +1487,13 @@ mod tests {
             match q.try_dequeue() {
                 Ok(msg) => {
                     i += 1;
-                    println!("recv {:?} ({}/{})", msg, i, THREADS * MSGS);
+                    println!("recv {msg:?} ({i}/{})", THREADS * MSGS);
                 }
                 Err(TryDequeueError::Busy) => {
                     panic!("the queue should never be busy, as there is only one consumer")
                 }
                 Err(e) => {
-                    println!("recv error {:?}", e);
+                    println!("recv error {e:?}");
                     thread::yield_now();
                 }
             }
@@ -1480,8 +1517,8 @@ mod tests {
 mod test_util {
     use super::*;
     use crate::loom::alloc;
-    pub use std::{boxed::Box, pin::Pin, println, vec, vec::Vec};
-    #[repr(C)]
+    pub use std::{boxed::Box, pin::Pin, println, ptr, vec, vec::Vec};
+
     pub(super) struct Entry {
         links: Links<Entry>,
         pub(super) val: i32,
@@ -1516,17 +1553,18 @@ mod test_util {
         }
 
         unsafe fn links(target: NonNull<Entry>) -> NonNull<Links<Entry>> {
-            // Safety: this cast is safe only because `Entry` `is repr(C)` and
-            // the links is the first field.
-            target.cast()
+            let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+            NonNull::new_unchecked(links)
         }
     }
 
     impl fmt::Debug for Entry {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let Self { links, val, _track } = self;
             f.debug_struct("Entry")
-                .field("links", &self.links)
-                .field("val", &self.val)
+                .field("links", links)
+                .field("val", val)
+                .field("_track", _track)
                 .finish()
         }
     }

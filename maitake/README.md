@@ -35,21 +35,81 @@ supporting `#![no_std]` projects.
 
 Unlike other async runtime implementations, `maitake` does *not* provide a
 complete, fully-functional runtime implementation. Instead, it provides reusable
-implementations of common functionality, including a [task system],
-[scheduling], and [notification primitives][wait]. These components may be
-combined with other runtime services, such as timers and I/O resources, to
-produce a complete, application-specific async runtime.
+implementations of common functionality, including a [task system][task],
+[scheduler], a [timer wheel][timer], and [synchronization primitives][sync].
+These components may be combined with other runtime services, such as timers and
+I/O resources, to produce a complete, application-specific async runtime.
 
 `maitake` was initially designed for use in the [mycelium] and [mnemOS]
 operating systems, but may be useful for other projects as well.
 
 [`core::task`]: https://doc.rust-lang.org/stable/core/task/index.html
 [`core::future`]: https://doc.rust-lang.org/stable/core/future/index.html
-[task system]: https://mycelium.elizas.website/maitake/task/index.html
+[task]: https://mycelium.elizas.website/maitake/task/index.html
 [scheduling]: https://mycelium.elizas.website/maitake/scheduler/index.html
-[wait]: https://mycelium.elizas.website/maitake/wait/index.html
+[timer]: https://mycelium.elizas.website/maitake/time/struct.Timer.html
+[sync]: https://mycelium.elizas.website/maitake/sync/index.html
 [mycelium]: https://github.com/hawkw/mycelium
 [mnemOS]: https://mnemos.jamesmunns.com
+## a tour of `maitake`
+
+`maitake` currently provides the following major API components:
+
+- **[`maitake::task`][task]: the `maitake` task system**. This module contains the
+  [`Task`] type, representing an asynchronous task (a [`Future`] that can be
+  spawned on the runtime), and the [`TaskRef`] type, a reference-counted,
+  type-erased pointer to a spawned [`Task`].
+
+  Additionally, it also contains other utility types for working with tasks.
+  These include the [`JoinHandle`] type, which can be used to await the output
+  of a task once it has been spawned, and the [`task::Builder`] type, for
+  configuring a task prior to spawning it.
+
+- **[`maitake::scheduler`][scheduler]: schedulers for executing tasks**. In order to
+  actually execute asynchronous tasks, one or more schedulers is required. This
+  module contains the [`Scheduler`] and [`StaticScheduler`] types, which
+  implement task schedulers, and utilities for constructing and using
+  schedulers.
+
+- **[`maitake::time`][time]: timers and futures for tracking time**. This module
+  contains tools for waiting for time-based events in asynchronous systems. It
+  provides the [`Sleep`] type, a [`Future`] which completes after a specified
+  duration, and the [`Timeout`] type, which wraps another [`Future`] and cancels
+  it if it runs for longer than a specified duration without completing.
+
+  In order to use these futures, a system must have a timer. The `maitake::time`
+  module therefore provides the [`Timer`] type, a hierarchical timer wheel which
+  can track and notify a large number of time-based futures efficiently. A
+  [`Timer`] must be [driven by a hardware time source][time-source], such as an
+  interrupt or timestamp counter.
+
+- **[`maitake::sync`][sync]: asynchronous synchronization primitives**. This
+  module provides asynchronous implementations of common [synchronization
+  primitives], including a [`Mutex`], [`RwLock`], and [`Semaphore`].
+  Additionally, it provides lower-level synchronization types which may be
+  useful when implementing custom synchronization strategies.
+
+- **[`maitake::future`][future]: utility futures**. This module provides
+  general-purpose utility [`Future`] types that may be used without the Rust
+  standard library.
+
+[`Task`]: https://mycelium.elizas.website/maitake/task/struct.Task.html
+[`Future`]: https://doc.rust-lang.org/stable/core/future/trait.Future.html
+[`TaskRef`]: https://mycelium.elizas.website/maitake/task/struct.TaskRef.html
+[`JoinHandle`]: https://mycelium.elizas.website/maitake/task/struct.JoinHandle.html
+[`task::Builder`]: https://mycelium.elizas.website/maitake/task/struct.Builder.html
+[`Scheduler`]: https://mycelium.elizas.website/maitake/scheduler/struct.Scheduler.html
+[`StaticScheduler`]: https://mycelium.elizas.website/maitake/scheduler/struct.StaticScheduler.html
+[time]: https://mycelium.elizas.website/maitake/time/index.html
+[`Sleep`]: https://mycelium.elizas.website/maitake/time/struct.Sleep.html
+[`Timeout`]: https://mycelium.elizas.website/maitake/time/struct.Timeout.html
+[`Timer`]: https://mycelium.elizas.website/maitake/time/struct.Timer.html
+[time-source]: https://mycelium.elizas.website/maitake/time/timer/struct.Timer.html#driving-timers
+[synchronization primitives]: https://wiki.osdev.org/Synchronization_Primitives
+[`Mutex`]: https://mycelium.elizas.website/maitake/sync/struct.Mutex.html
+[`RwLock`]: https://mycelium.elizas.website/maitake/sync/struct.RwLock.html
+[`Semaphore`]: https://mycelium.elizas.website/maitake/sync/struct.Semaphore.html
+[future]: https://mycelium.elizas.website/maitake/future/index.html
 
 ## usage considerations
 
@@ -126,16 +186,75 @@ explicitly disable unwinding in that project's `Cargo.toml`.
 [`catch_unwind`]: https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
 [UnwindSafe]: https://doc.rust-lang.org/stable/std/panic/trait.UnwindSafe.html
 
+## platform support
+
+In general, `maitake` is a platform-agnostic library. It does not interact
+directly with the underlying hardware, or use platform-specific features (with
+one small exception). Instead, `maitake` provides portable implementations of
+core runtime components. In some cases, [such as the timer wheel][time-source],
+downstream code must integrate `maitake`'s APIs with hardware-specific code for
+in order to use them effectively.
+
+### support for atomic operations
+
+However, one aspect of `maitake`'s implementation may differ slightly across
+different target architectures: `maitake` relies on atomic operations integers.
+Sometimes, atomic operations on integers of specific widths are needed (e.g.,
+[`AtomicU64`]), which may not be available on all architectures.
+
+In order to work on architectures which lack atomic operations on 64-bit
+integers, `maitake` uses the [`portable-atomic`] crate by Taiki Endo. This crate
+crate polyfills atomic operations on integers larger than the platform's pointer
+width, when these are not supported in hardware.
+
+In most cases, users of `maitake` don't need to be aware of `maitake`'s use of
+`portable-atomic`. If compiling `maitake` for a target architecture that has
+native support for 64-bit atomic operations (such as `x86_64` or `aarch64`), the
+native atomics are used automatically. Similarly, if compiling `maitake` for any
+target that has atomic compare-and-swap operations on any size integer, but
+lacks 64-bit atomics (i.e., 32-bit x86 targets like `i686`, or 32-bit ARM
+targets with atomic operations), the `portable-atomic` polyfill is used
+automatically. Finally, when compiling for target architectures which lack
+atomic operations because they are *always* single-core, such as MSP430 or AVR
+microcontrollers, `portable-atomic` simply uses unsynchronized operations with
+interrupts temporarily disabled.
+
+**The only case where the user must be aware of `portable-atomic` is when
+compiling for targets which lack atomic operations but are not guaranteed to
+always be single-core**. This includes ARMv6-M (`thumbv6m`), pre-v6 ARM (e.g.,
+`thumbv4t`, `thumbv5te`), and RISC-V targets without the A extension. On these
+architectures, the user must manually enable the [`RUSTFLAGS`] configuration
+[`--cfg portable_atomic_unsafe_assume_single_core`][single-core] if (and **only
+if**) the specific target hardware is known to be single-core. Enabling this cfg
+is unsafe, as it will cause unsound behavior on multi-core systems using these
+architectures.
+
+Additional configurations for some single-core systems, which determine the
+specific sets of interrupts that `portable-atomic` will disable when entering a
+critical section, are described [here][interrupt-cfgs].
+
+[time-source]: https://mycelium.elizas.website/maitake/time/struct.timer#driving-timers
+[`AtomicU64`]: https://doc.rust-lang.org/stable/core/sync/atomic/struct.AtomicU64.html
+[`portable-atomic`]: https://crates.io/crates/portable-atomic
+[`RUSTFLAGS`]: https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags
+[single-core]: https://docs.rs/portable-atomic/latest/portable_atomic/#optional-cfg
+[interrupt-cfgs]: https://github.com/taiki-e/portable-atomic/blob/HEAD/src/imp/interrupt/README.md
+
 ## features
 
 The following features are available (this list is incomplete; you can help by [expanding it].)
 
 [expanding it]: https://github.com/hawkw/mycelium/edit/main/maitake/README.md
 
-| Feature | Default | Explanation |
-| :---    | :---    | :---        |
-| `alloc` | `true`  | Enables [`liballoc`] dependency |
+| Feature        | Default | Explanation |
+| :---           | :---    | :---        |
+| `alloc`        | `true`  | Enables [`liballoc`] dependency |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
+| `tracing-01`   | `false` | Enables support for v0.1.x of [`tracing`] (the current release version). Requires `liballoc`.|
+| `tracing-02`   | `false` | Enables support for the upcoming v0.2 of [`tracing`] (via a Git dependency). |
+| `core-error`   | `false` | Enables implementations of the [`core::error::Error` trait][core-error] for `maitake`'s error types. *Requires a nightly Rust toolchain*. |
 
 [`liballoc`]: https://doc.rust-lang.org/alloc/
 [`CachePadded`]: https://mycelium.elizas.website/mycelium_util/sync/struct.cachepadded
+[`tracing`]: https://crates.io/crates/tracing
+[core-error]: https://doc.rust-lang.org/stable/core/error/index.html

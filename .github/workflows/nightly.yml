@@ -34,8 +34,25 @@ jobs:
   # file. this job checks to see if we can build mycelium on whatever the most
   # recent nightly is. if this fails, there are breaking changes we need to
   # address before updating to a newer nightly build.
+  kernel-x86_64-nightly:
+    name: build x86_64 boot image (latest nightly)
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      uses: actions-rs/toolchain@v1.0.6
+      with:
+        profile: minimal
+        # needed to build the kernel
+        components: rust-src, llvm-tools-preview
+        toolchain: nightly
+        override: true
+    - uses: actions/checkout@v3
+    - name: print current nightly
+      run: rustc --version && cargo --version
+    - run: cargo build-x64
+
   clippy-nightly:
-    name: check latest nightly
+    name: check (latest nightly)
     runs-on: ubuntu-latest
     steps:
     - name: install rust toolchain
@@ -45,11 +62,13 @@ jobs:
         components: clippy
         toolchain: nightly
         override: true
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: print current nightly
       run: rustc --version && cargo --version
-    - name: run cargo clippy
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: clippy
-        args: --all --all-features
+    - name: install Just
+      uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: cargo clippy
+      run: just clippy

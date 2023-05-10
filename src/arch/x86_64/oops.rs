@@ -14,13 +14,14 @@ use hal_core::{
     interrupt, Address,
 };
 use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
-use mycelium_trace::{embedded_graphics::MakeTextWriter, writer::MakeWriter};
+use mycelium_trace::{embedded_graphics::TextWriterBuilder, writer::MakeWriter};
 use mycelium_util::fmt::{self, Write};
 
 #[derive(Debug)]
 pub struct Oops<'a> {
     already_panicked: bool,
     already_faulted: bool,
+    alloc: crate::allocator::State,
     situation: OopsSituation<'a>,
 }
 
@@ -31,6 +32,7 @@ enum OopsSituation<'a> {
         details: Option<&'a dyn fmt::Display>,
     },
     Panic(&'a PanicInfo<'a>),
+    AllocError(alloc::alloc::Layout),
 }
 
 type Fault<'a> = &'a dyn interrupt::ctx::Context<Registers = X64Registers>;
@@ -70,10 +72,6 @@ pub fn oops(oops: Oops<'_>) -> ! {
     framebuf.fill(RgbColor::RED);
 
     let mut target = framebuf.as_draw_target();
-    let smol = MonoTextStyleBuilder::new()
-        .font(&ascii::FONT_6X10)
-        .text_color(Rgb888::WHITE)
-        .build();
     let uwu = MonoTextStyleBuilder::new()
         .font(&ascii::FONT_9X15_BOLD)
         .text_color(Rgb888::RED)
@@ -88,41 +86,48 @@ pub fn oops(oops: Oops<'_>) -> ! {
     )
     .draw(&mut target)
     .unwrap();
-    let _ = Text::with_alignment(
-        "uwu mycelium did a widdle fucky-wucky!",
-        Point::new(5, 30),
-        smol,
-        Alignment::Left,
-    )
-    .draw(&mut target)
-    .unwrap();
     drop(framebuf);
 
-    let mk_writer = MakeTextWriter::new_at(
-        || unsafe { super::framebuf::mk_framebuf() },
-        Point::new(4, 45),
-    );
+    let mk_writer = TextWriterBuilder::default()
+        .starting_point(Point::new(5, 30))
+        .default_color(mycelium_trace::color::Color::BrightWhite)
+        .build(|| unsafe { super::framebuf::mk_framebuf() });
+    writeln!(
+        mk_writer.make_writer(),
+        "uwu mycelium did a widdle fucky-wucky!\n"
+    )
+    .unwrap();
 
     match oops.situation {
         OopsSituation::Fault {
             kind,
             details: Some(deets),
             ..
-        } => writeln!(mk_writer.make_writer(), "a {} occurred: {}\n", kind, deets).unwrap(),
+        } => writeln!(mk_writer.make_writer(), "a {kind} occurred: {deets}\n").unwrap(),
         OopsSituation::Fault {
             kind,
             details: None,
             ..
-        } => writeln!(mk_writer.make_writer(), "a {} occurred!\n", kind).unwrap(),
+        } => writeln!(mk_writer.make_writer(), "a {kind} occurred!\n").unwrap(),
         OopsSituation::Panic(panic) => {
             let mut writer = mk_writer.make_writer();
             match panic.message() {
-                Some(msg) => writeln!(writer, "mycelium panicked: {}", msg).unwrap(),
+                Some(msg) => writeln!(writer, "mycelium panicked: {msg}").unwrap(),
                 None => writeln!(writer, "mycelium panicked!").unwrap(),
             }
             if let Some(loc) = panic.location() {
                 writeln!(writer, "at {}:{}:{}", loc.file(), loc.line(), loc.column()).unwrap();
             }
+        }
+        OopsSituation::AllocError(layout) => {
+            let mut writer = mk_writer.make_writer();
+            writeln!(
+                writer,
+                "out of memory: failed to allocate {}B aligned on a {}B boundary",
+                layout.size(),
+                layout.align()
+            )
+            .unwrap();
         }
     }
 
@@ -136,9 +141,9 @@ pub fn oops(oops: Oops<'_>) -> ! {
             )
             .unwrap();
             writeln!(writer, "%rsp    = {:#016x}", registers.stack_ptr.as_usize()).unwrap();
-            writeln!(writer, "%cs     = {:016x}", registers.code_segment).unwrap();
-            writeln!(writer, "%ss     = {:016x}", registers.stack_segment).unwrap();
             writeln!(writer, "%rflags = {:#016b}", registers.cpu_flags).unwrap();
+            writeln!(writer, "%cs     = {:?}", registers.code_segment).unwrap();
+            writeln!(writer, "%ss     = {:?}", registers.stack_segment).unwrap();
         }
 
         tracing::debug!(target: "oops", instruction_ptr = ?registers.instruction_ptr);
@@ -155,7 +160,34 @@ pub fn oops(oops: Oops<'_>) -> ! {
         }
     }
 
-    crate::ALLOC.dump_free_lists();
+    // we were in the allocator, so dump the allocator's free list
+    if oops.involves_allocator() {
+        let alloc_state = oops.alloc;
+
+        let mut writer = mk_writer.make_writer();
+        if alloc_state.allocating > 0 {
+            writeln!(
+                &mut writer,
+                "...while allocating ({} allocations in progress)!",
+                alloc_state.allocating,
+            )
+            .unwrap();
+        }
+
+        if alloc_state.deallocating > 0 {
+            writeln!(
+                &mut writer,
+                "...while deallocating ({} deallocations in progress)!",
+                alloc_state.deallocating
+            )
+            .unwrap();
+        }
+
+        writer.write_char('\n').unwrap();
+        writeln!(&mut writer, "{alloc_state}").unwrap();
+
+        crate::ALLOC.dump_free_lists();
+    }
 
     if oops.already_panicked {
         writeln!(
@@ -223,6 +255,7 @@ impl<'a> Oops<'a> {
         let already_panicked = IS_PANICKING.load(Ordering::Acquire);
         let already_faulted = IS_FAULTING.swap(true, Ordering::AcqRel);
         Self {
+            alloc: crate::ALLOC.state(),
             already_panicked,
             already_faulted,
             situation,
@@ -233,17 +266,33 @@ impl<'a> Oops<'a> {
         let already_panicked = IS_PANICKING.swap(true, Ordering::AcqRel);
         let already_faulted = IS_FAULTING.load(Ordering::Acquire);
         Self {
+            alloc: crate::ALLOC.state(),
             already_panicked,
             already_faulted,
             situation: OopsSituation::Panic(panic),
         }
     }
 
+    pub fn alloc_error(layout: alloc::alloc::Layout) -> Self {
+        let already_panicked = IS_PANICKING.swap(true, Ordering::AcqRel);
+        let already_faulted = IS_FAULTING.load(Ordering::Acquire);
+        Self {
+            alloc: crate::ALLOC.state(),
+            already_panicked,
+            already_faulted,
+            situation: OopsSituation::AllocError(layout),
+        }
+    }
+
+    fn involves_allocator(&self) -> bool {
+        matches!(self.situation, OopsSituation::AllocError(_)) || self.alloc.in_allocator()
+    }
+
     #[cfg(test)]
     fn fail_test(&self) -> ! {
         use super::{qemu_exit, QemuExitCode};
         let failure = match self.situation {
-            OopsSituation::Panic(_) => mycotest::Failure::Panic,
+            OopsSituation::Panic(_) | OopsSituation::AllocError(_) => mycotest::Failure::Panic,
             OopsSituation::Fault { .. } => mycotest::Failure::Fault,
         };
 
@@ -271,6 +320,7 @@ impl<'a> OopsSituation<'a> {
         match self {
             Self::Fault { .. } => " OOPSIE-WOOPSIE! ",
             Self::Panic(_) => " DON'T PANIC! ",
+            Self::AllocError(_) => " ALLOCATOR MACHINE BROKE! ",
         }
     }
 
@@ -294,11 +344,15 @@ impl fmt::Debug for OopsSituation<'_> {
                 dbg.field("kind", kind)
                     .field("registers", fault.registers());
                 if let Some(deets) = details {
-                    dbg.field("details", &format_args!("\"{}\"", deets));
+                    dbg.field("details", &format_args!("\"{deets}\""));
                 }
                 dbg.finish()
             }
             Self::Panic(panic) => f.debug_tuple("OopsSituation::Panic").field(&panic).finish(),
+            Self::AllocError(layout) => f
+                .debug_tuple("OopsSituation::AllocError")
+                .field(&layout)
+                .finish(),
         }
     }
 }
@@ -315,16 +369,16 @@ fn disassembly<'a>(rip: usize, mk_writer: &'a impl MakeWriter<'a>) {
         // memory. whoopsie.
         let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, 16) };
         let indent = if i == 0 { "> " } else { "  " };
-        let _ = write!(mk_writer.make_writer(), "{}{:016x}: ", indent, ptr);
+        let _ = write!(mk_writer.make_writer(), "{indent}{ptr:016x}: ");
         match decoder.decode_slice(bytes) {
             Ok(inst) => {
-                let _ = writeln!(mk_writer.make_writer(), "{}", inst);
-                tracing::debug!(target: "oops", "{:016x}: {}", ptr, inst);
+                let _ = writeln!(mk_writer.make_writer(), "{inst}");
+                tracing::debug!(target: "oops", "{ptr:016x}: {inst}");
                 ptr += inst.len();
             }
             Err(e) => {
-                let _ = writeln!(mk_writer.make_writer(), "{}", e);
-                tracing::debug!(target: "oops", "{:016x}: {}", ptr, e);
+                let _ = writeln!(mk_writer.make_writer(), "{e}");
+                tracing::debug!(target: "oops", "{ptr:016x}: {e}");
                 break;
             }
         }

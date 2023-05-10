@@ -11,17 +11,14 @@ use hal_core::{
 };
 use mycelium_util::fmt;
 use mycelium_util::intrusive::{list, Linked, List};
-use mycelium_util::math::Log2;
+use mycelium_util::math::Logarithm;
 use mycelium_util::sync::{
-    atomic::{
-        AtomicUsize,
-        Ordering::{AcqRel, Acquire, Relaxed},
-    },
+    atomic::{AtomicUsize, Ordering::*},
     spin,
 };
 
 #[derive(Debug)]
-pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
+pub struct Alloc<const FREE_LISTS: usize> {
     /// Minimum allocateable page size in bytes.
     ///
     /// Free blocks on `free_lists[0]` are one page of this size each. For each
@@ -38,10 +35,13 @@ pub struct Alloc<L = [spin::Mutex<List<Free>>; 32]> {
     /// Total size of the heap.
     heap_size: AtomicUsize,
 
+    /// Currently allocated size.
+    allocated_size: AtomicUsize,
+
     /// Array of free lists by "order". The order of an block is the number
     /// of times the minimum page size must be doubled to reach that block's
     /// size.
-    free_lists: L,
+    free_lists: [spin::Mutex<List<Free>>; FREE_LISTS],
 }
 
 type Result<T> = core::result::Result<T, AllocErr>;
@@ -54,53 +54,19 @@ pub struct Free {
 
 // ==== impl Alloc ===
 
-impl Alloc {
+impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
     #[cfg(not(loom))]
-    pub const fn new_default(min_size: usize) -> Self {
-        Self::new(
-            min_size,
-            // haha this is cool and fun
-            [
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-                spin::Mutex::new(List::new()),
-            ],
-        )
-    }
-}
+    pub const fn new(mut min_size: usize) -> Self {
+        // clippy doesn't like interior mutable items in `const`s, because
+        // mutating an instance of the `const` value will not mutate the const.
+        // that is the *correct* behavior here, as the const is used just as an
+        // array initializer; every time it's referenced, it *should* produce a
+        // new value. therefore, this warning is incorrect in this case.
+        //
+        // see https://github.com/rust-lang/rust-clippy/issues/7665
+        #[allow(clippy::declare_interior_mutable_const)]
+        const ONE_FREE_LIST: spin::Mutex<List<Free>> = spin::Mutex::new(List::new());
 
-impl<L> Alloc<L> {
-    #[cfg(not(loom))]
-    pub const fn new(mut min_size: usize, free_lists: L) -> Self {
         // ensure we don't split memory into regions too small to fit the free
         // block header in them.
         let free_block_size = mem::size_of::<Free>();
@@ -117,7 +83,8 @@ impl<L> Alloc<L> {
             vm_offset: AtomicUsize::new(0),
             min_size_log2: mycelium_util::math::usize_const_log2_ceil(min_size),
             heap_size: AtomicUsize::new(0),
-            free_lists,
+            allocated_size: AtomicUsize::new(0),
+            free_lists: [ONE_FREE_LIST; FREE_LISTS],
         }
     }
 
@@ -132,9 +99,14 @@ impl<L> Alloc<L> {
         self.min_size
     }
 
-    /// Returns the current amount of allocatable memory, in bytes.
-    pub fn free_size(&self) -> usize {
+    /// Returns the total size of the allocator (allocated and free), in bytes.
+    pub fn total_size(&self) -> usize {
         self.heap_size.load(Acquire)
+    }
+
+    /// Returns the currently allocated size in bytes.
+    pub fn allocated_size(&self) -> usize {
+        self.allocated_size.load(Acquire)
     }
 
     /// Returns the base virtual memory offset.
@@ -159,7 +131,7 @@ impl<L> Alloc<L> {
 
         // Round up to the heap's minimum allocateable size.
         if size < self.min_size {
-            tracing::warn!(
+            tracing::trace!(
                 size,
                 min_size = self.min_size,
                 layout.size = layout.size(),
@@ -212,10 +184,7 @@ impl<L> Alloc<L> {
     }
 }
 
-impl<L> Alloc<L>
-where
-    L: AsRef<[spin::Mutex<List<Free>>]>,
-{
+impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
     pub fn dump_free_lists(&self) {
         for (order, list) in self.free_lists.as_ref().iter().enumerate() {
             let _span =
@@ -247,8 +216,7 @@ where
         while let Some(mut region) = next_region.take() {
             let size = region.size();
             let base = region.base_addr();
-            let _span = tracing::trace_span!("adding_region", size, ?base).entered();
-            tracing::info!(region.size = size, region.base_addr = ?base, "adding region");
+            let _span = tracing::debug_span!("adding_region", size, ?base).entered();
 
             // Is the region aligned on the heap's minimum page size? If not, we
             // need to align it.
@@ -336,6 +304,7 @@ where
                 // it before the first word is written to.
                 block.make_busy();
                 tracing::trace!(?block, "made busy");
+                self.allocated_size.fetch_add(block.size(), Release);
                 return Some(block.into());
             }
         }
@@ -348,15 +317,14 @@ where
         tracing::trace!(?min_order);
         let min_order = min_order.ok_or_else(AllocErr::oom)?;
 
-        let size = match self.size_for(layout) {
-            Some(size) => size,
+        let Some(size) = self.size_for(layout) else {
             // XXX(eliza): is it better to just leak it?
-            None => panic!(
+            panic!(
                 "couldn't determine the correct layout for an allocation \
                 we previously allocated successfully, what the actual fuck!\n \
                 addr={:?}; layout={:?}; min_order={}",
                 paddr, layout, min_order,
-            ),
+            )
         };
 
         // Construct a new free block.
@@ -384,6 +352,7 @@ where
                 // free list.
                 free_list.push_front(block);
                 tracing::trace!("deallocated block");
+                self.allocated_size.fetch_sub(size, Release);
                 return Ok(());
             }
         }
@@ -436,12 +405,12 @@ where
             block.addr = ?block,
             block.order = order,
             block.size = size,
-            "calculating buddy..."
+            "calculating buddy"
         );
 
         // Find the relative offset of `block` from the base of the heap.
         let rel_offset = block.as_ptr() as usize - base;
-        let buddy_offset = rel_offset ^ size;
+        let buddy_offset = rel_offset ^ (1 << order);
         let buddy = (base + buddy_offset) as *mut Free;
         tracing::trace!(
             block.rel_offset = fmt::hex(rel_offset),
@@ -468,7 +437,13 @@ where
         //
         // `is_maybe_free` returns a *hint* --- if it returns `false`, we know
         // the block is in use, so we don't have to remove it from the free list.
-        if unsafe { buddy.as_ref().is_maybe_free() } {
+        let block = unsafe { buddy.as_ref() };
+        if block.is_maybe_free() {
+            tracing::trace!(
+                buddy.block = ?block,
+                buddy.addr = ?buddy, "trying to remove buddy..."
+            );
+            debug_assert_eq!(block.size(), size, "buddy block did not have correct size");
             // Okay, now try to remove the buddy from its free list. If it's not
             // free, this will return `None`.
             return free_list.remove(buddy);
@@ -503,9 +478,8 @@ where
     }
 }
 
-unsafe impl<S, L> page::Alloc<S> for Alloc<L>
+unsafe impl<S, const FREE_LISTS: usize> page::Alloc<S> for Alloc<FREE_LISTS>
 where
-    L: AsRef<[spin::Mutex<List<Free>>]>,
     S: Size + fmt::Display,
 {
     /// Allocate a range of at least `len` pages.
@@ -523,8 +497,7 @@ where
 
         debug_assert!(
             size.as_usize().is_power_of_two(),
-            "page size must be a power of 2; size={}",
-            size
+            "page size must be a power of 2; size={size}",
         );
 
         let actual_len = if len.is_power_of_two() {
@@ -548,10 +521,7 @@ where
 
         debug_assert!(
             total_size.is_power_of_two(),
-            "total size of page range must be a power of 2; total_size={} size={} len={}",
-            total_size,
-            size,
-            actual_len
+            "total size of page range must be a power of 2; total_size={total_size} size={size} len={actual_len}",
         );
 
         #[cfg(debug_assertions)]
@@ -622,7 +592,7 @@ where
     }
 }
 
-unsafe impl GlobalAlloc for Alloc {
+unsafe impl<const FREE_LISTS: usize> GlobalAlloc for Alloc<FREE_LISTS> {
     #[tracing::instrument(level = "trace", skip(self))]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         self.alloc_inner(layout)
@@ -636,8 +606,7 @@ unsafe impl GlobalAlloc for Alloc {
         let addr = match (ptr as usize).checked_sub(self.offset()) {
             Some(addr) => addr,
             None => panic!(
-                "pointer is not to a kernel VAddr! ptr={:p}; offset={:x}",
-                ptr,
+                "pointer is not to a kernel VAddr! ptr={ptr:p}; offset={:x}",
                 self.offset()
             ),
         };
@@ -646,8 +615,7 @@ unsafe impl GlobalAlloc for Alloc {
         match self.dealloc_inner(addr, layout) {
             Ok(_) => {}
             Err(_) => panic!(
-                "deallocating {:?} with layout {:?} failed! this shouldn't happen!",
-                addr, layout
+                "deallocating {addr:?} with layout {layout:?} failed! this shouldn't happen!",
             ),
         }
     }
@@ -698,13 +666,18 @@ impl Free {
         debug_assert_eq!(
             self.magic,
             Self::MAGIC,
-            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
-            self,
+            "MY MAGIC WAS MESSED UP! self={self:#?}, self.magic={:#x}",
             self.magic
+        );
+        debug_assert!(
+            !self.links.is_linked(),
+            "tried to split a block while it was on a free list!"
         );
 
         let new_meta = self.meta.split_back(size)?;
         debug_assert_ne!(new_meta, self.meta);
+        debug_assert_eq!(new_meta.size(), size);
+        debug_assert_eq!(self.meta.size(), size);
         tracing::trace!(?new_meta, ?self.meta, "split meta");
 
         let new_free = unsafe { Self::new(new_meta, offset) };
@@ -717,18 +690,19 @@ impl Free {
         debug_assert_eq!(
             self.magic,
             Self::MAGIC,
-            "MY MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
-            self,
+            "MY MAGIC WAS MESSED UP! self={self:#?}, self.magic={:#x}",
             self.magic
         );
         debug_assert_eq!(
-            self.magic,
+            other.magic,
             Self::MAGIC,
-            "THEIR MAGIC WAS MESSED UP! self={:#?}, self.magic={:#x}",
-            self,
-            self.magic
+            "THEIR MAGIC WAS MESSED UP! other={other:#?}, other.magic={:#x}",
+            other.magic
         );
-        assert!(!other.links.is_linked());
+        assert!(
+            !other.links.is_linked(),
+            "tried to merge with a block that's already linked! other={other:?}",
+        );
         self.meta.merge(&mut other.meta)
     }
 
@@ -773,16 +747,24 @@ unsafe impl Linked<list::Links<Self>> for Free {
 
     #[inline]
     unsafe fn links(ptr: ptr::NonNull<Self>) -> ptr::NonNull<list::Links<Self>> {
-        ptr::NonNull::from(&ptr.as_ref().links)
+        // Safety: using `ptr::addr_of_mut!` avoids creating a temporary
+        // reference, which stacked borrows dislikes.
+        let links = ptr::addr_of_mut!((*ptr.as_ptr()).links);
+        // Safety: it's fine to use `new_unchecked` here; if the pointer that we
+        // offset to the `links` field is not null (which it shouldn't be, as we
+        // received it as a `NonNull`), the offset pointer should therefore also
+        // not be null.
+        ptr::NonNull::new_unchecked(links)
     }
 }
 
 impl fmt::Debug for Free {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { magic, links, meta } = self;
         f.debug_struct("Free")
-            .field("magic", &fmt::hex(&self.magic))
-            .field("links", &self.links)
-            .field("meta", &self.meta)
+            .field("magic", &fmt::hex(magic))
+            .field("links", links)
+            .field("meta", meta)
             .finish()
     }
 }

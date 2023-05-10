@@ -7,7 +7,7 @@ authors = [
 ]
 description = "Async runtime construction kit"
 repository = "https://github.com/hawkw/mycelium"
-documentation = "https://docs.rs/maitake"
+documentation = "https://mycelium.elizas.website/maitake"
 homepage = "https://mycelium.elizas.website"
 license = "MIT"
 readme = "README.md"
@@ -32,25 +32,37 @@ links = "maitake"
 default = ["alloc"]
 alloc = ["cordyceps/alloc"]
 no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad"]
+core-error = []
 
 [dependencies]
 mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }
-mycotest = { path = "../mycotest", default-features = false }
 cordyceps = { path = "../cordyceps" }
 pin-project = "1"
+portable-atomic = "1.2"
 
-[dependencies.tracing_02]
+[dependencies.tracing-02]
 package = "tracing"
 default_features = false
 git = "https://github.com/tokio-rs/tracing"
+optional = true
+
+[dependencies.tracing-01]
+package = "tracing"
+default_features = false
+version = "0.1.35"
+optional = true
 
 [dev-dependencies]
 futures-util = "0.3"
 futures = "0.3"
+tokio-test = "0.4"
 
 [target.'cfg(not(loom))'.dev-dependencies]
-tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = ["ansi", "fmt"] }
+tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["ansi", "fmt", "env-filter"] }
+tracing-02 = { package = "tracing", git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["std"] }
+console-subscriber = "0.1.6"
+proptest = "1"
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.5.5", features = ["futures", "checkpoint"] }
@@ -60,3 +72,7 @@ tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", fe
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name = "tokio-console"
+required-features = ["tracing-01"]

@@ -11,15 +11,18 @@ license = "MIT"
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3", features = ["derive", "env"] }
+clap = { version = "4.1.8", features = ["derive", "env"] }
 tracing = "0.1.23"
-tracing-subscriber = { version = "0.3.1", features = ["env-filter"] }
+tracing-subscriber = "0.3.16"
 tracing-error = "0.2"
-color-eyre = "0.5"
-bootloader-locator = "0.0.4"
+color-eyre = "0.6"
+bootloader = "0.11.2"
+bootloader-boot-config = "0.11.3"
 locate-cargo-manifest = "0.2"
 wait-timeout = "0.2"
-owo-colors = "2.0.0"
+owo-colors = "3.5.0"
 atty = "0.2"
 mycotest = { path = "../mycotest", features = ["alloc"] }
 heck = "0.3.3"
+# used for UEFI booting in QEMU
+ovmf-prebuilt = "0.1.0-alpha.1"

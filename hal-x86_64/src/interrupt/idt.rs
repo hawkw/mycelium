@@ -1,6 +1,6 @@
+use super::apic::IoApic;
 use crate::{cpu, segment};
-use core::{arch::asm, fmt};
-use mycelium_util::bits;
+use mycelium_util::{bits, fmt};
 
 #[repr(C)]
 #[repr(align(16))]
@@ -12,9 +12,9 @@ pub struct Idt {
 #[repr(C)]
 pub struct Descriptor {
     offset_low: u16,
-    pub segment: segment::Selector,
+    segment: segment::Selector,
     ist_offset: u8,
-    pub attrs: Attrs,
+    attrs: Attrs,
     offset_mid: u16,
     offset_hi: u32,
     _zero: u32,
@@ -44,8 +44,8 @@ impl Descriptor {
         }
     }
 
-    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Attrs {
-        self.segment = segment::code_segment();
+    pub(crate) fn set_handler(&mut self, handler: *const ()) -> &mut Self {
+        self.segment = segment::Selector::current_cs();
         let addr = handler as u64;
         self.offset_low = addr as u16;
         self.offset_mid = (addr >> 16) as u16;
@@ -53,7 +53,23 @@ impl Descriptor {
         self.attrs
             .set_present(true)
             .set_32_bit(true)
-            .set_gate_kind(GateKind::Interrupt)
+            .set_gate_kind(GateKind::Interrupt);
+        self
+    }
+
+    /// Sets the descriptor's [Interrupt Stack Table][ist] offset.
+    ///
+    /// [ist]: https://en.wikipedia.org/wiki/Task_state_segment#Inner-level_stack_pointers
+    pub(crate) fn set_ist_offset(&mut self, ist_offset: u8) -> &mut Self {
+        self.ist_offset = ist_offset;
+        self
+    }
+
+    /// Mutably borrows the descriptor's [attributes](Attrs).
+    #[inline]
+    #[must_use]
+    pub fn attrs_mut(&mut self) -> &mut Attrs {
+        &mut self.attrs
     }
 }
 
@@ -86,7 +102,7 @@ impl bits::FromBits<u8> for GateKind {
 // === impl Idt ===
 
 impl Idt {
-    const NUM_VECTORS: usize = 256;
+    pub(super) const NUM_VECTORS: usize = 256;
 
     /// Divide-by-zero interrupt (#D0)
     pub const DIVIDE_BY_ZERO: usize = 0;
@@ -136,6 +152,22 @@ impl Idt {
 
     pub const SECURITY_EXCEPTION: usize = 30;
 
+    /// Chosen by fair die roll, guaranteed to be random.
+    pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
+
+    pub const PIC_PIT_TIMER: usize = Self::PIC_BIG_START;
+    pub const PIC_PS2_KEYBOARD: usize = Self::PIC_BIG_START + 1;
+
+    pub(super) const LOCAL_APIC_TIMER: usize = (Self::NUM_VECTORS - 2);
+    pub(super) const LOCAL_APIC_SPURIOUS: usize = (Self::NUM_VECTORS - 1);
+    pub(super) const PIC_BIG_START: usize = 0x20;
+    pub(super) const PIC_LITTLE_START: usize = 0x28;
+    // put the IOAPIC right after the PICs
+    pub(super) const IOAPIC_START: usize = 0x30;
+    pub(super) const IOAPIC_PIT_TIMER: usize = Self::IOAPIC_START + IoApic::PIT_TIMER_IRQ as usize;
+    pub(super) const IOAPIC_PS2_KEYBOARD: usize =
+        Self::IOAPIC_START + IoApic::PS2_KEYBOARD_IRQ as usize;
+
     pub const fn new() -> Self {
         Self {
             descriptors: [Descriptor::null(); Self::NUM_VECTORS],
@@ -143,19 +175,41 @@ impl Idt {
     }
 
     pub(super) fn set_isr(&mut self, vector: usize, isr: *const ()) {
-        let attrs = self.descriptors[vector].set_handler(isr);
-        tracing::debug!(vector, isr = ?isr, ?attrs, "set isr");
+        let descr = self.descriptors[vector].set_handler(isr);
+        if vector == Self::DOUBLE_FAULT {
+            descr.set_ist_offset(Self::DOUBLE_FAULT_IST_OFFSET as u8);
+        }
+        tracing::debug!(vector, ?isr, ?descr, "set isr");
     }
 
     pub fn load(&'static self) {
-        let ptr = crate::cpu::DtablePtr::new(self);
-        unsafe { asm!("lidt [{0}]", in(reg) &ptr) }
+        unsafe {
+            // Safety: the `'static` bound ensures the IDT isn't going away
+            // unless you did something really evil.
+            self.load_raw()
+        }
+    }
+
+    /// # Safety
+    ///
+    /// The referenced IDT must be valid for the `'static` lifetime.
+    pub unsafe fn load_raw(&self) {
+        let ptr = cpu::DtablePtr::new_unchecked(self);
+        tracing::debug!(?ptr, "loading IDT");
+        cpu::intrinsics::lidt(ptr);
+        tracing::debug!("IDT loaded!");
     }
 }
 
 impl fmt::Debug for Idt {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_list().entries(self.descriptors[..].iter()).finish()
+        let Self { descriptors } = self;
+        let descriptors = descriptors[..]
+            .iter()
+            .filter(|&descr| descr != &Descriptor::null())
+            .enumerate()
+            .map(|(i, descr)| (fmt::hex(i), descr));
+        f.debug_map().entries(descriptors).finish()
     }
 }
 
@@ -163,13 +217,22 @@ impl fmt::Debug for Idt {
 
 impl fmt::Debug for Descriptor {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let Self {
+            offset_low,
+            segment,
+            ist_offset,
+            attrs,
+            offset_mid,
+            offset_hi,
+            _zero: _,
+        } = self;
         f.debug_struct("Descriptor")
-            .field("offset_low", &format_args!("{:#x}", self.offset_low))
-            .field("segment", &self.segment)
-            .field("ist_offset", &format_args!("{:#x}", self.ist_offset))
-            .field("attrs", &self.attrs)
-            .field("offset_mid", &format_args!("{:#x}", self.offset_mid))
-            .field("offset_high", &format_args!("{:#x}", self.offset_hi))
+            .field("offset_low", &format_args!("{offset_low:#x}"))
+            .field("segment", segment)
+            .field("ist_offset", &format_args!("{ist_offset:#x}"))
+            .field("attrs", attrs)
+            .field("offset_mid", &format_args!("{offset_mid:#x}"))
+            .field("offset_high", &format_args!("{offset_hi:#x}"))
             .finish()
     }
 }
@@ -214,42 +277,6 @@ impl Attrs {
     }
 }
 
-// impl fmt::Debug for Attrs {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         f.debug_struct("Attrs")
-//             .field("gate_kind", &self.gate_kind())
-//             .field("ring", &self.ring())
-//             .field("is_32_bit", &self.is_32_bit())
-//             .field("is_present", &self.is_present())
-//             .field("bits", &format_args!("{:b}", self))
-//             .finish()
-//     }
-// }
-
-// impl fmt::Binary for Attrs {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         f.debug_tuple("Attrs")
-//             .field(&format_args!("{:#08b}", self.0))
-//             .finish()
-//     }
-// }
-
-impl fmt::UpperHex for Attrs {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Attrs")
-            .field(&format_args!("{:#X}", self.0))
-            .finish()
-    }
-}
-
-impl fmt::LowerHex for Attrs {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Attrs")
-            .field(&format_args!("{:#x}", self.0))
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,9 +309,8 @@ mod tests {
         // Z: this bit is 0 for a 64-bit IDT. for a 32-bit IDT, this may be 1 for task gates.
         // Gate Type: 32-bit interrupt gate is 0b1110. that's just how it is.
         assert_eq!(
-            present_32bit_interrupt.0 as u8, 0b1000_1110,
-            "\n attrs: {:#?}",
-            present_32bit_interrupt
+            present_32bit_interrupt.0, 0b1000_1110,
+            "\n attrs: {present_32bit_interrupt:#?}",
         );
     }
 
@@ -305,6 +331,6 @@ mod tests {
             0x00, 0x00, 0x00, 0x00,
         ];
 
-        assert_eq!(idt_bytes, &expected_idt, "\n entry: {:#?}", idt_entry);
+        assert_eq!(idt_bytes, &expected_idt, "\n entry: {idt_entry:#?}",);
     }
 }

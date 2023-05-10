@@ -1,19 +1,19 @@
 use self::size::*;
 use crate::{PAddr, VAddr};
 use core::{
-    fmt,
     marker::PhantomData,
     ops,
     ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
+pub use hal_core::mem::page;
 use hal_core::{
     mem::page::{
-        self, Map, Page, Size, StaticSize, TranslateAddr, TranslateError, TranslatePage,
-        TranslateResult,
+        Map, Page, Size, StaticSize, TranslateAddr, TranslateError, TranslatePage, TranslateResult,
     },
     Address,
 };
+use mycelium_util::fmt;
 pub const MIN_PAGE_SIZE: usize = Size4Kb::SIZE;
 const ENTRIES: usize = 512;
 
@@ -93,8 +93,18 @@ where
     VAddr: From<A>,
 {
     let vaddr = VAddr::from(it);
-    let paddr = vaddr.as_usize() + vm_offset().as_usize();
+    let paddr = vaddr.as_usize() - vm_offset().as_usize();
     PAddr::from_u64(paddr as u64)
+}
+
+#[inline(always)]
+pub fn kernel_vaddr_of<A>(it: A) -> VAddr
+where
+    PAddr: From<A>,
+{
+    let paddr = PAddr::from(it);
+    let vaddr = paddr.as_usize() + vm_offset().as_usize();
+    VAddr::from_usize(vaddr)
 }
 
 /// This value should only be set once, early in the kernel boot process before
@@ -138,7 +148,7 @@ where
         &mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> page::Handle<'_, Size4Kb, Self::Entry> {
         // XXX(eliza): most of this fn is *internally* safe and should be
         // factored out into a safe function...
@@ -303,16 +313,15 @@ impl<R: level::Recursive> PageTable<R> {
     }
 
     #[inline]
-    #[tracing::instrument(skip(self))]
     fn next_table_mut<S: Size>(&mut self, idx: VirtPage<S>) -> Option<&mut PageTable<R::Next>> {
-        let span = tracing::debug_span!(
+        let _span = tracing::debug_span!(
             "next_table_mut",
             ?idx,
             self.level = %R::NAME,
             next.level = %<R::Next>::NAME,
             self.addr = ?&self as *const _,
-        );
-        let _e = span.enter();
+        )
+        .entered();
         let entry = &mut self[idx];
         tracing::trace!(?entry);
         if !entry.is_present() {
@@ -346,15 +355,11 @@ impl<R: level::Recursive> PageTable<R> {
     fn create_next_table<S: Size>(
         &mut self,
         idx: VirtPage<S>,
-        alloc: &mut impl page::Alloc<Size4Kb>,
+        alloc: &impl page::Alloc<Size4Kb>,
     ) -> &mut PageTable<R::Next> {
         let span = tracing::trace_span!("create_next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
         let _e = span.enter();
-        for (idx, entry) in self.entries[..].iter().enumerate() {
-            if entry.is_present() {
-                tracing::trace!(idx, ?entry);
-            }
-        }
+
         if self.next_table(idx).is_some() {
             tracing::trace!("next table already exists");
             return self
@@ -384,30 +389,24 @@ impl<R: level::Recursive> PageTable<R> {
         };
 
         tracing::trace!(?frame, "allocated page table frame");
-
-        let table = PageTable::<R::Next>::new(frame);
         entry
-            .set_next_table(table)
             .set_present(true)
-            .set_writable(true);
-        tracing::trace!(?entry, "set entry to point at new page table");
-        unsafe { &mut *table }
+            .set_writable(true)
+            .set_phys_addr(frame.base_addr());
+        tracing::trace!(?entry, ?frame, "set page table entry to point to frame");
+
+        self.next_table_mut(idx)
+            .expect("we should have just created this table!")
+            .zero()
     }
 }
 
 impl<L: Level> PageTable<L> {
-    pub fn zero(&mut self) {
+    pub fn zero(&mut self) -> &mut Self {
         for e in &mut self.entries[..] {
             *e = Entry::none();
         }
-    }
-
-    fn new(frame: Page<PAddr, Size4Kb>) -> *mut Self {
-        let this = frame.base_addr().as_ptr::<Self>();
-        unsafe {
-            (*this).zero();
-        }
-        this
+        self
     }
 }
 
@@ -557,12 +556,6 @@ impl<L: level::PointsToPage> Entry<L> {
     fn set_phys_page(&mut self, page: Page<PAddr, L::Size>) -> &mut Self {
         self.set_phys_addr(page.base_addr());
         self
-    }
-}
-
-impl<L: level::Recursive> Entry<L> {
-    fn set_next_table(&mut self, table: *mut PageTable<L::Next>) -> &mut Self {
-        self.set_phys_addr(PAddr::from_u64(table as u64))
     }
 }
 
@@ -746,8 +739,8 @@ pub trait Level {
 impl<L: Level> fmt::Debug for PageTable<L> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("PageTable")
-            .field("level", &format_args!("{}", L::NAME))
-            .field("addr", &format_args!("{:p}", self))
+            .field("level", &fmt::display(L::NAME))
+            .field("addr", &fmt::ptr(self))
             .finish()
     }
 }
@@ -903,15 +896,13 @@ mycotest::decl_test! {
     fn basic_map() -> mycotest::TestResult {
         let mut ctrl = PageCtrl::current();
         // We shouldn't need to allocate page frames for this test.
-        let mut frame_alloc = page::EmptyAlloc::default();
+        let frame_alloc = page::EmptyAlloc::default();
 
         let frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
         let page = Page::containing_fixed(VAddr::from_usize(0));
 
         let page = unsafe {
-            let mut flags = ctrl.map_page(page, frame, &mut frame_alloc);
-            flags.set_writable(true);
-            flags.commit()
+            ctrl.map_page(page, frame, &frame_alloc).set_writable(true).commit()
         };
         tracing::info!(?page, "page mapped!");
 
@@ -929,12 +920,10 @@ mycotest::decl_test! {
         let mut ctrl = PageCtrl::current();
 
         // We shouldn't need to allocate page frames for this test.
-        let mut frame_alloc = page::EmptyAlloc::default();
+        let frame_alloc = page::EmptyAlloc::default();
         let actual_frame = Page::containing_fixed(PAddr::from_usize(0xb8000));
         unsafe {
-            let mut flags = ctrl.identity_map(actual_frame, &mut frame_alloc);
-            flags.set_writable(true);
-            flags.commit()
+            ctrl.identity_map(actual_frame, &frame_alloc).set_writable(true).commit()
         };
 
         let page = VirtPage::<Size4Kb>::containing_fixed(VAddr::from_usize(0xb8000));

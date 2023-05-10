@@ -1,6 +1,6 @@
 [package]
 name = "cordyceps"
-version = "0.2.1"
+version = "0.3.1"
 edition = "2021"
 description = "Mycelium intrusive data structures."
 authors = ["Eliza Weisman <eliza@elizas.website>"]
@@ -37,6 +37,7 @@ tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = [
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.5.5"
+tracing = { version = "0.1" }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.5.5", features = ["futures", "checkpoint"] }

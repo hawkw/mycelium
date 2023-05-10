@@ -1,5 +1,6 @@
 use crate::{Address, PAddr, VAddr};
-use core::{cmp, fmt, ops, slice};
+use core::{cmp, ops, slice};
+use mycelium_util::fmt;
 
 pub trait Size: Copy + Eq + PartialEq + fmt::Display {
     /// Returns the size (in bytes) of this page.
@@ -97,7 +98,7 @@ where
         &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry>;
 
     fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Handle<'_, S, Self::Entry>;
@@ -122,7 +123,7 @@ where
     fn identity_map(
         &mut self,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry> {
         let base_paddr = phys.base_addr().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
@@ -172,7 +173,7 @@ where
         virt: PageRange<VAddr, S>,
         phys: PageRange<PAddr, S>,
         mut set_flags: F,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
         F: FnMut(&mut Handle<'_, S, Self::Entry>),
@@ -256,7 +257,7 @@ where
         &mut self,
         phys: PageRange<PAddr, S>,
         set_flags: F,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
         F: FnMut(&mut Handle<'_, S, Self::Entry>),
@@ -284,7 +285,7 @@ where
         &mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry> {
         (*self).map_page(virt, phys, frame_alloc)
     }
@@ -303,7 +304,7 @@ where
     fn identity_map(
         &mut self,
         phys: Page<PAddr, S>,
-        frame_alloc: &mut A,
+        frame_alloc: &A,
     ) -> Handle<'_, S, Self::Entry> {
         (*self).identity_map(phys, frame_alloc)
     }
@@ -317,7 +318,7 @@ pub trait TranslateAddr {
     fn translate_addr(&self, addr: VAddr) -> Option<PAddr>;
 }
 
-pub trait PageFlags<S: Size> {
+pub trait PageFlags<S: Size>: fmt::Debug {
     /// Set whether or not this page is writable.
     ///
     /// # Safety
@@ -531,9 +532,10 @@ impl<A: Address, S: StaticSize> cmp::Ord for Page<A, S> {
 
 impl<A: fmt::Debug, S: Size + fmt::Display> fmt::Debug for Page<A, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { base, size } = self;
         f.debug_struct("Page")
-            .field("base", &self.base)
-            .field("size", &format_args!("{}", self.size))
+            .field("base", base)
+            .field("size", &format_args!("{size}"))
             .finish()
     }
 }
@@ -635,9 +637,10 @@ where
     S: Size + fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { start, end } = self;
         f.debug_struct("PageRange")
-            .field("start", &self.start)
-            .field("end", &self.end)
+            .field("start", start)
+            .field("end", end)
             .finish()
     }
 }
@@ -656,8 +659,9 @@ unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
 
 impl<S: Size + fmt::Display> fmt::Debug for NotAligned<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { size } = self;
         f.debug_struct("NotAligned")
-            .field("size", &format_args!("{}", self.size))
+            .field("size", &fmt::display(size))
             .finish()
     }
 }
@@ -679,7 +683,7 @@ impl<S: Size + fmt::Display> fmt::Debug for TranslateError<S> {
             TranslateError::NotMapped => f.debug_tuple("TranslateError::NotMapped").finish(),
             TranslateError::WrongSize(s) => f
                 .debug_tuple("TranslateError::WrongSize")
-                .field(&format_args!("{}", s))
+                .field(&format_args!("{s}"))
                 .finish(),
         }
     }
@@ -688,7 +692,7 @@ impl<S: Size + fmt::Display> fmt::Debug for TranslateError<S> {
 impl<S: Size> fmt::Display for TranslateError<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            TranslateError::Other(msg) => write!(f, "error translating page/address: {}", msg),
+            TranslateError::Other(msg) => write!(f, "error translating page/address: {msg}"),
             TranslateError::NotMapped => f.pad("error translating page/address: not mapped"),
             TranslateError::WrongSize(_) => write!(
                 f,
@@ -750,7 +754,7 @@ where
     /// page table (i.e. it has multiple page table entries pointing to it) may
     /// also cause undefined behavior.
     #[inline]
-    pub unsafe fn set_writable(&mut self, writable: bool) -> &mut Self {
+    pub unsafe fn set_writable(self, writable: bool) -> Self {
         self.entry.set_writable(writable);
         self
     }
@@ -764,7 +768,7 @@ where
     /// undefined behavior. Also, this can be used to execute the contents of
     /// arbitrary memory, which (of course) is wildly unsafe.
     #[inline]
-    pub unsafe fn set_executable(&mut self, executable: bool) -> &mut Self {
+    pub unsafe fn set_executable(self, executable: bool) -> Self {
         self.entry.set_executable(executable);
         self
     }
@@ -775,7 +779,7 @@ where
     ///
     /// Manual control of page flags can be used to violate Rust invariants.
     #[inline]
-    pub unsafe fn set_present(&mut self, present: bool) -> &mut Self {
+    pub unsafe fn set_present(self, present: bool) -> Self {
         self.entry.set_present(present);
         self
     }
@@ -797,6 +801,11 @@ where
 
     #[inline]
     pub fn commit(self) -> Page<VAddr, S> {
+        tracing::debug!(
+            page = ?self.page,
+            entry = ?self.entry,
+            "commiting page table update"
+        );
         self.entry.commit(self.page);
         self.page
     }

@@ -1,5 +1,4 @@
-use maitake::{scheduler::Scheduler, sync::Mutex};
-use std::{future::Future, sync::Arc};
+use maitake::sync::Mutex;
 
 #[test]
 fn try_lock() {
@@ -16,58 +15,67 @@ fn try_lock() {
     assert!(lock3.is_some());
 }
 
-#[test]
-fn basically_works() {
-    const TASKS: usize = 10;
+// Tests which require `maitake`'s "alloc" feature flag.
+#[cfg(feature = "alloc")]
+mod alloc {
+    use super::*;
+    use maitake::scheduler::Scheduler;
+    use std::{future::Future, sync::Arc};
 
-    let scheduler = Scheduler::new();
-    let lock = Arc::new(Mutex::new(0));
+    #[test]
+    fn basically_works() {
+        const TASKS: usize = 10;
 
-    fn incr(lock: &Arc<Mutex<usize>>) -> impl Future + Send + 'static {
-        let lock = lock.clone();
-        async move {
-            let mut guard = lock.lock().await;
-            *guard += 1;
+        let scheduler = Scheduler::new();
+        let lock = Arc::new(Mutex::new(0));
+
+        fn incr(lock: &Arc<Mutex<usize>>) -> impl Future<Output = ()> + Send + 'static {
+            let lock = lock.clone();
+            async move {
+                let mut guard = lock.lock().await;
+                *guard += 1;
+            }
         }
-    }
 
-    for _ in 0..TASKS {
-        scheduler.spawn(incr(&lock));
-    }
-
-    let mut completed = 0;
-    while completed < TASKS {
-        let tick = scheduler.tick();
-        completed += tick.completed;
-    }
-
-    assert_eq!(*lock.try_lock().unwrap(), TASKS);
-}
-
-#[test]
-fn lock_owned() {
-    const TASKS: usize = 10;
-
-    let scheduler = Scheduler::new();
-    let lock = Arc::new(Mutex::new(0));
-
-    fn incr(lock: &Arc<Mutex<usize>>) -> impl Future + Send + 'static {
-        let lock = lock.clone().lock_owned();
-        async move {
-            let mut guard = lock.await;
-            *guard += 1;
+        for _ in 0..TASKS {
+            scheduler.spawn(incr(&lock));
         }
+
+        let mut completed = 0;
+        while completed < TASKS {
+            let tick = scheduler.tick();
+            completed += tick.completed;
+        }
+
+        assert_eq!(*lock.try_lock().unwrap(), TASKS);
     }
 
-    for _ in 0..TASKS {
-        scheduler.spawn(incr(&lock));
-    }
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn lock_owned() {
+        const TASKS: usize = 10;
 
-    let mut completed = 0;
-    while completed < TASKS {
-        let tick = scheduler.tick();
-        completed += tick.completed;
-    }
+        let scheduler = Scheduler::new();
+        let lock = Arc::new(Mutex::new(0));
 
-    assert_eq!(*lock.try_lock().unwrap(), TASKS);
+        fn incr(lock: &Arc<Mutex<usize>>) -> impl Future<Output = ()> + Send + 'static {
+            let lock = lock.clone().lock_owned();
+            async move {
+                let mut guard = lock.await;
+                *guard += 1;
+            }
+        }
+
+        for _ in 0..TASKS {
+            scheduler.spawn(incr(&lock));
+        }
+
+        let mut completed = 0;
+        while completed < TASKS {
+            let tick = scheduler.tick();
+            completed += tick.completed;
+        }
+
+        assert_eq!(*lock.try_lock().unwrap(), TASKS);
+    }
 }

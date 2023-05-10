@@ -2,16 +2,24 @@
 name = "hal-x86_64"
 version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>", "iximeow <git@iximeow.net>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 
 [features]
+default = ["alloc"]
 log = ["tracing/log"]
+alloc = []
 
 [dependencies]
+acpi = "4.1.1"
 hal-core = { path = "../hal-core" }
 mycelium-util = { path = "../util" }
 mycelium-trace = { path = "../trace" }
 mycotest = { path = "../mycotest"}
+rand_core = { version = "0.6.4", default_features = false, optional = true }
+raw-cpuid = "10.6.0"
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }
-volatile = { version = "0.4.4", features = ["unstable"] }
+volatile = { version = "0.4.5", features = ["unstable"] }
+
+[dev-dependencies]
+proptest = "1"

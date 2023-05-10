@@ -172,10 +172,16 @@ impl fmt::Write for Buffer {
 
 impl fmt::Debug for Buffer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Buffer")
-            .field("row", &self.row)
-            .field("col", &self.col)
-            .field("color", &self.color)
+        let Self {
+            row,
+            col,
+            color,
+            buf: _,
+        } = self;
+        f.debug_struct("vga::Buffer")
+            .field("row", row)
+            .field("col", col)
+            .field("color", color)
             .field("buf", &format_args!("[..]"))
             .finish()
     }

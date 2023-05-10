@@ -1,9 +1,11 @@
-//! An asynchronous mutual exclusion lock.
+//! An asynchronous [mutual exclusion lock].
 //!
 //! See the documentation on the [`Mutex`] type for details.
+//!
+//! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
 use crate::{
     loom::cell::{MutPtr, UnsafeCell},
-    wait::queue::{self, WaitQueue},
+    sync::wait_queue::{self, WaitQueue},
 };
 use core::{
     future::Future,
@@ -13,6 +15,9 @@ use core::{
 };
 use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
+
+#[cfg(test)]
+mod tests;
 
 /// An asynchronous [mutual exclusion lock][mutex] for protecting shared data.
 ///
@@ -73,7 +78,7 @@ use pin_project::pin_project;
 /// [`mycelium_util::sync::spin::Mutex`]: https://mycelium.elizas.website/mycelium_util/sync/spin/struct.mutex
 /// [`futures-util`]: https://crates.io/crate/futures-util
 /// [`futures_util::lock::Mutex`]: https://docs.rs/futures-util/latest/futures_util/lock/struct.Mutex.html
-/// [intrusive linked list]: crate::wait::WaitQueue#implementation-notes
+/// [intrusive linked list]: crate::sync::WaitQueue#implementation-notes
 /// [poisoning]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html#poisoning
 // for some reason, intra-doc links don't work in footnotes?
 /// [storage]: ../task/trait.Storage.html
@@ -113,9 +118,10 @@ pub struct MutexGuard<'a, T: ?Sized> {
 /// [future]: core::future::Future
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[pin_project]
+#[derive(Debug)]
 pub struct Lock<'a, T: ?Sized> {
     #[pin]
-    wait: queue::Wait<'a>,
+    wait: wait_queue::Wait<'a>,
     mutex: &'a Mutex<T>,
 }
 
@@ -236,9 +242,10 @@ impl<T: ?Sized> Mutex<T> {
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { data: _, wait } = self;
         f.debug_struct("Mutex")
             .field("data", &fmt::opt(&self.try_lock()).or_else("<locked>"))
-            .field("wait", &self.wait)
+            .field("wait", wait)
             .finish()
     }
 }

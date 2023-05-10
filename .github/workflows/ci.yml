@@ -27,7 +27,6 @@ env:
   # don't emit giant backtraces in the CI logs.
   RUST_BACKTRACE: short
   # loom config
-  LOOM_MAX_PREEMPTIONS: 2
   LOOM_LOG: "mycelium=trace,cordyceps=trace,maitake=trace,debug"
 
 jobs:
@@ -50,16 +49,19 @@ jobs:
                 - 'cordyceps/**/*.rs'
                 - 'cordyceps/Cargo.toml'
                 - '.github/workflows/ci.yml'
+                - 'justfile'
             util:
               paths:
                 - 'util/**/*.rs'
                 - 'util/Cargo.toml'
                 - '.github/workflows/ci.yml'
+                - 'justfile'
             maitake:
               paths:
                 - 'maitake/**/*.rs'
                 - 'maitake/Cargo.toml'
                 - '.github/workflows/ci.yml'
+                - 'justfile'
 
   # run `cargo check` with the host target triple.
   check-host:
@@ -71,10 +73,19 @@ jobs:
     - name: install rust toolchain
       run: rustup show
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
-    - uses: actions/checkout@v2
-    - name: run cargo check
+    - uses: actions/checkout@v3
+    - name: run cargo check (debug)
       run: |
         cargo check \
+          --workspace \
+          --all-features \
+          --quiet \
+          --message-format=json |
+          cargo-action-fmt
+    - name: run cargo check (release)
+      run: |
+        cargo check \
+          --release \
           --workspace \
           --all-features \
           --quiet \
@@ -89,9 +100,28 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
     - name: run rustfmt
-      run: cargo fmt --check
+      run: cargo fmt --check --message-format=json | cargo-action-fmt
+
+  # are there any annoying clippy lints we ought to clean up?
+  clippy:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v3
+    - name: install Just
+      uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
+    - name: cargo clippy
+      run: just clippy
+
 
   # run host tests
   #
@@ -111,12 +141,15 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
-    - name: run host tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test
-        args: --all --all-features
+    - uses: actions/checkout@v3
+    - name: install Just
+      uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: cargo nextest run
+      run: just test-host
 
   # build a bootable image for the `x86_64-mycelium` target.
   build-x64:
@@ -127,11 +160,9 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: x86_64 boot image
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: build-x64
+      run: cargo build-x64
 
   # run kernel tests in QEMU for the `x86_64-mycelium` target.
   test-x64:
@@ -142,7 +173,7 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     # install QEMU
     - name: install qemu
@@ -152,9 +183,7 @@ jobs:
 
     # run kernel tests in QEMU
     - name: run tests
-      uses: actions-rs/cargo@v1.0.1
-      with:
-        command: test-x64
+      run: cargo test-x64
 
   # check that RustDoc builds
   docs:
@@ -164,18 +193,14 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - uses: olix0r/cargo-action-fmt@ee1ef42932e44794821dab57ef1bf7a73df8b21f
-    - name: run rustdoc
-      run: |
-        cargo doc \
-          --message-format=json \
-          --no-deps \
-          --all-features \
-          --document-private-items |
-          cargo-action-fmt
+    - name: install Just
+      uses: extractions/setup-just@v1
       env:
-        RUSTDOCFLAGS: "--cfg docsrs -Dwarnings"
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: run rustdoc
+      run: just check-docs
 
   ### cordyceps ###
 
@@ -188,11 +213,15 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
-    - name: run loom tests
-      run: cargo test --profile loom --lib -p cordyceps -- --nocapture --test-threads=1
+    - uses: actions/checkout@v3
+    - name: install Just
+      uses: extractions/setup-just@v1
       env:
-        RUSTFLAGS: "--cfg loom"
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: just loom cordyceps
 
   # run miri tests
   cordyceps_miri:
@@ -203,9 +232,15 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
-    - name: run miri tests
-      run: ./bin/miri -p cordyceps
+    - uses: actions/checkout@v3
+    - name: install Just
+      uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run Miri tests
+      run: just miri cordyceps
 
   ### maitake ###
 
@@ -218,11 +253,11 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: run tests
       # don't run doctests with `no-default-features`, as some of them
       # require liballoc.
-      run: cargo test -p maitake --no-default-features --tests --lib 
+      run: cargo test -p maitake --no-default-features --tests --lib
 
   # run loom tests
   maitake_loom:
@@ -233,11 +268,15 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
-    - name: run loom tests
-      run: cargo test --profile loom --lib -p maitake
+    - uses: actions/checkout@v3
+    - name: install Just
+      uses: extractions/setup-just@v1
       env:
-        RUSTFLAGS: "--cfg loom"
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: just loom maitake
 
   ### mycelium-util ###
 
@@ -250,8 +289,12 @@ jobs:
     steps:
     - name: install rust toolchain
       run: rustup show
-    - uses: actions/checkout@v2
-    - name: run loom tests
-      run: cargo test --profile loom --lib -p mycelium-util
+    - uses: actions/checkout@v3
+    - name: install Just
+      uses: extractions/setup-just@v1
       env:
-        RUSTFLAGS: "--cfg loom"
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run loom tests
+      run: just loom mycelium-util

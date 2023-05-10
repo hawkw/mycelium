@@ -1,14 +1,21 @@
-#![no_std]
-#![feature(doc_cfg)]
+#![cfg_attr(not(test), no_std)]
+#![feature(doc_cfg, doc_auto_cfg)]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+#[cfg(feature = "alloc")]
+pub mod buf;
+pub mod color;
 #[cfg(feature = "embedded-graphics")]
-#[doc(cfg(feature = "embedded-graphics"))]
 pub mod embedded_graphics;
 pub mod writer;
 
-use crate::writer::MakeWriter;
+use crate::{
+    color::{Color, SetColor},
+    writer::MakeWriter,
+};
 use core::sync::atomic::{AtomicU64, Ordering};
-use mycelium_util::fmt::{self, Write, WriteExt};
+use mycelium_util::fmt::{self, Write};
 use tracing_core::{field, span, Event, Level, Metadata};
 
 #[derive(Debug)]
@@ -28,7 +35,21 @@ struct Output<W, const BIT: u64> {
 struct OutputCfg {
     line_len: usize,
     indent: AtomicU64,
-    span_indent_chars: &'static str,
+    indent_cfg: IndentCfg,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct IndentCfg {
+    event: &'static str,
+    indent: &'static str,
+    new_span: &'static str,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum IndentKind {
+    Event,
+    NewSpan,
+    Indent,
 }
 
 #[derive(Debug)]
@@ -45,10 +66,11 @@ struct WriterPair<'a, D: Write, S: Write> {
 }
 
 struct Visitor<'writer, W> {
-    writer: fmt::WithIndent<'writer, W>,
+    writer: &'writer mut W,
     seen: bool,
     newline: bool,
     comma: bool,
+    altmode: bool,
 }
 
 // === impl Subscriber ===
@@ -63,8 +85,8 @@ where
     }
 }
 
-const SERIAL_BIT: u64 = 1 << 62;
-const VGA_BIT: u64 = 1 << 63;
+const SERIAL_BIT: u64 = 1 << 0;
+const VGA_BIT: u64 = 1 << 1;
 const _ACTUAL_ID_BITS: u64 = !(SERIAL_BIT | VGA_BIT);
 
 impl<D, S> Subscriber<D, S> {
@@ -75,8 +97,8 @@ impl<D, S> Subscriber<D, S> {
         S: Default,
     {
         Self {
-            display: Output::new(display, " "),
-            serial: Output::new(S::default(), " |"),
+            display: Output::new(display, Self::DISPLAY_INDENT_CFG),
+            serial: Output::new(S::default(), Self::SERIAL_INDENT_CFG),
             next_id: AtomicU64::new(0),
         }
     }
@@ -86,11 +108,22 @@ impl<D, S> Subscriber<D, S> {
         for<'a> S: MakeWriter<'a>,
     {
         Subscriber {
-            serial: Output::new(port, " |"),
+            serial: Output::new(port, Self::SERIAL_INDENT_CFG),
             display: self.display,
             next_id: self.next_id,
         }
     }
+
+    const SERIAL_INDENT_CFG: IndentCfg = IndentCfg {
+        indent: "│",
+        new_span: "┌",
+        event: "├",
+    };
+    const DISPLAY_INDENT_CFG: IndentCfg = IndentCfg {
+        indent: " ",
+        new_span: "> ",
+        event: " ",
+    };
 }
 
 impl<D, S> Subscriber<D, S> {
@@ -106,10 +139,12 @@ impl<D, S> Subscriber<D, S> {
     }
 }
 
-impl<D, S> tracing_core::Collect for Subscriber<D, S>
+impl<D, S, DW, SW> tracing_core::Collect for Subscriber<D, S>
 where
-    for<'a> D: MakeWriter<'a> + 'static,
-    for<'a> S: MakeWriter<'a> + 'static,
+    for<'a> D: MakeWriter<'a, Writer = DW> + 'static,
+    DW: Write + SetColor,
+    for<'a> S: MakeWriter<'a, Writer = SW> + 'static,
+    SW: Write + SetColor,
 {
     fn enabled(&self, meta: &Metadata) -> bool {
         self.display.enabled(meta) || self.serial.enabled(meta)
@@ -117,30 +152,40 @@ where
 
     fn new_span(&self, span: &span::Attributes) -> span::Id {
         let meta = span.metadata();
+        let id = {
+            let mut id = self.next_id.fetch_add(1, Ordering::Acquire);
+            if id & SERIAL_BIT != 0 {
+                // we have used a _lot_ of span IDs...presumably the low-numbered
+                // spans are gone by now.
+                self.next_id.store(0, Ordering::Release);
+            }
+
+            if self.display.enabled(meta) {
+                // mark that this span should be written to the VGA buffer.
+                id |= VGA_BIT;
+            }
+
+            if self.serial.enabled(meta) {
+                // mark that this span should be written to the serial port buffer.
+                id |= SERIAL_BIT;
+            }
+            span::Id::from_u64(id)
+        };
+
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
-        let _ = writer.indent(true);
-        let _ = write!(writer, "{}: ", meta.name());
+        let _ = writer.indent_initial(IndentKind::NewSpan);
+        let _ = writer.with_bold().write_str(meta.name());
+        let _ = writer.with_fg_color(Color::BrightBlack).write_str(": ");
 
-        span.record(&mut Visitor::new(&mut writer));
+        // ensure the span's fields are nicely indented if they wrap by
+        // "entering" and then "exiting"
+        // the span.
+        self.enter(&id);
+        span.record(&mut Visitor::new(&mut writer, false));
+        self.exit(&id);
 
-        let mut id = self.next_id.fetch_add(1, Ordering::Acquire);
-        if id & SERIAL_BIT != 0 {
-            // we have used a _lot_ of span IDs...presumably the low-numbered
-            // spans are gone by now.
-            self.next_id.store(0, Ordering::Release);
-        }
-
-        if self.display.enabled(meta) {
-            // mark that this span should be written to the VGA buffer.
-            id |= VGA_BIT;
-        }
-
-        if self.serial.enabled(meta) {
-            // mark that this span should be written to the serial port buffer.
-            id |= SERIAL_BIT;
-        }
-        span::Id::from_u64(id)
+        id
     }
 
     fn record(&self, _span: &span::Id, _values: &span::Record) {
@@ -155,9 +200,13 @@ where
         let meta = event.metadata();
         let mut writer = self.writer(meta);
         let _ = write_level(&mut writer, meta.level());
-        let _ = writer.indent(false);
-        let _ = write!(writer, "{}: ", meta.target());
-        event.record(&mut Visitor::new(&mut writer));
+        let _ = writer.indent_initial(IndentKind::Event);
+        let _ = write!(
+            writer.with_fg_color(Color::BrightBlack),
+            "{}: ",
+            meta.target()
+        );
+        event.record(&mut Visitor::new(&mut writer, true));
     }
 
     fn enter(&self, span: &span::Id) {
@@ -181,14 +230,14 @@ where
 // === impl Output ===
 
 impl<W, const BIT: u64> Output<W, BIT> {
-    fn new<'a>(make_writer: W, span_indent_chars: &'static str) -> Self
+    fn new<'a>(make_writer: W, indent_cfg: IndentCfg) -> Self
     where
         W: MakeWriter<'a>,
     {
         let cfg = OutputCfg {
             line_len: make_writer.line_len(),
             indent: AtomicU64::new(0),
-            span_indent_chars,
+            indent_cfg,
         };
         Self { make_writer, cfg }
     }
@@ -204,14 +253,14 @@ impl<W, const BIT: u64> Output<W, BIT> {
     #[inline]
     fn enter(&self, id: u64) {
         if id & BIT != 0 {
-            self.cfg.indent.fetch_add(1, Ordering::Relaxed);
+            self.cfg.indent.fetch_add(1, Ordering::Release);
         }
     }
 
     #[inline]
     fn exit(&self, id: u64) {
         if id & BIT != 0 {
-            self.cfg.indent.fetch_sub(1, Ordering::Relaxed);
+            self.cfg.indent.fetch_sub(1, Ordering::Release);
         }
     }
 
@@ -229,6 +278,38 @@ impl<W, const BIT: u64> Output<W, BIT> {
 }
 
 // === impl WriterPair ===
+
+impl<'a, D, S> SetColor for WriterPair<'a, D, S>
+where
+    D: Write + SetColor,
+    S: Write + SetColor,
+{
+    fn set_fg_color(&mut self, color: Color) {
+        if let Some(ref mut w) = self.display {
+            w.set_fg_color(color)
+        }
+        if let Some(ref mut w) = self.serial {
+            w.set_fg_color(color)
+        };
+    }
+
+    fn fg_color(&self) -> Color {
+        self.display
+            .as_ref()
+            .map(SetColor::fg_color)
+            .or_else(|| self.serial.as_ref().map(SetColor::fg_color))
+            .unwrap_or(Color::Default)
+    }
+
+    fn set_bold(&mut self, bold: bool) {
+        if let Some(ref mut w) = self.display {
+            w.set_bold(bold)
+        }
+        if let Some(ref mut w) = self.serial {
+            w.set_bold(bold)
+        };
+    }
+}
 
 impl<'a, D, S> Write for WriterPair<'a, D, S>
 where
@@ -265,24 +346,18 @@ where
     D: Write,
     S: Write,
 {
-    fn indent(&mut self, is_span: bool) -> fmt::Result {
+    fn indent_initial(&mut self, kind: IndentKind) -> fmt::Result {
         let err = if let Some(ref mut display) = self.display {
             // "rust has try-catch syntax lol"
             (|| {
-                display.indent()?;
-                if is_span {
-                    display.write_char(' ')?;
-                };
+                display.indent(kind)?;
                 Ok(())
             })()
         } else {
             Ok(())
         };
         if let Some(ref mut serial) = self.serial {
-            serial.indent()?;
-            let chars = if is_span { '-' } else { ' ' };
-
-            serial.write_char(chars)?;
+            serial.indent(kind)?;
         }
         err
     }
@@ -291,18 +366,35 @@ where
 // ==== impl Writer ===
 
 impl<'a, W: Write> Writer<'a, W> {
-    fn indent(&mut self) -> fmt::Result {
-        for _ in 0..self.cfg.indent.load(Ordering::Acquire) {
-            self.writer.write_str(self.cfg.span_indent_chars)?;
-            self.current_line += self.cfg.span_indent_chars.len();
+    fn indent(&mut self, kind: IndentKind) -> fmt::Result {
+        let indent = self.cfg.indent.load(Ordering::Acquire);
+        self.write_indent(" ")?;
+
+        for i in 1..=indent {
+            let indent_str = match (i, kind) {
+                (i, IndentKind::Event) if i == indent => self.cfg.indent_cfg.event,
+                _ => self.cfg.indent_cfg.indent,
+            };
+            self.write_indent(indent_str)?;
         }
+
+        if kind == IndentKind::NewSpan {
+            self.write_indent(self.cfg.indent_cfg.new_span)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_indent(&mut self, chars: &'static str) -> fmt::Result {
+        self.writer.write_str(chars)?;
+        self.current_line += chars.len();
         Ok(())
     }
 
     fn write_newline(&mut self) -> fmt::Result {
         self.writer.write_str("   ")?;
         self.current_line = 3;
-        self.indent()
+        self.indent(IndentKind::Indent)
     }
 
     fn finish(&mut self) -> fmt::Result {
@@ -332,8 +424,8 @@ where
                 };
                 self.writer.write_char('\n')?;
                 self.write_newline()?;
-                self.writer.write_str("  ")?;
-                self.current_line += 2;
+                self.writer.write_str(" ")?;
+                self.current_line += 1;
                 line = &line[offset..];
             }
             self.writer.write_str(line)?;
@@ -357,6 +449,23 @@ where
     }
 }
 
+impl<'a, W> SetColor for Writer<'a, W>
+where
+    W: Write + SetColor,
+{
+    fn fg_color(&self) -> Color {
+        self.writer.fg_color()
+    }
+
+    fn set_fg_color(&mut self, color: Color) {
+        self.writer.set_fg_color(color);
+    }
+
+    fn set_bold(&mut self, bold: bool) {
+        self.writer.set_bold(bold)
+    }
+}
+
 impl<'a, W: Write> Drop for Writer<'a, W> {
     fn drop(&mut self) {
         let _ = self.finish();
@@ -364,25 +473,33 @@ impl<'a, W: Write> Drop for Writer<'a, W> {
 }
 
 #[inline]
-fn write_level(w: &mut impl fmt::Write, level: &Level) -> fmt::Result {
+fn write_level<W>(w: &mut W, level: &Level) -> fmt::Result
+where
+    W: fmt::Write + SetColor,
+{
+    w.write_char('[')?;
     match *level {
-        Level::TRACE => w.write_str("[+]")?,
-        Level::DEBUG => w.write_str("[-]")?,
-        Level::INFO => w.write_str("[*]")?,
-        Level::WARN => w.write_str("[!]")?,
-        Level::ERROR => w.write_str("[x]")?,
-    };
-
-    Ok(())
+        Level::TRACE => w.with_fg_color(Color::BrightBlue).write_char('*'),
+        Level::DEBUG => w.with_fg_color(Color::BrightCyan).write_char('?'),
+        Level::INFO => w.with_fg_color(Color::BrightGreen).write_char('i'),
+        Level::WARN => w.with_fg_color(Color::BrightYellow).write_char('!'),
+        Level::ERROR => w.with_fg_color(Color::BrightRed).write_char('x'),
+    }?;
+    w.write_char(']')
 }
 
-impl<'writer, W: fmt::Write> Visitor<'writer, W> {
-    fn new(writer: &'writer mut W) -> Self {
+impl<'writer, W> Visitor<'writer, W>
+where
+    W: fmt::Write,
+    &'writer mut W: SetColor,
+{
+    fn new(writer: &'writer mut W, altmode: bool) -> Self {
         Self {
-            writer: writer.with_indent(2),
+            writer,
             seen: false,
             comma: false,
             newline: false,
+            altmode,
         }
     }
 
@@ -405,6 +522,23 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
             }
         }
 
+        impl<'a, W: fmt::Write> SetColor for HasWrittenNewline<'a, W>
+        where
+            W: SetColor,
+        {
+            fn fg_color(&self) -> Color {
+                self.writer.fg_color()
+            }
+
+            fn set_fg_color(&mut self, color: Color) {
+                self.writer.set_fg_color(color);
+            }
+
+            fn set_bold(&mut self, bold: bool) {
+                self.writer.set_bold(bold)
+            }
+        }
+
         let mut writer = HasWrittenNewline {
             writer: &mut self.writer,
             has_written_newline: false,
@@ -414,9 +548,9 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
 
         if field.name() == "message" {
             if self.seen {
-                let _ = write!(writer, ",{}{:?}", nl, val);
+                let _ = write!(writer.with_bold(), "{nl}{val:?}");
             } else {
-                let _ = write!(writer, "{:?}", val);
+                let _ = write!(writer.with_bold(), "{val:?}");
                 self.comma = !writer.has_written_punct;
             }
             self.seen = true;
@@ -424,7 +558,7 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
         }
 
         if self.comma {
-            let _ = writer.write_char(',');
+            let _ = writer.with_fg_color(Color::BrightBlack).write_char(',');
         }
 
         if self.seen {
@@ -436,12 +570,27 @@ impl<'writer, W: fmt::Write> Visitor<'writer, W> {
             self.comma = true;
         }
 
-        let _ = write!(writer, "{}={:?}", field, val);
+        // pretty-print the name with dots in the punctuation color
+        let mut name_pieces = field.name().split('.');
+        if let Some(piece) = name_pieces.next() {
+            let _ = writer.write_str(piece);
+            for piece in name_pieces {
+                let _ = writer.with_fg_color(Color::BrightBlack).write_char('.');
+                let _ = writer.write_str(piece);
+            }
+        }
+
+        let _ = writer.with_fg_color(Color::BrightBlack).write_char('=');
+        let _ = write!(writer, "{val:?}");
         self.newline |= writer.has_written_newline;
     }
 }
 
-impl<'writer, W: fmt::Write> field::Visit for Visitor<'writer, W> {
+impl<'writer, W> field::Visit for Visitor<'writer, W>
+where
+    W: fmt::Write,
+    &'writer mut W: SetColor,
+{
     #[inline]
     fn record_u64(&mut self, field: &field::Field, val: u64) {
         self.record_inner(field, &val)
@@ -466,6 +615,10 @@ impl<'writer, W: fmt::Write> field::Visit for Visitor<'writer, W> {
     }
 
     fn record_debug(&mut self, field: &field::Field, val: &dyn fmt::Debug) {
-        self.record_inner(field, &fmt::alt(val))
+        if self.altmode {
+            self.record_inner(field, &fmt::alt(val))
+        } else {
+            self.record_inner(field, val)
+        }
     }
 }

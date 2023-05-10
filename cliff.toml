@@ -1,11 +1,19 @@
+# configuration file for git-cliff (0.7.0)
+
 [changelog]
+# changelog header
+header = """
+# Changelog\n
+All notable changes to this project will be documented in this file.
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).\n
+"""
 # template for the changelog body
 # https://tera.netlify.app/docs/#introduction
 body = """
 {% if version %}\
     ## {{ version | trim_start_matches(pat="v") }} - ({{ timestamp | date(format="%Y-%m-%d") }})
 {% else %}\
-    ## [unreleased]
+    ## Unreleased
 {% endif %}\
 {% if previous %}\
     {% if previous.commit_id %}
@@ -49,13 +57,14 @@ footer = """
 [git]
 conventional_commits = true
 commit_parsers = [
+    { body = ".*[dD]eprecate.*", group = "Deprecated" },
     { message = "^feat", group = "Added"},
     { message = "^fix", group = "Fixed"},
     { message = "^doc", group = "Documented"},
     { message = "^perf", group = "Performance"},
     { message = "^chore", skip = true },
     { message = "^test", skip = true },
-    { message = "prepare to release", skip = true }
+    { message = "prepare to release", skip = true },
 ]
 filter_commits = false
 # regex for preprocessing the commit messages

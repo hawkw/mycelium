@@ -17,7 +17,7 @@ pub fn run_gdb(binary: &Path, gdb_port: u16) -> Result<ExitStatus> {
     // before handing control over to the user, and we can use it to
     // configure the gdb session to connect to the gdb remote.
     gdb.arg("-ex").arg(format!("file {}", binary.display()));
-    gdb.arg("-ex").arg(format!("target remote :{}", gdb_port));
+    gdb.arg("-ex").arg(format!("target remote :{gdb_port}"));
 
     // Set a temporary breakpoint on `kernel_main` and continue to it to
     // skip the non-mycelium boot process.
@@ -25,7 +25,7 @@ pub fn run_gdb(binary: &Path, gdb_port: u16) -> Result<ExitStatus> {
     gdb.arg("-ex").arg("tbreak mycelium_kernel::kernel_main");
     gdb.arg("-ex").arg("continue");
 
-    tracing::info!("Running {:?}", gdb);
+    tracing::info!("Running {gdb:?}");
     // Try to run gdb.
     let status = gdb.status().context("failed to run gdb")?;
 

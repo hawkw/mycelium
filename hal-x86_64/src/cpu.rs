@@ -1,7 +1,12 @@
 use core::{arch::asm, convert::Infallible, fmt, mem};
 use mycelium_util::bits;
 
+pub mod entropy;
 pub mod intrinsics;
+#[cfg(feature = "alloc")]
+pub mod local;
+pub mod msr;
+pub use self::msr::Msr;
 
 #[repr(transparent)]
 pub struct Port {
@@ -10,7 +15,7 @@ pub struct Port {
 
 /// Describes which descriptor table ([GDT], [LDT], or [IDT]) a selector references.
 ///
-/// [GDT]: https://en.wikipedia.org/wiki/Global_Descriptor_Table
+/// [GDT]: crate::segment::Gdt
 /// [LDT]: https://en.wikipedia.org/wiki/Global_Descriptor_Table#Local_Descriptor_Table
 /// [IDT]: crate::interrupt::Idt
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -18,7 +23,7 @@ pub enum DescriptorTable {
     /// The selector references a descriptor in the [Global Descriptor Table
     /// (GDT)][gdt].
     ///
-    /// [gdt]: https://en.wikipedia.org/wiki/Global_Descriptor_Table
+    /// [gdt]: crate::segment::Gdt
     Gdt,
 
     /// The selector references an entry in a [Local Descriptor Table
@@ -49,6 +54,11 @@ pub(crate) struct DtablePtr {
     base: *const (),
 }
 
+/// An error indicating that a given CPU feature source is not supported on this
+/// CPU.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct FeatureNotSupported(&'static str);
+
 /// Halt the CPU.
 ///
 /// This disables interrupts and performs the `hlt` instruction in a loop,
@@ -68,12 +78,30 @@ pub fn halt() -> ! {
     }
 }
 
+/// Wait for an interrupt in a spin loop.
+///
+/// This is distinct from `core::hint::spin_loop`, as it is intended
+/// specifically for waiting for an interrupt, rather than progress from another
+/// thread. This should be called on each iteration of a loop that waits on a condition
+/// set by an interrupt handler.
+///
+/// This function will execute one [`intrinsics::sti`] instruction to enable interrupts
+/// followed by one [`intrinsics::hlt`] instruction to halt the CPU.
+#[inline(always)]
+pub fn wait_for_interrupt() {
+    unsafe {
+        intrinsics::sti();
+        intrinsics::hlt();
+    }
+}
+
 // === impl Port ===
 
 impl fmt::Debug for Port {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { num } = self;
         f.debug_struct("Port")
-            .field("num", &format_args!("{:#02x}", self.num))
+            .field("num", &format_args!("{num:#02x}"))
             .finish()
     }
 }
@@ -97,6 +125,15 @@ impl Port {
     /// Writing to a CPU port is unsafe.
     pub unsafe fn writeb(&self, value: u8) {
         asm!("out dx, al", in("dx") self.num, in("al") value)
+    }
+
+    /// # Safety
+    ///
+    /// Reading from a CPU port is unsafe.
+    pub unsafe fn readl(&self) -> u32 {
+        let result: u32;
+        asm!("in eax, dx", in("dx") self.num, out("eax") result);
+        result
     }
 
     /// # Safety
@@ -146,8 +183,21 @@ impl Ring {
             0b01 => Ring::Ring1,
             0b10 => Ring::Ring2,
             0b11 => Ring::Ring3,
-            bits => panic!("invalid ring {:#02b}", bits),
+            bits => panic!("invalid ring {bits:#02b}"),
         }
+    }
+}
+
+impl bits::FromBits<u64> for Ring {
+    const BITS: u32 = 2;
+    type Error = core::convert::Infallible;
+
+    fn try_from_bits(u: u64) -> Result<Self, Self::Error> {
+        Ok(Self::from_u8(u as u8))
+    }
+
+    fn into_bits(self) -> u64 {
+        self as u8 as u64
     }
 }
 
@@ -181,9 +231,47 @@ impl bits::FromBits<u8> for Ring {
 
 impl DtablePtr {
     pub(crate) fn new<T>(t: &'static T) -> Self {
+        unsafe {
+            // safety: the `'static` lifetime ensures the pointed dtable is
+            // never going away
+            Self::new_unchecked(t)
+        }
+    }
+
+    pub(crate) unsafe fn new_unchecked<T>(t: &T) -> Self {
         let limit = (mem::size_of::<T>() - 1) as u16;
         let base = t as *const _ as *const ();
 
         Self { limit, base }
+    }
+}
+
+impl fmt::Debug for DtablePtr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // avoid creating misaligned references by moving these i guess? idk why
+        // rustc is okay with this but i'll trust it.
+        let Self { limit, base } = *self;
+        f.debug_struct("DtablePtr")
+            .field("base", &format_args!("{base:0p}",))
+            .field("limit", &limit)
+            .finish()
+    }
+}
+
+// === impl FeatureNotSupported ===
+
+impl fmt::Display for FeatureNotSupported {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "this CPU does not support {}", self.0)
+    }
+}
+
+impl FeatureNotSupported {
+    pub fn feature_name(&self) -> &'static str {
+        self.0
+    }
+
+    pub(crate) fn new(feature_name: &'static str) -> Self {
+        Self(feature_name)
     }
 }

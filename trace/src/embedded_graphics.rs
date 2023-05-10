@@ -1,10 +1,11 @@
+use crate::color::{Color, SetColor};
 use core::{
     fmt,
     sync::atomic::{AtomicU64, Ordering},
 };
 use embedded_graphics::{
     geometry::Point,
-    mono_font::{self, MonoTextStyle},
+    mono_font::{self, MonoFont, MonoTextStyle},
     pixelcolor::{self, RgbColor},
     text::{self, Text},
     Drawable,
@@ -13,15 +14,23 @@ use hal_core::framebuffer::{Draw, DrawTarget};
 #[derive(Debug)]
 pub struct MakeTextWriter<D> {
     mk: fn() -> D,
+    settings: TextWriterBuilder,
     next_point: AtomicU64,
     line_len: u32,
     char_height: u32,
     last_line: i32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TextWriterBuilder {
+    default_color: Color,
+    start_point: Point,
+}
+
 #[derive(Clone, Debug)]
 pub struct TextWriter<'mk, D> {
     target: DrawTarget<D>,
+    color: Color,
     mk: &'mk MakeTextWriter<D>,
 }
 
@@ -97,7 +106,7 @@ where
                 curr_point
             } else {
                 // otherwise, actually draw the text.
-                Text::with_alignment(s, curr_point, default_text_style(), text::Alignment::Left)
+                Text::with_alignment(s, curr_point, self.text_style(), text::Alignment::Left)
                     .draw(&mut self.target)
                     .map_err(|_| fmt::Error)?
             };
@@ -131,22 +140,112 @@ where
     }
 }
 
-impl<D: Draw> MakeTextWriter<D> {
-    pub fn new(mk: fn() -> D) -> Self {
-        Self::new_at(mk, Point { x: 10, y: 10 })
+impl<'mk, D> SetColor for TextWriter<'mk, D>
+where
+    D: Draw,
+{
+    fn set_fg_color(&mut self, color: Color) {
+        let color = if color == Color::Default {
+            self.mk.settings.default_color
+        } else {
+            color
+        };
+        self.color = color;
     }
 
-    pub fn new_at(mk: fn() -> D, point: Point) -> Self {
+    fn fg_color(&self) -> Color {
+        self.color
+    }
+
+    fn set_bold(&mut self, bold: bool) {
+        use Color::*;
+        let next_color = if bold {
+            match self.color {
+                Black => BrightBlack,
+                Red => BrightRed,
+                Green => BrightGreen,
+                Yellow => BrightYellow,
+                Blue => BrightBlue,
+                Magenta => BrightMagenta,
+                Cyan => BrightCyan,
+                White => BrightWhite,
+                x => x,
+            }
+        } else {
+            match self.color {
+                BrightBlack => Black,
+                BrightRed => Red,
+                BrightGreen => Green,
+                BrightYellow => Yellow,
+                BrightBlue => Blue,
+                BrightMagenta => Magenta,
+                BrightCyan => Cyan,
+                BrightWhite => White,
+                x => x,
+            }
+        };
+        self.set_fg_color(next_color);
+    }
+}
+
+impl<'mk, D> TextWriter<'mk, D>
+where
+    D: Draw,
+{
+    fn text_style(&self) -> MonoTextStyle<'static, pixelcolor::Rgb888> {
+        use pixelcolor::Rgb888;
+        const COLOR_TABLE: [Rgb888; 17] = [
+            Rgb888::BLACK,              // black
+            Rgb888::new(128, 0, 0),     // red
+            Rgb888::new(0, 128, 0),     // green
+            Rgb888::new(128, 128, 0),   // yellow
+            Rgb888::new(0, 0, 128),     // blue
+            Rgb888::new(128, 0, 128),   // magenta
+            Rgb888::new(0, 128, 128),   // cyan
+            Rgb888::new(192, 192, 192), // white
+            Rgb888::new(192, 192, 192), // default
+            Rgb888::new(128, 128, 128), // bright black
+            Rgb888::new(255, 0, 0),     // bright red
+            Rgb888::new(0, 255, 0),     // bright green
+            Rgb888::new(255, 255, 0),   // bright yellow
+            Rgb888::new(0, 0, 255),     // bright blue
+            Rgb888::new(255, 0, 255),   // bright magenta
+            Rgb888::new(0, 255, 255),   // bright cyan
+            Rgb888::new(255, 255, 255), // bright white
+        ];
+        MonoTextStyle::new(
+            self.mk.settings.get_font(),
+            COLOR_TABLE[self.color as usize],
+        )
+    }
+}
+
+// === impl MakeTextWriter ===
+impl<D> MakeTextWriter<D> {
+    #[must_use]
+    pub const fn builder() -> TextWriterBuilder {
+        TextWriterBuilder::new()
+    }
+}
+
+impl<D: Draw> MakeTextWriter<D> {
+    #[must_use]
+    pub fn new(mk: fn() -> D) -> Self {
+        Self::build(mk, TextWriterBuilder::new())
+    }
+
+    fn build(mk: fn() -> D, settings: TextWriterBuilder) -> Self {
         let (pixel_width, pixel_height) = {
             let buf = (mk)();
             (buf.width() as u32, buf.height() as u32)
         };
-        let text_style = default_text_style();
+        let text_style = MonoTextStyle::new(settings.get_font(), pixelcolor::Rgb888::WHITE);
         let line_len = Self::line_len(pixel_width, &text_style);
         let char_height = text_style.font.character_size.height;
         let last_line = (pixel_height - char_height - 10) as i32;
         Self {
-            next_point: AtomicU64::new(pack_point(point)),
+            settings,
+            next_point: AtomicU64::new(pack_point(settings.start_point)),
             char_height,
             mk,
             line_len,
@@ -167,6 +266,7 @@ where
 
     fn make_writer(&'a self) -> Self::Writer {
         TextWriter {
+            color: self.settings.default_color,
             target: (self.mk)().into_draw_target(),
             mk: self,
         }
@@ -177,6 +277,57 @@ where
     }
 }
 
-fn default_text_style() -> MonoTextStyle<'static, pixelcolor::Rgb888> {
-    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, pixelcolor::Rgb888::WHITE)
+impl TextWriterBuilder {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            // TODO(eliza): it would be nice if this was configurable via the builder,
+            // but it's not, because `MonoFont` is `!Sync` due to containing a trait
+            // object without a `Sync` bound...this should be fixed upstream in
+            // `embedded-graphics`.
+            // font: &mono_font::ascii::FONT_6X13,
+            default_color: Color::White,
+            start_point: Point { x: 10, y: 10 },
+        }
+    }
+
+    // #[must_use]
+    // pub fn font(self, font: &'static MonoFont<'static>) -> Self {
+    //     Self { font, ..self }
+    // }
+
+    #[must_use]
+    pub fn default_color(self, default_color: Color) -> Self {
+        Self {
+            default_color,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn starting_point(self, start_point: Point) -> Self {
+        Self {
+            start_point,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn build<D: Draw>(self, mk: fn() -> D) -> MakeTextWriter<D> {
+        MakeTextWriter::build(mk, self)
+    }
+
+    // TODO(eliza): it would be nice if this was configurable via the builder,
+    // but it's not, because `MonoFont` is `!Sync` due to containing a trait
+    // object without a `Sync` bound...this should be fixed upstream in
+    // `embedded-graphics`.
+    fn get_font(&self) -> &'static MonoFont<'static> {
+        &mono_font::ascii::FONT_6X13
+    }
+}
+
+impl Default for TextWriterBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }

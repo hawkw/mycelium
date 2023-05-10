@@ -3,30 +3,43 @@
 #![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 #![feature(panic_info_message)]
 #![allow(unused_unsafe)]
+// we need the SPICY version of const-eval apparently
+#![feature(const_mut_refs)]
 #![doc = include_str!("../README.md")]
 
 extern crate alloc;
 extern crate rlibc;
 
+pub mod allocator;
 pub mod arch;
+pub mod drivers;
+pub mod rt;
+pub mod shell;
 pub mod wasm;
-
-use core::fmt::Write;
-use hal_core::{boot::BootInfo, mem};
-use mycelium_alloc::buddy;
 
 #[cfg(test)]
 mod tests;
 
-#[cfg_attr(target_os = "none", global_allocator)]
-static ALLOC: buddy::Alloc = buddy::Alloc::new_default(32);
+use core::fmt::Write;
+use hal_core::{boot::BootInfo, mem};
 
-pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
+pub const MYCELIUM_VERSION: &str = concat!(
+    env!("VERGEN_BUILD_SEMVER"),
+    "-",
+    env!("VERGEN_GIT_BRANCH"),
+    ".",
+    env!("VERGEN_GIT_SHA_SHORT")
+);
+
+#[cfg_attr(target_os = "none", global_allocator)]
+static ALLOC: allocator::Allocator = allocator::Allocator::new();
+
+pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) -> ! {
     let mut writer = bootinfo.writer();
     writeln!(
         writer,
         "hello from mycelium {} (on {})",
-        env!("CARGO_PKG_VERSION"),
+        MYCELIUM_VERSION,
         arch::NAME
     )
     .unwrap();
@@ -100,11 +113,9 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         tracing::trace!("hahahaha yayyyy we drew a screen!");
     }
 
-    arch::interrupt::init::<arch::InterruptHandlers>();
+    arch::interrupt::enable_exceptions();
     bootinfo.init_paging();
-
-    // XXX(eliza): this sucks
-    ALLOC.set_vm_offset(arch::mm::vm_offset());
+    ALLOC.init(&bootinfo);
 
     let mut regions = 0;
     let mut free_regions = 0;
@@ -127,9 +138,7 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
                 free_regions += 1;
                 free_bytes += size;
                 unsafe {
-                    tracing::trace!(?region, "adding to page allocator");
-                    let e = ALLOC.add_region(region);
-                    tracing::trace!(added = e.is_ok());
+                    ALLOC.add_region(region);
                 }
             }
         }
@@ -142,51 +151,80 @@ pub fn kernel_main(bootinfo: &impl BootInfo) -> ! {
         );
     }
 
+    // perform arch-specific initialization once we have an allocator and
+    // tracing.
+    arch::init(&bootinfo, &archinfo);
+
+    // initialize the kernel runtime.
+    rt::init();
+
     #[cfg(test)]
     arch::run_tests();
 
-    // if this function returns we would boot loop. Hang, instead, so the debug
-    // output can be read.
-    //
-    // eventually we'll call into a kernel main loop here...
-    #[allow(clippy::empty_loop)]
-    #[allow(unreachable_code)]
-    loop {}
+    kernel_main(bootinfo);
+}
+
+fn kernel_main(bootinfo: impl BootInfo) -> ! {
+    rt::spawn(keyboard_demo());
+
+    let mut core = rt::Core::new();
+    tracing::info!(
+        version = %MYCELIUM_VERSION,
+        arch = %arch::NAME,
+        bootloader = %bootinfo.bootloader_name(),
+        "welcome to the Glorious Mycelium Operating System",
+    );
+
+    loop {
+        core.run();
+        tracing::warn!("someone stopped CPU 0's core! restarting it...");
+    }
 }
 
 #[cfg_attr(target_os = "none", alloc_error_handler)]
 pub fn alloc_error(layout: core::alloc::Layout) -> ! {
-    panic!("alloc error: {:?}", layout);
+    arch::oops(arch::Oops::alloc_error(layout))
 }
 
 #[cfg_attr(target_os = "none", panic_handler)]
 #[cold]
 pub fn panic(panic: &core::panic::PanicInfo<'_>) -> ! {
-    // use core::fmt;
-    // struct PrettyPanic<'a>(&'a core::panic::PanicInfo<'a>);
-    // impl<'a> fmt::Display for PrettyPanic<'a> {
-    //     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    //         let message = self.0.message();
-    //         let location = self.0.location();
-    //         if let Some(message) = message {
-    //             writeln!(f, "  mycelium panicked: {}", message)?;
-    //             if let Some(loc) = location {
-    //                 writeln!(f, "  at: {}:{}:{}", loc.file(), loc.line(), loc.column(),)?;
-    //             } else {
-    //                 writeln!(f, "  at: ???")?;
-    //             }
-    //         } else {
-    //             writeln!(f, "  mycelium panicked: {}", self.0)?;
-    //         }
-    //         Ok(())
-    //     }
-    // }
-
-    // let pp = PrettyPanic(panic);
     arch::oops(arch::Oops::from(panic))
 }
 
 #[cfg(all(test, not(target_os = "none")))]
 pub fn main() {
     /* no host-platform tests in this crate */
+}
+
+/// Keyboard handler demo task: logs each line typed by the user.
+// TODO(eliza): let's do something Actually Useful with keyboard input...
+async fn keyboard_demo() {
+    #[cfg(target_os = "none")]
+    use alloc::string::String;
+    use drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
+
+    let mut line = String::new();
+    tracing::info!("type `help` to list available commands");
+    loop {
+        let key = ps2_keyboard::next_key().await;
+        let mut newline = false;
+        match key {
+            DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
+                newline = true;
+            }
+            // backspace
+            DecodedKey::RawKey(KeyCode::Backspace)
+            | DecodedKey::RawKey(KeyCode::Delete)
+            | DecodedKey::Unicode('\u{0008}') => {
+                line.pop();
+            }
+            DecodedKey::Unicode(c) => line.push(c),
+            DecodedKey::RawKey(key) => tracing::warn!(?key, "you typed something weird"),
+        }
+        if newline {
+            shell::eval(&line);
+            line.clear();
+        }
+    }
 }
