@@ -4,6 +4,25 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+macro_rules! feature {
+    (
+        #![$meta:meta]
+        $($item:item)*
+    ) => {
+        $(
+            #[cfg($meta)]
+            $item
+        )*
+    }
+}
+
+macro_rules! test_trace {
+    ($($tt:tt)*) => {
+        #[cfg(test)]
+        tracing::trace!($($tt)*)
+    }
+}
+
 /// An exponential backoff for spin loops
 #[derive(Debug, Clone)]
 pub(crate) struct Backoff {
@@ -131,3 +150,6 @@ impl<T: fmt::Display> fmt::Display for FmtOption<'_, T> {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) fn assert_send_sync<T: Send + Sync>() {}
