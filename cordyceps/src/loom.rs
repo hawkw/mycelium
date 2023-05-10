@@ -77,8 +77,20 @@ mod inner {
     pub(crate) use core::sync::atomic;
 
     #[cfg(test)]
-    pub use std::thread;
-
+    pub(crate) mod thread {
+        pub(crate) use std::thread::{yield_now, JoinHandle};
+        pub(crate) fn spawn<F, T>(f: F) -> JoinHandle<T>
+        where
+            F: FnOnce() -> T + Send + 'static,
+            T: Send + 'static,
+        {
+            let track = super::alloc::track::Registry::current();
+            std::thread::spawn(move || {
+                let _tracking = track.map(|track| track.set_default());
+                f()
+            })
+        }
+    }
     pub(crate) mod hint {
         #[inline(always)]
         pub(crate) fn spin_loop() {
@@ -186,13 +198,6 @@ mod inner {
     }
 
     pub(crate) mod alloc {
-        #[cfg(test)]
-        use core::{
-            future::Future,
-            pin::Pin,
-            task::{Context, Poll},
-        };
-
         #[cfg(test)]
         use std::sync::Arc;
 
@@ -322,57 +327,6 @@ mod inner {
                         );
                     }
                 }
-            }
-        }
-
-        #[cfg(test)]
-        #[derive(Debug)]
-        #[pin_project::pin_project]
-        pub(crate) struct TrackFuture<F> {
-            #[pin]
-            inner: F,
-            track: Option<Arc<track::TrackData>>,
-        }
-
-        #[cfg(test)]
-        impl<F: Future> Future for TrackFuture<F> {
-            type Output = TrackFuture<F::Output>;
-            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                let this = self.project();
-                this.inner.poll(cx).map(|inner| TrackFuture {
-                    inner,
-                    track: this.track.clone(),
-                })
-            }
-        }
-
-        #[cfg(test)]
-        impl<F> TrackFuture<F> {
-            /// Wrap a `Future` in a `TrackFuture` that participates in Loom's
-            /// leak checking.
-            #[track_caller]
-            pub(crate) fn new(inner: F) -> Self {
-                let track = track::Registry::start_tracking::<F>();
-                Self { inner, track }
-            }
-
-            /// Stop tracking this future, and return the inner value.
-            pub(crate) fn into_inner(self) -> F {
-                self.inner
-            }
-        }
-
-        #[cfg(test)]
-        #[track_caller]
-        pub(crate) fn track_future<F: Future>(inner: F) -> TrackFuture<F> {
-            TrackFuture::new(inner)
-        }
-
-        // PartialEq impl so that `assert_eq!(..., Ok(...))` works
-        #[cfg(test)]
-        impl<F: PartialEq> PartialEq for TrackFuture<F> {
-            fn eq(&self, other: &Self) -> bool {
-                self.inner == other.inner
             }
         }
 

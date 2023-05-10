@@ -1,7 +1,7 @@
 use crate::{
     loom::{
         cell::UnsafeCell,
-        sync::atomic::{AtomicPtr, Ordering::*},
+        sync::atomic::{AtomicPtr, AtomicUsize, Ordering::*},
     },
     Linked,
 };
@@ -89,6 +89,8 @@ where
     }
 }
 
+// === impl Links ===
+
 impl<T> Links<T> {
     /// Returns new [`TransferStack`] links.
     #[cfg(not(loom))]
@@ -124,6 +126,8 @@ where
         test_trace!(?curr, "Drain::next");
         let curr = curr?;
         unsafe {
+            // Safety: we have exclusive ownership over this chunk of stack.
+
             // advance the iterator to the next node after the current one (if
             // there is one).
             self.next = T::links(curr).as_mut().next.with_mut(|next| (*next).take());
@@ -231,19 +235,71 @@ mod loom {
             assert_eq!(all, vec![10, 11, 20, 21]);
         })
     }
+
+    #[test]
+    fn doesnt_leak() {
+        const PUSHES: i32 = 2;
+        loom::model(|| {
+            let stack = Arc::new(TransferStack::new());
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all(&stack, 2, PUSHES)
+            });
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+        })
+    }
+
+    #[test]
+    fn drain_doesnt_leak() {
+        const PUSHES: i32 = 2;
+        loom::model(|| {
+            let stack = Arc::new(TransferStack::new());
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all(&stack, 2, PUSHES)
+            });
+
+            let drain = stack.drain();
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            tracing::info!("dropping drain");
+            drop(drain);
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+        })
+    }
 }
 
 #[cfg(test)]
 mod test_util {
     use super::*;
     use core::pin::Pin;
+    use crate::loom::alloc;
 
     #[pin_project::pin_project]
-    #[repr(C)]
     pub(super) struct Entry {
         #[pin]
         links: Links<Entry>,
         pub(super) val: i32,
+        track: alloc::Track<()>,
     }
 
     unsafe impl Linked<Links<Self>> for Entry {
@@ -267,9 +323,12 @@ mod test_util {
         }
 
         unsafe fn links(target: NonNull<Self>) -> NonNull<Links<Self>> {
-            // Safety: this is safe because the `links` are the first field of
-            // `Entry`, and `Entry` is `repr(C)`.
-            target.cast()
+            let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+            // Safety: it's fine to use `new_unchecked` here; if the pointer that we
+            // offset to the `links` field is not null (which it shouldn't be, as we
+            // received it as a `NonNull`), the offset pointer should therefore also
+            // not be null.
+            NonNull::new_unchecked(links)
         }
     }
 
@@ -278,6 +337,7 @@ mod test_util {
             Box::pin(Entry {
                 links: Links::new(),
                 val,
+                track: alloc::Track::new(()),
             })
         }
 
