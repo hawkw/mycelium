@@ -1,7 +1,15 @@
+//! [Intrusive] stacks.
+//!
+//! See the documentation for the [`Stack`] and [`TransferStack`] types for
+//! details.
+//!
+//! [intrusive]: crate#intrusive-data-structures
+#![warn(missing_debug_implementations)]
+
 use crate::{
     loom::{
         cell::UnsafeCell,
-        sync::atomic::{AtomicPtr, AtomicUsize, Ordering::*},
+        sync::atomic::{AtomicPtr, Ordering::*},
     },
     Linked,
 };
@@ -11,15 +19,22 @@ use core::{
     ptr::{self, NonNull},
 };
 
+/// An [intrusive], lock-free singly-linked stack, where all entries currently in
+/// the list are consumed in a single atomic operation.
+///
+/// A transfer stack is perhaps the world's simplest lock-free concurrent data
+/// structure.
+///
+/// [intrusive]: crate#intrusive-data-structures
 pub struct TransferStack<T: Linked<Links<T>>> {
     head: AtomicPtr<T>,
 }
 
-pub struct Drain<T: Linked<Links<T>>> {
-    next: Option<NonNull<T>>,
+pub struct Stack<T: Linked<Links<T>>> {
+    head: Option<NonNull<T>>,
 }
 
-/// Links to other nodes in a [`TransferStack`].
+/// Links to other nodes in a [`TransferStack`] or [`Stack`].
 ///
 /// In order to be part of a [`TransferStack`], a type must contain an instance of this
 /// type, and must implement the [`Linked`] trait for `Links<Self>`.
@@ -33,11 +48,13 @@ pub struct Links<T> {
     _unpin: PhantomPinned,
 }
 
+// === impl AtomicStack ===
+
 impl<T> TransferStack<T>
 where
     T: Linked<Links<T>>,
 {
-    /// Returns a new `TransferStack`.
+    /// Returns a new `AtomicStack`.
     #[cfg(not(loom))]
     #[must_use]
     pub const fn new() -> Self {
@@ -46,7 +63,7 @@ where
         }
     }
 
-    /// Returns a new `TransferStack`.
+    /// Returns a new `AtomicStack`.
     #[cfg(loom)]
     #[must_use]
     pub fn new() -> Self {
@@ -57,14 +74,13 @@ where
 
     pub fn push(&self, element: T::Handle) {
         let ptr = T::into_ptr(element);
-        test_trace!(?ptr, "TransferStack::push");
-
+        test_trace!(?ptr, "AtomicStack::push");
         let links = unsafe { T::links(ptr).as_mut() };
         debug_assert!(links.next.with(|next| unsafe { (*next).is_none() }));
 
         let mut head = self.head.load(Relaxed);
         loop {
-            test_trace!(?ptr, ?head, "TransferStack::push");
+            test_trace!(?ptr, ?head, "AtomicStack::push");
             links.next.with_mut(|next| unsafe {
                 *next = NonNull::new(head);
             });
@@ -74,7 +90,7 @@ where
                 .compare_exchange_weak(head, ptr.as_ptr(), AcqRel, Acquire)
             {
                 Ok(_) => {
-                    test_trace!(?ptr, ?head, "TransferStack::push -> pushed");
+                    test_trace!(?ptr, ?head, "AtomicStack::push -> pushed");
                     return;
                 }
                 Err(actual) => head = actual,
@@ -83,10 +99,10 @@ where
     }
 
     #[must_use]
-    pub fn drain(&self) -> Drain<T> {
+    pub fn take_all(&self) -> Stack<T> {
         let head = self.head.swap(ptr::null_mut(), AcqRel);
-        let next = NonNull::new(head);
-        Drain { next }
+        let head = NonNull::new(head);
+        Stack { head }
     }
 }
 
@@ -97,11 +113,120 @@ where
     fn drop(&mut self) {
         // The stack owns any entries that are still in the stack; ensure they
         // are dropped before dropping the stack.
-        for entry in self.drain() {
+        for entry in self.take_all() {
             drop(entry);
         }
     }
 }
+
+impl<T> fmt::Debug for TransferStack<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { head } = self;
+        f.debug_struct("AtomicStack").field("head", head).finish()
+    }
+}
+
+
+// === impl UnsyncStack ===
+
+impl<T> Stack<T>
+where
+    T: Linked<Links<T>>,
+{
+    /// Returns a new `UnsyncStack`.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            head: None,
+        }
+    }
+
+    pub fn push(&mut self, element: T::Handle) {
+        let ptr = T::into_ptr(element);
+        test_trace!(?ptr, ?self.head, "UnsyncStack::push");
+        unsafe {
+            // Safety: we have exclusive mutable access to the stack, and
+            // therefore can also mutate the stack's entries.
+            let links = T::links(ptr).as_mut();
+            links.next.with_mut(|next| {
+                debug_assert!((*next).is_none());
+                *next = self.head.replace(ptr);
+            })
+        }
+    }
+
+    #[must_use]
+    pub fn pop(&mut self) -> Option<T::Handle> {
+        test_trace!(?self.head, "Stack::pop");
+        let head = self.head.take()?;
+        unsafe {
+            // Safety: we have exclusive ownership over this chunk of stack.
+
+            // advance the iterator to the next node after the current one (if
+            // there is one).
+            self.head = T::links(head).as_mut().next.with_mut(|next| (*next).take());
+
+            test_trace!(?self.head, "Stack::pop -> popped");
+
+            // return the current node
+            Some(T::from_ptr(head))
+        }
+    }
+
+    #[must_use]
+    pub fn take_all(&mut self) -> Self {
+        Self {
+            head: self.head.take(),
+        }
+    }
+}
+
+impl<T> Drop for Stack<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn drop(&mut self) {
+        // The stack owns any entries that are still in the stack; ensure they
+        // are dropped before dropping the stack.
+        for entry in self {
+            drop(entry);
+        }
+    }
+}
+
+impl<T> fmt::Debug for Stack<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { head } = self;
+        f.debug_struct("Stack").field("head", head).finish()
+    }
+}
+
+impl<T> Iterator for Stack<T>
+where
+    T: Linked<Links<T>>,
+{
+    type Item = T::Handle;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.pop()
+    }
+}
+
+/// # Safety
+///
+/// A `Stack` is `Send` if `T` is send, because moving it across threads
+/// also implicitly moves any `T`s in the stack.
+unsafe impl<T> Send for Stack<T>
+where T: Send, T: Linked<Links<T>> {}
+
+unsafe impl<T> Sync for Stack<T>
+where T: Sync, T: Linked<Links<T>> {}
 
 // === impl Links ===
 
@@ -145,45 +270,12 @@ unsafe impl<T: Send> Send for Links<T> {}
 /// make a type `!Send`.
 unsafe impl<T: Sync> Sync for Links<T> {}
 
-// === impl Drain ===
-
-impl<T> Iterator for Drain<T>
-where
-    T: Linked<Links<T>>,
-{
-    type Item = T::Handle;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let curr = self.next.take();
-        test_trace!(?curr, "Drain::next");
-        let curr = curr?;
-        unsafe {
-            // Safety: we have exclusive ownership over this chunk of stack.
-
-            // advance the iterator to the next node after the current one (if
-            // there is one).
-            self.next = T::links(curr).as_mut().next.with_mut(|next| (*next).take());
-
-            test_trace!(?self.next, "Drain::next");
-
-            // return the current node
-            Some(T::from_ptr(curr))
-        }
+impl<T> fmt::Debug for Links<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("transfer_stack::Links { ... }")
     }
 }
 
-impl<T> Drop for Drain<T>
-where
-    T: Linked<Links<T>>,
-{
-    fn drop(&mut self) {
-        // The `Drain` iterator *owns* all entries popped from the stack. Ensure
-        // that they are all dropped prior to dropping the iterator.
-        for entry in self {
-            drop(entry);
-        }
-    }
-}
 
 #[cfg(test)]
 mod loom {
@@ -225,7 +317,7 @@ mod loom {
             let mut seen = Vec::new();
 
             loop {
-                seen.extend(stack.drain().map(|entry| entry.val));
+                seen.extend(stack.take_all().map(|entry| entry.val));
 
                 if threads.load(Ordering::Relaxed) == 0 {
                     break;
@@ -234,7 +326,7 @@ mod loom {
                 thread::yield_now();
             }
 
-            seen.extend(stack.drain().map(|entry| entry.val));
+            seen.extend(stack.take_all().map(|entry| entry.val));
 
             seen.sort();
             assert_eq!(seen, vec![10, 11, 20, 21]);
@@ -261,16 +353,16 @@ mod loom {
 
             let thread3 = thread::spawn({
                 let stack = stack.clone();
-                move || stack.drain().map(|entry| entry.val).collect::<Vec<_>>()
+                move || stack.take_all().map(|entry| entry.val).collect::<Vec<_>>()
             });
 
-            let seen_thread0 = stack.drain().map(|entry| entry.val).collect::<Vec<_>>();
+            let seen_thread0 = stack.take_all().map(|entry| entry.val).collect::<Vec<_>>();
             let seen_thread3 = thread3.join().unwrap();
 
             thread1.join().unwrap();
             thread2.join().unwrap();
 
-            let seen_thread0_final = stack.drain().map(|entry| entry.val).collect::<Vec<_>>();
+            let seen_thread0_final = stack.take_all().map(|entry| entry.val).collect::<Vec<_>>();
 
             let mut all = dbg!(seen_thread0);
             all.extend(dbg!(seen_thread3));
@@ -305,7 +397,7 @@ mod loom {
     }
 
     #[test]
-    fn drain_doesnt_leak() {
+    fn take_all_doesnt_leak() {
         const PUSHES: i32 = 2;
         loom::model(|| {
             let stack = Arc::new(TransferStack::new());
@@ -322,18 +414,18 @@ mod loom {
             thread1.join().unwrap();
             thread2.join().unwrap();
 
-            let drain = stack.drain();
+            let take_all = stack.take_all();
 
             tracing::info!("dropping stack");
             drop(stack);
 
-            tracing::info!("dropping drain");
-            drop(drain);
+            tracing::info!("dropping take_all");
+            drop(take_all);
         })
     }
 
     #[test]
-    fn drain_doesnt_leak_racy() {
+    fn take_all_doesnt_leak_racy() {
         const PUSHES: i32 = 2;
         loom::model(|| {
             let stack = Arc::new(TransferStack::new());
@@ -347,7 +439,7 @@ mod loom {
                 move || Entry::push_all(&stack, 2, PUSHES)
             });
 
-            let drain = stack.drain();
+            let take_all = stack.take_all();
 
             thread1.join().unwrap();
             thread2.join().unwrap();
@@ -355,10 +447,45 @@ mod loom {
             tracing::info!("dropping stack");
             drop(stack);
 
-            tracing::info!("dropping drain");
-            drop(drain);
+            tracing::info!("dropping take_all");
+            drop(take_all);
         })
     }
+
+
+    #[test]
+    fn unsync() {
+        loom::model(|| {
+            let mut stack = Stack::<Entry>::new();
+            stack.push(Entry::new(1));
+            stack.push(Entry::new(2));
+            stack.push(Entry::new(3));
+            let mut take_all = stack.take_all();
+
+            for i in (1..=3).rev() {
+                assert_eq!(take_all.next().unwrap().val, i);
+                stack.push(Entry::new(10 + i));
+            }
+
+            let mut i = 11;
+            for entry in stack.take_all() {
+                assert_eq!(entry.val, i);
+                i += 1;
+            }
+
+        })
+    }
+
+    #[test]
+    fn unsync_doesnt_leak() {
+        loom::model(|| {
+            let mut stack = Stack::<Entry>::new();
+            stack.push(Entry::new(1));
+            stack.push(Entry::new(2));
+            stack.push(Entry::new(3));
+        })
+    }
+
 }
 
 #[cfg(test)]
