@@ -14,12 +14,14 @@ pub(crate) mod util;
 
 pub mod list;
 pub mod mpsc_queue;
-pub mod transfer_stack;
+pub mod stack;
 
 #[doc(inline)]
 pub use list::List;
 #[doc(inline)]
 pub use mpsc_queue::MpscQueue;
+#[doc(inline)]
+pub use stack::{TransferStack, Stack};
 
 pub(crate) mod loom;
 

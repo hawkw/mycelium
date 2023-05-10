@@ -510,10 +510,10 @@ mod test_util {
     use crate::loom::alloc;
 
     #[pin_project::pin_project]
-    pub(super) struct Entry {
+    pub(stack) struct Entry {
         #[pin]
         links: Links<Entry>,
-        pub(super) val: i32,
+        pub(stack) val: i32,
         track: alloc::Track<()>,
     }
 
