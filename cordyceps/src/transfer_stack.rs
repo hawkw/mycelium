@@ -11,11 +11,11 @@ use core::{
     ptr::{self, NonNull},
 };
 
-pub struct TransferStack<T> {
+pub struct TransferStack<T: Linked<Links<T>>> {
     head: AtomicPtr<T>,
 }
 
-pub struct Drain<T> {
+pub struct Drain<T: Linked<Links<T>>> {
     next: Option<NonNull<T>>,
 }
 
@@ -89,6 +89,19 @@ where
     }
 }
 
+impl<T> Drop for TransferStack<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn drop(&mut self) {
+        // The stack owns any entries that are still in the stack; ensure they
+        // are dropped before dropping the stack.
+        for entry in self.drain() {
+            drop(entry);
+        }
+    }
+}
+
 // === impl Links ===
 
 impl<T> Links<T> {
@@ -136,6 +149,19 @@ where
 
             // return the current node
             Some(T::from_ptr(curr))
+        }
+    }
+}
+
+impl<T> Drop for Drain<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn drop(&mut self) {
+        // The `Drain` iterator *owns* all entries popped from the stack. Ensure
+        // that they are all dropped prior to dropping the iterator.
+        for entry in self {
+            drop(entry);
         }
     }
 }
@@ -274,6 +300,9 @@ mod loom {
                 move || Entry::push_all(&stack, 2, PUSHES)
             });
 
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+
             let drain = stack.drain();
 
             tracing::info!("dropping stack");
@@ -281,9 +310,34 @@ mod loom {
 
             tracing::info!("dropping drain");
             drop(drain);
+        })
+    }
+
+    #[test]
+    fn drain_doesnt_leak_racy() {
+        const PUSHES: i32 = 2;
+        loom::model(|| {
+            let stack = Arc::new(TransferStack::new());
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all(&stack, 2, PUSHES)
+            });
+
+            let drain = stack.drain();
 
             thread1.join().unwrap();
             thread2.join().unwrap();
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            tracing::info!("dropping drain");
+            drop(drain);
         })
     }
 }
