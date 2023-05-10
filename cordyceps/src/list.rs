@@ -24,10 +24,15 @@ pub use self::cursor::{Cursor, CursorMut};
 ///
 /// This data structure may be used as a first-in, first-out queue by using the
 /// [`List::push_front`] and [`List::pop_back`] methods. It also supports
-/// random-access removals using the [`List::remove`] method.
+/// random-access removals using the [`List::remove`] method. This makes the
+/// [`List`] type suitable for use in cases where elements must be able to drop
+/// themselves while linked into a list.
 ///
 /// This data structure can also be used as a stack or doubly-linked list by using
 /// the [`List::pop_front`] and [`List::push_back`] methods.
+///
+/// The [`List`] type is **not** a lock-free data structure, and can only be
+/// modified through `&mut` references.
 ///
 /// In order to be part of a `List`, a type `T` must implement [`Linked`] for
 /// [`list::Links<T>`].

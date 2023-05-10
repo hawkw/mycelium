@@ -3,7 +3,65 @@
 #![cfg_attr(docsrs, deny(missing_docs))]
 #![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![allow(unused_unsafe)]
-
+//!
+//! ## data structures
+//!
+//! `cordyceps` provides implementations of the following data structures:
+//!
+//! - **[`List`]: a mutable, doubly-linked list.**
+//!
+//!   A [`List`] provides *O*(1) insertion and removal at both the head and
+//!   tail of the list. In addition, parts of a [`List`] may be split off to
+//!   form new [`List`]s, and two [`List`]s may be spliced together to form a
+//!   single [`List`], all in *O*(1) time. The [`list`] module also provides
+//!   [`list::Cursor`] and [`list::CursorMut`] types, which allow traversal and
+//!   modification of elements in a list. Finally, elements can remove themselves
+//!   from arbitrary positions in a [`List`], provided that they have mutable
+//!   access to the [`List`] itself. This makes the [`List`] type suitable for
+//!   use in cases where elements must be able to drop themselves while linked
+//!   into a list.
+//!
+//!   The [`List`] type is **not** a lock-free data structure, and can only be
+//!   modified through `&mut` references.
+//!
+//! - **[`MpscQueue`]: a multi-producer, single-consumer (MPSC) lock-free
+//!   last-in, first-out (LIFO) queue.**
+//!
+//!   A [`MpscQueue`] is a *lock-free* concurrent data structure that allows
+//!   multiple producers to concurrently push elements onto the queue, and a
+//!   single consumer to dequeue elements in the order that they were pushed.
+//!
+//!   [`MpscQueue`]s can be used to efficiently share data from multiple
+//!   concurrent producers with a consumer.
+//!
+//! - **[`stack::Stack`]: a mutable, singly-linked first-in, first-out (FIFO)
+//!   stack.**
+//!
+//!   This is a simple, singly-linked stack with *O*(1) push and pop
+//!   operations. The pop operation returns the *last* element pushed to the
+//!   stack. A [`Stack`] also implements the [`Iterator`] trait; iterating over
+//!   a stack pops elements from the end of the list.
+//!
+//!   The [`Stack`] type is **not** a lock-free data structure, and can only be
+//!   modified through `&mut` references.
+//!
+//! - **[`stack::TransferStack`]: a lock-free, multi-producer FIFO stack, where
+//!   all elements currently in the stack are popped in a single atomic operation.**
+//!
+//!   A [`TransferStack`] is a lock-free data structure where multiple producers
+//!   can [concurrently push elements](stack::TransferStack::push) to the end of
+//!   the stack through immutable `&` references. A consumer can [pop all
+//!   elements currently in the `TransferStack`](stack::TransferStack::take_all)
+//!   in a single atomic operation, returning a new [`Stack`]. Pushing an
+//!   element, and taking all elements in the [`TransferStack`] are both *O*(1)
+//!   operations.
+//!
+//!   A [`TransferStack`] can be used to efficiently transfer ownership of
+//!   resources from multiple producers to a consumer, such as for reuse or
+//!   cleanup.
+//!
+//! [`Stack`]: stack::Stack
+//! [`TransferStack`]: stack::TransferStack
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(test)]
@@ -20,8 +78,6 @@ pub mod stack;
 pub use list::List;
 #[doc(inline)]
 pub use mpsc_queue::MpscQueue;
-#[doc(inline)]
-pub use stack::{TransferStack, Stack};
 
 pub(crate) mod loom;
 

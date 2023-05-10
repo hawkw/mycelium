@@ -1,4 +1,4 @@
-//! [Intrusive] stacks.
+//! [Intrusive], singly-linked first-in, first-out (FIFO) stacks.
 //!
 //! See the documentation for the [`Stack`] and [`TransferStack`] types for
 //! details.
@@ -19,25 +19,78 @@ use core::{
     ptr::{self, NonNull},
 };
 
-/// An [intrusive], lock-free singly-linked stack, where all entries currently in
-/// the list are consumed in a single atomic operation.
+/// An [intrusive] lock-free singly-linked FIFO stack, where all entries
+/// currently in the stack are consumed in a single atomic operation.
 ///
 /// A transfer stack is perhaps the world's simplest lock-free concurrent data
-/// structure.
+/// structure. It provides two primary operations:
+///
+/// - [`TransferStack::push`], which appends an element to the end of the
+///   transfer stack,
+///
+/// - [`TransferStack::take_all`], which atomically takes all elements currently
+///   on the transfer stack and returns them as a new mutable [`Stack`].
+///
+/// These are both *O*(1) operations, although `push` performs a
+/// compare-and-swap loop that may be retried if another producer concurrently
+/// pushed an element.
+///
+/// In order to be part of a `TransferStack`, a type `T` must implement
+/// the [`Linked`] trait for [`stack::Links<T>`](Links).
+///
+/// Pushing elements into a `TransferStack` takes ownership of those elements
+/// through an owning [`Handle` type](Linked::Handle). Dropping a
+/// [`TransferStack`] drops all elements currently linked into the stack.
+///
+/// A transfer stack is often useful in cases where a large number of resources
+/// must be efficiently transferred from several producers to a consumer, such
+/// as for reuse or cleanup. For example, a [`TransferStack`] can be used as the
+/// "thread" (shared) free list in a [`mimalloc`-style sharded
+/// allocator][mimalloc], with a mutable [`Stack`] used as the local
+/// (unsynchronized) free list. When an allocation is freed from the same CPU
+/// core that it was allocated on, it is pushed to the local free list, using an
+/// unsynchronized mutable [`Stack::push`] operation. If an allocation is freed
+/// from a different thread, it is instead pushed to that thread's shared free
+/// list, a [`TransferStack`], using an atomic [`TransferStack::push`]
+/// operation. New allocations are popped from the local unsynchronized free
+/// list, and if the local free list is empty, the entire shared free list is
+/// moved onto the local free list. This allows objects which do not leave the
+/// CPU core they were allocated on to be both allocated and deallocated using
+/// unsynchronized operations, and new allocations only perform an atomic
+/// operation when the local free list is empty.
 ///
 /// [intrusive]: crate#intrusive-data-structures
+/// [mimalloc]: https://www.microsoft.com/en-us/research/uploads/prod/2019/06/mimalloc-tr-v1.pdf
 pub struct TransferStack<T: Linked<Links<T>>> {
     head: AtomicPtr<T>,
 }
 
+/// An [intrusive] singly-linked mutable FIFO stack.
+///
+/// This is a very simple implementation of a linked `Stack`, which provides
+/// *O*(1) [`push`](Self::push) and [`pop`](Self::pop) operations. Items are
+/// popped from the stack in the opposite order that they were pushed in.
+///
+/// A [`Stack`] also implements the [`Iterator`] trait, with the
+/// [`Iterator::next`] method popping elements from the end of the stack.
+///
+/// In order to be part of a `Stack`, a type `T` must implement
+/// the [`Linked`] trait for [`stack::Links<T>`](Links).
+///
+/// Pushing elements into a `Stack` takes ownership of those elements
+/// through an owning [`Handle` type](Linked::Handle). Dropping a
+/// `Stack` drops all elements currently linked into the stack.
+///
+/// [intrusive]: crate#intrusive-data-structures
 pub struct Stack<T: Linked<Links<T>>> {
     head: Option<NonNull<T>>,
 }
 
 /// Links to other nodes in a [`TransferStack`] or [`Stack`].
 ///
-/// In order to be part of a [`TransferStack`], a type must contain an instance of this
-/// type, and must implement the [`Linked`] trait for `Links<Self>`.
+/// In order to be part of a [`Stack`] or [`TransferStack`], a type must contain
+/// an instance of this type, and must implement the [`Linked`] trait for
+/// `Links<Self>`.
 pub struct Links<T> {
     /// The next node in the queue.
     next: UnsafeCell<Option<NonNull<T>>>,
@@ -54,7 +107,7 @@ impl<T> TransferStack<T>
 where
     T: Linked<Links<T>>,
 {
-    /// Returns a new `AtomicStack`.
+    /// Returns a new `TransferStack` with no elements.
     #[cfg(not(loom))]
     #[must_use]
     pub const fn new() -> Self {
@@ -63,7 +116,7 @@ where
         }
     }
 
-    /// Returns a new `AtomicStack`.
+    /// Returns a new `TransferStack` with no elements.
     #[cfg(loom)]
     #[must_use]
     pub fn new() -> Self {
@@ -72,15 +125,25 @@ where
         }
     }
 
+    /// Pushes `element` onto the end of this `TransferStack`, taking ownership
+    /// of it.
+    ///
+    /// This is an *O*(1) operation, although it performs a compare-and-swap
+    /// loop that may repeat if another producer is concurrently calling `push`
+    /// on the same `TransferStack`.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `TransferStack` is dropped before the
+    /// pushed `element` is removed from the stack, the `element` will be dropped.
     pub fn push(&self, element: T::Handle) {
         let ptr = T::into_ptr(element);
-        test_trace!(?ptr, "AtomicStack::push");
+        test_trace!(?ptr, "TransferStack::push");
         let links = unsafe { T::links(ptr).as_mut() };
         debug_assert!(links.next.with(|next| unsafe { (*next).is_none() }));
 
         let mut head = self.head.load(Relaxed);
         loop {
-            test_trace!(?ptr, ?head, "AtomicStack::push");
+            test_trace!(?ptr, ?head, "TransferStack::push");
             links.next.with_mut(|next| unsafe {
                 *next = NonNull::new(head);
             });
@@ -90,7 +153,7 @@ where
                 .compare_exchange_weak(head, ptr.as_ptr(), AcqRel, Acquire)
             {
                 Ok(_) => {
-                    test_trace!(?ptr, ?head, "AtomicStack::push -> pushed");
+                    test_trace!(?ptr, ?head, "TransferStack::push -> pushed");
                     return;
                 }
                 Err(actual) => head = actual,
@@ -98,6 +161,11 @@ where
         }
     }
 
+    /// Takes all elements *currently* in this `TransferStack`, returning a new
+    /// mutable [`Stack`] containing those elements.
+    ///
+    /// This is an *O*(1) operation which does not allocate memory. It will
+    /// never loop and does not spin.
     #[must_use]
     pub fn take_all(&self) -> Stack<T> {
         let head = self.head.swap(ptr::null_mut(), AcqRel);
@@ -125,18 +193,18 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { head } = self;
-        f.debug_struct("AtomicStack").field("head", head).finish()
+        f.debug_struct("TransferStack").field("head", head).finish()
     }
 }
 
 
-// === impl UnsyncStack ===
+// === impl Stack ===
 
 impl<T> Stack<T>
 where
     T: Linked<Links<T>>,
 {
-    /// Returns a new `UnsyncStack`.
+    /// Returns a new `Stack` with no elements in it.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -144,9 +212,19 @@ where
         }
     }
 
+    /// Pushes `element` onto the end of this `Stack`, taking ownership
+    /// of it.
+    ///
+    /// This is an *O*(1) operation that does not allocate memory. It will never
+    /// loop.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `Stack` is dropped before the
+    /// pushed `element` is [`pop`](Self::pop)pped from the stack, the `element`
+    /// will be dropped.
     pub fn push(&mut self, element: T::Handle) {
         let ptr = T::into_ptr(element);
-        test_trace!(?ptr, ?self.head, "UnsyncStack::push");
+        test_trace!(?ptr, ?self.head, "Stack::push");
         unsafe {
             // Safety: we have exclusive mutable access to the stack, and
             // therefore can also mutate the stack's entries.
@@ -158,6 +236,12 @@ where
         }
     }
 
+
+    /// Returns the element most recently [push](Self::push)ed to this `Stack`,
+    /// or `None` if the stack is empty.
+    ///
+    /// This is an *O*(1) operation which does not allocate memory. It will
+    /// never loop and does not spin.
     #[must_use]
     pub fn pop(&mut self) -> Option<T::Handle> {
         test_trace!(?self.head, "Stack::pop");
@@ -165,7 +249,7 @@ where
         unsafe {
             // Safety: we have exclusive ownership over this chunk of stack.
 
-            // advance the iterator to the next node after the current one (if
+            // advance the head link to the next node after the current one (if
             // there is one).
             self.head = T::links(head).as_mut().next.with_mut(|next| (*next).take());
 
@@ -176,11 +260,23 @@ where
         }
     }
 
+    /// Takes all elements *currently* in this `Stack`, returning a new
+    /// mutable `Stack` containing those elements.
+    ///
+    /// This is an *O*(1) operation which does not allocate memory. It will
+    /// never loop and does not spin.
     #[must_use]
     pub fn take_all(&mut self) -> Self {
         Self {
             head: self.head.take(),
         }
+    }
+
+    /// Returns `true` if this `Stack` is empty.
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.head.is_none()
     }
 }
 
@@ -510,10 +606,10 @@ mod test_util {
     use crate::loom::alloc;
 
     #[pin_project::pin_project]
-    pub(stack) struct Entry {
+    pub(super) struct Entry {
         #[pin]
         links: Links<Entry>,
-        pub(stack) val: i32,
+        pub(super) val: i32,
         track: alloc::Track<()>,
     }
 
