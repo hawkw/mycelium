@@ -136,7 +136,7 @@ where
     }
 }
 
-#[cfg(all(loom, test))]
+#[cfg(test)]
 mod loom {
     use super::*;
     use crate::loom::{

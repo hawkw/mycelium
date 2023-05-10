@@ -4,51 +4,6 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-#[cfg(all(test, not(loom)))]
-pub(crate) use tracing_02 as tracing;
-
-#[cfg(all(test, loom))]
-pub(crate) use tracing_01 as tracing;
-
-#[cfg(not(test))]
-macro_rules! test_dbg {
-    ($e:expr) => {
-        $e
-    };
-}
-
-#[cfg(test)]
-macro_rules! test_dbg {
-    ($e:expr) => {
-        match $e {
-            e => {
-                crate::util::tracing::debug!(
-                    location = %core::panic::Location::caller(),
-                    "{} = {:?}",
-                    stringify!($e),
-                    &e
-                );
-                e
-            }
-        }
-    };
-}
-
-#[cfg(not(test))]
-macro_rules! test_trace {
-    ($($args:tt)+) => {};
-}
-
-#[cfg(test)]
-macro_rules! test_trace {
-    ($($args:tt)+) => {
-        crate::util::tracing::debug!(
-            location = %core::panic::Location::caller(),
-            $($args)+
-        );
-    };
-}
-
 macro_rules! feature {
     (
         #![$meta:meta]
@@ -56,24 +11,15 @@ macro_rules! feature {
     ) => {
         $(
             #[cfg($meta)]
-            #[cfg_attr(docsrs, doc(cfg($meta)))]
             $item
         )*
     }
 }
 
-macro_rules! loom_const_fn {
-    (
-        $(#[$meta:meta])*
-        $vis:vis fn $name:ident($($arg:ident: $T:ty),*) -> $Ret:ty $body:block
-    ) => {
-        $(#[$meta])*
-        #[cfg(not(loom))]
-        $vis const fn $name($($arg: $T),*) -> $Ret $body
-
-        $(#[$meta])*
-        #[cfg(loom)]
-        $vis fn $name($($arg: $T),*) -> $Ret $body
+macro_rules! test_trace {
+    ($($tt:tt)*) => {
+        #[cfg(test)]
+        tracing::trace!($($tt)*)
     }
 }
 

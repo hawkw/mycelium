@@ -25,23 +25,13 @@ no-cache-pad = []
 
 [dev-dependencies]
 proptest = "1"
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 pin-project = "1"
-tracing_01 = { package = "tracing", version = "0.1", default_features = false }
-
-[dev-dependencies.tracing_02]
-package = "tracing"
-default_features = false
-git = "https://github.com/tokio-rs/tracing"
-
-[target.'cfg(not(loom))'.dev-dependencies]
-tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = ["ansi", "fmt"] }
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.5.5"
-
-[target.'cfg(loom)'.dev-dependencies]
-loom = { version = "0.5.5", features = ["futures", "checkpoint"] }
-tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
+tracing = { version = "0.1" }
 
 [package.metadata.docs.rs]
 all-features = true
