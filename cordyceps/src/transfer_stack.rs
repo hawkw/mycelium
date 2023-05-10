@@ -14,6 +14,7 @@ use core::{
 pub struct TransferStack<T> {
     head: AtomicPtr<T>,
 }
+
 pub struct Drain<T> {
     next: Option<NonNull<T>>,
 }
