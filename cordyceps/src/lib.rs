@@ -34,7 +34,7 @@
 //!   [`MpscQueue`]s can be used to efficiently share data from multiple
 //!   concurrent producers with a consumer.
 //!
-//! - **[`stack::Stack`]: a mutable, singly-linked first-in, first-out (FIFO)
+//! - **[`Stack`]: a mutable, singly-linked first-in, first-out (FIFO)
 //!   stack.**
 //!
 //!   This is a simple, singly-linked stack with *O*(1) push and pop
@@ -45,7 +45,7 @@
 //!   The [`Stack`] type is **not** a lock-free data structure, and can only be
 //!   modified through `&mut` references.
 //!
-//! - **[`stack::TransferStack`]: a lock-free, multi-producer FIFO stack, where
+//! - **[`TransferStack`]: a lock-free, multi-producer FIFO stack, where
 //!   all elements currently in the stack are popped in a single atomic operation.**
 //!
 //!   A [`TransferStack`] is a lock-free data structure where multiple producers
@@ -59,9 +59,6 @@
 //!   A [`TransferStack`] can be used to efficiently transfer ownership of
 //!   resources from multiple producers to a consumer, such as for reuse or
 //!   cleanup.
-//!
-//! [`Stack`]: stack::Stack
-//! [`TransferStack`]: stack::TransferStack
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(test)]
@@ -78,6 +75,9 @@ pub mod stack;
 pub use list::List;
 #[doc(inline)]
 pub use mpsc_queue::MpscQueue;
+#[doc(inline)]
+pub use stack::{Stack, TransferStack};
+
 
 pub(crate) mod loom;
 
