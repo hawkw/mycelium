@@ -6,3 +6,6 @@ pub mod buddy;
 
 #[cfg(feature = "bump")]
 pub mod bump;
+
+#[cfg(feature = "sharded")]
+pub mod sharded;
