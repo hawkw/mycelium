@@ -1401,6 +1401,7 @@ version = "0.1.0"
 dependencies = [
  "hal-core",
  "mycelium-util",
+ "pin-project",
  "tracing 0.2.0",
 ]
 

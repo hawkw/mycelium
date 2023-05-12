@@ -11,9 +11,11 @@ license = "MIT"
 [features]
 bump = []
 buddy = ["hal-core", "mycelium-util", "tracing"]
-sharded = ["hal-core", "mycelium-util", "tracing"]
+sharded = ["hal-core", "mycelium-util", "tracing", "pin-project"]
+default = ["bump", "buddy", "sharded"]
 
 [dependencies]
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, optional = true }
 mycelium-util = { path = "../util", optional = true }
 hal-core = { path = "../hal-core", optional = true }
+pin-project = { version = "1", optional = true }

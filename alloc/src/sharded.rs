@@ -4,41 +4,38 @@ use mycelium_util::{
         list::{self, List},
         stack::{self, Stack, TransferStack},
 }, sync::{atomic::AtomicUsize, CachePadded, cell::UnsafeCell}};
-use core::{ptr::{self, NonNull}, marker::PhantomPinned, mem};
+use core::{ptr::{self, NonNull}, marker, mem, alloc};
+use hal_core::{mem::page, CoreLocal};
 
 const MAX_CORES: usize = 512;
 
-pub struct Heap<L> {
-    shards: [Shared; MAX_CORES],
-    local: L,
-}
-
-struct Shared {
-
+pub struct Heap<L, P, S> {
+    shards: [LocalHeap<P, S>; MAX_CORES],
+    current: L,
 }
 
 #[derive(Debug)]
-struct LocalHeap {
-    direct_pages: [NonNull<PageHeader>; DIRECT_PAGES],
-    page_lists: [List<PageHeader>; DIRECT_PAGES],
+struct LocalHeap<P, S> {
+    direct_pages: [NonNull<PageHeader<S>>; DIRECT_PAGES],
+    page_lists: [List<PageHeader<S>>; DIRECT_PAGES],
+    page_allocator: P,
 }
 
-const SMALL_MAX_SIZE: usize = 1024;
-const SMALL_BUCKET: usize = 8;
-const SMALL_BUCKET_SHIFT: usize = 3;
-const DIRECT_PAGES: usize = SMALL_MAX_SIZE / SMALL_BUCKET;
-
 #[derive(Debug)]
-struct PageHeader {
+#[pin_project::pin_project]
+struct PageHeader<S> {
     // magic: usize,
 
     /// Links for the linked list of pages.
-    links: list::Links<PageHeader>,
+    #[pin]
+    links: list::Links<Self>,
 
     shared: CachePadded<PageShared>,
     local: UnsafeCell<PageLocal>,
 
-    _pin: PhantomPinned,
+    _pin: marker::PhantomPinned,
+
+    _size: marker::PhantomData<fn(S)>,
 }
 
 #[derive(Debug)]
@@ -62,44 +59,86 @@ struct BlockHeader {
     /// Free list links.
     links: stack::Links<BlockHeader>,
 
-    _pin: PhantomPinned,
+    _pin: marker::PhantomPinned,
+}
+
+
+const SMALL_MAX_SIZE: usize = 1024;
+const SMALL_BUCKET: usize = 8;
+const SMALL_BUCKET_SHIFT: usize = 3;
+const DIRECT_PAGES: usize = SMALL_MAX_SIZE / SMALL_BUCKET;
+
+// === impl Heap ===
+impl<L, P, S> Heap<L, P, S>
+where
+    P: page::Alloc<S>,
+    S: page::StaticSize,
+    L: CoreLocal<usize>,
+{
+    pub fn allocate(&self, layout: alloc::Layout) -> Option<NonNull<()>> {
+        // TODO(eliza): handle alignment...
+        let size = layout.size();
+        let core = self.current.with(|core| *core);
+        let shard = self.shards.get(core)?;
+        unsafe {
+            Some(shard.alloc_small(size).cast())
+        }
+    }
+
+    pub unsafe fn deallocate(&self, ptr: NonNull<()>, layout: alloc::Layout) {
+        todo!("eliza: deallocate({ptr:?}, {layout:?})")
+    }
 }
 
 // === impl LocalHeap ===
 
-impl LocalHeap {
+impl<P, S> LocalHeap<P, S>
+where
+    P: page::Alloc<S>,
+    S: page::StaticSize,
+{
     #[inline]
-    unsafe fn alloc(&mut self, size: usize) -> NonNull<BlockHeader> {
+    unsafe fn alloc_small(&self, size: usize) -> NonNull<BlockHeader> {
         let bucket = (size + SMALL_BUCKET - 1) >> SMALL_BUCKET_SHIFT;
-        let page = self.direct_pages[bucket].as_mut();
+        let page = self.direct_pages[bucket].as_ref();
         page.local.with_mut(|local| unsafe { (*local).malloc_in_page() })
-            .unwrap_or_else(|| self.alloc_slow(size))
+            .unwrap_or_else(|| self.alloc_generic(size))
     }
 
-    unsafe fn alloc_slow(&mut self, size: usize) -> NonNull<BlockHeader> {
-        let pages = self.page_lists[size_class(size)].iter();
-        for page in pages {
-            page.collect_free();
+    #[inline(never)]
+    unsafe fn alloc_generic(&self, size: usize) -> NonNull<BlockHeader> {
+        let mut cursor = self.page_lists[size_class(size)].cursor_front_mut();
+        // advance the cursor to the head of the list.
+        cursor.move_next();
+        // loop until the cursor has reached the end of the list
+        while let Some(page) = cursor.current_mut() {
+            let page = page.project();
+            let block = page.local.with_mut(|local| unsafe {
+                // safety: we are on the thread that owns this page.
+                let local = &mut *local;
+                // collect the page's shared free list.
+                local.collect_free(page.shared);
 
-            // TODO(eliza): if the page is empty, free it back to the page allocator
+                // TODO(eliza): if the page is empty, free it back to the
+                // page allocator
+                // if page.is_empty() {
+                //     cursor.remove_current();
+                //     self.page_allocator.free(page.page());
+                //     return None;
+                // }
 
-            // if the page now has free blocks, allocate one.
-            if let Some(block) = page.local.with_mut(|local| unsafe { (*local).malloc_in_page() }) {
-                return block;
+                // the page is not empty, try to allocate a block from it.
+                local.malloc_in_page()
+            });
+
+            match block {
+                Some(block) => return block,
+                None => cursor.move_next(),
             }
         }
 
+        // no pages have space for a new block, try to allocate a new page.
         todo!("try to alloc a new page from the page allocator")
-    }
-}
-
-impl PageHeader {
-    fn collect_free(&self) {
-        self.local.with_mut(|local| unsafe {
-            debug_assert!((*local).free_list.is_empty());
-            (*local).free_list = self.shared.free_list.take_all();
-        })
-
     }
 }
 
@@ -110,12 +149,17 @@ impl PageLocal {
         self.used_blocks += 1;
         Some(block)
     }
+
+    fn collect_free(&mut self, shared: &PageShared) {
+        debug_assert!(self.free_list.is_empty());
+        self.free_list = shared.free_list.take_all();
+    }
 }
 
 // === impl PageHeader ===
 
 
-unsafe impl Linked<list::Links<PageHeader>> for PageHeader {
+unsafe impl<S> Linked<list::Links<Self>> for PageHeader<S> {
     type Handle = ptr::NonNull<Self>;
 
     #[inline]
