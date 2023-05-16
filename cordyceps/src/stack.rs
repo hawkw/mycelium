@@ -197,7 +197,6 @@ where
     }
 }
 
-
 // === impl Stack ===
 
 impl<T> Stack<T>
@@ -207,9 +206,7 @@ where
     /// Returns a new `Stack` with no elements in it.
     #[must_use]
     pub const fn new() -> Self {
-        Self {
-            head: None,
-        }
+        Self { head: None }
     }
 
     /// Pushes `element` onto the end of this `Stack`, taking ownership
@@ -235,7 +232,6 @@ where
             })
         }
     }
-
 
     /// Returns the element most recently [push](Self::push)ed to this `Stack`,
     /// or `None` if the stack is empty.
@@ -319,10 +315,18 @@ where
 /// A `Stack` is `Send` if `T` is send, because moving it across threads
 /// also implicitly moves any `T`s in the stack.
 unsafe impl<T> Send for Stack<T>
-where T: Send, T: Linked<Links<T>> {}
+where
+    T: Send,
+    T: Linked<Links<T>>,
+{
+}
 
 unsafe impl<T> Sync for Stack<T>
-where T: Sync, T: Linked<Links<T>> {}
+where
+    T: Sync,
+    T: Linked<Links<T>>,
+{
+}
 
 // === impl Links ===
 
@@ -371,7 +375,6 @@ impl<T> fmt::Debug for Links<T> {
         f.write_str("transfer_stack::Links { ... }")
     }
 }
-
 
 #[cfg(test)]
 mod loom {
@@ -548,7 +551,6 @@ mod loom {
         })
     }
 
-
     #[test]
     fn unsync() {
         loom::model(|| {
@@ -568,7 +570,6 @@ mod loom {
                 assert_eq!(entry.val, i);
                 i += 1;
             }
-
         })
     }
 
@@ -581,12 +582,11 @@ mod loom {
             stack.push(Entry::new(3));
         })
     }
-
 }
 
 #[cfg(test)]
 mod test {
-    use super::{*, test_util::Entry};
+    use super::{test_util::Entry, *};
 
     #[test]
     fn stack_is_send_sync() {
@@ -602,8 +602,8 @@ mod test {
 #[cfg(test)]
 mod test_util {
     use super::*;
-    use core::pin::Pin;
     use crate::loom::alloc;
+    use core::pin::Pin;
 
     #[pin_project::pin_project]
     pub(super) struct Entry {

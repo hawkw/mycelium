@@ -749,7 +749,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// that node.
     ///
     /// This operation should complete in *O*(1) time.
-    /// 
+    ///
     /// # Returns
     ///
     /// - [`Some`]`(`[`Pin`]`<&T>)` containing a pinned mutable reference to

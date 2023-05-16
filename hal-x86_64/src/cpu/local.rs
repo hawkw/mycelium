@@ -7,8 +7,8 @@ use core::{
     ptr,
     sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
 };
-use mycelium_util::{fmt, sync::Lazy};
 use hal_core::CoreLocal;
+use mycelium_util::{fmt, sync::Lazy};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -187,10 +187,11 @@ impl<T: 'static> CoreLocal<T> for LocalKey<T> {
         Self::new(initializer)
     }
 
-
     #[track_caller]
     fn with<F, U>(&self, f: F) -> U
-    where F: FnOnce(&T) -> U {
+    where
+        F: FnOnce(&T) -> U,
+    {
         self.with(f)
     }
 }

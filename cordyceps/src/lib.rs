@@ -78,7 +78,6 @@ pub use mpsc_queue::MpscQueue;
 #[doc(inline)]
 pub use stack::{Stack, TransferStack};
 
-
 pub(crate) mod loom;
 
 use core::ptr::NonNull;
