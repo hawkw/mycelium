@@ -1,41 +1,66 @@
+#![allow(unstable_name_collisions)]
+use sptr::Strict;
+use core::{
+    alloc, marker, mem,
+    ptr::{self, NonNull},
+};
+use hal_core::{mem::page::{self, Page}, CoreLocal};
 use mycelium_util::{
     intrusive::{
-        Linked,
         list::{self, List},
         stack::{self, Stack, TransferStack},
-}, sync::{atomic::AtomicUsize, CachePadded, cell::UnsafeCell}};
-use core::{ptr::{self, NonNull}, marker, mem, alloc};
-use hal_core::{mem::page, CoreLocal};
+        Linked,
+    },
+    sync::{atomic::{Ordering, AtomicUsize}, cell::UnsafeCell, CachePadded},
+};
+use crate::{KB, MB};
 
-const MAX_CORES: usize = 512;
 
 pub struct Heap<L, P, S> {
-    shards: [LocalHeap<P, S>; MAX_CORES],
+    shards: [UnsafeCell<LocalHeap<P, S>>; MAX_CORES],
     current: L,
+}
+
+// #[repr(align(4_194_304))] // 4MB aligned
+struct SegmentHeader {
+    magic: usize,
+    /// The ID of the CPU core that owns this segment.
+    core_id: usize,
+
+    page_shift: usize,
+
+    pages: SegmentKind,
+}
+
+#[derive(Debug)]
+enum SegmentKind {
+    /// Small pages ([`PageMeta::SMALL_PAGE_SIZE`]).
+    Small([PageMeta; SegmentHeader::SMALL_PAGES]),
+    Medium([PageMeta; SegmentHeader::MEDIUM_PAGES]),
+    Large(PageMeta),
+    Huge(PageMeta),
 }
 
 #[derive(Debug)]
 struct LocalHeap<P, S> {
-    direct_pages: [NonNull<PageHeader<S>>; DIRECT_PAGES],
-    page_lists: [List<PageHeader<S>>; DIRECT_PAGES],
+    /// The ID of the CPU core that this heap corresponds to.
+    core_id: usize,
+    direct_pages: [NonNull<PageMeta>; DIRECT_PAGES],
+    page_lists: [List<PageMeta>; DIRECT_PAGES],
     page_allocator: P,
+    _size: marker::PhantomData<fn(S)>,
 }
 
 #[derive(Debug)]
 #[pin_project::pin_project]
-struct PageHeader<S> {
+struct PageMeta {
     // magic: usize,
-
     /// Links for the linked list of pages.
     #[pin]
     links: list::Links<Self>,
 
     shared: CachePadded<PageShared>,
     local: UnsafeCell<PageLocal>,
-
-    _pin: marker::PhantomPinned,
-
-    _size: marker::PhantomData<fn(S)>,
 }
 
 #[derive(Debug)]
@@ -54,7 +79,7 @@ struct PageLocal {
     used_blocks: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct BlockHeader {
     /// Free list links.
     links: stack::Links<BlockHeader>,
@@ -62,11 +87,21 @@ struct BlockHeader {
     _pin: marker::PhantomPinned,
 }
 
+// === segment and page sizes ===
+// `MI_INTPTR_SHIFT` in mimalloc
+const BASE_SHIFT: usize = match mem::size_of::<*const ()>() {
+    // assume 128-bit (e.g. CHERI on ARM)
+    size if size > mem::size_of::<u64>() => 4,
+    size if size == mem::size_of::<u64>() => 3,
+    size if size == mem::size_of::<u32>() => 2,
+    _ => panic!("pointers must be 32, 64, or 128 bits"),
+};
 
 const SMALL_MAX_SIZE: usize = 1024;
 const SMALL_BUCKET: usize = 8;
 const SMALL_BUCKET_SHIFT: usize = 3;
 const DIRECT_PAGES: usize = SMALL_MAX_SIZE / SMALL_BUCKET;
+const MAX_CORES: usize = 512;
 
 // === impl Heap ===
 impl<L, P, S> Heap<L, P, S>
@@ -80,13 +115,47 @@ where
         let size = layout.size();
         let core = self.current.with(|core| *core);
         let shard = self.shards.get(core)?;
-        unsafe {
-            Some(shard.alloc_small(size).cast())
-        }
+
+        let ptr = shard.with_mut(|shard| {
+            // Safety: we have selected the `LocalHeap` that is owned by this
+            // CPU core; it will never be accessed by another core.
+            unsafe { (*shard).alloc_small(size) }
+        });
+
+        Some(ptr.cast())
     }
 
     pub unsafe fn deallocate(&self, ptr: NonNull<()>, layout: alloc::Layout) {
-        todo!("eliza: deallocate({ptr:?}, {layout:?})")
+        let core = self.current.with(|core| *core);
+        let _span = tracing::trace_span!("deallocate", core, ?ptr, ?layout).entered();
+
+        let segment = SegmentHeader::for_addr(ptr).as_mut();
+        assert!(segment.magic == SegmentHeader::MAGIC, "segment header had invalid magic");
+        let page = segment.page(ptr.as_ptr() as usize);
+
+        let block = {
+            let block = ptr.cast::<mem::MaybeUninit<BlockHeader>>().as_mut().write(BlockHeader::default());
+            NonNull::from(block)
+        };
+
+        if core == segment.core_id {
+            // local free
+            tracing::trace!("deallocate -> local");
+            page.local.with_mut(|local| unsafe {
+                let mut local = &mut *local;
+                local.free_list.push(block);
+                local.used_blocks -= 1;
+                if local.used_blocks - page.shared.freed.load(Ordering::Acquire) == 0 {
+                    // TODO(eliza): return the page to the page allocator
+                }
+            });
+        } else {
+            // remote free
+            tracing::trace!("deallocate -> remote");
+            page.shared.free_list.push(block);
+            page.shared.freed.fetch_add(1, Ordering::Release);
+        }
+
     }
 }
 
@@ -98,15 +167,16 @@ where
     S: page::StaticSize,
 {
     #[inline]
-    unsafe fn alloc_small(&self, size: usize) -> NonNull<BlockHeader> {
+    unsafe fn alloc_small(&mut self, size: usize) -> NonNull<BlockHeader> {
         let bucket = (size + SMALL_BUCKET - 1) >> SMALL_BUCKET_SHIFT;
         let page = self.direct_pages[bucket].as_ref();
-        page.local.with_mut(|local| unsafe { (*local).malloc_in_page() })
+        page.local
+            .with_mut(|local| unsafe { (*local).malloc_in_page() })
             .unwrap_or_else(|| self.alloc_generic(size))
     }
 
     #[inline(never)]
-    unsafe fn alloc_generic(&self, size: usize) -> NonNull<BlockHeader> {
+    unsafe fn alloc_generic(&mut self, size: usize) -> NonNull<BlockHeader> {
         let mut cursor = self.page_lists[size_class(size)].cursor_front_mut();
         // advance the cursor to the head of the list.
         cursor.move_next();
@@ -156,17 +226,132 @@ impl PageLocal {
     }
 }
 
+// === impl SegmentHeader ===
+
+impl SegmentHeader {
+    const MAGIC: usize = 0xfacade;
+    const ALIGN: usize = 4 * MB;
+
+    const SHIFT: usize = if mem::size_of::<*const ()>() > 4 {
+        // 32 MB
+        9 + PageMeta::SMALL_SHIFT
+    } else {
+        // 4MB on 32-bit
+        7 + PageMeta::SMALL_SHIFT
+    };
+
+    const SIZE: usize = 1 << Self::SHIFT;
+
+    const SMALL_PAGES: usize = Self::SIZE / PageMeta::SMALL_SIZE;
+    const MEDIUM_PAGES: usize = Self::SIZE / PageMeta::MEDIUM_SIZE;
+
+    #[inline]
+    fn page(&self, addr: usize) -> &PageMeta {
+        let idx = addr - self as *const _ as usize;
+        self.pages.page(idx)
+    }
+
+    fn for_addr(ptr: NonNull<()>) -> NonNull<Self> {
+        let ptr = ptr.as_ptr().map_addr(|addr| {
+            // find the segment address for the freed pointer
+            addr & (!Self::ALIGN)
+        }).cast::<Self>();
+        NonNull::new(ptr).expect("tried to free a pointer on the zero page, seems bad")
+    }
+}
+
+// === impl SegmentKind ===
+
+impl SegmentKind {
+    // #[inline(always)]
+    // const fn page_shift(&self) -> usize {
+    //     match self {
+    //         Self::Small(_) => PageMeta::SMALL_SHIFT,
+    //         Self::Medium(_) => PageMeta::MEDIUM_SHIFT,
+    //         Self::Large(_) => todo!("eliza: what is a large page's shift?"),
+    //         Self::Huge(_) => todo!("eliza: what is a huge page's shift?"),
+    //     }
+    // }
+
+    #[inline]
+    fn page(&self, idx: usize) -> &PageMeta {
+        match self {
+            Self::Small(pages) => &pages[idx >> PageMeta::SMALL_SHIFT],
+            Self::Medium(pages) => &pages[idx >> PageMeta::MEDIUM_SHIFT],
+            Self::Large(page) | Self::Huge(page) => page,
+        }
+    }
+}
+
 // === impl PageHeader ===
 
+impl PageMeta {
+    /// Address shift for a small page.
+    const SMALL_SHIFT: usize = 13 + BASE_SHIFT; // 64 KB (32 KB on 32-bit)
+    /// Size of a small page.
+    const SMALL_SIZE: usize = 1 << Self::SMALL_SHIFT;
+    /// Maximum size of an object on a small page.
+    const SMALL_OBJ_MAX: usize = Self::SMALL_SIZE / 4; // 8 KB on 64-bit
+    const SMALL_OBJ_WSIZE_MAX: usize = Self::wsize_max(Self::SMALL_OBJ_MAX);
 
-unsafe impl<S> Linked<list::Links<Self>> for PageHeader<S> {
+    /// Address shift for a medium page.
+    const MEDIUM_SHIFT: usize = Self::SMALL_SHIFT + 3; // 512 KB on 64-bit
+    /// Size of a medium page.
+    const MEDIUM_SIZE: usize = 1 << Self::MEDIUM_SHIFT;
+    /// Maximum size of an object on a small page.
+    const MEDIUM_OBJ_MAX: usize = Self::MEDIUM_SIZE / 4; // 128 KB on 64-bit
+    const MEDIUM_OBJ_WSIZE_MAX: usize = Self::wsize_max(Self::MEDIUM_OBJ_MAX);
+
+    const LARGE_OBJ_MAX: usize = SegmentHeader::SIZE / 2; // 32MB on 64-bit
+    const LARGE_OBJ_WSIZE_MAX: usize = Self::wsize_max(Self::LARGE_OBJ_MAX);
+
+    /// XXX(eliza): what is a wsize?
+    const fn wsize_max(obj_size: usize) -> usize {
+        obj_size / mem::size_of::<*const ()>()
+    }
+}
+
+// #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+// struct PageKind {
+//     /// Size of a page of this kind.
+//     size: usize,
+//     /// Number of pages of this size per segment.
+//     per_segment: usize,
+//     /// Address shift for a page of this size.
+//     shift: usize,
+//     /// Maximum object size allocatable on a page of this size.
+//     obj_max: usize,
+//     /// XXX(eliza): what is a wsize?
+//     obj_wsize_max: usize,
+// }
+
+// impl PageKind {
+//     const fn new(shift: usize, obj_max: usize) -> Self {
+//         let size = 1 << shift;
+//         // XXX(eliza): what is a wsize?
+//         let obj_wsize_max = obj_max / mem::size_of::<*const ()>();
+//         Self {
+//             size,
+//             per_segment: SegmentHeader::SIZE / size,
+//             shift,
+//             obj_max,
+//             obj_wsize_max,
+//         }
+//     }
+// }
+
+unsafe impl Linked<list::Links<Self>> for PageMeta {
     type Handle = ptr::NonNull<Self>;
 
     #[inline]
-    fn into_ptr(handle: Self::Handle) -> NonNull<Self> { handle }
+    fn into_ptr(handle: Self::Handle) -> NonNull<Self> {
+        handle
+    }
 
     #[inline]
-    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle { ptr }
+    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle {
+        ptr
+    }
 
     #[inline]
     unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
@@ -189,10 +374,14 @@ unsafe impl Linked<stack::Links<BlockHeader>> for BlockHeader {
     type Handle = ptr::NonNull<Self>;
 
     #[inline]
-    fn into_ptr(handle: Self::Handle) -> NonNull<Self> { handle }
+    fn into_ptr(handle: Self::Handle) -> NonNull<Self> {
+        handle
+    }
 
     #[inline]
-    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle { ptr }
+    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle {
+        ptr
+    }
 
     #[inline]
     unsafe fn links(target: NonNull<Self>) -> NonNull<stack::Links<Self>> {
@@ -208,6 +397,21 @@ unsafe impl Linked<stack::Links<BlockHeader>> for BlockHeader {
         NonNull::new_unchecked(links)
     }
 }
+
+// === impl PageSize ===
+
+// impl PageSize {
+//     pub fn for_size(size: usize) -> Self {
+//         const SMALL_MAX: usize = 8 * KB;
+//         const LARGE_MIN: usize = SMALL_MAX + 1;
+//         const LARGE_MAX: usize = 512 * KB;
+//         match size {
+//             0..=SMALL_MAX => Self::Small,
+//             LARGE_MIN..=LARGE_MAX => Self::Large,
+//             _ => Self::Huge,
+//         }
+//     }
+// }
 
 fn size_class(size: usize) -> usize {
     debug_assert!(size > 0);
@@ -225,8 +429,7 @@ fn size_class(size: usize) -> usize {
     let wsize = wsize - 1;
     let bit_pos = msb_index(wsize);
 
-    (((bit_pos as usize) << 2)
-        | ((wsize >> (bit_pos - 2)) & 3)) - 3
+    (((bit_pos as usize) << 2) | ((wsize >> (bit_pos - 2)) & 3)) - 3
 }
 
 const fn align_up(n: usize, multiple: usize) -> usize {

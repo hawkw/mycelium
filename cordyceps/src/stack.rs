@@ -376,6 +376,12 @@ impl<T> fmt::Debug for Links<T> {
     }
 }
 
+impl<T> Default for Links<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod loom {
     use super::*;

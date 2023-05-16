@@ -15,6 +15,7 @@ sharded = ["hal-core", "mycelium-util", "tracing", "pin-project"]
 default = ["bump", "buddy", "sharded"]
 
 [dependencies]
+sptr = "0.3.2"
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, optional = true }
 mycelium-util = { path = "../util", optional = true }
 hal-core = { path = "../hal-core", optional = true }
