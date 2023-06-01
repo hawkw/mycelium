@@ -956,10 +956,10 @@ feature! {
     #![feature = "alloc"]
 
     use crate::{
-        loom::sync::{Arc, Weak},
+        loom::sync::{Arc},
         task::{BoxStorage, Task},
     };
-    use alloc::boxed::Box;
+    use alloc::{sync::Weak, boxed::Box};
 
     /// An atomically reference-counted single-core scheduler implementation.
     ///
@@ -1571,6 +1571,7 @@ feature! {
         /// Returns a new [`LocalSpawner`] that can be used by other threads to
         /// spawn [`Send`] tasks on this scheduler.
         #[must_use = "the returned `LocalSpawner` does nothing unless used to spawn tasks"]
+        #[cfg(not(loom))] // Loom's `Arc` does not have a weak reference type...
         pub fn spawner(&self) -> LocalSpawner {
             LocalSpawner(Arc::downgrade(&self.core))
         }
