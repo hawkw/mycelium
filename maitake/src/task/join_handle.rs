@@ -30,7 +30,7 @@ use mycelium_util::fmt;
 // with types other than `Self` (which cannot impl `Eq`).
 #[allow(clippy::derive_partial_eq_without_eq)]
 pub struct JoinHandle<T> {
-    task: Option<TaskRef>,
+    task: JoinHandleState,
     id: TaskId,
     _t: PhantomData<fn(T)>,
 }
@@ -43,9 +43,16 @@ pub struct JoinError<T> {
     output: Option<T>,
 }
 
+#[derive(PartialEq, Eq, Debug)]
+enum JoinHandleState {
+    Task(TaskRef),
+    Empty,
+    Error(JoinErrorKind),
+}
+
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
-enum JoinErrorKind {
+pub(crate) enum JoinErrorKind {
     /// The task was canceled.
     Canceled {
         /// `true` if the task was canceled after it completed successfully.
@@ -54,6 +61,9 @@ enum JoinErrorKind {
 
     /// A stub was awaited
     StubNever,
+
+    /// The scheduler has been dropped.
+    Shutdown,
 }
 
 impl<T> JoinHandle<T> {
@@ -66,8 +76,16 @@ impl<T> JoinHandle<T> {
         task.state().create_join_handle();
         let id = task.id();
         Self {
-            task: Some(task),
+            task: JoinHandleState::Task(task),
             id,
+            _t: PhantomData,
+        }
+    }
+
+    pub(crate) fn error(kind: JoinErrorKind) -> Self {
+        Self {
+            id: TaskId::stub(),
+            task: JoinHandleState::Error(kind),
             _t: PhantomData,
         }
     }
@@ -79,9 +97,13 @@ impl<T> JoinHandle<T> {
     /// deallocated until all such [`TaskRef`]s are dropped.
     #[must_use]
     pub fn task_ref(&self) -> TaskRef {
-        self.task
-            .clone()
-            .expect("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
+        match self.task {
+            JoinHandleState::Task(ref task) => task.clone(),
+            JoinHandleState::Empty => {
+                panic!("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
+            }
+            JoinHandleState::Error(ref error) => panic!("`JoinHandle` errored: {error:?}"),
+        }
     }
 
     /// Returns `true` if this task has completed.
@@ -99,13 +121,13 @@ impl<T> JoinHandle<T> {
     #[inline]
     #[must_use]
     pub fn is_complete(&self) -> bool {
-        self.task
-            .as_ref()
-            .map(TaskRef::is_complete)
+        match self.task {
+            JoinHandleState::Task(ref task) => task.is_complete(),
             // if the `JoinHandle`'s `TaskRef` has been taken, we know the
             // `Future` impl for `JoinHandle` completed, and the task has
             // _definitely_ completed.
-            .unwrap_or(true)
+            _ => true,
+        }
     }
 
     /// Forcibly cancel the task.
@@ -121,7 +143,10 @@ impl<T> JoinHandle<T> {
     /// `false` if the task could not be canceled (i.e., it has already completed,
     /// has already been canceled, cancel culture has gone TOO FAR, et cetera).
     pub fn cancel(&self) -> bool {
-        self.task.as_ref().map(TaskRef::cancel).unwrap_or(false)
+        match self.task {
+            JoinHandleState::Task(ref task) => task.cancel(),
+            _ => false,
+        }
     }
 
     /// Returns a [`TaskId`] that uniquely identifies this [task].
@@ -144,14 +169,26 @@ impl<T> Future for JoinHandle<T> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let task = this.task.take().unwrap();
+        let task = match core::mem::replace(&mut this.task, JoinHandleState::Empty) {
+            JoinHandleState::Task(task) => task,
+            JoinHandleState::Empty => {
+                panic!("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
+            }
+            JoinHandleState::Error(kind) => {
+                return Poll::Ready(Err(JoinError {
+                    kind,
+                    id: this.id,
+                    output: None,
+                }))
+            }
+        };
         let poll = unsafe {
             // Safety: the `JoinHandle` must have been constructed with the
             // task's actual output type!
             task.poll_join::<T>(cx)
         };
         if poll.is_pending() {
-            this.task = Some(task);
+            this.task = JoinHandleState::Task(task);
         } else {
             // clear join interest
             task.state().drop_join_handle();
@@ -164,7 +201,7 @@ impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {
         // if the JoinHandle has not already been consumed, clear the join
         // handle flag on the task.
-        if let Some(ref task) = self.task {
+        if let JoinHandleState::Task(ref task) = self.task {
             test_debug!(
                 task = ?self.task,
                 task.tid = task.id().as_u64(),
@@ -186,25 +223,37 @@ impl<T> Drop for JoinHandle<T> {
 
 impl<T> PartialEq<TaskRef> for JoinHandle<T> {
     fn eq(&self, other: &TaskRef) -> bool {
-        self.task.as_ref().unwrap() == other
+        match self.task {
+            JoinHandleState::Task(ref task) => task == other,
+            _ => false,
+        }
     }
 }
 
 impl<T> PartialEq<&'_ TaskRef> for JoinHandle<T> {
     fn eq(&self, other: &&TaskRef) -> bool {
-        self.task.as_ref().unwrap() == *other
+        match self.task {
+            JoinHandleState::Task(ref task) => task == *other,
+            _ => false,
+        }
     }
 }
 
 impl<T> PartialEq<JoinHandle<T>> for TaskRef {
     fn eq(&self, other: &JoinHandle<T>) -> bool {
-        self == other.task.as_ref().unwrap()
+        match other.task {
+            JoinHandleState::Task(ref task) => self == task,
+            _ => false,
+        }
     }
 }
 
 impl<T> PartialEq<&'_ JoinHandle<T>> for TaskRef {
     fn eq(&self, other: &&JoinHandle<T>) -> bool {
-        self == other.task.as_ref().unwrap()
+        match other.task {
+            JoinHandleState::Task(ref task) => self == task,
+            _ => false,
+        }
     }
 }
 
@@ -242,7 +291,7 @@ impl<T> fmt::Debug for JoinHandle<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JoinHandle")
             .field("output", &core::any::type_name::<T>())
-            .field("task", &fmt::opt(&self.task).or_else("<completed>"))
+            .field("task", &self.task)
             .field("id", &self.id)
             .finish()
     }
@@ -320,6 +369,7 @@ impl<T> fmt::Display for JoinError<T> {
                 write!(f, "task {} was canceled{completed}", self.id)
             }
             JoinErrorKind::StubNever => f.write_str("the stub task can never join"),
+            JoinErrorKind::Shutdown => f.write_str("the scheduler has already shut down"),
         }
     }
 }

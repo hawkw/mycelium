@@ -25,6 +25,16 @@
 //!       increments when spawning tasks. However, in order to be used, a
 //!       [`StaticScheduler`] *must* be stored in a `'static`, which can limit
 //!       its usage in some cases.
+//! - [`LocalScheduler`]: a reference-counted scheduler for `!`[`Send`] `Future`s
+//!       (requires the "alloc" [feature]). This type is identical to the
+//!       [`Scheduler`] type, except that it is capable of spawning `Future`s
+//!       that do not implement [`Send`], and is itself not [`Send`] or [`Sync`]
+//!       (it cannot be shared between CPU cores).
+//! - [`LocalStaticScheduler`]: a [`StaticScheduler`] variant for `!`[`Send`]
+//!       `Future`s.  This type is identical to the [`StaticScheduler`] type,
+//!       except that it is capable of spawning `Future`s that do not implement
+//!       [`Send`], and is itself not [`Send`] or [`Sync`] (it cannot be shared
+//!       between CPU cores).
 //!
 //! The [`Schedule`] trait in this module is used by the [`Task`] type to
 //! abstract over both types of scheduler that tasks may be spawned on.
@@ -169,7 +179,7 @@ use crate::{
     loom::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::*},
     task::{self, Header, JoinHandle, Storage, TaskRef},
 };
-use core::{future::Future, ptr};
+use core::{future::Future, marker::PhantomData, ptr};
 
 use cordyceps::mpsc_queue::MpscQueue;
 
@@ -285,6 +295,42 @@ pub use self::steal::*;
 #[derive(Debug)]
 #[cfg_attr(feature = "alloc", derive(Default))]
 pub struct StaticScheduler(Core);
+
+/// A statically-initialized scheduler for `!`[`Send`] tasks.
+///
+/// This type is identical to the [`StaticScheduler`] type, except that it is
+/// capable of scheduling [`Future`]s that do not implement [`Send`]. Because
+/// this scheduler's futures cannot be moved across threads[^1], the scheduler
+/// itself is also `!Send` and `!Sync`, as ticking it from another thread would
+/// cause its tasks to be polled from that thread, violating the [`Send`] and
+/// [`Sync`] contracts.
+///
+/// [^1]: Or CPU cores, in bare-metal systems.
+#[derive(Debug)]
+#[cfg_attr(feature = "alloc", derive(Default))]
+pub struct LocalStaticScheduler {
+    core: Core,
+    _not_send: PhantomData<*mut ()>,
+}
+
+/// A handle to a [`LocalStaticScheduler`] that implements [`Send`].
+///
+/// The [`LocalScheduler`] and [`LocalStaticScheduler`] types are capable of
+/// spawning futures which do not implement [`Send`]. Because of this, those
+/// scheduler types themselves are also `!Send` and `!Sync`, as as ticking them
+/// from another thread would  cause its tasks to be polled from that thread,
+/// violating the [`Send`] and [`Sync`] contracts.
+///
+/// However, tasks which *are* [`Send`] may still be spawned on a `!Send`
+/// scheduler, alongside `!Send` tasks. Because the scheduler types are `!Sync`,
+/// other threads may not reference them in order to spawn remote tasks on those
+/// schedulers. This type is a handle to a `!Sync` scheduler which *can* be sent
+/// across thread boundaries, as it does not have the capacity to poll tasks or
+/// reference the current task.
+///
+/// This type is returned by [`LocalStaticScheduler::spawner`].
+#[derive(Debug)]
+pub struct LocalStaticSpawner(&'static LocalStaticScheduler);
 
 /// Metrics recorded during a scheduler tick.
 ///
@@ -593,6 +639,194 @@ impl StaticScheduler {
     }
 }
 
+impl Schedule for &'static StaticScheduler {
+    fn schedule(&self, task: TaskRef) {
+        self.0.wake(task)
+    }
+
+    #[must_use]
+    fn current_task(&self) -> Option<TaskRef> {
+        self.0.current_task()
+    }
+}
+
+// === impl LocalStaticScheduler ===
+
+impl LocalStaticScheduler {
+    /// How many tasks are polled per call to [`LocalStaticScheduler::tick`].
+    ///
+    /// Chosen by fair dice roll, guaranteed to be random.
+    pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+    /// Create a `LocalStaticScheduler` with a static "stub" task entity
+    ///
+    /// This is used for creating a `LocalStaticScheduler` as a `static` variable.
+    ///
+    /// # Safety
+    ///
+    /// The "stub" provided must ONLY EVER be used for a single `LocalStaticScheduler`.
+    /// Re-using the stub for multiple schedulers may lead to undefined behavior.
+    ///
+    /// For a safe alternative, consider using the [`new_static!`] macro to
+    /// initialize a `LocalStaticScheduler` in a `static` variable.
+    #[cfg(not(loom))]
+    pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
+        LocalStaticScheduler {
+            core: Core::new_with_static_stub(&stub.hdr),
+            _not_send: PhantomData,
+        }
+    }
+
+    /// Spawn a pre-allocated, ![`Send`] task.
+    ///
+    /// Unlike [`StaticScheduler::spawn_local`], this method is capable of
+    /// spawning [`Future`s] which do not implement [`Send`].
+    ///
+    /// This method is used to spawn a task that requires some bespoke
+    /// procedure of allocation, typically of a custom [`Storage`] implementor.
+    /// See the documentation for the [`Storage`] trait for more details on
+    /// using custom task storage.
+    ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
+    ///
+    /// When tasks are spawned on a scheduler, the scheduler must be
+    /// [ticked](Self::tick) in order to drive those tasks to completion.
+    /// See the [module-level documentation][run-loops] for more information
+    /// on implementing a system's run loop.
+    ///
+    /// [`Storage`]: crate::task::Storage
+    /// [run-loops]: crate::scheduler#executing-tasks
+    #[inline]
+    #[track_caller]
+    pub fn spawn_allocated<F, STO>(&'static self, task: STO::StoredTask) -> JoinHandle<F::Output>
+    where
+        F: Future + 'static,
+        F::Output: 'static,
+        STO: Storage<&'static Self, F>,
+    {
+        let (task, join) = TaskRef::new_allocated::<&'static Self, F, STO>(self, task);
+        self.schedule(task);
+        join
+    }
+
+    /// Returns a new [task `Builder`] for configuring tasks prior to spawning
+    /// them on this scheduler.
+    ///
+    /// [task `Builder`]: task::Builder
+    #[must_use]
+    pub fn build_task<'a>(&'static self) -> task::Builder<'a, &'static Self> {
+        task::Builder::new(self)
+    }
+
+    /// Returns a [`TaskRef`] referencing the task currently being polled by
+    /// this scheduler, if a task is currently being polled.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(`[`TaskRef`]`)` referencing the currently-polling task, if a
+    ///   task is currently being polled (i.e., the scheduler is
+    ///   [ticking](Self::tick) and the queue of scheduled tasks is non-empty).
+    ///
+    /// - [`None`] if the scheduler is not currently being polled (i.e., the
+    ///   scheduler is not ticking or its run queue is empty and all polls have
+    ///   completed).
+    #[must_use]
+    #[inline]
+    pub fn current_task(&'static self) -> Option<TaskRef> {
+        self.core.current_task()
+    }
+
+    /// Tick this scheduler, polling up to [`Self::DEFAULT_TICK_SIZE`] tasks
+    /// from the scheduler's run queue.
+    ///
+    /// Only a single CPU core/thread may tick a given scheduler at a time. If
+    /// another call to `tick` is in progress on a different core, this method
+    /// will wait until that call to `tick` completes before ticking the scheduler.
+    ///
+    /// See [the module-level documentation][run-loops] for more information on
+    /// using this function to implement a system's run loop.
+    ///
+    /// # Returns
+    ///
+    /// A [`Tick`] struct with data describing what occurred during the
+    /// scheduler tick.
+    ///
+    /// [run-loops]: crate::scheduler#executing-tasks
+    pub fn tick(&'static self) -> Tick {
+        self.core.tick_n(Self::DEFAULT_TICK_SIZE)
+    }
+
+    /// Returns a new [`LocalStaticSpawner`] that can be used by other threads to
+    /// spawn [`Send`] tasks on this scheduler.
+    #[must_use = "the returned `LocalStaticSpawner` does nothing unless used to spawn tasks"]
+    pub fn spawner(&'static self) -> LocalStaticSpawner {
+        LocalStaticSpawner(self)
+    }
+}
+
+impl Schedule for &'static LocalStaticScheduler {
+    fn schedule(&self, task: TaskRef) {
+        self.core.wake(task)
+    }
+
+    #[must_use]
+    fn current_task(&self) -> Option<TaskRef> {
+        self.core.current_task()
+    }
+}
+
+// === impl LocalStaticSpawner ===
+
+impl LocalStaticSpawner {
+    /// Spawn a pre-allocated task on the [`LocalStaticScheduler`] this spawner
+    /// references.
+    ///
+    /// Unlike [`LocalScheduler::spawn_allocated`] and
+    /// [`LocalStaticScheduler::spawn_allocated`], this method requires that the
+    /// spawned `Future` implement [`Send`], as the `LocalSpawner` type is [`Send`]
+    /// and [`Sync`], and therefore allows tasks to be spawned on a local
+    /// scheduler from other threads.
+    ///
+    /// This method is used to spawn a task that requires some bespoke
+    /// procedure of allocation, typically of a custom [`Storage`] implementor.
+    /// See the documentation for the [`Storage`] trait for more details on
+    /// using custom task storage.
+    ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
+    ///
+    /// When tasks are spawned on a scheduler, the scheduler must be
+    /// [ticked](LocalStaticScheduler::tick) in order to drive those tasks to completion.
+    /// See the [module-level documentation][run-loops] for more information
+    /// on implementing a system's run loop.
+    ///
+    /// [`Storage`]: crate::task::Storage
+    /// [run-loops]: crate::scheduler#executing-tasks
+    #[inline]
+    #[track_caller]
+    pub fn spawn_allocated<F, STO>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+        STO: Storage<&'static LocalStaticScheduler, F>,
+    {
+        self.0.spawn_allocated::<F, STO>(task)
+    }
+}
+
+/// # Safety
+///
+/// A `LocalStaticSpawner` cannot be used to access any `!Send` tasks on the
+/// local scheduler it references. It can only push tasks to that scheduler's
+/// run queue, which *is* thread safe.
+unsafe impl Send for LocalStaticSpawner {}
+unsafe impl Sync for LocalStaticSpawner {}
+
+// === impl Core ===
+
 impl Core {
     /// How many tasks are polled per scheduler tick.
     ///
@@ -709,17 +943,6 @@ impl Core {
     }
 }
 
-impl Schedule for &'static StaticScheduler {
-    fn schedule(&self, task: TaskRef) {
-        self.0.wake(task)
-    }
-
-    #[must_use]
-    fn current_task(&self) -> Option<TaskRef> {
-        self.0.current_task()
-    }
-}
-
 impl Tick {
     /// Returns the total number of tasks woken since the last poll.
     pub fn woken(&self) -> usize {
@@ -733,7 +956,7 @@ feature! {
     #![feature = "alloc"]
 
     use crate::{
-        loom::sync::Arc,
+        loom::sync::{Arc, Weak},
         task::{BoxStorage, Task},
     };
     use alloc::boxed::Box;
@@ -753,7 +976,57 @@ feature! {
     #[derive(Clone, Debug, Default)]
     pub struct Scheduler(Arc<Core>);
 
+    /// A reference-counted scheduler for `!`[`Send`] tasks.
+    ///
+    /// This type is identical to the [`LocalScheduler`] type, except that it is
+    /// capable of scheduling [`Future`]s that do not implement [`Send`]. Because
+    /// this scheduler's futures cannot be moved across threads[^1], the scheduler
+    /// itself is also `!Send` and `!Sync`, as ticking it from multiple threads would
+    /// move ownership of a `!Send` future.
+    ///
+    /// This type stores the core of the scheduler inside an [`Arc`], which is
+    /// cloned by each task spawned on the scheduler. The use of [`Arc`] allows
+    /// schedulers to be created and dropped dynamically at runtime. This is in
+    /// contrast to the [`StaticScheduler`] type, which must be stored in a
+    /// `static` variable for the entire lifetime of the program.
+    ///
+    /// Due to the use of [`Arc`], this type requires [the "alloc" feature
+    /// flag][features] to be enabled.
+    ///
+    /// [features]: crate#features
+    /// [^1]: Or CPU cores, in bare-metal systems.
+    #[derive(Clone, Debug, Default)]
+    pub struct LocalScheduler {
+        core: Arc<Core>,
+        _not_send: PhantomData<*mut ()>,
+    }
+
+    /// A handle to a [`LocalScheduler`] that implements [`Send`].
+    ///
+    /// The [`LocalScheduler`] and [`LocalStaticScheduler`] types are capable of
+    /// spawning futures which do not implement [`Send`]. Because of this, those
+    /// scheduler types themselves are also `!Send` and `!Sync`, as as ticking them
+    /// from another thread would  cause its tasks to be polled from that thread,
+    /// violating the [`Send`] and [`Sync`] contracts.
+    ///
+    /// However, tasks which *are* [`Send`] may still be spawned on a `!Send`
+    /// scheduler, alongside `!Send` tasks. Because the scheduler types are `!Sync`,
+    /// other threads may not reference them in order to spawn remote tasks on those
+    /// schedulers. This type is a handle to a `!Sync` scheduler which *can* be sent
+    /// across thread boundaries, as it does not have the capacity to poll tasks or
+    /// reference the current task.
+    ///
+    /// This type owns a [`Weak`] reference to the scheduler. If the
+    /// `LocalScheduler` is dropped, any attempts to spawn a task using this
+    /// handle will return a [`JoinHandle`] that fails with a "scheduler shut
+    /// down" error.
+    ///
+    /// This type is returned by [`LocalScheduler::spawner`].
+    #[derive(Clone, Debug)]
+    pub struct LocalSpawner(Weak<Core>);
+
     // === impl Scheduler ===
+
     impl Scheduler {
         /// How many tasks are polled per call to `Scheduler::tick`.
         ///
@@ -930,24 +1203,23 @@ feature! {
             self.0.current_task()
         }
 
-
-    /// Tick this scheduler, polling up to [`Self::DEFAULT_TICK_SIZE`] tasks
-    /// from the scheduler's run queue.
-    ///
-    /// Only a single CPU core/thread may tick a given scheduler at a time. If
-    /// another call to `tick` is in progress on a different core, this method
-    /// will wait until that call to `tick` completes before ticking the
-    /// scheduler.
-    ///
-    /// See [the module-level documentation][run-loops] for more information on
-    /// using this function to implement a system's run loop.
-    ///
-    /// # Returns
-    ///
-    /// A [`Tick`] struct with data describing what occurred during the
-    /// scheduler tick.
-    ///
-    /// [run-loops]: crate::scheduler#executing-tasks
+        /// Tick this scheduler, polling up to [`Self::DEFAULT_TICK_SIZE`] tasks
+        /// from the scheduler's run queue.
+        ///
+        /// Only a single CPU core/thread may tick a given scheduler at a time. If
+        /// another call to `tick` is in progress on a different core, this method
+        /// will wait until that call to `tick` completes before ticking the
+        /// scheduler.
+        ///
+        /// See [the module-level documentation][run-loops] for more information on
+        /// using this function to implement a system's run loop.
+        ///
+        /// # Returns
+        ///
+        /// A [`Tick`] struct with data describing what occurred during the
+        /// scheduler tick.
+        ///
+        /// [run-loops]: crate::scheduler#executing-tasks
         pub fn tick(&self) -> Tick {
             self.0.tick_n(Self::DEFAULT_TICK_SIZE)
         }
@@ -963,6 +1235,8 @@ feature! {
             self.0.current_task()
         }
     }
+
+    // === impl StaticScheduler ===
 
     impl StaticScheduler {
         /// Returns a new `StaticScheduler` with a heap-allocated stub task.
@@ -1047,6 +1321,380 @@ feature! {
             join
         }
     }
+
+    // === impl LocalStaticScheduler ===
+
+    impl LocalStaticScheduler {
+        /// Returns a new `LocalStaticScheduler` with a heap-allocated stub task.
+        ///
+        /// Unlike [`LocalStaticScheduler::new_with_static_stub`], this is *not* a
+        /// `const fn`, as it performs a heap allocation for the stub task.
+        /// However, the returned `StaticScheduler` must still be stored in a
+        /// `static` variable in order to be used.
+        ///
+        /// This method is generally used with lazy initialization of the
+        /// scheduler `static`.
+        #[must_use]
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Spawn a [task].
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// When tasks are spawned on a scheduler, the scheduler must be
+        /// [ticked](Self::tick) in order to drive those tasks to completion.
+        /// See the [module-level documentation][run-loops] for more information
+        /// on implementing a system's run loop.
+        ///
+        /// [task]: crate::task
+        /// [run-loops]: crate::scheduler#executing-tasks
+        #[inline]
+        #[track_caller]
+        pub fn spawn<F>(&'static self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
+            let (task, join) = TaskRef::new(self, future);
+            self.core.spawn_inner(task);
+            join
+        }
+    }
+
+    // === impl LocalScheduler ===
+
+    impl LocalScheduler {
+        /// How many tasks are polled per call to `LocalScheduler::tick`.
+        ///
+        /// Chosen by fair dice roll, guaranteed to be random.
+        pub const DEFAULT_TICK_SIZE: usize = Core::DEFAULT_TICK_SIZE;
+
+        /// Returns a new `LocalScheduler`.
+        #[must_use]
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Returns a new [task `Builder`][`Builder`] for configuring tasks prior to spawning
+        /// them on this scheduler.
+        ///
+        /// To spawn `!`[`Send`] tasks using a [`Builder`], use the
+        /// [`Builder::spawn_local`] method.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use maitake::scheduler::LocalScheduler;
+        ///
+        /// let scheduler = LocalScheduler::new();
+        /// scheduler.build_task().name("hello world").spawn_local(async {
+        ///     // ...
+        /// });
+        ///
+        /// scheduler.tick();
+        /// ```
+        ///
+        /// Multiple tasks can be spawned using the same [`Builder`]:
+        ///
+        /// ```
+        /// use maitake::scheduler::LocalScheduler;
+        ///
+        /// let scheduler = LocalScheduler::new();
+        /// let builder = scheduler
+        ///     .build_task()
+        ///     .kind("my_cool_task");
+        ///
+        /// builder.spawn_local(async {
+        ///     // ...
+        /// });
+        ///
+        /// builder.spawn_local(async {
+        ///     // ...
+        /// });
+        ///
+        /// scheduler.tick();
+        /// ```
+        ///
+        /// [`Builder`]: task::Builder
+        #[must_use]
+        #[inline]
+        pub fn build_task<'a>(&self) -> task::Builder<'a, Self> {
+            task::Builder::new(self.clone())
+        }
+
+        /// Spawn a `!`[`Send`] [task].
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// When tasks are spawned on a scheduler, the scheduler must be
+        /// [ticked](Self::tick) in order to drive those tasks to completion.
+        /// See the [module-level documentation][run-loops] for more information
+        /// on implementing a system's run loop.
+        ///
+        /// # Examples
+        ///
+        /// Spawning a task and awaiting its output:
+        ///
+        /// ```
+        /// use maitake::scheduler::LocalScheduler;
+        ///
+        /// let scheduler = LocalScheduler::new();
+        ///
+        /// // spawn a new task, returning a `JoinHandle`.
+        /// let task = scheduler.spawn(async move {
+        ///     // ... do stuff ...
+        ///    42
+        /// });
+        ///
+        /// // spawn another task that awaits the output of the first task.
+        /// scheduler.spawn(async move {
+        ///     // await the `JoinHandle` future, which completes when the task
+        ///     // finishes, and unwrap its output.
+        ///     let output = task.await.expect("task is not cancelled");
+        ///     assert_eq!(output, 42);
+        /// });
+        ///
+        /// // run the scheduler, driving the spawned tasks to completion.
+        /// while scheduler.tick().has_remaining {}
+        /// ```
+        ///
+        /// Spawning a task to run in the background, without awaiting its
+        /// output:
+        ///
+        /// ```
+        /// use maitake::scheduler::LocalScheduler;
+        ///
+        /// let scheduler = LocalScheduler::new();
+        ///
+        /// // dropping the `JoinHandle` allows the task to run in the background
+        /// // without awaiting its output.
+        /// scheduler.spawn(async move {
+        ///     // ... do stuff ...
+        /// });
+        ///
+        /// // run the scheduler, driving the spawned tasks to completion.
+        /// while scheduler.tick().has_remaining {}
+        /// ```
+        ///
+        /// [task]: crate::task
+        /// [run-loops]: crate::scheduler#executing-tasks
+        #[inline]
+        #[track_caller]
+        pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
+            let (task, join) = TaskRef::new(self.clone(), future);
+            self.core.spawn_inner(task);
+            join
+        }
+
+
+        /// Spawn a pre-allocated `!`[`Send`] task.
+        ///
+        /// This method is used to spawn a task that requires some bespoke
+        /// procedure of allocation, typically of a custom [`Storage`]
+        /// implementor. See the documentation for the [`Storage`] trait for
+        /// more details on using custom task storage.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// When tasks are spawned on a scheduler, the scheduler must be
+        /// [ticked](Self::tick) in order to drive those tasks to completion.
+        /// See the [module-level documentation][run-loops] for more information
+        /// on implementing a system's run loop.
+        ///
+        /// [`Storage`]: crate::task::Storage
+        /// [run-loops]: crate::scheduler#executing-tasks
+        #[inline]
+        #[track_caller]
+        pub fn spawn_allocated<F>(&self, task: Box<Task<Self, F, BoxStorage>>) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
+            let (task, join) = TaskRef::new_allocated::<Self, F, BoxStorage>(self.clone(), task);
+            self.core.spawn_inner(task);
+            join
+        }
+
+        /// Returns a [`TaskRef`] referencing the task currently being polled by
+        /// this scheduler, if a task is currently being polled.
+        ///
+        /// # Returns
+        ///
+        /// - [`Some`]`(`[`TaskRef`]`)` referencing the currently-polling task,
+        ///   if a task is currently being polled (i.e., the scheduler is
+        ///   [ticking](Self::tick) and the queue of scheduled tasks is
+        ///   non-empty).
+        ///
+        /// - [`None`] if the scheduler is not currently being polled (i.e., the
+        ///   scheduler is not ticking or its run queue is empty and all polls
+        ///   have completed).
+        #[must_use]
+        #[inline]
+        pub fn current_task(&self) -> Option<TaskRef> {
+            self.core.current_task()
+        }
+
+
+        /// Tick this scheduler, polling up to [`Self::DEFAULT_TICK_SIZE`] tasks
+        /// from the scheduler's run queue.
+        ///
+        /// Only a single CPU core/thread may tick a given scheduler at a time. If
+        /// another call to `tick` is in progress on a different core, this method
+        /// will wait until that call to `tick` completes before ticking the
+        /// scheduler.
+        ///
+        /// See [the module-level documentation][run-loops] for more information on
+        /// using this function to implement a system's run loop.
+        ///
+        /// # Returns
+        ///
+        /// A [`Tick`] struct with data describing what occurred during the
+        /// scheduler tick.
+        ///
+        /// [run-loops]: crate::scheduler#executing-tasks
+        pub fn tick(&self) -> Tick {
+            self.core.tick_n(Self::DEFAULT_TICK_SIZE)
+        }
+
+        /// Returns a new [`LocalSpawner`] that can be used by other threads to
+        /// spawn [`Send`] tasks on this scheduler.
+        #[must_use = "the returned `LocalSpawner` does nothing unless used to spawn tasks"]
+        pub fn spawner(&self) -> LocalSpawner {
+            LocalSpawner(Arc::downgrade(&self.core))
+        }
+    }
+
+    impl Schedule for LocalScheduler {
+        fn schedule(&self, task: TaskRef) {
+            self.core.wake(task)
+        }
+
+        #[must_use]
+        fn current_task(&self) -> Option<TaskRef> {
+            self.core.current_task()
+        }
+    }
+
+    // === impl LocalStaticSpawner ===
+
+    impl LocalStaticSpawner {
+        /// Spawn a task on the [`LocalStaticScheduler`] this handle
+        /// references.
+        ///
+        /// Unlike [`LocalStaticScheduler::spawn`], this method requires that the
+        /// spawned `Future` implement [`Send`], as the `LocalStaticSpawner` type is [`Send`]
+        /// and [`Sync`], and therefore allows tasks to be spawned on a local
+        /// scheduler from other threads.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// When tasks are spawned on a scheduler, the scheduler must be
+        /// [ticked](LocalStaticScheduler::tick) in order to drive those tasks to completion.
+        /// See the [module-level documentation][run-loops] for more information
+        /// on implementing a system's run loop.
+        ///
+        /// [`Storage`]: crate::task::Storage
+        /// [run-loops]: crate::scheduler#executing-tasks
+        #[inline]
+        #[track_caller]
+        pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + Send +'static,
+            F::Output: Send + 'static,
+        {
+            self.0.spawn(future)
+        }
+    }
+
+    // === impl LocalSpawner ===
+
+    impl LocalSpawner {
+        /// Spawn a task on the [`LocalScheduler`] this handle
+        /// references.
+        ///
+        /// Unlike [`LocalScheduler::spawn`], this method requires that the
+        /// spawned `Future` implement [`Send`], as the `LocalSpawner` type is [`Send`]
+        /// and [`Sync`], and therefore allows tasks to be spawned on a local
+        /// scheduler from other threads.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// When tasks are spawned on a scheduler, the scheduler must be
+        /// [ticked](LocalScheduler::tick) in order to drive those tasks to completion.
+        /// See the [module-level documentation][run-loops] for more information
+        /// on implementing a system's run loop.
+        ///
+        /// [`Storage`]: crate::task::Storage
+        /// [run-loops]: crate::scheduler#executing-tasks
+        #[inline]
+        #[track_caller]
+        pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + Send +'static,
+            F::Output: Send + 'static,
+        {
+            match self.0.upgrade() {
+                Some(core) => LocalScheduler { core, _not_send: PhantomData }.spawn(future),
+                None => JoinHandle::error(task::join_handle::JoinErrorKind::Shutdown),
+            }
+        }
+
+        /// Spawn a pre-allocated task on the [`LocalScheduler`] this handle
+        /// references.
+        ///
+        /// Unlike [`LocalScheduler::spawn_allocated`] and
+        /// [`LocalStaticScheduler::spawn_allocated`], this method requires that the
+        /// spawned `Future` implement [`Send`], as the `LocalSpawner` type is [`Send`]
+        /// and [`Sync`], and therefore allows tasks to be spawned on a local
+        /// scheduler from other threads.
+        ///
+        /// This method is used to spawn a task that requires some bespoke
+        /// procedure of allocation, typically of a custom [`Storage`] implementor.
+        /// See the documentation for the [`Storage`] trait for more details on
+        /// using custom task storage.
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        ///
+        /// When tasks are spawned on a scheduler, the scheduler must be
+        /// [ticked](LocalScheduler::tick) in order to drive those tasks to completion.
+        /// See the [module-level documentation][run-loops] for more information
+        /// on implementing a system's run loop.
+        ///
+        /// [`Storage`]: crate::task::Storage
+        /// [run-loops]: crate::scheduler#executing-tasks
+        #[inline]
+        #[track_caller]
+        pub fn spawn_allocated<F>(&self, task: Box<Task<LocalScheduler, F, BoxStorage>>) -> JoinHandle<F::Output>
+        where
+            F: Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            match self.0.upgrade() {
+                Some(core) => LocalScheduler { core, _not_send: PhantomData }.spawn_allocated(task),
+                None => JoinHandle::error(task::join_handle::JoinErrorKind::Shutdown),
+            }
+        }
+    }
+
+    // === impl Core ===
 
     impl Core {
         fn new() -> Self {

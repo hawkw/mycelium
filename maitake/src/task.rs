@@ -19,7 +19,7 @@ pub use core::task::{Context, Poll, Waker};
 
 mod builder;
 mod id;
-mod join_handle;
+pub(crate) mod join_handle;
 mod state;
 mod storage;
 

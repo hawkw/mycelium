@@ -1,3 +1,5 @@
+use crate::scheduler::LocalStaticScheduler;
+
 use super::{Future, JoinHandle, Schedule, Storage, TaskRef};
 use core::panic::Location;
 
@@ -99,18 +101,52 @@ impl<'a, S: Schedule + 'static> Builder<'a, S> {
     #[track_caller]
     pub fn spawn_allocated<STO, F>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
     where
-        F: Future + 'static,
-        F::Output: 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
         STO: Storage<S, F>,
     {
         let (task, join) = TaskRef::build_allocated::<S, F, STO>(&self.settings, task);
         self.scheduler.schedule(task);
         join
     }
+}
 
-    feature! {
-        #![feature = "alloc"]
+impl Builder<'_, &'static LocalStaticScheduler> {
+    /// Spawns a new `!`[`Send`] task in a custom allocation, with this
+    /// builder's configured settings.
+    ///
+    /// This method is capable of spawning futures which do not implement
+    /// `Send`. Therefore, it is only available when this [`Builder`] was
+    /// returned by a [`LocalStaticScheduler`]
+    ///
+    /// Note that the `StoredTask` *must* be bound to the same scheduler
+    /// instance as this task's scheduler!
+    ///
+    /// This method returns a [`JoinHandle`] that can be used to await the
+    /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+    /// allowing it to run in the background without awaiting its output.
+    #[inline]
+    #[track_caller]
+    pub fn spawn_local_allocated<STO, F>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
+    where
+        F: Future + 'static,
+        F::Output: 'static,
+        STO: Storage<&'static LocalStaticScheduler, F>,
+    {
+        let (task, join) =
+            TaskRef::build_allocated::<&'static LocalStaticScheduler, F, STO>(&self.settings, task);
+        self.scheduler.schedule(task);
+        join
+    }
+}
 
+feature! {
+    #![feature = "alloc"]
+    use alloc::boxed::Box;
+    use super::{BoxStorage, Task};
+    use crate::scheduler::LocalScheduler;
+
+    impl<S: Schedule + 'static> Builder<'_, S> {
         /// Spawns a new task with this builder's configured settings.
         ///
         /// This method returns a [`JoinHandle`] that can be used to await the
@@ -120,15 +156,88 @@ impl<'a, S: Schedule + 'static> Builder<'a, S> {
         #[track_caller]
         pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
         where
-            F: Future + 'static,
-            F::Output: 'static,
+            F: Future + Send + 'static,
+            F::Output: Send + 'static,
         {
-            use alloc::boxed::Box;
-            use super::{BoxStorage, Task};
-
             let mut task = Box::new(Task::<S, _, BoxStorage>::new(future));
             task.bind(self.scheduler.clone());
             let (task, join) = TaskRef::build_allocated::<S, _, BoxStorage>(&self.settings, task);
+            self.scheduler.schedule(task);
+            join
+        }
+    }
+
+    impl Builder<'_, &'static LocalStaticScheduler> {
+        /// Spawns a new `!`[`Send`] task with this builder's configured settings.
+        ///
+        /// This method is capable of spawning futures which do not implement
+        /// [`Send`]. Therefore, it is only available when this [`Builder`] was
+        /// returned by a [`LocalStaticScheduler`]
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        #[inline]
+        #[track_caller]
+        pub fn spawn_local<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
+            let mut task = Box::new(Task::<&'static LocalStaticScheduler, _, BoxStorage>::new(future));
+            task.bind(self.scheduler);
+            let (task, join) = TaskRef::build_allocated::<&'static LocalStaticScheduler, _, BoxStorage>(&self.settings, task);
+            self.scheduler.schedule(task);
+            join
+        }
+    }
+
+    impl Builder<'_, LocalScheduler> {
+        /// Spawns a new `!`[`Send`] task with this builder's configured settings.
+        ///
+        /// This method is capable of spawning futures which do not implement
+        /// [`Send`]. Therefore, it is only available when this [`Builder`] was
+        /// returned by a [`LocalScheduler`]
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        #[inline]
+        #[track_caller]
+        pub fn spawn_local<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+        {
+            let mut task = Box::new(Task::<LocalScheduler, _, BoxStorage>::new(future));
+            task.bind(self.scheduler.clone());
+            let (task, join) = TaskRef::build_allocated::<LocalScheduler, _, BoxStorage>(&self.settings, task);
+            self.scheduler.schedule(task);
+            join
+        }
+
+        /// Spawns a new `!`[`Send`] task in a custom allocation, with this
+        /// builder's configured settings.
+        ///
+        /// This method is capable of spawning futures which do not implement
+        /// `Send`. Therefore, it is only available when this [`Builder`] was
+        /// returned by a [`LocalStaticScheduler`]
+        ///
+        /// Note that the `StoredTask` *must* be bound to the same scheduler
+        /// instance as this task's scheduler!
+        ///
+        /// This method returns a [`JoinHandle`] that can be used to await the
+        /// task's output. Dropping the [`JoinHandle`] _detaches_ the spawned task,
+        /// allowing it to run in the background without awaiting its output.
+        #[inline]
+        #[track_caller]
+        pub fn spawn_local_allocated<STO, F>(&self, task: STO::StoredTask) -> JoinHandle<F::Output>
+        where
+            F: Future + 'static,
+            F::Output: 'static,
+            STO: Storage<LocalScheduler, F>,
+        {
+            let (task, join) = TaskRef::build_allocated::<LocalScheduler, F, STO>(&self.settings, task);
             self.scheduler.schedule(task);
             join
         }
