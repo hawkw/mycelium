@@ -679,7 +679,7 @@ impl LocalStaticScheduler {
 
     /// Spawn a pre-allocated, ![`Send`] task.
     ///
-    /// Unlike [`LocalStaticScheduler::spawn_local`], this method is capable of
+    /// Unlike [`StaticScheduler::spawn_allocated`], this method is capable of
     /// spawning [`Future`]s which do not implement [`Send`].
     ///
     /// This method is used to spawn a task that requires some bespoke
@@ -714,7 +714,7 @@ impl LocalStaticScheduler {
     /// Returns a new [task `Builder`] for configuring tasks prior to spawning
     /// them on this scheduler.
     ///
-    /// To spawn `!`[`Send`] tasks using a [`Builder`], use the
+    /// To spawn `!`[`Send`] tasks using a [`Builder`](task::Builder), use the
     /// [`Builder::spawn_local`](task::Builder::spawn_local) method.
     /// 
     /// [task `Builder`]: task::Builder
