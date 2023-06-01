@@ -1648,6 +1648,7 @@ feature! {
         /// [run-loops]: crate::scheduler#executing-tasks
         #[inline]
         #[track_caller]
+        #[cfg(not(loom))]
         pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
         where
             F: Future + Send +'static,
@@ -1686,6 +1687,7 @@ feature! {
         /// [run-loops]: crate::scheduler#executing-tasks
         #[inline]
         #[track_caller]
+        #[cfg(not(loom))]
         pub fn spawn_allocated<F>(&self, task: Box<Task<LocalScheduler, F, BoxStorage>>) -> JoinHandle<F::Output>
         where
             F: Future + Send + 'static,
