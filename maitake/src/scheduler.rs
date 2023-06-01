@@ -679,8 +679,8 @@ impl LocalStaticScheduler {
 
     /// Spawn a pre-allocated, ![`Send`] task.
     ///
-    /// Unlike [`StaticScheduler::spawn_local`], this method is capable of
-    /// spawning [`Future`s] which do not implement [`Send`].
+    /// Unlike [`LocalStaticScheduler::spawn_local`], this method is capable of
+    /// spawning [`Future`]s which do not implement [`Send`].
     ///
     /// This method is used to spawn a task that requires some bespoke
     /// procedure of allocation, typically of a custom [`Storage`] implementor.
@@ -714,6 +714,9 @@ impl LocalStaticScheduler {
     /// Returns a new [task `Builder`] for configuring tasks prior to spawning
     /// them on this scheduler.
     ///
+    /// To spawn `!`[`Send`] tasks using a [`Builder`], use the
+    /// [`Builder::spawn_local`](task::Builder::spawn_local) method.
+    /// 
     /// [task `Builder`]: task::Builder
     #[must_use]
     pub fn build_task<'a>(&'static self) -> task::Builder<'a, &'static Self> {
@@ -1383,7 +1386,7 @@ feature! {
         /// them on this scheduler.
         ///
         /// To spawn `!`[`Send`] tasks using a [`Builder`], use the
-        /// [`Builder::spawn_local`] method.
+        /// [`Builder::spawn_local`](task::Builder::spawn_local) method.
         ///
         /// # Examples
         ///
