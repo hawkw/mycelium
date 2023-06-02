@@ -1,5 +1,5 @@
 use bootloader_api::config::{BootloaderConfig, Mapping};
-use hal_core::boot::BootInfo;
+use hal_core::{boot::BootInfo, PAddr};
 use hal_x86_64::{
     cpu::{self, local::GsLocalData},
     vga,
@@ -8,6 +8,7 @@ pub use hal_x86_64::{
     cpu::{entropy::seed_rng, local::LocalKey, wait_for_interrupt},
     mm, NAME,
 };
+use mycelium_util::sync::spin::Mutex;
 
 mod acpi;
 mod boot;
@@ -15,7 +16,9 @@ mod framebuf;
 pub mod interrupt;
 mod oops;
 pub mod pci;
+mod segmentation;
 pub mod shell;
+
 pub use self::{
     boot::ArchInfo,
     oops::{oops, Oops},
@@ -58,35 +61,70 @@ pub fn arch_entry(info: &'static mut bootloader_api::BootInfo) -> ! {
     crate::kernel_start(boot_info, archinfo);
 }
 
+static TOPOLOGY: Mutex<Option<cpu::Topology>> = Mutex::new(None);
+
 pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     pci::init_pci();
 
-    // init boot processor's core-local data
-    unsafe {
-        GsLocalData::init();
-    }
-    tracing::info!("set up the boot processor's local data");
-
-    if let Some(rsdp) = archinfo.rsdp_addr {
-        let acpi = acpi::acpi_tables(rsdp);
-        let platform_info = acpi.and_then(|acpi| acpi.platform_info());
-        match platform_info {
-            Ok(platform) => {
-                tracing::debug!("found ACPI platform info");
-                interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
-                acpi::bringup_smp(&platform)
-                    .expect("failed to bring up application processors! this is bad news!");
-                return;
-            }
-            Err(error) => tracing::warn!(?error, "missing ACPI platform info"),
+    let (mut topo, irq_ctrl) = match archinfo.rsdp_addr {
+        Some(rsdp_addr) => {
+            tracing::info!(?rsdp_addr);
+            init_acpi(rsdp_addr).expect("failed to detect topology from ACPI")
         }
-    } else {
-        // TODO(eliza): try using MP Table to bringup application processors?
-        tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
+        None => {
+            // TODO(eliza): try using MP Table to bringup application processors?
+            tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
+
+            // no ACPI
+            interrupt::enable_hardware_interrupts(None);
+            return;
+        }
+    };
+
+    topo.init_boot_processor(&mut segmentation::GDT.lock());
+    tracing::info!("initialized boot processor");
+
+    tracing::info!("starting application processors");
+    let bsp_lapic = irq_ctrl
+        .local_apic()
+        .expect("if we are starting application processors, the interrupt model must be APIC");
+    let mut started = 0;
+    for ap in topo.application_cpus_mut() {
+        match ap.bringup_ap(bsp_lapic) {
+            Ok(()) => {
+                tracing::info!(?ap, "started application processor");
+                started += 1;
+            }
+            Err(error) => tracing::error!(?ap, %error, "failed to start application processor"),
+        }
     }
 
-    // no ACPI
-    interrupt::enable_hardware_interrupts(None);
+    tracing::info!("started {started} application processors");
+
+    // store the topology for later
+    *TOPOLOGY.lock() = Some(topo);
+}
+
+fn init_acpi(
+    rsdp_addr: PAddr,
+) -> Result<(cpu::Topology, &'static interrupt::Controller), acpi::AcpiError> {
+    let tables = acpi::acpi_tables(rsdp_addr)?;
+
+    let platform = tables.platform_info()?;
+    tracing::debug!("found ACPI platform info");
+
+    tracing::info!(?platform.power_profile);
+
+    // enable hardware interrupts
+    let irq_ctrl = interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
+
+    // detect CPU topology
+    let topology = cpu::topology::Topology::from_acpi(&platform).unwrap();
+    tracing::debug!(?topology);
+
+    // TODO(eliza): initialize APs
+
+    Ok((topology, irq_ctrl))
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be

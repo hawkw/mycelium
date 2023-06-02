@@ -439,6 +439,11 @@ impl<A: Address, S: Size> Page<A, S> {
         Self { base, size }
     }
 
+    /// Returns the page number in `S`-sized pages.
+    pub fn number(&self) -> usize {
+        self.base.as_usize() / self.size.as_usize()
+    }
+
     pub fn base_addr(&self) -> A {
         self.base
     }
@@ -663,6 +668,13 @@ impl<S: Size + fmt::Display> fmt::Debug for NotAligned<S> {
         f.debug_struct("NotAligned")
             .field("size", &fmt::display(size))
             .finish()
+    }
+}
+
+impl<S: Size + fmt::Display> fmt::Display for NotAligned<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { size } = self;
+        write!(f, "address not aligned on a {size}-sized boundary")
     }
 }
 

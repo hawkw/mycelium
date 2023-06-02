@@ -875,7 +875,6 @@ pub(crate) mod tlb {
     use crate::control_regs::cr3;
     use crate::VAddr;
     use core::arch::asm;
-    use hal_core::Address;
 
     #[allow(dead_code)] // we'll need this later
     pub(crate) unsafe fn flush_all() {
@@ -931,5 +930,18 @@ mycotest::decl_test! {
         tracing::info!(?page, ?frame, "translated");
         mycotest::assert_eq!(frame, actual_frame, "identity mapped address should translate to itself");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_size() {
+        let addr = 0x8000;
+        let page =
+            PhysPage::<Size4Kb>::starting_at_fixed(PAddr::from_usize(addr)).expect("page is valid");
+        assert_eq!(page.number(), addr >> 12)
     }
 }

@@ -24,6 +24,39 @@ pub struct LocalApicRegister<T = u32, A = access::ReadWrite> {
     _ty: PhantomData<fn(T, A)>,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum IpiTarget {
+    /// The interrupt is sent to the processor with the provided local APIC ID.
+    ///
+    /// This must be a valid local APIC ID for the current system, and may
+    /// not exceed 4 bits in length.
+    ApicId(u8),
+    /// The interrupt is sent to this processor.
+    Current,
+    /// The interrupt is sent to all processors, *including* the current one.
+    All,
+    /// The interrupt is sent to all processors *except* the current one.
+    Others,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum IpiKind {
+    /// A Startup IPI (SIPI) is used to start an AP processor.
+    Startup(mm::PhysPage<mm::size::Size4Kb>),
+
+    /// INIT assert or de-assert.
+    Init {
+        /// Whether the INIT line should be asserted or deasserted.
+        assert: bool,
+    },
+
+    /// An IPI is used to send an interrupt to another processor.
+    Interrupt {
+        /// The interrupt vector to trigger.
+        vector: u8,
+        // TODO(eliza): rest of this.
+    },
+}
 pub trait RegisterAccess {
     type Access;
     type Target;
@@ -114,6 +147,170 @@ impl LocalApic {
         tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
     }
 
+    #[tracing::instrument(
+        level = tracing::Level::DEBUG,
+        name = "LocalApic::start_periodic_timer",
+        skip(self, interval),
+        fields(?interval, vector),
+        err
+    )]
+    pub fn start_periodic_timer(
+        &self,
+        interval: Duration,
+        vector: u8,
+    ) -> Result<(), InvalidDuration> {
+        let timer_frequency_hz = self.timer_frequency_hz();
+        let ticks_per_ms = timer_frequency_hz / 1000;
+        tracing::trace!(
+            timer_frequency_hz,
+            ticks_per_ms,
+            "starting local APIC timer"
+        );
+        let interval_ms: u32 = interval.as_millis().try_into().map_err(|_| {
+            InvalidDuration::new(
+                interval,
+                "local APIC periodic timer interval exceeds a `u32`",
+            )
+        })?;
+        let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).ok_or_else(|| {
+            InvalidDuration::new(
+                interval,
+                "local APIC periodic timer interval requires a number of ticks that exceed a `u32`",
+            )
+        })?;
+
+        unsafe {
+            let lvt_entry = register::LvtTimer::new()
+                .with(register::LvtTimer::VECTOR, vector)
+                .with(register::LvtTimer::MODE, register::TimerMode::Periodic);
+            // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
+            self.write_register(register::TIMER_DIVISOR, 0b11);
+            self.write_register(register::LVT_TIMER, lvt_entry);
+            self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
+        }
+
+        tracing::info!(
+            ?interval,
+            timer_frequency_hz,
+            ticks_per_ms,
+            vector,
+            "started local APIC timer"
+        );
+
+        Ok(())
+    }
+
+    /// Sends an IPI (inter-processor interrupt) to another CPU.
+    #[tracing::instrument(
+        level = tracing::Level::DEBUG,
+        name = "LocalApic::send_ipi",
+        skip(self),
+        err(Display)
+    )]
+    pub fn send_ipi(&self, target: IpiTarget, kind: IpiKind) -> Result<(), &'static str> {
+        use register::{IcrFlags, IcrTarget, IpiInit, IpiMode};
+
+        let mut flags = IcrFlags::new();
+        match kind {
+            IpiKind::Startup(page) => {
+                let page_num: u8 = page
+                    .number()
+                    .try_into()
+                    .map_err(|_| "SIPI page number must be <= 255")?;
+                flags
+                    .set(IcrFlags::VECTOR, page_num)
+                    .set(IcrFlags::MODE, IpiMode::Sipi)
+                    // This is set for all IPIs except INIT level deassert.
+                    .set(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
+            }
+            IpiKind::Init { assert } => {
+                let assert = match assert {
+                    true => IpiInit::Assert,
+                    false => IpiInit::Deassert,
+                };
+
+                flags
+                    .set(IcrFlags::MODE, IpiMode::InitDeinit)
+                    .set(IcrFlags::INIT_ASSERT_DEASSERT, assert);
+            }
+            IpiKind::Interrupt { vector: _ } => {
+                unreachable!("non-SIPI inter-processor interrupts are not currently implemented...")
+            }
+        }
+
+        match target {
+            IpiTarget::ApicId(apic_id) => {
+                flags
+                    .set(IcrFlags::DESTINATION, register::IpiDest::Target)
+                    // when targeting a local APIC ID, the destination mode is
+                    // "physical" (per osdev wiki).
+                    .set(IcrFlags::IS_LOGICAL, false);
+                assert!(
+                    apic_id < 0b0000_1111,
+                    "target APIC ID may not be more than 4 bits, got {apic_id:#b}"
+                );
+                let target_reg = IcrTarget::new().with(IcrTarget::APIC_ID, apic_id as u32);
+                unsafe { self.write_register(register::ICR_TARGET, target_reg) };
+            }
+            // TODO(eliza): there are probably some IPIs that are invalid to
+            // send to yourself...should we handle them here? e.g. i assume you
+            // can't send yourself a SIPI. tbqh, sending any IPI to yourself
+            // feels..onanic, at best.
+            IpiTarget::Current => {
+                flags.set(IcrFlags::DESTINATION, register::IpiDest::Current);
+            }
+            IpiTarget::All => {
+                flags.set(IcrFlags::DESTINATION, register::IpiDest::All);
+            }
+            IpiTarget::Others => {
+                flags.set(IcrFlags::DESTINATION, register::IpiDest::Others);
+            }
+        };
+
+        tracing::debug!(?flags, "sending IPI...");
+        unsafe {
+            // write the ICR flags
+            self.write_register(register::ICR_FLAGS, flags);
+
+            // wait for the interrupt to be delivered.
+            while self
+                .register(register::ICR_FLAGS)
+                .read()
+                .get(IcrFlags::SEND_PENDING)
+            {
+                // spin
+                core::hint::spin_loop();
+            }
+        };
+        tracing::info!(?flags, ?target, "IPI sent!");
+
+        Ok(())
+    }
+
+    /// Sends an End of Interrupt (EOI) to the local APIC.
+    ///
+    /// This should be called by an interrupt handler after handling a local
+    /// APIC interrupt.
+    ///
+    /// # Safety
+    ///
+    /// This should only be called when an interrupt has been triggered by this
+    /// local APIC.
+    pub unsafe fn end_interrupt(&self) {
+        // Write a 0 to the EOI register.
+        self.register(register::END_OF_INTERRUPT).write(0);
+    }
+
+    unsafe fn write_register<T, A>(&self, register: LocalApicRegister<T, A>, value: T)
+    where
+        LocalApicRegister<T, A>: RegisterAccess<Target = T, Access = A>,
+        A: access::Writable,
+        T: Copy + fmt::Debug + 'static,
+    {
+        tracing::trace!(%register, write = ?value);
+        self.register(register).write(value);
+    }
+
     fn timer_frequency_hz(&self) -> u32 {
         use register::*;
 
@@ -189,83 +386,6 @@ impl LocalApic {
         let frequency_hz = ticks_per_10ms * 100;
         tracing::debug!(frequency_hz, "calibrated local APIC timer using PIT");
         frequency_hz
-    }
-
-    #[tracing::instrument(
-        level = tracing::Level::DEBUG,
-        name = "LocalApic::start_periodic_timer",
-        skip(self, interval),
-        fields(?interval, vector),
-        err
-    )]
-    pub fn start_periodic_timer(
-        &self,
-        interval: Duration,
-        vector: u8,
-    ) -> Result<(), InvalidDuration> {
-        let timer_frequency_hz = self.timer_frequency_hz();
-        let ticks_per_ms = timer_frequency_hz / 1000;
-        tracing::trace!(
-            timer_frequency_hz,
-            ticks_per_ms,
-            "starting local APIC timer"
-        );
-        let interval_ms: u32 = interval.as_millis().try_into().map_err(|_| {
-            InvalidDuration::new(
-                interval,
-                "local APIC periodic timer interval exceeds a `u32`",
-            )
-        })?;
-        let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).ok_or_else(|| {
-            InvalidDuration::new(
-                interval,
-                "local APIC periodic timer interval requires a number of ticks that exceed a `u32`",
-            )
-        })?;
-
-        unsafe {
-            let lvt_entry = register::LvtTimer::new()
-                .with(register::LvtTimer::VECTOR, vector)
-                .with(register::LvtTimer::MODE, register::TimerMode::Periodic);
-            // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
-            self.write_register(register::TIMER_DIVISOR, 0b11);
-            self.write_register(register::LVT_TIMER, lvt_entry);
-            self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
-        }
-
-        tracing::info!(
-            ?interval,
-            timer_frequency_hz,
-            ticks_per_ms,
-            vector,
-            "started local APIC timer"
-        );
-
-        Ok(())
-    }
-
-    /// Sends an End of Interrupt (EOI) to the local APIC.
-    ///
-    /// This should be called by an interrupt handler after handling a local
-    /// APIC interrupt.
-    ///
-    /// # Safety
-    ///
-    /// This should only be called when an interrupt has been triggered by this
-    /// local APIC.
-    pub unsafe fn end_interrupt(&self) {
-        // Write a 0 to the EOI register.
-        self.register(register::END_OF_INTERRUPT).write(0);
-    }
-
-    unsafe fn write_register<T, A>(&self, register: LocalApicRegister<T, A>, value: T)
-    where
-        LocalApicRegister<T, A>: RegisterAccess<Target = T, Access = A>,
-        A: access::Writable,
-        T: Copy + fmt::Debug + 'static,
-    {
-        tracing::trace!(%register, write = ?value);
-        self.register(register).write(value);
     }
 
     #[must_use]
@@ -414,14 +534,100 @@ pub mod register {
         /// *Access**: read/write
         LVT_CMCI = 0x2f0, ReadWrite;
 
-        ICR_LOW = 0x300, ReadWrite;
-        ICR_HIGH = 0x310, ReadWrite;
+        /// Interrupt Command Register (ICR), Low Half (Flags)
+        ///
+        /// Bitflags for this register are represented by the [`IcrFlags`] type.
+        ///
+        /// The interrupt command register (ICR) is used for sending
+        /// inter-processor interrupts (IPIs) to other processors. It consists
+        /// of two separate 32-bit registers, the low half ([`ICR_FLAGS`]) at
+        /// 0x300, and the high half ([`ICR_TARGET`]) at 0x310. The low half
+        /// contains flags describing the / inter-processor interrupt, while the
+        /// high half contains the local APIC ID of the target processor.
+        ///
+        /// Note that the interrupt is sent when 0x300 ([`ICR_FLAGS`]) is
+        /// written to, so in order to send an interrupt, 0x310 should be
+        /// written prior to writing to 0x300.
+        ICR_FLAGS<IcrFlags> = 0x300, ReadWrite;
 
+        /// Interrupt Command Register (ICR), High Half (Target)
+        ///
+        /// The interrupt command register (ICR) is used for sending
+        /// inter-processor interrupts (IPIs) to other processors. It consists
+        /// of two separate 32-bit registers, the low half ([`ICR_FLAGS`]) at
+        /// 0x300, and the high half ([`ICR_TARGET`]) at 0x310. The low half
+        /// contains flags describing the / inter-processor interrupt, while the
+        /// high half contains the local APIC ID of the target processor.
+        ///
+        /// Note that the interrupt is sent when 0x300 ([`ICR_FLAGS`]) is
+        /// written to, so in order to send an interrupt, 0x310 should be
+        /// written prior to writing to 0x300.
+        ICR_TARGET<IcrTarget> = 0x310, ReadWrite;
+
+        /// LVT Local APIC Timer
+        ///
+        /// This register is used to configure an interrupt in the [Local Vector
+        /// Table (LVT)][lvt]. This register configures the LVT's local APIC timer
+        /// interrupt.
+        ///
+        /// Bitflags for this register are represented by the [`LvtTimer`] type.
+        ///
+        /// [lvt]: https://wiki.osdev.org/APIC#Local_Vector_Table_Registers
         LVT_TIMER<LvtTimer> = 0x320, ReadWrite;
+
+        /// LVT Thermal Sensor Interrupt
+        ///
+        /// This register is used to configure an interrupt in the [Local Vector
+        /// Table (LVT)][lvt]. This register configures the LVT interrupts
+        /// generated by the CPU's thermal sensor.
+        ///
+        /// Bitflags for this register are represented by the [`LvtEntry`] type.
+        ///
+        /// [lvt]: https://wiki.osdev.org/APIC#Local_Vector_Table_Registers
         LVT_THERMAL<LvtEntry> = 0x330, ReadWrite;
+
+        /// LVT Performance Monitoring Counters
+        ///
+        /// This register is used to configure an interrupt in the [Local Vector
+        /// Table (LVT)][lvt]. This register configures the LVT interrupts
+        /// generated by performance monitoring counters.
+        ///
+        /// Bitflags for this register are represented by the [`LvtEntry`] type.
+        ///
+        /// [lvt]: https://wiki.osdev.org/APIC#Local_Vector_Table_Registers
         LVT_PERF<LvtEntry> = 0x340, ReadWrite;
+
+        /// LVT Local Interrupt 0 (LINT0)
+        ///
+        /// This register is used to configure an interrupt in the [Local Vector
+        /// Table (LVT)][lvt]. This register configures the LVT's Local
+        /// Interrupt 0 (LINT0) interrupt.
+        ///
+        /// Bitflags for this register are represented by the [`LvtEntry`] type.
+        ///
+        /// [lvt]: https://wiki.osdev.org/APIC#Local_Vector_Table_Registers
         LVT_LINT0<LvtEntry> = 0x350, ReadWrite;
+
+        /// LVT Local Interrupt 1 (LINT1)
+        ///
+        /// This register is used to configure an interrupt in the [Local Vector
+        /// Table (LVT)][lvt]. This register configures the LVT's Local
+        /// Interrupt 1 (LINT1) interrupt.
+        ///
+        /// Bitflags for this register are represented by the [`LvtEntry`] type.
+        ///
+        /// [lvt]: https://wiki.osdev.org/APIC#Local_Vector_Table_Registers
         LVT_LINT1<LvtEntry> = 0x360, ReadWrite;
+
+
+        /// LVT Error Interrupt
+        ///
+        /// This register is used to configure an interrupt in the [Local Vector
+        /// Table (LVT)][lvt].  This register configures the LVT error interrupt.
+        ///
+        /// Bitflags for this register are represented by the [`LvtEntry`] type.
+        ///
+        /// [lvt]: https://wiki.osdev.org/APIC#Local_Vector_Table_Registers
         LVT_ERROR<LvtEntry> = 0x370, ReadWrite;
 
         TIMER_INITIAL_COUNT = 0x380, ReadWrite;
@@ -441,17 +647,44 @@ pub mod register {
     }
 
     bitfield! {
+        /// Bitflags configuring an interrupt entry in the [Local Vector Table
+        /// (LVT)][lvt].
+        ///
+        /// This type represents the values of the [`LVT_PERF`],
+        /// [`LVT_THERMAL`], [`LVT_LINT0`], [`LVT_LINT1`], and [`LVT_ERROR`]
+        /// registers.
+        ///
+        /// [lvt]: https://wiki.osdev.org/APIC#Local_Vector_Table_Registers
         pub struct LvtEntry<u32> {
+            /// The vector number for this interrupt.
             pub const VECTOR: u8;
             const _RESERVED_0 = 2;
+            /// If set, this interrupt will trigger a Non-Maskable Interrupt
+            /// (NMI).
             pub const NMI: bool;
-            pub const SEND_PENDING: bool;
+            const _RESERVED_1 = 1;
+            /// Set if this interrupt is currently pending.
+            pub const PENDING: bool;
+            /// Configures the pin polarity of this interrupt.
+            ///
+            /// If this bit is set, the interrupt is low-triggered.
             pub const POLARITY: PinPolarity;
+            /// Remote IRR
+            ///
+            /// XXX(eliza): what does this mean? OSDev Wiki just says that this
+            /// bit means "remote IRR" but doesn't say what a "remote IRR"
+            /// is...or even what "IRR" stands for...
             pub const REMOTE_IRR: bool;
+            /// Trigger mode.
+            ///
+            /// If this bit is set, the interrupt is level-triggered.
             pub const TRIGGER: TriggerMode;
+            /// If set, this interrupt is masked.
             pub const MASKED: bool;
         }
     }
+
+    // === TimerMode ===
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     #[repr(u8)]
@@ -481,10 +714,166 @@ pub mod register {
             self as u8 as u32
         }
     }
+
+    bitfield! {
+        /// Interrupt Command Register (ICR) flags.
+        ///
+        /// This is the value of the ([`ICR_FLAGS`]) register.
+        #[derive(Eq, PartialEq)]
+        pub struct IcrFlags<u32> {
+            /// The vector number, or starting page number for SIPIs.
+            pub const VECTOR: u8;
+            /// The destination mode.
+            ///
+            /// 0 is normal, 1 is lowest priority, 2 is SMI, 4 is NMI, 5 can be
+            /// INIT or INIT level de-assert, 6 is a SIPI.
+            pub const MODE: IpiMode;
+            /// The destination mode.
+            ///
+            /// Clear for a physical destination, or set for a logical
+            /// destination. If the bit is clear, then the destination field in
+            /// 0x310 is treated normally.
+            /// XXX(eliza): what does "normally" mean? this came from osdev wiki
+            /// lol.
+            pub const IS_LOGICAL: bool;
+            /// Delivery status.
+            ///
+            /// Cleared when the interrupt has been accepted by the target. You
+            /// should usually wait until this bit clears after sending an
+            /// interrupt.
+            pub const SEND_PENDING: bool;
+            const _RESERVED = 1;
+            pub const INIT_ASSERT_DEASSERT: IpiInit;
+
+            /// Destination selection.
+            ///
+            /// If this is > 0 then the destination field in 0x310 is ignored. 1
+            /// will always send the interrupt to itself, 2 will send it to all
+            /// processors, and 3 will send it to all processors aside from the
+            /// current one. It is best to avoid using modes 1, 2 and 3, and stick with 0.
+            pub const DESTINATION: IpiDest;
+        }
+    }
+
+    bitfield! {
+        /// Interrupt Command Register (ICR) target register.
+        ///
+        /// This is the value of the ([`ICR_TARGET`]) register.
+        #[derive(Eq, PartialEq)]
+        pub struct IcrTarget<u32> {
+            /// XXX(eliza): if this is an x2APIC, the destination starts at bit
+            /// 0 i think?
+            const _RESERVED_0 = 24;
+
+            /// The local APIC ID of the target processor.
+            pub const APIC_ID = 4;
+        }
+    }
+
+    /// Inter-processor Interrupt (IPI) Destination Modes.
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u8)]
+    pub enum IpiMode {
+        /// Normal priority.
+        Normal = 0,
+        /// Lowest priority.
+        LowPrio = 1,
+        /// System Management Interrupt (SMI)
+        Smi = 2,
+        /// Non-Maskable Interrupt (NMI)
+        Nmi = 4,
+        // INIT or INIT level de-assert
+        InitDeinit = 5,
+        /// SIPI
+        Sipi = 6,
+    }
+
+    /// Inter-processor Interrupt (IPI) Init level assert/de-assert.
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u8)]
+    pub enum IpiInit {
+        /// Assert INIT level (or any other ICR command if not sending an INIT).
+        Assert = 0x01,
+        /// Deassert INIT level.
+        Deassert = 0x10,
+    }
+
+    /// Inter-processor Interrupt (IPI) destination selection.
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u8)]
+    pub enum IpiDest {
+        /// The interrupt is sent to the target local APIC in the [`ICR_TARGET`]
+        /// register.
+        Target = 0,
+        /// The interrupt is sent to this processor.
+        Current = 1,
+        /// The interrupt is sent to all processors, *including* the current one.
+        All = 2,
+        /// The interrupt is sent to all processors *except* the current one.
+        Others = 3,
+    }
+
+    impl FromBits<u32> for IpiMode {
+        const BITS: u32 = 3;
+        type Error = &'static str;
+
+        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+            match bits {
+                bits if bits as u8 == Self::Normal as u8 => Ok(Self::Normal),
+                bits if bits as u8 == Self::LowPrio as u8 => Ok(Self::LowPrio),
+                bits if bits as u8 == Self::Smi as u8 => Ok(Self::Smi),
+                bits if bits as u8 == Self::Nmi as u8 => Ok(Self::Nmi),
+                bits if bits as u8 == Self::InitDeinit as u8 => Ok(Self::InitDeinit),
+                bits if bits as u8 == Self::Sipi as u8 => Ok(Self::Sipi),
+                _ => Err("not a valid IPI mode"),
+            }
+        }
+
+        fn into_bits(self) -> u32 {
+            self as u8 as u32
+        }
+    }
+
+    impl FromBits<u32> for IpiInit {
+        const BITS: u32 = 2;
+        type Error = &'static str;
+
+        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+            match bits {
+                bits if bits as u8 == Self::Assert as u8 => Ok(Self::Assert),
+                bits if bits as u8 == Self::Deassert as u8 => Ok(Self::Deassert),
+                _ => Err("not a valid ICR INIT assert/deassert mode"),
+            }
+        }
+
+        fn into_bits(self) -> u32 {
+            self as u8 as u32
+        }
+    }
+
+    impl FromBits<u32> for IpiDest {
+        const BITS: u32 = 2;
+        type Error = &'static str;
+
+        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
+            match bits {
+                bits if bits as u8 == Self::Target as u8 => Ok(Self::Target),
+                bits if bits as u8 == Self::Current as u8 => Ok(Self::Current),
+                bits if bits as u8 == Self::All as u8 => Ok(Self::All),
+                bits if bits as u8 == Self::Others as u8 => Ok(Self::Others),
+                _ => unreachable!("2 bits has 4 possible values!"),
+            }
+        }
+
+        fn into_bits(self) -> u32 {
+            self as u8 as u32
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::register::{IcrFlags, IcrTarget, IpiInit, IpiMode};
     use super::*;
 
     #[test]
@@ -524,5 +913,31 @@ mod tests {
             17,
             "mode LSB"
         );
+    }
+
+    #[test]
+    fn init_icr() {
+        let icr = IcrFlags::new()
+            .with(IcrFlags::VECTOR, 0)
+            .with(IcrFlags::MODE, IpiMode::InitDeinit)
+            .with(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
+        println!("{icr}");
+        assert_eq!(icr, IcrFlags::from_bits(0x4500))
+    }
+
+    #[test]
+    fn sipi_icr() {
+        let icr = IcrFlags::new()
+            .with(IcrFlags::VECTOR, 8) // page 8
+            .with(IcrFlags::MODE, IpiMode::Sipi)
+            .with(IcrFlags::INIT_ASSERT_DEASSERT, IpiInit::Assert);
+        println!("{icr}");
+        assert_eq!(icr, IcrFlags::from_bits(0x4600 | 8))
+    }
+
+    #[test]
+    fn icr_target() {
+        let icr = IcrTarget::new().with(IcrTarget::APIC_ID, 1);
+        assert_eq!(icr, IcrTarget::from_bits(1 << 24));
     }
 }

@@ -1,4 +1,4 @@
-use super::Msr;
+use super::{topology::Processor, Msr};
 use alloc::boxed::Box;
 use core::{
     arch::asm,
@@ -12,13 +12,16 @@ use mycelium_util::{fmt, sync::Lazy};
 
 #[repr(C)]
 #[derive(Debug)]
+#[pin_project::pin_project]
 pub struct GsLocalData {
     /// This *must* be the first field of the local data struct, because we read
     /// from `gs:0x0` to get the local data's address.
     _self: *const Self,
     magic: usize,
+    processor: Processor,
     /// Because this struct is self-referential, it may not be `Unpin`.
     _must_pin: PhantomPinned,
+
     /// Arbitrary user data.
     ///
     // TODO(eliza): consider storing this in some kind of heap allocated tree
@@ -36,12 +39,13 @@ impl GsLocalData {
     const MAGIC: usize = 0xC0FFEE;
     pub const MAX_LOCAL_KEYS: usize = 64;
 
-    const fn new() -> Self {
+    pub(crate) const fn new(processor: Processor) -> Self {
         #[allow(clippy::declare_interior_mutable_const)] // array initializer
         const LOCAL_SLOT_INIT: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
         Self {
             _self: ptr::null(),
             _must_pin: PhantomPinned,
+            processor,
             magic: Self::MAGIC,
             userdata: [LOCAL_SLOT_INIT; Self::MAX_LOCAL_KEYS],
         }
@@ -79,6 +83,10 @@ impl GsLocalData {
             .expect("GsLocalData::current() called before local data was initialized on this core!")
     }
 
+    pub fn processor_info(&self) -> &Processor {
+        &self.processor
+    }
+
     /// Access a local key on this CPU core's local data.
     pub fn with<T, U>(&self, key: &LocalKey<T>, f: impl FnOnce(&T) -> U) -> U {
         let idx = *key.idx.get();
@@ -109,14 +117,15 @@ impl GsLocalData {
     ///
     /// This should only be called a single time per CPU core.
     #[track_caller]
-    pub fn init() {
+    pub(crate) fn init(self: Pin<Box<Self>>) {
         if Self::has_local_data() {
             tracing::warn!("this CPU core already has local data initialized!");
             debug_assert!(false, "this CPU core already has local data initialized!");
             return;
         }
 
-        let ptr = Box::into_raw(Box::new(Self::new()));
+        let this = unsafe { Pin::into_inner_unchecked(self) };
+        let ptr = Box::into_raw(this);
         tracing::trace!(?ptr, "initializing local data");
         unsafe {
             // set up self reference

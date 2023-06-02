@@ -334,6 +334,11 @@ macro_rules! impl_addrs {
                 pub fn as_ptr<T>(self) -> *mut T {
                     Address::as_ptr(self)
                 }
+
+                #[inline]
+                pub const fn as_usize(self) -> usize {
+                    self.0 as usize
+                }
             }
         )+
     }
@@ -341,7 +346,7 @@ macro_rules! impl_addrs {
 
 impl PAddr {
     #[inline]
-    pub fn from_usize_checked(u: usize) -> Result<Self, InvalidAddress> {
+    pub const fn from_usize_checked(u: usize) -> Result<Self, InvalidAddress> {
         #[cfg(target_arch = "x86_64")]
         {
             const MASK: usize = 0xFFF0_0000_0000_0000;
@@ -359,7 +364,7 @@ impl PAddr {
 
 impl VAddr {
     #[inline]
-    pub fn from_usize_checked(u: usize) -> Result<Self, InvalidAddress> {
+    pub const fn from_usize_checked(u: usize) -> Result<Self, InvalidAddress> {
         #[cfg(target_arch = "x86_64")]
         {
             // sign extend 47th bit
@@ -404,7 +409,7 @@ impl_addrs! {
 }
 
 impl InvalidAddress {
-    fn new(addr: usize, msg: &'static str) -> Self {
+    const fn new(addr: usize, msg: &'static str) -> Self {
         Self { msg, addr }
     }
 }

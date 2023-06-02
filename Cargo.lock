@@ -950,6 +950,7 @@ dependencies = [
  "mycelium-trace",
  "mycelium-util",
  "mycotest",
+ "pin-project",
  "proptest",
  "rand_core",
  "raw-cpuid",

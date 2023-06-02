@@ -4,6 +4,7 @@ use core::{arch::asm, mem};
 use mycelium_util::{
     bits::{self, Pack64, Packing64, Pair64},
     fmt,
+    sync::spin::Mutex,
 };
 
 bits::bitfield! {
@@ -116,12 +117,12 @@ bits::bitfield! {
 //   it to `usize` in the array, but this requires unstable const generics
 //   features and i didn't want to mess with it...
 #[derive(Clone)]
+#[repr(C)]
 // rustfmt eats default parameters in const generics for some reason (probably a
 // bug...)
 #[rustfmt::skip]
-pub struct Gdt<const SIZE: usize = 8> {
-    entries: [u64; SIZE],
-    sys_segments: [bool; SIZE],
+pub struct Gdt {
+    entries: [u64; Self::SIZE as usize],
     push_at: usize,
 }
 
@@ -332,30 +333,52 @@ impl Selector {
 
 // === impl Gdt ===
 
-impl<const SIZE: usize> Gdt<SIZE> {
+impl Gdt {
+    const SIZE: u16 = 8 + (crate::cpu::topology::MAX_CPUS as u16 * 2);
+
     /// Sets `self` as the current GDT.
     ///
     /// This method is safe, because the `'static` bound on `self` ensures that
     /// the pointed GDT doesn't go away while it's active. Therefore, this
     /// method is a safe wrapper around the `lgdt` CPU instruction
     pub fn load(&'static self) {
-        // Create the descriptor table pointer with *just* the actual table, so
-        // that the next push index isn't considered a segment descriptor!
-        let ptr = cpu::DtablePtr::new(&self.entries);
-        tracing::trace!(?ptr, "loading GDT");
         unsafe {
             // Safety: the `'static` bound ensures the GDT isn't going away
             // unless you did something really evil.
-            cpu::intrinsics::lgdt(ptr)
+            self.load_unchecked();
         }
+    }
+
+    /// Sets a GDT inside of a [`Mutex`] as the current GDT.
+    ///
+    /// This method is safe, because the `'static` bound on `gdt` ensures that
+    /// the pointed GDT doesn't go away while it's active. Therefore, this
+    /// method is a safe wrapper around the `lgdt` CPU instruction
+    pub fn load_locked(gdt: &'static Mutex<Self>) {
+        let gdt = gdt.lock();
+        unsafe {
+            // Safety: the `'static` bound on the mutex ensures the GDT isn't
+            // going away unless you did something really evil.
+            gdt.load_unchecked();
+        }
+    }
+
+    /// Sets `self` as the current GDT.
+    ///
+    /// # Safety
+    ///
+    /// `self` must point to a GDT that is valid for the `'static` lifetime.
+    unsafe fn load_unchecked(&self) {
+        let ptr = cpu::DtablePtr::new_unchecked(&self.entries);
+        tracing::trace!(?ptr, "loading GDT");
+        cpu::intrinsics::lgdt(ptr);
         tracing::trace!("loaded GDT!");
     }
 
     /// Returns a new `Gdt` with all entries zeroed.
     pub const fn new() -> Self {
         Gdt {
-            entries: [0; SIZE],
-            sys_segments: [false; SIZE],
+            entries: [Descriptor::new().bits(); Self::SIZE as usize],
             push_at: 1,
         }
     }
@@ -363,7 +386,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
     #[tracing::instrument(level = "trace", skip(self))]
     pub fn add_segment(&mut self, segment: Descriptor) -> Selector {
         let ring = segment.ring_bits();
-        let idx = self.push(segment.0);
+        let idx = self.push(segment);
         let selector = Selector::from_raw(Selector::from_index(idx).0 | ring as u16);
         tracing::trace!(idx, ?selector, "added segment");
         selector
@@ -372,9 +395,7 @@ impl<const SIZE: usize> Gdt<SIZE> {
     #[tracing::instrument(level = "trace", skip(self))]
     pub fn add_sys_segment(&mut self, segment: SystemDescriptor) -> Selector {
         tracing::trace!(?segment, "Gdt::add_add_sys_segment");
-        let idx = self.push(segment.low);
-        self.sys_segments[idx as usize] = true;
-        self.push(segment.high);
+        let idx = self.push_tss(segment);
         // sys segments are always ring 0
         let selector = Selector::null()
             .with(Selector::INDEX, idx)
@@ -383,43 +404,29 @@ impl<const SIZE: usize> Gdt<SIZE> {
         selector
     }
 
-    const fn push(&mut self, entry: u64) -> u16 {
+    const fn push(&mut self, entry: Descriptor) -> u16 {
         let idx = self.push_at;
-        self.entries[idx] = entry;
+        self.entries[idx] = entry.bits();
         self.push_at += 1;
+        idx as u16
+    }
+
+    const fn push_tss(&mut self, entry: SystemDescriptor) -> u16 {
+        let idx = self.push_at;
+        self.entries[idx] = entry.low;
+        self.entries[idx + 1] = entry.high;
+        self.push_at += 2;
         idx as u16
     }
 }
 
-impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
+impl fmt::Debug for Gdt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct GdtEntries<'a, const SIZE: usize>(&'a Gdt<SIZE>);
-        impl<const SIZE: usize> fmt::Debug for GdtEntries<'_, SIZE> {
-            #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let mut sys0 = None;
-                let mut entries = f.debug_list();
-                for (&entry, &is_sys) in self.0.entries[..self.0.push_at]
-                    .iter()
-                    .zip(self.0.sys_segments.iter())
-                {
-                    if let Some(low) = sys0.take() {
-                        entries.entry(&SystemDescriptor { low, high: entry });
-                    } else if is_sys {
-                        sys0 = Some(entry);
-                    } else {
-                        entries.entry(&Descriptor(entry));
-                    }
-                }
-
-                entries.finish()
-            }
-        }
-
         f.debug_struct("Gdt")
-            .field("capacity", &SIZE)
+            .field("capacity", &Self::SIZE)
             .field("len", &(self.push_at - 1))
-            .field("entries", &GdtEntries(self))
+            // .field("entries", &&self.entries[..self.push_at])
+            // .field("tss_descrs", &&self.tss_descrs[..self.push_tss_at])
             .finish()
     }
 }
@@ -479,6 +486,20 @@ impl Descriptor {
         Self(Self::DEFAULT_BITS | Self::DATA_FLAGS)
     }
 
+    // TODO(eliza): construct this more nicely
+    pub(crate) const fn data_flat_16() -> Self {
+        Self(
+            Packing64::new(0)
+                .set_all(&Self::LIMIT_LOW)
+                .set_all(&Self::READABLE)
+                .set_all(&Self::IS_USER_SEGMENT)
+                .set_all(&Self::IS_PRESENT)
+                .set_all(&Self::LIMIT_HIGH)
+                .set_all(&Self::GRANULARITY)
+                .bits(),
+        )
+    }
+
     pub fn ring(&self) -> cpu::Ring {
         cpu::Ring::from_u8(self.ring_bits())
     }
@@ -512,6 +533,10 @@ impl Descriptor {
 impl SystemDescriptor {
     const BASE_HIGH: bits::Pack64 = bits::Pack64::least_significant(32);
     const BASE_HIGH_PAIR: Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
+
+    const fn null() -> Self {
+        Self { high: 0, low: 0 }
+    }
 
     #[cfg(feature = "alloc")]
     pub fn boxed_tss(tss: alloc::boxed::Box<task::StateSegment>) -> Self {
@@ -676,6 +701,14 @@ mod tests {
         dbg!(Descriptor::BASE_LOW_PAIR);
         dbg!(Descriptor::BASE_MID_PAIR);
         dbg!(SystemDescriptor::BASE_HIGH_PAIR);
+    }
+
+    #[test]
+    fn data_flat_16() {
+        assert_eq!(
+            Descriptor::data_flat_16(),
+            Descriptor::from_bits(0x008F_9200_0000_FFFF)
+        )
     }
 
     proptest! {

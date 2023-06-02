@@ -1,6 +1,7 @@
-use acpi::{AcpiError, AcpiHandler, AcpiTables};
+pub use acpi::AcpiError;
+use acpi::{AcpiHandler, AcpiTables};
 use core::{fmt, ptr::NonNull};
-use hal_core::{Address, PAddr};
+use hal_core::PAddr;
 use hal_x86_64::mm;
 
 #[derive(Debug)]
@@ -16,51 +17,6 @@ pub(super) fn acpi_tables(
     let tables = unsafe { AcpiTables::from_rsdp(IdentityMappedAcpiHandler, rsdp_addr.as_usize()) }?;
     tracing::info!("found ACPI tables!");
     Ok(tables)
-}
-
-#[tracing::instrument(err, skip(platform))]
-pub fn bringup_smp(platform: &acpi::PlatformInfo) -> Result<(), Error> {
-    use acpi::platform::{self, interrupt::InterruptModel};
-
-    tracing::info!(?platform.power_profile);
-
-    let apic = match platform.interrupt_model {
-        acpi::InterruptModel::Apic(ref apic) => {
-            tracing::info!("APIC interrupt model detected");
-            apic
-        }
-        InterruptModel::Unknown => {
-            return Err(Error::Other(
-                "MADT does not indicate support for APIC interrupt model!",
-            ));
-        }
-        ref model => {
-            tracing::warn!(?model, "unknown interrupt model detected");
-            return Err(Error::Other(
-                "MADT does not indicate support for APIC interrupt model!",
-            ));
-        }
-    };
-
-    tracing::debug!(?apic);
-
-    let platform::ProcessorInfo {
-        ref application_processors,
-        ref boot_processor,
-    } = platform
-        .processor_info
-        .as_ref()
-        .ok_or(Error::Other("no processor information found in MADT!"))?;
-    tracing::info!("boot processor seems normalish");
-    tracing::debug!(?boot_processor);
-    tracing::info!(
-        "found {} application processors",
-        application_processors.len()
-    );
-    tracing::debug!(?application_processors);
-    tracing::warn!("not starting app processors (SMP support isn't done yet)");
-
-    Ok(())
 }
 
 #[derive(Clone)]
