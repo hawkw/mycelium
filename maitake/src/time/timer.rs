@@ -232,7 +232,7 @@ pub struct Timer {
     core: Mutex<wheel::Core>,
 }
 
-//// Represents a single turn of the timer wheel.
+/// Represents a single turn of the timer wheel.
 #[derive(Debug)]
 pub struct Turn {
     /// The total number of ticks elapsed since the first time this timer wheel was
