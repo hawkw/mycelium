@@ -9,7 +9,7 @@ mod tests;
 
 #[derive(Debug)]
 pub(in crate::time) struct Core {
-    /// The total number of ticks that have now since this timer started.
+    /// The current "now"
     now: Ticks,
 
     /// The actual timer wheels.
@@ -39,8 +39,8 @@ struct Wheel {
     slots: SlotArray,
 }
 
-#[derive(Debug)]
-struct Deadline {
+#[derive(Copy, Clone, Debug)]
+pub(super) struct Deadline {
     pub(super) ticks: Ticks,
     slot: usize,
     wheel: usize,
