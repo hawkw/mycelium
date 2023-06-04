@@ -100,6 +100,33 @@ use self::sleep::Sleep;
 /// form of runtime bookkeeping action. For example, the timer can be advanced
 /// in a system's run loop every time the [`Scheduler::tick`] method completes.
 ///
+/// ### Periodic and One-Shot Timer Interrupts
+///
+/// Generally, hardware timer interrupts operate in one of two modes: _periodic_
+/// timers, which fire on a regular interval, and _one-shot_ timers, where the
+/// timer counts down to a particular time, fires the interrupt, and then stops
+/// until it is reset by software. Depending on the particular hardware
+/// platform, one or both of these timer modes may be available.
+///
+/// Using a periodic timer with the `maitake` timer wheel is quite simple:
+/// construct the timer wheel with the minimum [granularity](#timer-granularity)
+/// set to the period of the timer interrupt, and call
+/// [`Timer::advance_ticks`]`(1)` or [`Timer::pend_ticks`]`(1)` in the interrupt
+/// handler, as discused [above](#interrupt-driven-timers).
+///
+/// However, if the hardware platform provides a way to put the processor in a
+/// low-power state while waiting for an interrupt, it may be desirable to
+/// instead use a one-shot timer mode. When a timer wheel is advanced, it
+/// returns a [`Turn`] structure describing what happened while advancing the
+/// wheel. Among other things, this includes [the duration until the next
+/// scheduled timer expires](Turn::time_to_next_deadline). If the timer is
+/// advanced when the system has no other work to perform, and no new work was
+/// scheduled as a result of advancing the timer wheel to the current time, the
+/// system can then instruct the one-shot timer to fire in
+/// [`Turn::time_to_next_deadline`], and put the processor in a low-power state
+/// to wait for that interrupt. This allows the system to idle more efficiently
+/// than if it was woken repeatedly by a periodic timer interrupt.
+///
 /// ### Timestamp-Driven Timers
 ///
 /// When the timer is advanced by reading from a time source, the
@@ -205,6 +232,28 @@ pub struct Timer {
     core: Mutex<wheel::Core>,
 }
 
+//// Represents a single turn of the timer wheel.
+#[derive(Debug)]
+pub struct Turn {
+    /// The total number of ticks elapsed since the first time this timer wheel was
+    /// advanced.
+    pub now: Ticks,
+
+    /// The tick at which the next deadline in the timer wheel expires.
+    ///
+    /// If this is `None`, there are currently no scheduled [`Sleep`] futures in the
+    /// wheel.
+    next_deadline_ticks: Option<Ticks>,
+
+    /// The number of [`Sleep`] futures that were woken up by this turn of the
+    /// timer wheel.
+    pub expired: usize,
+
+    /// The timer's tick duration (granularity); used for converting `now_ticks`
+    /// and `next_deadline_ticks` into [`Duration`].
+    tick_duration: Duration,
+}
+
 /// Timer ticks are always counted by a 64-bit unsigned integer.
 pub type Ticks = u64;
 
@@ -264,7 +313,7 @@ impl Timer {
 
     /// Returns the maximum duration of [`Sleep`] futures driven by this timer.
     pub fn max_duration(&self) -> Duration {
-        self.ticks_to_dur(u64::MAX)
+        ticks_to_dur(self.tick_duration, u64::MAX)
     }
 
     /// Returns a [`Future`] that will complete in `duration`.
@@ -365,6 +414,18 @@ impl Timer {
     /// Advance the timer by `duration`, potentially waking any [`Sleep`] futures
     /// that have completed.
     ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(`[`Turn`]`)` if the lock was acquired and the wheel was
+    ///   advanced. A [`Turn`] structure describes what occurred during this
+    ///   turn of the wheel, including the [current time][elapsed] and the
+    ///   [deadline of the next expiring timer][next], if one exists.
+    /// - [`None`] if the wheel was not advanced because the lock was already
+    ///   held.
+    ///
+    /// [elapsed]: Turn::elapsed
+    /// [next]: Turn::time_to_next_deadline
+    ///
     /// # Interrupt Safety
     ///
     /// This method will *never* spin if the timer wheel lock is held; instead,
@@ -391,6 +452,18 @@ impl Timer {
 
     /// Advance the timer by `ticks` timer ticks, potentially waking any [`Sleep`]
     /// futures that have completed.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(`[`Turn`]`)` if the lock was acquired and the wheel was
+    ///   advanced. A [`Turn`] structure describes what occurred during this
+    ///   turn of the wheel, including the [current time][elapsed] and the
+    ///   [deadline of the next expiring timer][next], if one exists.
+    /// - [`None`] if the wheel was not advanced because the lock was already
+    ///   held.
+    ///
+    /// [elapsed]: Turn::elapsed
+    /// [next]: Turn::time_to_next_deadline
     ///
     /// # Interrupt Safety
     ///
@@ -432,6 +505,15 @@ impl Timer {
     /// Advance the timer by `duration`, ensuring any `Sleep` futures that have
     /// completed are woken, even if a lock must be acquired.
     ///
+    /// # Returns
+    ///
+    /// A [`Turn`] structure describing what occurred during this turn of the
+    /// wheel, including including the [current time][elapsed] and the [deadline
+    /// of the next expiring timer][next], if one exists.
+    ///
+    /// [elapsed]: Turn::elapsed
+    /// [next]: Turn::time_to_next_deadline
+    ///
     /// # Interrupt Safety
     ///
     /// This method will spin to acquire the timer wheel lock if it is currently
@@ -446,13 +528,22 @@ impl Timer {
     ///
     /// [`advance`]: Timer::advance
     #[inline]
-    pub fn force_advance(&self, duration: Duration) {
+    pub fn force_advance(&self, duration: Duration) -> Turn {
         let ticks = expect_display(self.dur_to_ticks(duration), "cannot advance timer");
         self.force_advance_ticks(ticks)
     }
 
     /// Advance the timer by `ticks` timer ticks, ensuring any `Sleep` futures
     /// that have completed are woken, even if a lock must be acquired.
+    ///
+    /// # Returns
+    ///
+    /// A [`Turn`] structure describing what occurred during this turn of the
+    /// wheel, including including the [current time][elapsed] and the [deadline
+    /// of the next expiring timer][next], if one exists.
+    ///
+    /// [elapsed]: Turn::elapsed
+    /// [next]: Turn::time_to_next_deadline
     ///
     /// # Interrupt Safety
     ///
@@ -468,11 +559,11 @@ impl Timer {
     ///
     /// [`advance_ticks`]: Timer::advance_ticks
     #[inline]
-    pub fn force_advance_ticks(&self, ticks: Ticks) {
+    pub fn force_advance_ticks(&self, ticks: Ticks) -> Turn {
         self.advance_locked(self.core.lock(), ticks)
     }
 
-    fn advance_locked(&self, mut core: MutexGuard<'_, wheel::Core>, ticks: Ticks) {
+    fn advance_locked(&self, mut core: MutexGuard<'_, wheel::Core>, ticks: Ticks) -> Turn {
         // take any pending ticks.
         let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
         // we do two separate `advance` calls here instead of advancing once
@@ -480,7 +571,14 @@ impl Timer {
         if pending_ticks > 0 {
             core.advance(pending_ticks);
         }
-        core.advance(ticks);
+        let (expired, next_deadline) = core.advance(ticks);
+
+        Turn {
+            expired,
+            next_deadline_ticks: next_deadline.map(|d| d.ticks),
+            now: core.now(),
+            tick_duration: self.tick_duration,
+        }
     }
 
     fn core(&self) -> MutexGuard<'_, wheel::Core> {
@@ -495,13 +593,6 @@ impl Timer {
                 requested: dur,
                 max: self.max_duration(),
             })
-    }
-
-    #[track_caller]
-    fn ticks_to_dur(&self, ticks: Ticks) -> Duration {
-        let nanos = self.tick_duration.subsec_nanos() as u64 * ticks;
-        let secs = self.tick_duration.as_secs() * ticks;
-        Duration::new(secs, nanos as u32)
     }
 
     #[cfg(all(test, not(loom)))]
@@ -520,6 +611,52 @@ impl fmt::Debug for Timer {
             .field("core", &fmt::opt(&self.core.try_lock()).or_else("<locked>"))
             .finish()
     }
+}
+
+// === impl Turn ===
+
+impl Turn {
+    /// Returns the number of ticks until the deadline at which the next
+    /// [`Sleep`] future expires, or [`None`] if no sleep futures are currently
+    /// scheduled.
+    #[inline]
+    #[must_use]
+    pub fn ticks_to_next_deadline(&self) -> Option<Ticks> {
+        self.next_deadline_ticks.map(|deadline| deadline - self.now)
+    }
+
+    /// Returns the [`Duration`] from the current time to the deadline of the
+    /// next [`Sleep`] future, or [`None`] if no sleep futures are currently
+    /// scheduled.
+    #[inline]
+    #[must_use]
+    pub fn time_to_next_deadline(&self) -> Option<Duration> {
+        self.ticks_to_next_deadline().map(|deadline| ticks_to_dur(self.tick_duration, deadline))
+    }
+
+    /// Returns the total elapsed time since this timer wheel started running.
+    #[inline]
+    #[must_use]
+    pub fn elapsed(&self) -> Duration {
+        ticks_to_dur(self.tick_duration, self.now)
+    }
+
+    /// Returns `true` if there are currently pending [`Sleep`] futures
+    /// scheduled in this timer wheel.
+    #[inline]
+    #[must_use]
+    pub fn has_remaining(&self) -> bool {
+        self.next_deadline_ticks.is_some()
+    }
+}
+
+#[track_caller]
+#[inline]
+#[must_use]
+fn ticks_to_dur(tick_duration: Duration, ticks: Ticks) -> Duration {
+    let nanos = tick_duration.subsec_nanos() as u64 * ticks;
+    let secs = tick_duration.as_secs() * ticks;
+    Duration::new(secs, nanos as u32)
 }
 
 // === impl TimerError ====
