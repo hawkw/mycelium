@@ -9,7 +9,7 @@ mod tests;
 
 #[derive(Debug)]
 pub(in crate::time) struct Core {
-    /// The total number of ticks that have now since this timer started.
+    /// The current "now"
     now: Ticks,
 
     /// The actual timer wheels.
@@ -39,9 +39,9 @@ struct Wheel {
     slots: SlotArray,
 }
 
-#[derive(Debug)]
-struct Deadline {
-    ticks: Ticks,
+#[derive(Copy, Clone, Debug)]
+pub(super) struct Deadline {
+    pub(super) ticks: Ticks,
     slot: usize,
     wheel: usize,
 }
@@ -100,15 +100,19 @@ impl Core {
     }
 
     #[inline(never)]
-    pub(super) fn advance(&mut self, ticks: Ticks) -> usize {
+    pub(super) fn advance(&mut self, ticks: Ticks) -> (usize, Option<Deadline>) {
         let now = self.now + ticks;
         let mut fired = 0;
+
         // sleeps that need to be rescheduled on lower-level wheels need to be
         // processed after we have finished turning the wheel, to avoid looping
         // infinitely.
-
         let mut pending_reschedule = List::<sleep::Entry>::new();
-        while let Some(deadline) = self.next_deadline() {
+
+        // we will stop looping if the next deadline is after `now`, but we
+        // still need to be able to return it.
+        let mut next_deadline = self.next_deadline();
+        while let Some(deadline) = next_deadline {
             if deadline.ticks > now {
                 break;
             }
@@ -147,6 +151,8 @@ impl Core {
 
             self.now = deadline.ticks;
             fired += fired_this_turn;
+
+            next_deadline = self.next_deadline();
         }
 
         self.now = now;
@@ -156,6 +162,7 @@ impl Core {
             now = self.now,
             fired,
             rescheduled = pending_reschedule.len(),
+            ?next_deadline,
             "wheel turned to"
         );
         for entry in pending_reschedule {
@@ -164,7 +171,7 @@ impl Core {
             self.insert_sleep_at(deadline, entry)
         }
 
-        fired
+        (fired, next_deadline)
     }
 
     pub(super) fn cancel_sleep(&mut self, sleep: Pin<&mut sleep::Entry>) {

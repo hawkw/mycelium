@@ -50,7 +50,7 @@ use crate::util;
 
 #[doc(inline)]
 pub use self::timeout::Timeout;
-pub use self::timer::{set_global_timer, sleep::Sleep, AlreadyInitialized, Timer, TimerError};
+pub use self::timer::{set_global_timer, sleep::Sleep, AlreadyInitialized, Timer, TimerError, Turn};
 pub use core::time::Duration;
 
 use core::future::Future;
