@@ -164,13 +164,18 @@ impl SleepGroupTest {
             .sum();
 
         // advance the timer.
-        self.timer.advance_ticks(ticks);
+        let turn = self.timer.force_advance_ticks(ticks);
 
         let completed = self.scheduler.tick().completed;
 
-        info!(completed, "advanced test timer");
+        info!(
+            completed,
+            ?turn.expired,
+            turn.next_deadline = ?turn.ticks_to_next_deadline(),
+            "advanced test timer",
+        );
         info!("");
-
+        assert_eq!(self.next_deadline(), turn.ticks_to_next_deadline());
         self.assert();
 
         assert_eq!(
@@ -180,6 +185,15 @@ impl SleepGroupTest {
              the timer from {t_0} to {t_1}",
             t_1 = self.now,
         );
+    }
+
+    fn next_deadline(&self) -> Option<Ticks> {
+        self.groups
+            .keys()
+            .filter(|&&t| t > self.now)
+            .next()
+            .cloned()
+            .map(|t| t - self.now)
     }
 }
 
