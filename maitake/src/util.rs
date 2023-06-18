@@ -93,13 +93,20 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
 
 #[cfg(test)]
 pub(crate) mod test {
-
-    pub(crate) fn trace_init() -> impl Drop {
+    pub(crate) fn trace_init() -> TestGuard {
         trace_init_with_default("maitake=debug,cordyceps=debug")
     }
 
+    #[must_use]
+    pub struct TestGuard {
+        #[cfg(not(loom))]
+        _x: tracing_02::collect::DefaultGuard,
+        #[cfg(loom)]
+        _x: tracing_01::collect::DefaultGuard,
+    }
+
     #[cfg(not(loom))]
-    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
+    pub(crate) fn trace_init_with_default(default: &str) -> TestGuard {
         use tracing_subscriber::filter::{EnvFilter, LevelFilter};
         let env = std::env::var("RUST_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
@@ -115,11 +122,14 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        tracing_02::collect::set_default(collector)
+
+        TestGuard {
+            _x: tracing_02::collect::set_default(collector),
+        }
     }
 
     #[cfg(loom)]
-    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
+    pub(crate) fn trace_init_with_default(default: &str) -> TestGuard {
         use tracing_subscriber_03::filter::{EnvFilter, LevelFilter};
         let env = std::env::var("LOOM_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
@@ -138,7 +148,10 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        tracing_01::subscriber::set_default(collector)
+
+        TestGuard {
+            _x: tracing_01::collect::set_default(collector),
+        }
     }
 
     #[allow(dead_code)]
