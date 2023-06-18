@@ -93,13 +93,34 @@ pub(crate) fn expect_display<T, E: core::fmt::Display>(result: Result<T, E>, msg
 
 #[cfg(test)]
 pub(crate) mod test {
+    /// A guard that represents the tracing default subscriber guard
+    ///
+    /// *should* be held until the end of the test, to ensure that tracing messages
+    /// actually make it to the fmt subscriber for the entire test.
+    ///
+    /// Exists to abstract over tracing 01/02 guard type differences.
+    #[must_use]
+    pub struct TestGuard {
+        #[cfg(not(loom))]
+        _x2: tracing_02::collect::DefaultGuard,
+        #[cfg(loom)]
+        _x1: tracing_01::subscriber::DefaultGuard,
+    }
 
-    pub(crate) fn trace_init() -> impl Drop {
+    /// Initialize tracing with a default filter directive
+    ///
+    /// Returns a [TestGuard] that must be held for the duration of test to ensure
+    /// tracing messages are correctly output
+    pub(crate) fn trace_init() -> TestGuard {
         trace_init_with_default("maitake=debug,cordyceps=debug")
     }
 
+    /// Initialize tracing with the given filter directive
+    ///
+    /// Returns a [TestGuard] that must be held for the duration of test to ensure
+    /// tracing messages are correctly output
     #[cfg(not(loom))]
-    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
+    pub(crate) fn trace_init_with_default(default: &str) -> TestGuard {
         use tracing_subscriber::filter::{EnvFilter, LevelFilter};
         let env = std::env::var("RUST_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
@@ -115,11 +136,18 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        tracing_02::collect::set_default(collector)
+
+        TestGuard {
+            _x2: tracing_02::collect::set_default(collector),
+        }
     }
 
+    /// Initialize tracing with the given filter directive
+    ///
+    /// Returns a [TestGuard] that must be held for the duration of test to ensure
+    /// tracing messages are correctly output
     #[cfg(loom)]
-    pub(crate) fn trace_init_with_default(default: &str) -> impl Drop {
+    pub(crate) fn trace_init_with_default(default: &str) -> TestGuard {
         use tracing_subscriber_03::filter::{EnvFilter, LevelFilter};
         let env = std::env::var("LOOM_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
@@ -138,7 +166,11 @@ pub(crate) mod test {
             .with_test_writer()
             .without_time()
             .finish();
-        tracing_01::subscriber::set_default(collector)
+
+        use tracing_subscriber_03::util::SubscriberInitExt;
+        TestGuard {
+            _x1: collector.set_default(),
+        }
     }
 
     #[allow(dead_code)]
