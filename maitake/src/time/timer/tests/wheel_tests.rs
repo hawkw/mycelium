@@ -1,5 +1,6 @@
 use super::*;
 use crate::scheduler::Scheduler;
+use crate::util::test::TestGuard;
 use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -14,6 +15,9 @@ struct SleepGroupTest {
     now: Ticks,
     groups: BTreeMap<Ticks, SleepGroup>,
     next_id: usize,
+
+    // Hold on to this so the subscriber doesn't go away
+    _guard: TestGuard,
 }
 
 struct SleepGroup {
@@ -26,13 +30,14 @@ struct SleepGroup {
 
 impl SleepGroupTest {
     fn new(timer: &'static Timer) -> Self {
-        crate::util::test::trace_init_with_default("info,maitake::time=trace");
+        let _guard = crate::util::test::trace_init_with_default("info,maitake::time=trace");
         Self {
             scheduler: Scheduler::new(),
             timer,
             now: 0,
             groups: BTreeMap::new(),
             next_id: 0,
+            _guard,
         }
     }
 

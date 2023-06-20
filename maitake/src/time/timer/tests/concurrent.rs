@@ -16,8 +16,9 @@ use loom::model;
 
 #[cfg(not(loom))]
 fn model(f: impl Fn() + Send + Sync + 'static) {
-    crate::util::test::trace_init_with_default("info,maitake::time=trace");
+    let guard = crate::util::test::trace_init_with_default("info,maitake::time=trace");
     f();
+    drop(guard);
 }
 
 #[test]
