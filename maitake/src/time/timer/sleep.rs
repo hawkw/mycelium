@@ -44,9 +44,9 @@ pub(super) struct Entry {
     /// The waker of the task awaiting this future.
     waker: WaitCell,
 
-    /// The wheel's elapsed timestamp when this `sleep` future was first polled.
     pub(super) deadline: Ticks,
 
+    /// The wheel's elapsed timestamp when this `sleep` future was first polled.
     pub(super) ticks: Ticks,
 
     pub(super) linked: AtomicBool,

@@ -167,15 +167,20 @@ impl SleepGroupTest {
         let turn = self.timer.force_advance_ticks(ticks);
 
         let completed = self.scheduler.tick().completed;
-
+        let real_next = turn.ticks_to_next_deadline();
+        let logical_next = self.next_deadline();
         info!(
             completed,
             ?turn.expired,
-            turn.next_deadline = ?turn.ticks_to_next_deadline(),
+            turn.next_deadline = ?real_next,
+            logical_next = ?logical_next,
             "advanced test timer",
         );
         info!("");
-        // assert_eq!(self.next_deadline(), turn.ticks_to_next_deadline());
+        assert!(
+            real_next <= logical_next,
+            "next logical deadline in {real_next:?}, real work in {real_next:?}"
+        );
         self.assert();
 
         assert_eq!(
