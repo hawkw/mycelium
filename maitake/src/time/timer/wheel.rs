@@ -165,10 +165,21 @@ impl Core {
             ?next_deadline,
             "wheel turned to"
         );
+
+        // If we need to reschedule something, we may need to recalculate the next deadline
+        let any = !pending_reschedule.is_empty();
+
         for entry in pending_reschedule {
             let deadline = unsafe { entry.as_ref().deadline };
+            debug_assert!(deadline > self.now);
             debug_assert_ne!(deadline, 0);
             self.insert_sleep_at(deadline, entry)
+        }
+
+        // Yup, we rescheduled something. Recalculate the next deadline in case one of those
+        // was sooner than the last calculated deadline
+        if any {
+            next_deadline = self.next_deadline();
         }
 
         (fired, next_deadline)
