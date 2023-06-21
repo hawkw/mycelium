@@ -568,13 +568,15 @@ impl Timer {
         let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
         // we do two separate `advance` calls here instead of advancing once
         // with the sum, because `ticks` + `pending_ticks` could overflow.
+        let mut pend_exp = 0;
         if pending_ticks > 0 {
-            core.advance(pending_ticks);
+            let (expired, _next_deadline) = core.advance(pending_ticks);
+            pend_exp = expired;
         }
         let (expired, next_deadline) = core.advance(ticks);
 
         Turn {
-            expired,
+            expired: expired.saturating_add(pend_exp),
             next_deadline_ticks: next_deadline.map(|d| d.ticks),
             now: core.now(),
             tick_duration: self.tick_duration,
