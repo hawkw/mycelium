@@ -304,6 +304,55 @@ fn schedule_after_start() {
 }
 
 #[test]
+fn expired_shows_up() {
+    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    let mut test = SleepGroupTest::new(&TIMER);
+
+    test.spawn_group(150, 2);
+
+    // first tick --- timer is still at zero
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+    test.assert();
+
+    // advance the timer by 50 ticks.
+    test.advance(50);
+
+    // Second tick - still nothing
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+    test.assert();
+
+    // Add MORE items, sooner than the previous ones, to force a re-org
+    test.spawn_group(60, 3);
+
+    // Tick - nothing happens, but the new sleeps should now be registered.
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+    test.assert();
+
+    // advance the timer by 50 more ticks, NOT past our new sleeps,
+    // but forward
+    test.now += 50;
+    let turn = test.timer.force_advance_ticks(50);
+    assert_eq!(turn.ticks_to_next_deadline(), Some(10));
+
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+    test.assert();
+
+    // advance the timer by 10 ticks.
+    test.advance(10);
+    test.assert();
+
+    // advance the timer by 40 ticks.
+    test.advance(40);
+    test.assert();
+
+    test.assert_all_complete();
+}
+
+#[test]
 fn max_sleep() {
     static TIMER: Timer = Timer::new(Duration::from_millis(1));
     let mut test = SleepGroupTest::new(&TIMER);
