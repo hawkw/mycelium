@@ -184,6 +184,49 @@ impl SleepGroupTest {
 }
 
 #[test]
+fn pend_advance_wakes() {
+    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    let mut test = SleepGroupTest::new(&TIMER);
+
+    test.spawn_group(100, 2);
+
+    // first tick --- timer is still at zero
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+    test.assert();
+
+    // advance the timer by 50 ticks.
+    test.advance(50);
+
+    // advance the timer by 50 more ticks
+    // but ONLY by pending
+    test.now += 50;
+    test.timer.pend_ticks(50);
+
+    // Tick the scheduler, nothing should have happened
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, 0);
+
+    // How many do we expect to complete "now"? (it's two)
+    let expected_complete: usize = test
+        .groups
+        .iter_mut()
+        .take_while(|(&t, _)| t <= test.now)
+        .map(|(_, g)| std::mem::replace(&mut g.tasks, 0))
+        .sum();
+
+    // Call force, which will "notice" the pending ticks
+    let turn = test.timer.force_advance_ticks(0);
+    assert_eq!(turn.expired, expected_complete);
+
+    // NOW the tasks will show up as scheduled, and complete
+    let tick = test.scheduler.tick();
+    assert_eq!(tick.completed, expected_complete);
+
+    test.assert_all_complete();
+}
+
+#[test]
 fn timer_basically_works() {
     static TIMER: Timer = Timer::new(Duration::from_millis(1));
     let mut test = SleepGroupTest::new(&TIMER);
