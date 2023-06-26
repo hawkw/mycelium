@@ -3,9 +3,44 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## cordyceps-v0.3.1 - (2022-09-08)
+## cordyceps-v0.3.2 - (2023-06-26)
 
-[62b7ee5](https://github.com/hawkw/mycelium/62b7ee5f7080d7843a0785be73977124590be526)...[06179e2](https://github.com/hawkw/mycelium/06179e2855e9b91c7abbe2c15fe319ecbce1af36)
+[192e3e4](https://github.com/hawkw/mycelium/192e3e4dd9794fe9c4573c9bf3602f331b291c97)...[5e46e35](https://github.com/hawkw/mycelium/5e46e35cae131d5f60f527e6659dc53b18e30ebb)
+
+
+### Added
+
+- Add utilities for work-stealing ([#322](https://github.com/hawkw/mycelium/issues/322)) ([5283cf9](https://github.com/hawkw/mycelium/5283cf9960f79d6c067b192449616396f89dc554))
+- Add `Stack` and `TransferStack` ([#434](https://github.com/hawkw/mycelium/issues/434)) ([507b993](https://github.com/hawkw/mycelium/507b993eb50c5f83f2a43399d9e48f1b448aa297), closes [#137](https://github.com/hawkw/mycelium/issues/137))
+
+### Documented
+
+- Fix wrong footnote rendering ([#317](https://github.com/hawkw/mycelium/issues/317)) ([819017c](https://github.com/hawkw/mycelium/819017c0004b68b09dad34c5bbfdf82914fdccbe))
+- Add link to inconsistent states in error ([#317](https://github.com/hawkw/mycelium/issues/317)) ([667c089](https://github.com/hawkw/mycelium/667c0894bc976ffe36eabf0967fe3395085996ad))
+- `MpscQueue` doc formatting fixup ([#317](https://github.com/hawkw/mycelium/issues/317)) ([78a104c](https://github.com/hawkw/mycelium/78a104cbe29a55f054b8d2fe7b5a7293dafc7f35))
+- Remove unneeded `#[repr(C)]` in examples ([#317](https://github.com/hawkw/mycelium/issues/317)) ([d37ec8c](https://github.com/hawkw/mycelium/d37ec8c2d8f968e44b07a1be708f794f5636f6d8))
+- Fix typos in `List` and `Linked` docs ([#385](https://github.com/hawkw/mycelium/issues/385)) ([678d469](https://github.com/hawkw/mycelium/678d4692e7d003b9dcfa19acd65814984b3912a6))
+- Fix wrong time complexity notes ([#430](https://github.com/hawkw/mycelium/issues/430)) ([787f702](https://github.com/hawkw/mycelium/787f702f8ac4d1420cc9ac27d93c0217beace937), fixes [#429](https://github.com/hawkw/mycelium/issues/429))
+- Add nicer "Returns" sections ([#430](https://github.com/hawkw/mycelium/issues/430)) ([3548032](https://github.com/hawkw/mycelium/354803239df5a4af7873994f5055754e9e360d21))
+
+### Fixed
+
+- Remove `let ... else` syntax ([#373](https://github.com/hawkw/mycelium/issues/373)) ([5f36a6c](https://github.com/hawkw/mycelium/5f36a6cf6ef81763a927ee07f0c142c1704850a6))
+
+### Refac
+
+- @cratelyn-ify manual `fmt::Debug` impls ([#330](https://github.com/hawkw/mycelium/issues/330)) ([192acab](https://github.com/hawkw/mycelium/192acab3bae4d02ee11c179064d2c165131ca1af))
+
+### Style
+
+- Use `let`-`else` in a few places ([#335](https://github.com/hawkw/mycelium/issues/335)) ([d7d07cb](https://github.com/hawkw/mycelium/d7d07cb1afc1ce7b98f887d21badf25e23d8d9e0))
+- Fix clippy format inlining lint ([#390](https://github.com/hawkw/mycelium/issues/390)) ([30b83e0](https://github.com/hawkw/mycelium/30b83e02b1cc9647f4a0a54dfccc79c727e7f1f1))
+- Use inlined format args ([#391](https://github.com/hawkw/mycelium/issues/391)) ([43d29de](https://github.com/hawkw/mycelium/43d29de9d883a269389db91be9c224fdd518879a))
+- Rustfmt ([5e46e35](https://github.com/hawkw/mycelium/5e46e35cae131d5f60f527e6659dc53b18e30ebb))
+
+## cordyceps-v0.3.1 - (2022-09-13)
+
+[62b7ee5](https://github.com/hawkw/mycelium/62b7ee5f7080d7843a0785be73977124590be526)...[192e3e4](https://github.com/hawkw/mycelium/192e3e4dd9794fe9c4573c9bf3602f331b291c97)
 
 
 ### Added
