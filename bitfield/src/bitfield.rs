@@ -139,10 +139,11 @@
 /// ```
 ///
 /// Bitfields may also contain typed values, as long as those values implement
-/// the [`FromBits`] trait:
+/// the [`FromBits`] trait. [`FromBits`] may be manually implemented, or
+/// generated automatically for `enum` types using the [`enum_from_bits!] macro:
 ///
 /// ```
-/// use mycelium_bitfield::{bitfield, FromBits};
+/// use mycelium_bitfield::{bitfield, enum_from_bits, FromBits};
 ///
 /// // An enum type can implement the `FromBits` trait if it has a
 /// // `#[repr(uN)]` attribute.
@@ -173,6 +174,19 @@
 ///     }
 /// }
 ///
+/// Alternatively, the `enum_from_bits!` macro can be used to
+/// automatically generate a `FromBits` implementation for an
+/// enum type:
+/// enum_from_bits! {
+///     #[derive(Debug, Eq, PartialEq)]
+///     pub enum MyGeneratedEnum<u8> {
+///         /// Isn't this cool?
+///         Wow = 0b1001,
+///         /// It sure is! :D
+///         Whoa = 0b0110,
+///     }
+/// }
+///
 /// bitfield! {
 ///     pub struct TypedBitfield<u32> {
 ///         /// Use the first two bits to represent a typed `MyEnum` value.
@@ -190,16 +204,20 @@
 ///         /// `FromBits` is also implemented by (signed and unsigned) integer
 ///         /// types. This will allow the next 8 bits to be treated as a `u8`.
 ///         pub const A_BYTE: u8;
+///
+///         /// We can also use the automatically generated enum:
+///         pub const OTHER_ENUM: MyGeneratedEnum;
 ///     }
 /// }
 ///
 /// // Unpacking a typed value with `get` will return that value, or panic if
 /// // the bit pattern is invalid:
-/// let my_bitfield = TypedBitfield::from_bits(0b0011_0101_1001_1110);
+/// let my_bitfield = TypedBitfield::from_bits(0b0010_0100_0011_0101_1001_1110);
 ///
 /// assert_eq!(my_bitfield.get(TypedBitfield::ENUM_VALUE), MyEnum::Baz);
 /// assert_eq!(my_bitfield.get(TypedBitfield::FLAG_1), true);
 /// assert_eq!(my_bitfield.get(TypedBitfield::FLAG_2), false);
+/// assert_eq!(my_bitfield.get(TypedBitfield::OTHER_ENUM), MyGeneratedEnum::Wow);
 ///
 /// // The `try_get` method will return an error rather than panicking if an
 /// // invalid bit pattern is encountered:
@@ -334,6 +352,7 @@
 /// [`example`]: crate::example
 /// [`ExampleBitfield`]: crate::example::ExampleBitfield
 /// [`FromBits`]: crate::FromBits
+/// [`enum_from_bits!`]: crate::enum_from_bits!
 #[macro_export]
 macro_rules! bitfield {
     (
