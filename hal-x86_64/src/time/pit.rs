@@ -143,7 +143,6 @@ bitfield! {
 
 enum_from_bits! {
     #[derive(Debug, Eq, PartialEq)]
-    #[repr(u8)]
     enum ChannelSelect<u8> {
         Channel0 = 0b00,
         Channel1 = 0b01,
