@@ -1,6 +1,15 @@
 use core::{convert::Infallible, fmt};
 
 /// Trait implemented by values which can be converted to and from raw bits.
+///
+/// This trait is [implemented by default] for all signed and unsigned integer
+/// types, as well as for `bool`s. It can be implemented manually for any
+/// user-defined type which has a well-defined bit-pattern representation. For
+/// `enum` types with unsigned integer `repr`s, it may also be implemented
+/// automatically using the [`enum_from_bits!`] macro.
+///
+/// [implemented by default]: #foreign-impls
+/// [`enum_from_bits!`]: crate::enum_from_bits!
 pub trait FromBits<B>: Sized {
     /// The error type returned by [`Self::try_from_bits`] when an invalid bit
     /// pattern is encountered.
@@ -99,6 +108,7 @@ pub trait FromBits<B>: Sized {
 ///         Wont = 0b10,
 ///         Work = 0b11,
 ///     }
+/// }
 /// ```
 ///
 /// [^1]: **Why Not `#[derive(FromBits)]`?** Some readers may be curious about why

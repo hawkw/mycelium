@@ -140,7 +140,7 @@
 ///
 /// Bitfields may also contain typed values, as long as those values implement
 /// the [`FromBits`] trait. [`FromBits`] may be manually implemented, or
-/// generated automatically for `enum` types using the [`enum_from_bits!] macro:
+/// generated automatically for `enum` types using the [`enum_from_bits!`] macro:
 ///
 /// ```
 /// use mycelium_bitfield::{bitfield, enum_from_bits, FromBits};
@@ -174,9 +174,12 @@
 ///     }
 /// }
 ///
-/// Alternatively, the `enum_from_bits!` macro can be used to
-/// automatically generate a `FromBits` implementation for an
-/// enum type:
+/// // Alternatively, the `enum_from_bits!` macro can be used to
+/// // automatically generate a `FromBits` implementation for an
+/// // enum type.
+/// //
+/// // The macro will generate very similar code to the example
+/// // manual implementation above.
 /// enum_from_bits! {
 ///     #[derive(Debug, Eq, PartialEq)]
 ///     pub enum MyGeneratedEnum<u8> {
