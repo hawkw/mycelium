@@ -417,6 +417,25 @@ mod tests {
         assert_eq!(tick.completed, 1);
         assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
     }
+
+    /// Reproduces https://github.com/hawkw/mycelium/issues/449
+    #[test]
+    fn wait_spurious_poll() {
+        use tokio_test::{assert_pending, assert_ready_ok, task};
+
+        let cell = Arc::new(WaitCell::new());
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move { cell.wait().await }
+        });
+
+        assert_pending!(task.poll(), "first poll should be pending");
+        assert_pending!(task.poll(), "second poll should be pending");
+
+        cell.wake();
+
+        assert_ready_ok!(task.poll(), "should have been woken");
+    }
 }
 
 #[cfg(test)]
