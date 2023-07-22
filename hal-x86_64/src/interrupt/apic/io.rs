@@ -4,7 +4,7 @@ use crate::{
     mm::{self, page, size::Size4Kb, PhysPage, VirtPage},
 };
 use hal_core::PAddr;
-use mycelium_util::bits::{bitfield, FromBits};
+use mycelium_util::bits::{bitfield, enum_from_bits};
 use volatile::Volatile;
 
 #[derive(Debug)]
@@ -44,28 +44,30 @@ bitfield! {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum DestinationMode {
-    Physical = 0,
-    Logical = 1,
+enum_from_bits! {
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum DestinationMode<u8> {
+        Physical = 0,
+        Logical = 1,
+    }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum DeliveryMode {
-    /// Normal interrupt delivery.
-    Normal = 0b000,
-    /// Lowest priority.
-    LowPriority = 0b001,
-    /// System Management Interrupt (SMI).
-    SystemManagement = 0b010,
-    /// Non-Maskable Interrupt (NMI).
-    NonMaskable = 0b100,
-    /// "INIT" (what does this mean? i don't know!)
-    Init = 0b101,
-    /// External interrupt.
-    External = 0b111,
+enum_from_bits! {
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum DeliveryMode<u8> {
+        /// Normal interrupt delivery.
+        Normal = 0b000,
+        /// Lowest priority.
+        LowPriority = 0b001,
+        /// System Management Interrupt (SMI).
+        SystemManagement = 0b010,
+        /// Non-Maskable Interrupt (NMI).
+        NonMaskable = 0b100,
+        /// "INIT" (what does this mean? i don't know!)
+        Init = 0b101,
+        /// External interrupt.
+        External = 0b111,
+    }
 }
 
 /// Memory-mapped IOAPIC registers
@@ -278,49 +280,6 @@ impl Default for DeliveryMode {
     }
 }
 
-impl FromBits<u64> for DeliveryMode {
-    const BITS: u32 = 3;
-    type Error = &'static str;
-
-    fn into_bits(self) -> u64 {
-        self as u8 as u64
-    }
-
-    fn try_from_bits(bits: u64) -> Result<Self, Self::Error> {
-        match bits {
-            bits if bits as u8 == Self::Normal as u8 => Ok(Self::Normal),
-            bits if bits as u8 == Self::LowPriority as u8 => Ok(Self::LowPriority),
-            bits if bits as u8 == Self::SystemManagement as u8 => Ok(Self::SystemManagement),
-            bits if bits as u8 == Self::NonMaskable as u8 => Ok(Self::NonMaskable),
-            bits if bits as u8 == Self::Init as u8 => Ok(Self::Init),
-            bits if bits as u8 == Self::External as u8 => Ok(Self::External),
-            _ => Err(
-                "IOAPIC delivery mode must be one of 0b000, 0b001, 0b010, 0b100, 0b101, or 0b111",
-            ),
-        }
-    }
-}
-
-// === impl DestinationMode ===
-
-impl FromBits<u64> for DestinationMode {
-    const BITS: u32 = 1;
-    type Error = core::convert::Infallible;
-
-    fn into_bits(self) -> u64 {
-        self as u8 as u64
-    }
-
-    fn try_from_bits(bits: u64) -> Result<Self, Self::Error> {
-        Ok(match bits {
-            0 => Self::Physical,
-            1 => Self::Logical,
-            _ => unreachable!(),
-        })
-    }
-}
-
-#[cfg(test)]
 mod test {
     use super::*;
 
