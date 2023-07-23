@@ -359,8 +359,8 @@ impl<'cell> Future for Subscribe<'cell> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let already_closed = loop {
             match test_dbg!(self.cell.register_wait(cx.waker())) {
-                Ok(_) => break true,
-                Err(RegisterError::Closed) => break false,
+                Ok(_) => break false,
+                Err(RegisterError::Closed) => break true,
                 _ => {}
             }
         };
