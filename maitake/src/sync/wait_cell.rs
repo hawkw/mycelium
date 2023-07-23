@@ -329,15 +329,15 @@ impl Future for Wait<'_> {
     type Output = Result<(), super::Closed>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Did a wakeup occur while we were pre-registering the future?
-        if test_dbg!(self.presubscribe.is_ready()) {
-            return self.presubscribe;
-        }
-
         // Try to take the cell's `WOKEN` bit to see if we were previously
         // waiting and then received a notification.
         if test_dbg!(self.cell.fetch_and(!State::WOKEN, AcqRel)).is(State::WOKEN) {
             return Poll::Ready(Ok(()));
+        }
+
+        // Did a wakeup occur while we were pre-registering the future?
+        if test_dbg!(self.presubscribe.is_ready()) {
+            return self.presubscribe;
         }
 
         match test_dbg!(self.cell.register_wait(cx.waker())) {
