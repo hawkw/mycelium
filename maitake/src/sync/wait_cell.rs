@@ -324,6 +324,10 @@ impl Future for Wait<'_> {
     type Output = Result<(), super::Closed>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.already_closed {
+            return super::closed();
+        }
+
         // Try to take the cell's `WOKEN` bit to see if we were previously
         // waiting and then received a notification.
         if test_dbg!(self.cell.fetch_and(!State::WOKEN, AcqRel)).is(State::WOKEN) {
