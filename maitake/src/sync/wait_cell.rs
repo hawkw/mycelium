@@ -197,7 +197,7 @@ impl WaitCell {
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             cell: self,
-            already_closed: false,
+            presubscribe: Poll::Pending,
         }
     }
 
