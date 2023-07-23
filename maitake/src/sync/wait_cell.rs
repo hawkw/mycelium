@@ -127,18 +127,25 @@ impl WaitCell {
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
-        match test_dbg!(self.compare_exchange(State::WAITING, State::REGISTERING, Acquire)) {
-            // someone else is notifying, so don't wait!
-            Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
-                return Err(RegisterError::Closed);
+        let mut cur = State::WAITING;
+        loop {
+            match test_dbg!(self.compare_exchange(cur, State::REGISTERING, Acquire)) {
+                // someone else is notifying, so don't wait!
+                Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
+                    return Err(RegisterError::Closed);
+                }
+                Err(actual) if actual == State::WOKEN => {
+                    cur = actual;
+                }
+
+                Err(actual) if test_dbg!(actual.is(State::WAKING)) => {
+                    return Err(RegisterError::Waking);
+                }
+                Err(_) => return Err(RegisterError::Registering),
+                Ok(_) => {
+                    break;
+                }
             }
-            Err(actual)
-                if test_dbg!(actual.is(State::WAKING)) || test_dbg!(actual.is(State::WOKEN)) =>
-            {
-                return Err(RegisterError::Waking);
-            }
-            Err(_) => return Err(RegisterError::Registering),
-            Ok(_) => {}
         }
 
         test_debug!("-> wait cell locked!");
@@ -323,7 +330,7 @@ impl Future for Wait<'_> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Did a wakeup occur while we were pre-registering the future?
-        if self.presubscribe.is_ready() {
+        if test_dbg!(self.presubscribe.is_ready()) {
             return self.presubscribe;
         }
 
