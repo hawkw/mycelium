@@ -73,6 +73,18 @@ pub enum RegisterError {
 pub struct Wait<'a> {
     /// The [`WaitCell`] being waited on.
     cell: &'a WaitCell,
+
+    /// True if the `WaitCell` was closed while pre-registering this `Wait`
+    /// future during a call to [`WaitCell::subscribe()`].
+    already_closed: bool,
+}
+
+/// Future returned from [`WaitCell::subscribe()`].
+#[derive(Debug)]
+#[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
+pub struct Subscribe<'a> {
+    /// The [`WaitCell`] being waited on.
+    cell: &'a WaitCell,
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -185,7 +197,14 @@ impl WaitCell {
     /// **Note**: The calling task's [`Waker`] is not registered until AFTER the
     /// first time the returned [`Wait`] future is polled.
     pub fn wait(&self) -> Wait<'_> {
-        Wait { cell: self }
+        Wait {
+            cell: self,
+            already_closed: false,
+        }
+    }
+
+    pub fn subscribe(&self) -> Subscribe<'_> {
+        Subscribe { cell: self }
     }
 
     /// Wake the [`Waker`] stored in this cell.
@@ -328,6 +347,26 @@ impl Future for Wait<'_> {
     }
 }
 
+// === impl Subscribe ===
+
+impl<'cell> Future for Subscribe<'cell> {
+    type Output = Wait<'cell>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let already_closed = loop {
+            match test_dbg!(self.cell.register_wait(cx.waker())) {
+                Ok(_) => break true,
+                Err(RegisterError::Closed) => break false,
+                _ => {}
+            }
+        };
+        Poll::Ready(Wait {
+            cell: self.cell,
+            already_closed,
+        })
+    }
+}
+
 // === impl State ===
 
 impl State {
@@ -425,6 +464,37 @@ mod tests {
         assert_pending!(task.poll(), "second poll should be pending");
 
         cell.wake();
+
+        assert_ready_ok!(task.poll(), "should have been woken");
+    }
+    /// Tests behavior when a `Wait` future is created and the `WaitCell` is
+    /// woken *between* the call to `wait()` and the first time the `Wait` future
+    /// is polled.
+    #[test]
+    fn wake_before_poll() {
+        let _trace = crate::util::test::trace_init();
+
+        let mut task = task::spawn(async move {
+            let cell = WaitCell::new();
+            let wait = cell.wait();
+            cell.wake();
+            wait.await
+        });
+
+        assert_ready_ok!(task.poll(), "should have been woken");
+    }
+
+    /// Like `wake_before_poll` but with `close()` rather than `wait()`.
+    #[test]
+    fn close_before_poll() {
+        let _trace = crate::util::test::trace_init();
+
+        let mut task = task::spawn(async move {
+            let cell = WaitCell::new();
+            let wait = cell.wait();
+            cell.wake();
+            wait.await
+        });
 
         assert_ready_ok!(task.poll(), "should have been woken");
     }
