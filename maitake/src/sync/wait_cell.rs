@@ -74,8 +74,8 @@ pub struct Wait<'a> {
     /// The [`WaitCell`] being waited on.
     cell: &'a WaitCell,
 
-    /// Initial event count
-    gen: usize,
+    /// Has this `Wait` future already been registered?
+    registered: bool,
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -125,16 +125,12 @@ impl WaitCell {
             Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
                 return Err(RegisterError::Closed);
             }
-            Err(actual) if test_dbg!(actual.is(State::WAKING)) => {
+            Err(actual)
+                if test_dbg!(actual.is(State::WAKING)) || test_dbg!(actual.is(State::WOKEN)) =>
+            {
                 return Err(RegisterError::Waking);
             }
-
-            Err(actual) => {
-                debug_assert!(
-                    actual == State::REGISTERING || actual == State::REGISTERING | State::WAKING
-                );
-                return Err(RegisterError::Registering);
-            }
+            Err(_) => return Err(RegisterError::Registering),
             Ok(_) => {}
         }
 
@@ -192,8 +188,10 @@ impl WaitCell {
     /// **Note**: The calling task's [`Waker`] is not registered until AFTER the
     /// first time the returned [`Wait`] future is polled.
     pub fn wait(&self) -> Wait<'_> {
-        let gen = self.current_state().gen();
-        Wait { cell: self, gen }
+        Wait {
+            cell: self,
+            registered: false,
+        }
     }
 
     /// Wake the [`Waker`] stored in this cell.
@@ -203,7 +201,6 @@ impl WaitCell {
     /// - `true` if a waiting task was woken.
     /// - `false` if no task was woken (no [`Waker`] was stored in the cell)
     pub fn wake(&self) -> bool {
-        self.fetch_add(State::GEN_ONE, Release);
         if let Some(waker) = self.take_waker(false) {
             waker.wake();
             true
@@ -221,7 +218,6 @@ impl WaitCell {
     /// [`wait`]: Self::wait
     /// [`register_wait`]: Self::register_wait
     pub fn close(&self) -> bool {
-        self.fetch_add(State::GEN_ONE, Release);
         if let Some(waker) = self.take_waker(true) {
             waker.wake();
             true
@@ -242,7 +238,7 @@ impl WaitCell {
     // TODO(eliza): could probably be made a public API...
     pub(crate) fn take_waker(&self, close: bool) -> Option<Waker> {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
-        let mut bits = State::WAKING;
+        let mut bits = State::WAKING | State::WOKEN;
         if close {
             bits.0 |= State::CLOSED.0;
         }
@@ -273,11 +269,6 @@ impl WaitCell {
             .compare_exchange(curr, new, success, Acquire)
             .map(State)
             .map_err(State)
-    }
-
-    #[inline(always)]
-    fn fetch_add(&self, u: usize, order: Ordering) -> State {
-        State(self.lock.fetch_add(u, order))
     }
 
     #[inline(always)]
@@ -319,10 +310,12 @@ impl Drop for WaitCell {
 impl Future for Wait<'_> {
     type Output = Result<(), super::Closed>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if test_dbg!(self.cell.current_state().gen()) != test_dbg!(self.gen) {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.registered && self.cell.fetch_and(!State::WOKEN, AcqRel).is(State::WOKEN) {
             // We made it to "once", and got polled again, we must be ready!
             return Poll::Ready(Ok(()));
+        } else {
+            self.registered = true;
         }
 
         match test_dbg!(self.cell.register_wait(cx.waker())) {
@@ -349,16 +342,10 @@ impl State {
     const REGISTERING: Self = Self(0b01);
     const WAKING: Self = Self(0b10);
     const CLOSED: Self = Self(0b100);
-    const GEN_SHIFT: usize = 3;
-    const GEN_ONE: usize = 1 << Self::GEN_SHIFT;
-    const GEN_MASK: usize = usize::MAX << Self::GEN_SHIFT;
+    const WOKEN: Self = Self(0b1000);
 
     fn is(self, Self(state): Self) -> bool {
         self.0 & state == state
-    }
-
-    fn gen(self) -> usize {
-        self.0 & Self::GEN_MASK
     }
 }
 
@@ -382,7 +369,7 @@ impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut has_states = false;
 
-        fmt_bits!(self, f, has_states, REGISTERING, WAKING, CLOSED);
+        fmt_bits!(self, f, has_states, REGISTERING, WAKING, CLOSED, WOKEN);
 
         if !has_states {
             if *self == Self::WAITING {
@@ -445,38 +432,6 @@ mod tests {
         assert_pending!(task.poll(), "second poll should be pending");
 
         cell.wake();
-
-        assert_ready_ok!(task.poll(), "should have been woken");
-    }
-
-    /// Tests behavior when a `Wait` future is created and the `WaitCell` is
-    /// woken *between* the call to `wait()` and the first time the `Wait` future
-    /// is polled.
-    #[test]
-    fn wake_before_poll() {
-        let _trace = crate::util::test::trace_init();
-
-        let mut task = task::spawn(async move {
-            let cell = WaitCell::new();
-            let wait = cell.wait();
-            cell.wake();
-            wait.await
-        });
-
-        assert_ready_ok!(task.poll(), "should have been woken");
-    }
-
-    /// Like `wake_before_poll` but with `close()` rather than `wait()`.
-    #[test]
-    fn close_before_poll() {
-        let _trace = crate::util::test::trace_init();
-
-        let mut task = task::spawn(async move {
-            let cell = WaitCell::new();
-            let wait = cell.wait();
-            cell.wake();
-            wait.await
-        });
 
         assert_ready_ok!(task.poll(), "should have been woken");
     }
