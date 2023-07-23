@@ -134,7 +134,7 @@ impl WaitCell {
                 Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
                     return Err(RegisterError::Closed);
                 }
-                Err(actual) if actual == State::WOKEN => {
+                Err(actual) if actual.is(State::WOKEN) => {
                     cur = actual;
                 }
 
@@ -260,7 +260,7 @@ impl WaitCell {
         if close {
             bits.0 |= State::CLOSED.0;
         }
-        if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
+        if test_dbg!(self.fetch_or(bits, AcqRel)).is(State::WAITING) {
             // we have the lock!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
 
@@ -386,11 +386,11 @@ impl<'cell> Future for Subscribe<'cell> {
 // === impl State ===
 
 impl State {
-    const WAITING: Self = Self(0b00);
-    const REGISTERING: Self = Self(0b01);
-    const WAKING: Self = Self(0b10);
-    const CLOSED: Self = Self(0b100);
-    const WOKEN: Self = Self(0b1000);
+    const WAITING: Self = Self(1 << 1);
+    const REGISTERING: Self = Self(1 << 2);
+    const WAKING: Self = Self(1 << 3);
+    const CLOSED: Self = Self(1 << 4);
+    const WOKEN: Self = Self(1 << 5);
 
     fn is(self, Self(state): Self) -> bool {
         self.0 & state == state
