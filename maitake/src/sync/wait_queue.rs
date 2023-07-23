@@ -276,7 +276,7 @@ enum_from_bits! {
         ///
         /// When in this state, the node is **not** part of the linked list, and
         /// can be dropped without removing it from the list.
-        Start,
+        Start = 0b00,
 
         /// The waiter is waiting.
         ///
@@ -284,13 +284,13 @@ enum_from_bits! {
         /// node is dropped in this state, it **must** be removed from the list
         /// before dropping it. Failure to ensure this will result in dangling
         /// pointers in the linked list!
-        Waiting,
+        Waiting = 0b01,
 
         /// The waiter has been woken.
         ///
         /// When in this state, the node is **not** part of the linked list, and
         /// can be dropped without removing it from the list.
-        Woken,
+        Woken = 0b10,
     }
 }
 
