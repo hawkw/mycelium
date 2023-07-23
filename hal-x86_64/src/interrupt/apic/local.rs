@@ -288,7 +288,7 @@ impl LocalApic {
 
 pub mod register {
     use super::*;
-    use mycelium_util::bits::{bitfield, FromBits};
+    use mycelium_util::bits::{bitfield, enum_from_bits};
     use volatile::access::*;
 
     impl<T> RegisterAccess for LocalApicRegister<T, ReadOnly> {
@@ -453,32 +453,15 @@ pub mod register {
         }
     }
 
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    #[repr(u8)]
-    pub enum TimerMode {
-        /// One-shot mode, program count-down value in an initial-count register.
-        OneShot = 0b00,
-        /// Periodic mode, program interval value in an initial-count register.
-        Periodic = 0b01,
-        /// TSC-Deadline mode, program target value in IA32_TSC_DEADLINE MSR.
-        TscDeadline = 0b10,
-    }
-
-    impl FromBits<u32> for TimerMode {
-        const BITS: u32 = 2;
-        type Error = &'static str;
-
-        fn try_from_bits(bits: u32) -> Result<Self, Self::Error> {
-            match bits {
-                bits if bits as u8 == Self::OneShot as u8 => Ok(Self::OneShot),
-                bits if bits as u8 == Self::Periodic as u8 => Ok(Self::Periodic),
-                bits if bits as u8 == Self::TscDeadline as u8 => Ok(Self::TscDeadline),
-                _ => Err("0b11 is not a valid local APIC timer mode"),
-            }
-        }
-
-        fn into_bits(self) -> u32 {
-            self as u8 as u32
+    enum_from_bits! {
+        #[derive(Debug, Eq, PartialEq)]
+        pub enum TimerMode<u8> {
+            /// One-shot mode, program count-down value in an initial-count register.
+            OneShot = 0b00,
+            /// Periodic mode, program interval value in an initial-count register.
+            Periodic = 0b01,
+            /// TSC-Deadline mode, program target value in IA32_TSC_DEADLINE MSR.
+            TscDeadline = 0b10,
         }
     }
 }

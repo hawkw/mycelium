@@ -2,12 +2,12 @@
 use super::InvalidDuration;
 use crate::cpu::{self, Port};
 use core::{
-    convert::{Infallible, TryFrom},
+    convert::TryFrom,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use mycelium_util::{
-    bits::{bitfield, FromBits},
+    bits::{bitfield, enum_from_bits},
     fmt,
     sync::spin::Mutex,
 };
@@ -141,53 +141,56 @@ bitfield! {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[repr(u8)]
-enum ChannelSelect {
-    Channel0 = 0b00,
-    Channel1 = 0b01,
-    Channel2 = 0b10,
-    /// Readback command (8254 only)
-    Readback = 0b11,
+enum_from_bits! {
+    #[derive(Debug, Eq, PartialEq)]
+    enum ChannelSelect<u8> {
+        Channel0 = 0b00,
+        Channel1 = 0b01,
+        Channel2 = 0b10,
+        /// Readback command (8254 only)
+        Readback = 0b11,
+    }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[repr(u8)]
-enum AccessMode {
-    /// Latch count value command
-    LatchCount = 0b00,
-    /// Access mode: low byte only
-    LowByte = 0b01,
-    /// Access mode: high byte only
-    HighByte = 0b10,
-    /// Access mode: both bytes
-    Both = 0b11,
+enum_from_bits! {
+    #[derive(Debug, Eq, PartialEq)]
+    enum AccessMode<u8> {
+        /// Latch count value command
+        LatchCount = 0b00,
+        /// Access mode: low byte only
+        LowByte = 0b01,
+        /// Access mode: high byte only
+        HighByte = 0b10,
+        /// Access mode: both bytes
+        Both = 0b11,
+    }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[repr(u8)]
-enum OperatingMode {
-    /// Mode 0 (interrupt on terminal count)
-    Interrupt = 0b000,
-    /// Mode 1 (hardware re-triggerable one-shot)
-    HwOneshot = 0b001,
-    /// Mode 2 (rate generator)
-    RateGenerator = 0b010,
-    /// Mode 3 (square wave generator)
-    SquareWave = 0b011,
-    /// Mode 4 (software triggered strobe)
-    SwStrobe = 0b100,
-    /// Mode 5 (hardware triggered strobe)
-    HwStrobe = 0b101,
-    /// Mode 2 (rate generator, same as `0b010`)
-    ///
-    /// I'm not sure why both of these exist, but whatever lol.
-    RateGenerator2 = 0b110,
-    /// Mode 3 (square wave generator, same as `0b011`)
-    ///
-    /// Again, I don't know why two bit patterns configure the same behavior but
-    /// whatever lol.
-    SquareWave2 = 0b111,
+enum_from_bits! {
+    #[derive(Debug, Eq, PartialEq)]
+    enum OperatingMode<u8> {
+        /// Mode 0 (interrupt on terminal count)
+        Interrupt = 0b000,
+        /// Mode 1 (hardware re-triggerable one-shot)
+        HwOneshot = 0b001,
+        /// Mode 2 (rate generator)
+        RateGenerator = 0b010,
+        /// Mode 3 (square wave generator)
+        SquareWave = 0b011,
+        /// Mode 4 (software triggered strobe)
+        SwStrobe = 0b100,
+        /// Mode 5 (hardware triggered strobe)
+        HwStrobe = 0b101,
+        /// Mode 2 (rate generator, same as `0b010`)
+        ///
+        /// I'm not sure why both of these exist, but whatever lol.
+        RateGenerator2 = 0b110,
+        /// Mode 3 (square wave generator, same as `0b011`)
+        ///
+        /// Again, I don't know why two bit patterns configure the same behavior but
+        /// whatever lol.
+        SquareWave2 = 0b111,
+    }
 }
 
 /// The PIT.
@@ -408,82 +411,5 @@ impl Pit {
         unsafe {
             self.command.writeb(command.bits());
         }
-    }
-}
-
-// === impl ChannelSelect ===
-
-impl FromBits<u8> for ChannelSelect {
-    const BITS: u32 = 2;
-    type Error = Infallible;
-
-    fn try_from_bits(bits: u8) -> Result<Self, Self::Error> {
-        Ok(match bits {
-            0b00 => Self::Channel0,
-            0b01 => Self::Channel1,
-            0b10 => Self::Channel2,
-            0b11 => Self::Readback,
-            bits => unreachable!(
-                "unexpected bitpattern for `ChannelSelect`: {:#b} (this \
-                    should never happen as all 2-bit patterns are covered!)",
-                bits
-            ),
-        })
-    }
-
-    fn into_bits(self) -> u8 {
-        self as u8
-    }
-}
-
-// === impl AccessMode ===
-
-impl FromBits<u8> for AccessMode {
-    const BITS: u32 = 2;
-    type Error = Infallible;
-    fn try_from_bits(bits: u8) -> Result<Self, Self::Error> {
-        Ok(match bits {
-            0b00 => Self::LatchCount,
-            0b01 => Self::LowByte,
-            0b10 => Self::HighByte,
-            0b11 => Self::Both,
-            bits => unreachable!(
-                "unexpected bitpattern for `AccessMode`: {:#b} (this \
-                    should never happen as all 2-bit patterns are covered!)",
-                bits
-            ),
-        })
-    }
-
-    fn into_bits(self) -> u8 {
-        self as u8
-    }
-}
-
-// === impl OperatingMode ===
-
-impl FromBits<u8> for OperatingMode {
-    const BITS: u32 = 3;
-    type Error = Infallible;
-    fn try_from_bits(bits: u8) -> Result<Self, Self::Error> {
-        Ok(match bits {
-            0b000 => Self::Interrupt,
-            0b001 => Self::HwOneshot,
-            0b010 => Self::RateGenerator,
-            0b011 => Self::SquareWave,
-            0b100 => Self::SwStrobe,
-            0b101 => Self::HwStrobe,
-            0b110 => Self::RateGenerator2,
-            0b111 => Self::SquareWave2,
-            bits => unreachable!(
-                "unexpected bitpattern for `AccessMode`: {:#b} (this \
-                    should never happen as all 2-bit patterns are covered!)",
-                bits
-            ),
-        })
-    }
-
-    fn into_bits(self) -> u8 {
-        self as u8
     }
 }
