@@ -74,9 +74,7 @@ pub struct Wait<'a> {
     /// The [`WaitCell`] being waited on.
     cell: &'a WaitCell,
 
-    /// True if the `WaitCell` was closed while pre-registering this `Wait`
-    /// future during a call to [`WaitCell::subscribe()`].
-    already_closed: bool,
+    presubscribe: Poll<Result<(), super::Closed>>,
 }
 
 /// Future returned from [`WaitCell::subscribe()`].
@@ -324,8 +322,9 @@ impl Future for Wait<'_> {
     type Output = Result<(), super::Closed>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.already_closed {
-            return super::closed();
+        // Did a wakeup occur while we were pre-registering the future?
+        if self.presubscribe.is_ready() {
+            return self.presubscribe;
         }
 
         // Try to take the cell's `WOKEN` bit to see if we were previously
@@ -357,16 +356,22 @@ impl<'cell> Future for Subscribe<'cell> {
     type Output = Wait<'cell>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let already_closed = loop {
-            match test_dbg!(self.cell.register_wait(cx.waker())) {
-                Ok(_) => break false,
-                Err(RegisterError::Closed) => break true,
-                _ => {}
+        let presubscribe = match test_dbg!(self.cell.register_wait(cx.waker())) {
+            Ok(_) => Poll::Pending,
+            Err(RegisterError::Closed) => super::closed(),
+            Err(RegisterError::Registering) => {
+                // yield and try again
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+            Err(RegisterError::Waking) => {
+                // we are also woken
+                Poll::Ready(Ok(()))
             }
         };
         Poll::Ready(Wait {
             cell: self.cell,
-            already_closed,
+            presubscribe,
         })
     }
 }
