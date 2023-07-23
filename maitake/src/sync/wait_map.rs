@@ -25,7 +25,7 @@ use core::{
     ptr::{self, NonNull},
     task::{Context, Poll, Waker},
 };
-use mycelium_bitfield::FromBits;
+use mycelium_bitfield::{enum_from_bits, FromBits};
 use mycelium_util::fmt;
 use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
@@ -333,29 +333,30 @@ impl<K: PartialEq, V> Debug for Node<K, V> {
     }
 }
 
-/// The state of a [`Waiter`] node in a [`WaitMap`].
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(u8)]
-enum WaitState {
-    /// The waiter has not yet been enqueued.
-    ///
-    /// When in this state, the node is **not** part of the linked list, and
-    /// can be dropped without removing it from the list.
-    Start,
+enum_from_bits! {
+    /// The state of a [`Waiter`] node in a [`WaitMap`].
+    #[derive(Debug, Eq, PartialEq)]
+    enum WaitState<u8> {
+        /// The waiter has not yet been enqueued.
+        ///
+        /// When in this state, the node is **not** part of the linked list, and
+        /// can be dropped without removing it from the list.
+        Start = 0b01,
 
-    /// The waiter is waiting.
-    ///
-    /// When in this state, the node **is** part of the linked list. If the
-    /// node is dropped in this state, it **must** be removed from the list
-    /// before dropping it. Failure to ensure this will result in dangling
-    /// pointers in the linked list!
-    Waiting,
+        /// The waiter is waiting.
+        ///
+        /// When in this state, the node **is** part of the linked list. If the
+        /// node is dropped in this state, it **must** be removed from the list
+        /// before dropping it. Failure to ensure this will result in dangling
+        /// pointers in the linked list!
+        Waiting = 0b10,
 
-    /// The waiter has been woken.
-    ///
-    /// When in this state, the node is **not** part of the linked list, and
-    /// can be dropped without removing it from the list.
-    Completed,
+        /// The waiter has been woken.
+        ///
+        /// When in this state, the node is **not** part of the linked list, and
+        /// can be dropped without removing it from the list.
+        Completed = 0b11,
+    }
 }
 
 /// The queue's current state.
@@ -939,26 +940,6 @@ impl FromBits<usize> for State {
 
 impl State {
     const fn into_usize(self) -> usize {
-        self as u8 as usize
-    }
-}
-
-// === impl WaitState ===
-
-impl FromBits<usize> for WaitState {
-    const BITS: u32 = 2;
-    type Error = &'static str;
-
-    fn try_from_bits(bits: usize) -> Result<Self, Self::Error> {
-        match bits as u8 {
-            bits if bits == Self::Start as u8 => Ok(Self::Start),
-            bits if bits == Self::Waiting as u8 => Ok(Self::Waiting),
-            bits if bits == Self::Completed as u8 => Ok(Self::Completed),
-            _ => Err("invalid `WaitState`; expected one of Start, Waiting, or Completed"),
-        }
-    }
-
-    fn into_bits(self) -> usize {
         self as u8 as usize
     }
 }
