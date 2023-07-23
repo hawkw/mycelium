@@ -471,36 +471,16 @@ mod tests {
 
         assert_ready_ok!(task.poll(), "should have been woken");
     }
-    /// Tests behavior when a `Wait` future is created and the `WaitCell` is
-    /// woken *between* the call to `wait()` and the first time the `Wait` future
-    /// is polled.
+
     #[test]
-    fn wake_before_poll() {
+    fn subscribe() {
         let _trace = crate::util::test::trace_init();
-
-        let mut task = task::spawn(async move {
+        futures::executor::block_on(async {
             let cell = WaitCell::new();
-            let wait = cell.wait();
+            let wait = cell.subscribe().await;
             cell.wake();
-            wait.await
-        });
-
-        assert_ready_ok!(task.poll(), "should have been woken");
-    }
-
-    /// Like `wake_before_poll` but with `close()` rather than `wait()`.
-    #[test]
-    fn close_before_poll() {
-        let _trace = crate::util::test::trace_init();
-
-        let mut task = task::spawn(async move {
-            let cell = WaitCell::new();
-            let wait = cell.wait();
-            cell.wake();
-            wait.await
-        });
-
-        assert_ready_ok!(task.poll(), "should have been woken");
+            wait.await.unwrap();
+        })
     }
 }
 
@@ -591,6 +571,29 @@ mod loom {
             info!("waiting");
             let _ = future::block_on(wait.wait());
             info!("wait'd");
+        });
+    }
+
+    #[test]
+    fn subscribe() {
+        crate::loom::model(|| {
+            future::block_on(async move {
+                let cell = Arc::new(WaitCell::new());
+                let wait = cell.subscribe().await;
+
+                thread::spawn({
+                    let waker = cell.clone();
+                    move || {
+                        info!("waking");
+                        waker.wake();
+                        info!("woken");
+                    }
+                });
+
+                info!("waiting");
+                wait.await.expect("wait should be woken, not closed");
+                info!("wait'd");
+            });
         });
     }
 }
