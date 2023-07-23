@@ -76,14 +76,14 @@ macro_rules! debug_span {
     };
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(maitake_ultraverbose)))]
 macro_rules! test_dbg {
     ($e:expr) => {
         $e
     };
 }
 
-#[cfg(test)]
+#[cfg(any(test, maitake_ultraverbose))]
 macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
@@ -100,24 +100,24 @@ macro_rules! test_dbg {
     };
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(maitake_ultraverbose)))]
 macro_rules! test_debug {
     ($($args:tt)+) => {};
 }
 
-#[cfg(test)]
+#[cfg(any(test, maitake_ultraverbose))]
 macro_rules! test_debug {
     ($($args:tt)+) => {
         debug!($($args)+);
     };
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(maitake_ultraverbose)))]
 macro_rules! test_trace {
     ($($args:tt)+) => {};
 }
 
-#[cfg(test)]
+#[cfg(any(test, maitake_ultraverbose))]
 macro_rules! test_trace {
     ($($args:tt)+) => {
         trace!($($args)+);
