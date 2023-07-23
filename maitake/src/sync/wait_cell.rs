@@ -73,9 +73,6 @@ pub enum RegisterError {
 pub struct Wait<'a> {
     /// The [`WaitCell`] being waited on.
     cell: &'a WaitCell,
-
-    /// Has this `Wait` future already been registered?
-    registered: bool,
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -188,10 +185,7 @@ impl WaitCell {
     /// **Note**: The calling task's [`Waker`] is not registered until AFTER the
     /// first time the returned [`Wait`] future is polled.
     pub fn wait(&self) -> Wait<'_> {
-        Wait {
-            cell: self,
-            registered: false,
-        }
+        Wait { cell: self }
     }
 
     /// Wake the [`Waker`] stored in this cell.
@@ -310,12 +304,11 @@ impl Drop for WaitCell {
 impl Future for Wait<'_> {
     type Output = Result<(), super::Closed>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.registered && self.cell.fetch_and(!State::WOKEN, AcqRel).is(State::WOKEN) {
-            // We made it to "once", and got polled again, we must be ready!
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Try to take the cell's `WOKEN` bit to see if we were previously
+        // waiting and then received a notification.
+        if test_dbg!(self.cell.fetch_and(!State::WOKEN, AcqRel)).is(State::WOKEN) {
             return Poll::Ready(Ok(()));
-        } else {
-            self.registered = true;
         }
 
         match test_dbg!(self.cell.register_wait(cx.waker())) {
