@@ -270,7 +270,7 @@ impl WaitCell {
     // TODO(eliza): could probably be made a public API...
     pub(crate) fn take_waker(&self, close: bool) -> Option<Waker> {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
-        let mut bits = State::WAKING;
+        let mut bits = State::WAKING | State::WOKEN;
         if close {
             bits.0 |= State::CLOSED.0;
         }
@@ -279,15 +279,7 @@ impl WaitCell {
             // Ladies and gentlemen...we got him (the lock)!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
 
-            // Release the lock and set the WOKEN bit.
-            let mut state = bits;
-            loop {
-                let next_state = (state & !State::WAKING) | State::WOKEN;
-                match test_dbg!(self.compare_exchange(state, next_state, AcqRel)) {
-                    Ok(_) => break,
-                    Err(actual) => state = actual,
-                }
-            }
+            // Release the lock.
             self.fetch_and(!State::WAKING, Release);
 
             if let Some(waker) = test_dbg!(waker) {
