@@ -465,11 +465,11 @@ impl<'cell> Future for Subscribe<'cell> {
 // === impl State ===
 
 impl State {
-    const WAITING: Self = Self(1 << 0);
-    const REGISTERING: Self = Self(1 << 1);
-    const WAKING: Self = Self(1 << 2);
-    const WOKEN: Self = Self(1 << 3);
-    const CLOSED: Self = Self(1 << 4);
+    const WAITING: Self = Self(0b0000);
+    const REGISTERING: Self = Self(0b0001);
+    const WAKING: Self = Self(0b0010);
+    const WOKEN: Self = Self(0b0100);
+    const CLOSED: Self = Self(0b1000);
 
     fn contains(self, Self(state): Self) -> bool {
         self.0 & state > 0
