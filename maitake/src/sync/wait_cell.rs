@@ -116,10 +116,11 @@ impl WaitCell {
     ///   subsequent call to [`wake`].
     /// - [`Poll::Ready`]`(`[`Ok`]`(()))` if the cell was woken by a call to
     ///   [`wake`] while the [`Waker`] was being registered.
-    /// - [`Poll::Ready`]`(`[`Err`]`(`[`Error::Closed`]`))` if the [`WaitCell`]
-    ///   has been closed.
-    /// - [`Poll::Ready`]`(`[`Err`]`(`[`Error::Busy`]`))` if another task was
-    ///   concurrently registering its [`Waker`] with this [`WaitCell`].
+    /// - [`Poll::Ready`]`(`[`Err`]`(`[`PollWaitError::Closed`]`))` if the
+    ///   [`WaitCell`] has been closed.
+    /// - [`Poll::Ready`]`(`[`Err`]`(`[`PollWaitError::Busy`]`))` if another
+    ///   task was concurrently registering its [`Waker`] with this
+    ///   [`WaitCell`].
     ///
     /// [`wake`]: Self::wake
     pub fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<Result<(), PollWaitError>> {
