@@ -118,7 +118,7 @@ impl WaitCell {
     ///   [`wake`] while the [`Waker`] was being registered.
     /// - [`Poll::Ready`]`(`[`Err`](`[`Error::Closed`]`))` if the [`WaitCell`]
     ///   has been closed.
-    /// - [`Poll::Ready`]`(`[`Err`](`[`Error::Busy`]`)`) if another task was
+    /// - [`Poll::Ready`]`(`[`Err`](`[`Error::Busy`]`))` if another task was
     ///   concurrently registering its [`Waker`] with this [`WaitCell`].
     ///
     /// [`wake`]: Self::wake
@@ -217,6 +217,7 @@ impl WaitCell {
     ///
     /// [`wake`]: Self::wake
     /// [`poll_wait`]: Self::poll_wait
+    /// [`wait`]: Self::wait
     /// [`close`]: Self::close
     /// [`subscribe`]: Self::subscribe
     pub fn wait(&self) -> Wait<'_> {
@@ -281,6 +282,10 @@ impl WaitCell {
     /// wait.await.expect("WaitCell is not closed");
     /// # }
     /// ```
+    ///
+    /// [`wait`]: Self::wait
+    /// [`wake`]: Self::wake
+    /// [`close`]: Self::close
     pub fn subscribe(&self) -> Subscribe<'_> {
         Subscribe { cell: self }
     }
@@ -304,11 +309,11 @@ impl WaitCell {
     /// Close the [`WaitCell`].
     ///
     /// This wakes any waiting task with an error indicating the `WaitCell` is
-    /// closed. Subsequent calls to [`wait`] or [`register_wait`] will return an
+    /// closed. Subsequent calls to [`wait`] or [`poll_wait`] will return an
     /// error indicating that the cell has been closed.
     ///
     /// [`wait`]: Self::wait
-    /// [`register_wait`]: Self::register_wait
+    /// [`poll_wait`]: Self::poll_wait
     pub fn close(&self) -> bool {
         enter_test_debug_span!("WaitCell::close", cell = ?fmt::ptr(self));
         if let Some(waker) = self.take_waker(true) {
@@ -465,6 +470,15 @@ impl<'cell> Future for Subscribe<'cell> {
 // === impl State ===
 
 impl State {
+    /// /!\ EXTREMELY SERIOUS WARNING! /!\
+    /// It is LOAD BEARING that the `WAITING` state is represented by zero!
+    /// This is because we return to the waiting state by `fetch_and`ing out all
+    /// other bits in a few places. If this state's bit representation is
+    /// changed to anything other than zero, that code will break! Don't do
+    /// that!
+    ///
+    /// YES, FUTURE ELIZA, THIS DOES APPLY TO YOU. YOU ALREADY BROKE IT ONCE.
+    /// DON'T DO IT AGAIN.
     const WAITING: Self = Self(0b0000);
     const REGISTERING: Self = Self(0b0001);
     const WAKING: Self = Self(0b0010);
