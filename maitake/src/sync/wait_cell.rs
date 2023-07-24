@@ -116,9 +116,9 @@ impl WaitCell {
     ///   subsequent call to [`wake`].
     /// - [`Poll::Ready`]`(`[`Ok`]`(()))` if the cell was woken by a call to
     ///   [`wake`] while the [`Waker`] was being registered.
-    /// - [`Poll::Ready`]`(`[`Err`](`[`Error::Closed`]`))` if the [`WaitCell`]
+    /// - [`Poll::Ready`]`(`[`Err`]`(`[`Error::Closed`]`))` if the [`WaitCell`]
     ///   has been closed.
-    /// - [`Poll::Ready`]`(`[`Err`](`[`Error::Busy`]`))` if another task was
+    /// - [`Poll::Ready`]`(`[`Err`]`(`[`Error::Busy`]`))` if another task was
     ///   concurrently registering its [`Waker`] with this [`WaitCell`].
     ///
     /// [`wake`]: Self::wake
