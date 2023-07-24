@@ -40,7 +40,7 @@ use mycelium_util::{fmt, sync::CachePadded};
 /// [`wait`]: Self::wait
 /// [`wake`]: Self::wake
 pub struct WaitCell {
-    lock: CachePadded<AtomicUsize>,
+    state: CachePadded<AtomicUsize>,
     waker: UnsafeCell<Option<Waker>>,
 }
 
@@ -96,7 +96,7 @@ impl WaitCell {
         #[must_use]
         pub fn new() -> Self {
             Self {
-                lock: CachePadded::new(AtomicUsize::new(State::WAITING.0)),
+                state: CachePadded::new(AtomicUsize::new(State::WAITING.0)),
                 waker: UnsafeCell::new(None),
             }
         }
@@ -127,26 +127,21 @@ impl WaitCell {
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
-        let mut cur = State::WAITING;
-        loop {
-            match test_dbg!(self.compare_exchange(cur, State::REGISTERING, Acquire)) {
-                // someone else is notifying, so don't wait!
-                Err(actual) if test_dbg!(actual.is(State::CLOSED)) => {
-                    return Err(RegisterError::Closed);
-                }
-                Err(actual) if actual.is(State::WOKEN) => {
-                    cur = actual;
-                }
-
-                Err(actual) if test_dbg!(actual.is(State::WAKING)) => {
-                    return Err(RegisterError::Waking);
-                }
-                Err(_) => return Err(RegisterError::Registering),
-                Ok(_) => {
-                    break;
-                }
+        match test_dbg!(self.compare_exchange(State::WAITING, State::REGISTERING, Acquire)) {
+            // someone else is notifying, so don't wait!
+            Err(actual) if test_dbg!(actual.contains(State::CLOSED)) => {
+                return Err(RegisterError::Closed);
             }
-        }
+
+            Err(actual)
+                if test_dbg!(actual.contains(State::WAKING))
+                    || test_dbg!(actual.contains(State::WOKEN)) =>
+            {
+                return Err(RegisterError::Waking);
+            }
+            Err(_) => return Err(RegisterError::Registering),
+            Ok(_) => {}
+        };
 
         test_debug!("-> wait cell locked!");
         let prev_waker = self.waker.with_mut(|old_waker| unsafe {
@@ -188,7 +183,7 @@ impl WaitCell {
 
                 // Was the `CLOSED` bit set while we were clearing other bits?
                 // If so, the cell is closed. Otherwise, we must have been notified.
-                if state.is(State::CLOSED) {
+                if state.contains(State::CLOSED) {
                     Err(RegisterError::Closed)
                 } else {
                     Err(RegisterError::Waking)
@@ -208,6 +203,7 @@ impl WaitCell {
         }
     }
 
+    /// Pre-subscribe to notifications from this `WaitCell`.
     pub fn subscribe(&self) -> Subscribe<'_> {
         Subscribe { cell: self }
     }
@@ -260,7 +256,7 @@ impl WaitCell {
         if close {
             bits.0 |= State::CLOSED.0;
         }
-        if test_dbg!(self.fetch_or(bits, AcqRel)).is(State::WAITING) {
+        if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
             // we have the lock!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
 
@@ -283,7 +279,7 @@ impl WaitCell {
         State(new): State,
         success: Ordering,
     ) -> Result<State, State> {
-        self.lock
+        self.state
             .compare_exchange(curr, new, success, Acquire)
             .map(State)
             .map_err(State)
@@ -291,17 +287,17 @@ impl WaitCell {
 
     #[inline(always)]
     fn fetch_and(&self, State(state): State, order: Ordering) -> State {
-        State(self.lock.fetch_and(state, order))
+        State(self.state.fetch_and(state, order))
     }
 
     #[inline(always)]
     fn fetch_or(&self, State(state): State, order: Ordering) -> State {
-        State(self.lock.fetch_or(state, order))
+        State(self.state.fetch_or(state, order))
     }
 
     #[inline(always)]
     fn current_state(&self) -> State {
-        State(self.lock.load(Acquire))
+        State(self.state.load(Acquire))
     }
 }
 
@@ -331,7 +327,7 @@ impl Future for Wait<'_> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Try to take the cell's `WOKEN` bit to see if we were previously
         // waiting and then received a notification.
-        if test_dbg!(self.cell.fetch_and(!State::WOKEN, AcqRel)).is(State::WOKEN) {
+        if test_dbg!(self.cell.fetch_and(!State::WOKEN, AcqRel)).contains(State::WOKEN) {
             return Poll::Ready(Ok(()));
         }
 
@@ -386,14 +382,15 @@ impl<'cell> Future for Subscribe<'cell> {
 // === impl State ===
 
 impl State {
-    const WAITING: Self = Self(1 << 1);
-    const REGISTERING: Self = Self(1 << 2);
-    const WAKING: Self = Self(1 << 3);
+    const WAITING: Self = Self(1 << 0);
+    const REGISTERING: Self = Self(1 << 1);
+    const WAKING: Self = Self(1 << 2);
+    const WOKEN: Self = Self(1 << 3);
     const CLOSED: Self = Self(1 << 4);
-    const WOKEN: Self = Self(1 << 5);
 
-    fn is(self, Self(state): Self) -> bool {
-        self.0 & state == state
+    fn contains(self, Self(state): Self) -> bool {
+        test_trace!("{:#?}.contains({state:#b})", self.0);
+        test_dbg!(self.0) & test_dbg!(state) == state
     }
 }
 
