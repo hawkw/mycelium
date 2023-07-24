@@ -611,6 +611,35 @@ mod tests {
         assert!(task.is_woken());
         assert_ready!(task.poll());
     }
+
+    #[test]
+    fn subscribe_doesnt_self_wake() {
+        let _trace = crate::util::test::trace_init();
+        let cell = Arc::new(WaitCell::new());
+
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+            }
+        });
+        assert_pending!(task.poll());
+        assert!(!task.is_woken());
+
+        cell.wake();
+        assert!(task.is_woken());
+        assert_pending!(task.poll());
+
+        assert!(!task.is_woken());
+        assert_pending!(task.poll());
+
+        cell.wake();
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
+    }
 }
 
 #[cfg(test)]
