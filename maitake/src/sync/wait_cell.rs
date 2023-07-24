@@ -20,7 +20,7 @@ use mycelium_util::{fmt, sync::CachePadded};
 /// An atomically registered [`Waker`].
 ///
 /// This cell stores the [`Waker`] of a single task. A [`Waker`] is stored in
-/// the cell either by calling [`register_wait`], or by polling a [`wait`]
+/// the cell either by calling [`poll_wait`], or by polling a [`wait`]
 /// future. Once a task's [`Waker`] is stored in a `WaitCell`, it can be woken
 /// by calling [`wake`] on the `WaitCell`.
 ///
@@ -37,7 +37,7 @@ use mycelium_util::{fmt, sync::CachePadded};
 ///
 /// [`AtomicWaker`]: https://github.com/tokio-rs/tokio/blob/09b770c5db31a1f35631600e1d239679354da2dd/tokio/src/sync/task/atomic_waker.rs
 /// [`Waker`]: core::task::Waker
-/// [`register_wait`]: Self::register_wait
+/// [`poll_wait`]: Self::poll_wait
 /// [`wait`]: Self::wait
 /// [`wake`]: Self::wake
 pub struct WaitCell {
@@ -48,7 +48,7 @@ pub struct WaitCell {
 /// An error indicating that a [`WaitCell`] was closed or busy while
 /// attempting register a [`Waker`].
 ///
-/// This error is returned by the [`WaitCell::register_wait`] method.
+/// This error is returned by the [`WaitCell::poll_wait`] method.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     /// The [`Waker`] was not registered because the [`WaitCell`] has been
@@ -57,7 +57,7 @@ pub enum Error {
 
     /// The [`Waker`] was not registered because another task was concurrently
     /// storing its own [`Waker`] in the [`WaitCell`].
-    Registering,
+    Busy,
 }
 
 /// Future returned from [`WaitCell::wait()`].
@@ -74,6 +74,8 @@ pub struct Wait<'a> {
 }
 
 /// Future returned from [`WaitCell::subscribe()`].
+///
+/// See the documentation for [`WaitCell::subscribe()`] for details.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 pub struct Subscribe<'a> {
@@ -100,20 +102,24 @@ impl WaitCell {
 }
 
 impl WaitCell {
-    /// Poll to wait on this `WaitCell`.
+    /// Poll to wait on this `WaitCell`, consuming a stored wakeup or
+    /// registering the [`Waker`] from the provided [`Context`] to be woken by
+    /// the next wakeup.
     ///
     /// Once a [`Waker`] has been registered, a subsequent call to [`wake`] will
     /// wake that [`Waker`].
     ///
     /// # Returns
     ///
-    /// - `Ok(())` if the [`Waker`] was registered. If this method returns
-    ///   `Ok(())`, then the registered [`Waker`] will be woken by a subsequent
-    ///   call to [`wake`].
-    /// - `Err(`[`Error::Closed`]`)` if the [`WaitCell`] has been
-    ///   closed.
-    /// - `Err(`[`Err::Registering`]`)` if another task was
-    ///   [`WaitCell`] concurrently registering its [`Waker`].
+    /// - [`Poll::Pending`] if the [`Waker`] was registered. If this method returns
+    ///   [`Poll::Pending`], then the registered [`Waker`] will be woken by a
+    ///   subsequent call to [`wake`].
+    /// - [`Poll::Ready`]`(`[`Ok`]`(()))` if the cell was woken by a call to
+    ///   [`wake`] while the [`Waker`] was being registered.
+    /// - [`Poll::Ready`]`(`[`Err`](`[`Error::Closed`]`))` if the [`WaitCell`]
+    ///   has been closed.
+    /// - [`Poll::Ready`]`(`[`Err`](`[`Error::Busy`]`)`) if another task wasre
+    ///   concurrently registering its [`Waker`] with this [`WaitCell`].
     ///
     /// [`wake`]: Self::wake
     pub fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -133,7 +139,7 @@ impl WaitCell {
             Err(actual) if test_dbg!(actual.contains(State::WAKING)) => {
                 return Poll::Ready(Ok(()));
             }
-            Err(_) => return Poll::Ready(Err(Error::Registering)),
+            Err(_) => return Poll::Ready(Err(Error::Busy)),
             Ok(_) => {}
         }
 
@@ -192,8 +198,27 @@ impl WaitCell {
 
     /// Wait to be woken up by this cell.
     ///
+    /// # Returns
+    ///
+    /// This future completes with the following values:
+    ///
+    /// - [`Ok`]`(())` if the future was woken by a call to [`wake`] or another
+    ///   task calling [`poll_wait`] or [`wait`] on this [`WaitCell`].
+    /// - [`Err`]`(`[`Closed`]`)` if the task was woken by a call to [`close`],
+    ///   or the [`WaitCell`] was already closed.
+    ///
     /// **Note**: The calling task's [`Waker`] is not registered until AFTER the
-    /// first time the returned [`Wait`] future is polled.
+    /// first time the returned [`Wait`] future is polled. This means that if a
+    /// call to [`wake`] occurs between when [`wait`] is called and when the
+    /// future is first polled, the future will *not* complete. If the caller is
+    /// responsible for performing an operation which will result in an eventual
+    /// wakeup, prefer calling [`subscribe`] _before_ performing that operation
+    /// and `.await`ing the [`Wait`] future returned by [`subscribe`].
+    ///
+    /// [`wake`]: Self::wake
+    /// [`poll_wait`]: Self::poll_wait
+    /// [`close`]: Self::close
+    /// [`subscribe`]: Self::subscribe
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             cell: self,
@@ -201,7 +226,61 @@ impl WaitCell {
         }
     }
 
-    /// Pre-subscribe to notifications from this `WaitCell`.
+    /// Eagerly subscribe to notifications from this `WaitCell`.
+    ///
+    /// This method returns a [`Subscribe`] [`Future`], which outputs a [`Wait`]
+    /// [`Future`]. Awaiting the [`Subscribe`] future will eagerly register the
+    /// calling task to be woken by this [`WaitCell`], so that the returned
+    /// [`Wait`] future will be woken by any calls to [`wake`] (or [`close`])
+    /// that occur between when the [`Subscribe`] future completes and when the
+    /// returned [`Wait`] future is `.await`ed.
+    ///
+    /// This is primarily intended for scenarios where the task that waits on a
+    /// [`WaitCell`] is responsible for performing some operation that
+    /// ultimately results in the [`WaitCell`] being woken. If the task were to
+    /// simply perform the operation and then call [`wait`] on the [`WaitCell`],
+    /// a potential race condition could occur where the operation completes and
+    /// wakes the [`WaitCell`] *before* the [`Wait`] future is first `.await`ed.
+    /// Using `subscribe`, the task can ensure that it is ready to be woken by
+    /// the cell *before* performing an operation that could result in it being
+    /// woken.
+    ///
+    /// These scenarios occur when a wakeup is triggered by another thread/CPU
+    /// core in response to an operation performed in the task waiting on the
+    /// `WaitCell`, or when the wakeup is triggered by a hardware interrupt
+    /// resulting from operations performed in the task.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use maitake::sync::WaitCell;
+    ///
+    /// // Perform an operation that results in a concurrent wakeup, such as
+    /// // unmasking an interrupt.
+    /// fn do_something_that_causes_a_wakeup() {
+    ///     # WAIT_CELL.wake();
+    ///     // ...
+    /// }
+    ///
+    /// static WAIT_CELL: WaitCell = WaitCell::new();
+    ///
+    /// # async fn dox() {
+    /// // Subscribe to notifications from the cell *before* calling
+    /// // `do_something_that_causes_a_wakeup()`, to ensure that we are
+    /// // ready to be woken when the interrupt is unmasked.
+    /// let wait = WAIT_CELL.subscribe().await;
+    ///
+    /// // Actually perform the operation.
+    /// do_something_that_causes_a_wakeup();
+    ///
+    /// // Wait for the wakeup. If the wakeup occurred *before* the first
+    /// // poll of the `wait` future had successfully subscribed to the
+    /// // `WaitCell`, we would still receive the wakeup, because the
+    /// // `subscribe` future ensured that our waker was registered to be
+    /// // woken.
+    /// wait.await.expect("WaitCell is not closed");
+    /// # }
+    /// ```
     pub fn subscribe(&self) -> Subscribe<'_> {
         Subscribe { cell: self }
     }
@@ -345,7 +424,7 @@ impl Future for Wait<'_> {
         match task::ready!(test_dbg!(self.cell.poll_wait(cx))) {
             Ok(()) => Poll::Ready(Ok(())),
             Err(Error::Closed) => Poll::Ready(Err(Closed(()))),
-            Err(Error::Registering) => {
+            Err(Error::Busy) => {
                 // If some other task was registering, yield and try to re-register
                 // our waker when that task is done.
                 cx.waker().wake_by_ref();
@@ -365,7 +444,7 @@ impl<'cell> Future for Subscribe<'cell> {
 
         // Pre-register the waker in the cell.
         let presubscribe = match test_dbg!(self.cell.poll_wait(cx)) {
-            Poll::Ready(Err(Error::Registering)) => {
+            Poll::Ready(Err(Error::Busy)) => {
                 // Someone else is in the process of registering. Yield now so we
                 // can wait until that task is done, and then try again.
                 cx.waker().wake_by_ref();
