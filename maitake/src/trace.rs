@@ -101,6 +101,18 @@ macro_rules! test_dbg {
 }
 
 #[cfg(all(not(test), not(maitake_ultraverbose)))]
+macro_rules! enter_test_debug_span {
+    ($($args:tt)+) => {};
+}
+
+#[cfg(any(test, maitake_ultraverbose))]
+macro_rules! enter_test_debug_span {
+    ($($args:tt)+) => {
+        let _span = debug_span!($($args)+).entered();
+    };
+}
+
+#[cfg(all(not(test), not(maitake_ultraverbose)))]
 macro_rules! test_debug {
     ($($args:tt)+) => {};
 }

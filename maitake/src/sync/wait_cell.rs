@@ -1,6 +1,7 @@
 //! An atomically registered [`Waker`], for waking a single task.
 //!
 //! See the documentation for the [`WaitCell`] type for details.
+use super::Closed;
 use crate::loom::{
     cell::UnsafeCell,
     sync::atomic::{
@@ -104,6 +105,19 @@ impl WaitCell {
 }
 
 impl WaitCell {
+    /// Poll to wait on this `WaitCell`.
+    pub fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<Result<(), Closed>> {
+        match test_dbg!(self.register_wait(cx.waker())) {
+            Ok(()) => Poll::Pending,
+            Err(RegisterError::Closed) => super::closed(),
+            Err(RegisterError::Waking) => Poll::Ready(Ok(())),
+            Err(RegisterError::Registering) => {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+    }
+
     /// Register `waker` with this `WaitCell`.
     ///
     /// Once a [`Waker`] has been registered, a subsequent call to [`wake`] will
@@ -124,24 +138,26 @@ impl WaitCell {
     ///
     /// [`wake`]: Self::wake
     pub fn register_wait(&self, waker: &Waker) -> Result<(), RegisterError> {
+        enter_test_debug_span!("WaitCell::register_wait");
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
         match test_dbg!(self.compare_exchange(State::WAITING, State::REGISTERING, Acquire)) {
-            // someone else is notifying, so don't wait!
             Err(actual) if test_dbg!(actual.contains(State::CLOSED)) => {
                 return Err(RegisterError::Closed);
             }
-
-            Err(actual)
-                if test_dbg!(actual.contains(State::WAKING))
-                    || test_dbg!(actual.contains(State::WOKEN)) =>
-            {
+            Err(actual) if test_dbg!(actual.contains(State::WOKEN)) => {
+                // take the wakeup
+                self.fetch_and(!State::WOKEN, Release);
+                return Err(RegisterError::Waking);
+            }
+            // someone else is notifying, so don't wait!
+            Err(actual) if test_dbg!(actual.contains(State::WAKING)) => {
                 return Err(RegisterError::Waking);
             }
             Err(_) => return Err(RegisterError::Registering),
             Ok(_) => {}
-        };
+        }
 
         test_debug!("-> wait cell locked!");
         let prev_waker = self.waker.with_mut(|old_waker| unsafe {
@@ -215,6 +231,7 @@ impl WaitCell {
     /// - `true` if a waiting task was woken.
     /// - `false` if no task was woken (no [`Waker`] was stored in the cell)
     pub fn wake(&self) -> bool {
+        enter_test_debug_span!("WaitCell::wake");
         if let Some(waker) = self.take_waker(false) {
             waker.wake();
             true
@@ -232,6 +249,7 @@ impl WaitCell {
     /// [`wait`]: Self::wait
     /// [`register_wait`]: Self::register_wait
     pub fn close(&self) -> bool {
+        enter_test_debug_span!("WaitCell::close");
         if let Some(waker) = self.take_waker(true) {
             waker.wake();
             true
@@ -252,21 +270,32 @@ impl WaitCell {
     // TODO(eliza): could probably be made a public API...
     pub(crate) fn take_waker(&self, close: bool) -> Option<Waker> {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
-        let mut bits = State::WAKING | State::WOKEN;
+        let mut bits = State::WAKING;
         if close {
             bits.0 |= State::CLOSED.0;
         }
+
         if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
-            // we have the lock!
+            // Ladies and gentlemen...we got him (the lock)!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
 
-            test_dbg!(self.fetch_and(!State::WAKING, AcqRel));
+            // Release the lock and set the WOKEN bit.
+            let mut state = bits;
+            loop {
+                let next_state = (state & !State::WAKING) | State::WOKEN;
+                match test_dbg!(self.compare_exchange(state, next_state, AcqRel)) {
+                    Ok(_) => break,
+                    Err(actual) => state = actual,
+                }
+            }
+            self.fetch_and(!State::WAKING, Release);
 
             if let Some(waker) = test_dbg!(waker) {
                 trace!(wait_cell = ?fmt::ptr(self), ?close, ?waker, "notified");
                 return Some(waker);
             }
         }
+
         None
     }
 }
@@ -322,34 +351,16 @@ impl Drop for WaitCell {
 // === impl Wait ===
 
 impl Future for Wait<'_> {
-    type Output = Result<(), super::Closed>;
+    type Output = Result<(), Closed>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Try to take the cell's `WOKEN` bit to see if we were previously
-        // waiting and then received a notification.
-        if test_dbg!(self.cell.fetch_and(!State::WOKEN, AcqRel)).contains(State::WOKEN) {
-            return Poll::Ready(Ok(()));
-        }
-
+        enter_test_debug_span!("Wait::poll");
         // Did a wakeup occur while we were pre-registering the future?
         if test_dbg!(self.presubscribe.is_ready()) {
             return self.presubscribe;
         }
 
-        match test_dbg!(self.cell.register_wait(cx.waker())) {
-            Ok(_) => Poll::Pending,
-            Err(RegisterError::Registering) => {
-                // Cell was busy parking some other task, all we can do is try again later
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Err(RegisterError::Waking) => {
-                // Cell is waking another task RIGHT NOW, so let's ride that high all the
-                // way to the READY state.
-                Poll::Ready(Ok(()))
-            }
-            Err(RegisterError::Closed) => super::closed(),
-        }
+        self.cell.poll_wait(cx)
     }
 }
 
@@ -359,17 +370,14 @@ impl<'cell> Future for Subscribe<'cell> {
     type Output = Wait<'cell>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        enter_test_debug_span!("Subscribe::poll");
         let presubscribe = match test_dbg!(self.cell.register_wait(cx.waker())) {
-            Ok(_) => Poll::Pending,
-            Err(RegisterError::Closed) => super::closed(),
+            Ok(()) => Poll::Pending,
+            Err(RegisterError::Closed) => Poll::Ready(Err(Closed(()))),
+            Err(RegisterError::Waking) => Poll::Ready(Ok(())),
             Err(RegisterError::Registering) => {
-                // yield and try again
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
-            }
-            Err(RegisterError::Waking) => {
-                // we are also woken
-                Poll::Ready(Ok(()))
             }
         };
         Poll::Ready(Wait {
@@ -389,8 +397,7 @@ impl State {
     const CLOSED: Self = Self(1 << 4);
 
     fn contains(self, Self(state): Self) -> bool {
-        test_trace!("{:#?}.contains({state:#b})", self.0);
-        test_dbg!(self.0) & test_dbg!(state) == state
+        self.0 & state == state
     }
 }
 
@@ -399,6 +406,14 @@ impl ops::BitOr for State {
 
     fn bitor(self, Self(rhs): Self) -> Self::Output {
         Self(self.0 | rhs)
+    }
+}
+
+impl ops::BitAnd for State {
+    type Output = Self;
+
+    fn bitand(self, Self(rhs): Self) -> Self::Output {
+        Self(self.0 & rhs)
     }
 }
 
@@ -436,7 +451,7 @@ mod tests {
     use crate::scheduler::Scheduler;
     use alloc::sync::Arc;
 
-    use tokio_test::{assert_pending, assert_ready_ok, task};
+    use tokio_test::{assert_pending, assert_ready, assert_ready_ok, task};
 
     #[test]
     fn wait_smoke() {
@@ -490,6 +505,36 @@ mod tests {
             cell.wake();
             wait.await.unwrap();
         })
+    }
+
+    #[test]
+    fn wake_before_subscribe() {
+        let _trace = crate::util::test::trace_init();
+        let cell = Arc::new(WaitCell::new());
+        cell.wake();
+
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+            }
+        });
+
+        assert_ready!(task.poll(), "woken task should complete");
+
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+            }
+        });
+
+        assert_pending!(task.poll(), "wait cell hasn't been woken yet");
+        cell.wake();
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
     }
 }
 
