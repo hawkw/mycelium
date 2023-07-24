@@ -107,6 +107,7 @@ impl WaitCell {
 impl WaitCell {
     /// Poll to wait on this `WaitCell`.
     pub fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<Result<(), Closed>> {
+        enter_test_debug_span!("WaitCell::poll_wait", cell = ?fmt::ptr(self));
         match test_dbg!(self.register_wait(cx.waker())) {
             Ok(()) => Poll::Pending,
             Err(RegisterError::Closed) => super::closed(),
@@ -138,7 +139,7 @@ impl WaitCell {
     ///
     /// [`wake`]: Self::wake
     pub fn register_wait(&self, waker: &Waker) -> Result<(), RegisterError> {
-        enter_test_debug_span!("WaitCell::register_wait");
+        enter_test_debug_span!("WaitCell::register_wait", cell = ?fmt::ptr(self));
         trace!(wait_cell = ?fmt::ptr(self), ?waker, "registering waker");
 
         // this is based on tokio's AtomicWaker synchronization strategy
@@ -231,7 +232,7 @@ impl WaitCell {
     /// - `true` if a waiting task was woken.
     /// - `false` if no task was woken (no [`Waker`] was stored in the cell)
     pub fn wake(&self) -> bool {
-        enter_test_debug_span!("WaitCell::wake");
+        enter_test_debug_span!("WaitCell::wake", cell = ?fmt::ptr(self));
         if let Some(waker) = self.take_waker(false) {
             waker.wake();
             true
@@ -249,7 +250,7 @@ impl WaitCell {
     /// [`wait`]: Self::wait
     /// [`register_wait`]: Self::register_wait
     pub fn close(&self) -> bool {
-        enter_test_debug_span!("WaitCell::close");
+        enter_test_debug_span!("WaitCell::close", cell = ?fmt::ptr(self));
         if let Some(waker) = self.take_waker(true) {
             waker.wake();
             true
@@ -270,12 +271,18 @@ impl WaitCell {
     // TODO(eliza): could probably be made a public API...
     pub(crate) fn take_waker(&self, close: bool) -> Option<Waker> {
         trace!(wait_cell = ?fmt::ptr(self), ?close, "notifying");
-        let mut bits = State::WAKING | State::WOKEN;
-        if close {
-            bits.0 |= State::CLOSED.0;
-        }
+        // Set the WAKING bit (to indicate that we're touching the waker) and
+        // the WOKEN bit (to indicate that we intend to wake it up).
+        let state = {
+            let mut bits = State::WAKING | State::WOKEN;
+            if close {
+                bits.0 |= State::CLOSED.0;
+            }
+            test_dbg!(self.fetch_or(bits, AcqRel))
+        };
 
-        if test_dbg!(self.fetch_or(bits, AcqRel)) == State::WAITING {
+        // Is anyone else touching the waker?
+        if !test_dbg!(state.contains(State::WAKING | State::REGISTERING | State::CLOSED)) {
             // Ladies and gentlemen...we got him (the lock)!
             let waker = self.waker.with_mut(|thread| unsafe { (*thread).take() });
 
@@ -389,7 +396,7 @@ impl State {
     const CLOSED: Self = Self(1 << 4);
 
     fn contains(self, Self(state): Self) -> bool {
-        self.0 & state == state
+        self.0 & state > 0
     }
 }
 
