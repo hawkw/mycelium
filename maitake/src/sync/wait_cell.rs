@@ -50,7 +50,7 @@ pub struct WaitCell {
 ///
 /// This error is returned by the [`WaitCell::poll_wait`] method.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Error {
+pub enum PollWaitError {
     /// The [`Waker`] was not registered because the [`WaitCell`] has been
     /// [closed](WaitCell::close).
     Closed,
@@ -122,13 +122,13 @@ impl WaitCell {
     ///   concurrently registering its [`Waker`] with this [`WaitCell`].
     ///
     /// [`wake`]: Self::wake
-    pub fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub fn poll_wait(&self, cx: &mut Context<'_>) -> Poll<Result<(), PollWaitError>> {
         enter_test_debug_span!("WaitCell::poll_wait", cell = ?fmt::ptr(self));
 
         // this is based on tokio's AtomicWaker synchronization strategy
         match test_dbg!(self.compare_exchange(State::WAITING, State::REGISTERING, Acquire)) {
             Err(actual) if test_dbg!(actual.contains(State::CLOSED)) => {
-                return Poll::Ready(Err(Error::Closed));
+                return Poll::Ready(Err(PollWaitError::Closed));
             }
             Err(actual) if test_dbg!(actual.contains(State::WOKEN)) => {
                 // take the wakeup
@@ -139,7 +139,7 @@ impl WaitCell {
             Err(actual) if test_dbg!(actual.contains(State::WAKING)) => {
                 return Poll::Ready(Ok(()));
             }
-            Err(_) => return Poll::Ready(Err(Error::Busy)),
+            Err(_) => return Poll::Ready(Err(PollWaitError::Busy)),
             Ok(_) => {}
         }
 
@@ -186,7 +186,7 @@ impl WaitCell {
             // Was the `CLOSED` bit set while we were clearing other bits?
             // If so, the cell is closed. Otherwise, we must have been notified.
             if state.contains(State::CLOSED) {
-                return Poll::Ready(Err(Error::Closed));
+                return Poll::Ready(Err(PollWaitError::Closed));
             }
 
             return Poll::Ready(Ok(()));
@@ -428,8 +428,8 @@ impl Future for Wait<'_> {
         // Okay, actually poll the cell, then.
         match task::ready!(test_dbg!(self.cell.poll_wait(cx))) {
             Ok(()) => Poll::Ready(Ok(())),
-            Err(Error::Closed) => Poll::Ready(Err(Closed(()))),
-            Err(Error::Busy) => {
+            Err(PollWaitError::Closed) => Poll::Ready(Err(Closed(()))),
+            Err(PollWaitError::Busy) => {
                 // If some other task was registering, yield and try to re-register
                 // our waker when that task is done.
                 cx.waker().wake_by_ref();
@@ -449,13 +449,13 @@ impl<'cell> Future for Subscribe<'cell> {
 
         // Pre-register the waker in the cell.
         let presubscribe = match test_dbg!(self.cell.poll_wait(cx)) {
-            Poll::Ready(Err(Error::Busy)) => {
+            Poll::Ready(Err(PollWaitError::Busy)) => {
                 // Someone else is in the process of registering. Yield now so we
                 // can wait until that task is done, and then try again.
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
-            Poll::Ready(Err(Error::Closed)) => Poll::Ready(Err(Closed(()))),
+            Poll::Ready(Err(PollWaitError::Closed)) => Poll::Ready(Err(Closed(()))),
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             Poll::Pending => Poll::Pending,
         };
