@@ -4,7 +4,7 @@ use crate::{
         cell::UnsafeCell,
         sync::atomic::{AtomicBool, Ordering::*},
     },
-    sync::wait_cell::{self, WaitCell},
+    sync::wait_cell::WaitCell,
 };
 use cordyceps::{list, Linked};
 use core::{
@@ -12,7 +12,7 @@ use core::{
     marker::PhantomPinned,
     pin::Pin,
     ptr::{self, NonNull},
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use mycelium_util::fmt;
@@ -113,21 +113,12 @@ impl Future for Sleep<'_> {
             State::Completed => return Poll::Ready(()),
         }
 
-        match test_dbg!(this.entry.waker.register_wait(cx.waker())) {
-            Ok(_) => Poll::Pending,
-            // the timer has fired, so the future has now completed.
-            Err(wait_cell::RegisterError::Closed) => {
-                *this.state = State::Completed;
-                Poll::Ready(())
-            }
-            // these ones don't happen
-            Err(wait_cell::RegisterError::Registering) => {
-                unreachable!("a sleep should only be polled by one task!")
-            }
-            Err(wait_cell::RegisterError::Waking) => {
-                unreachable!("a sleep's WaitCell should only be woken by closing")
-            }
-        }
+        let _poll = ready!(test_dbg!(this.entry.waker.poll_wait(cx)));
+        debug_assert!(
+            _poll.is_err(),
+            "a Sleep's WaitCell should only be woken by closing"
+        );
+        Poll::Ready(())
     }
 }
 

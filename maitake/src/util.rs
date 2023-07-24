@@ -6,7 +6,7 @@ pub(crate) use self::wake_batch::WakeBatch;
 macro_rules! fmt_bits {
     ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
         $(
-            if $self.is(Self::$name) {
+            if $self.contains(Self::$name) {
                 if $has_states {
                     $f.write_str(" | ")?;
                 }

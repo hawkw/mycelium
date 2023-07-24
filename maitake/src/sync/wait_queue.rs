@@ -26,7 +26,7 @@ use core::{
     task::{Context, Poll, Waker},
 };
 use mycelium_bitfield::{bitfield, enum_from_bits, FromBits};
-#[cfg(test)]
+#[cfg(any(test, maitake_ultraverbose))]
 use mycelium_util::fmt;
 use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
