@@ -5,8 +5,7 @@
       && cargo doc \
         --workspace \
         --no-deps \
-        --all-features \
-        --document-private-items
+        --all-features 
     """
   publish = "target/doc"
 
