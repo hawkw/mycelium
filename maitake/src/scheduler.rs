@@ -181,7 +181,7 @@ use crate::{
 };
 use core::{future::Future, marker::PhantomData, ptr};
 
-use cordyceps::mpsc_queue::MpscQueue;
+use cordyceps::mpsc_queue::{MpscQueue, TryDequeueError};
 
 #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
 use mycelium_util::fmt;
@@ -716,7 +716,7 @@ impl LocalStaticScheduler {
     ///
     /// To spawn `!`[`Send`] tasks using a [`Builder`](task::Builder), use the
     /// [`Builder::spawn_local`](task::Builder::spawn_local) method.
-    /// 
+    ///
     /// [task `Builder`]: task::Builder
     #[must_use]
     pub fn build_task<'a>(&'static self) -> task::Builder<'a, &'static Self> {
@@ -888,7 +888,20 @@ impl Core {
             has_remaining: false,
         };
 
-        for task in self.run_queue.consume().take(n) {
+        while tick.polled < n {
+            let task = match self.run_queue.try_dequeue() {
+                Ok(task) => task,
+                // If inconsistent, just try again.
+                Err(TryDequeueError::Inconsistent) => {
+                    core::hint::spin_loop();
+                    continue;
+                }
+                // Queue is empty or busy (in use by something else), bail out.
+                Err(TryDequeueError::Busy | TryDequeueError::Empty) => {
+                    break;
+                }
+            };
+
             self.queued.fetch_sub(1, Relaxed);
             let _span = trace_span!(
                 "poll",
