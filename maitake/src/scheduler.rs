@@ -623,7 +623,7 @@ impl StaticScheduler {
     ///
     /// Only a single CPU core/thread may tick a given scheduler at a time. If
     /// another call to `tick` is in progress on a different core, this method
-    /// will wait until that call to `tick` completes before ticking the scheduler.
+    /// will immediately return.
     ///
     /// See [the module-level documentation][run-loops] for more information on
     /// using this function to implement a system's run loop.
@@ -746,7 +746,7 @@ impl LocalStaticScheduler {
     ///
     /// Only a single CPU core/thread may tick a given scheduler at a time. If
     /// another call to `tick` is in progress on a different core, this method
-    /// will wait until that call to `tick` completes before ticking the scheduler.
+    /// will immediately return.
     ///
     /// See [the module-level documentation][run-loops] for more information on
     /// using this function to implement a system's run loop.
@@ -1224,8 +1224,7 @@ feature! {
         ///
         /// Only a single CPU core/thread may tick a given scheduler at a time. If
         /// another call to `tick` is in progress on a different core, this method
-        /// will wait until that call to `tick` completes before ticking the
-        /// scheduler.
+        /// will immediately return.
         ///
         /// See [the module-level documentation][run-loops] for more information on
         /// using this function to implement a system's run loop.
@@ -1568,8 +1567,7 @@ feature! {
         ///
         /// Only a single CPU core/thread may tick a given scheduler at a time. If
         /// another call to `tick` is in progress on a different core, this method
-        /// will wait until that call to `tick` completes before ticking the
-        /// scheduler.
+        /// will immediately return.
         ///
         /// See [the module-level documentation][run-loops] for more information on
         /// using this function to implement a system's run loop.
