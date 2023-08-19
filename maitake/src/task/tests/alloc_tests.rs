@@ -40,22 +40,68 @@ fn task_is_valid_for_casts() {
 /// This test just prints the size (in bytes) of an empty task struct.
 #[test]
 fn empty_task_size() {
+    use core::{
+        any::type_name,
+        mem::{size_of, size_of_val},
+    };
+
     type Future = futures::future::Ready<()>;
     type EmptyTask = Task<NopSchedule, Future, BoxStorage>;
+
     println!(
-        "{}: {}B",
-        core::any::type_name::<EmptyTask>(),
-        core::mem::size_of::<EmptyTask>(),
+        "---- task size (in {} mode) ----\n",
+        if cfg!(debug_assertions) {
+            "debug "
+        } else {
+            "release"
+        }
     );
-    println!(
-        "{}: {}B",
-        core::any::type_name::<Future>(),
-        core::mem::size_of::<Future>(),
-    );
+    println!("{}: {}B", type_name::<EmptyTask>(), size_of::<EmptyTask>(),);
+    println!("{}: {}B", type_name::<Future>(), size_of::<Future>(),);
     println!(
         "task size: {}B",
-        core::mem::size_of::<EmptyTask>() - core::mem::size_of::<Future>()
+        size_of::<EmptyTask>() - size_of::<Future>()
     );
+
+    let task = Task::<Scheduler, Future, BoxStorage>::new(futures::future::ready(()));
+    println!("\nTask {{ // {}B", size_of_val(&task));
+    println!(
+        "    schedulable: Schedulable {{ // {}B",
+        size_of_val(&task.schedulable)
+    );
+    println!(
+        "        header: {{ // {}B",
+        size_of_val(&task.schedulable.header)
+    );
+    println!(
+        "            run_queue: {}B",
+        size_of_val(&task.schedulable.header.run_queue)
+    );
+    println!(
+        "            state: {}B",
+        size_of_val(&task.schedulable.header.state)
+    );
+    println!(
+        "            vtable: {}B",
+        size_of_val(&task.schedulable.header.vtable)
+    );
+    println!(
+        "            id: {}B",
+        size_of_val(&task.schedulable.header.id)
+    );
+    println!(
+        "            span: {}B",
+        size_of_val(&task.schedulable.header.span)
+    );
+    println!("         }}");
+    println!(
+        "        scheduler: {}B",
+        size_of_val(&task.schedulable.scheduler)
+    );
+    println!("    }}");
+    println!("    inner: {}B", size_of_val(&task.inner));
+    println!("    join_waker: {}B", size_of_val(&task.join_waker));
+    println!("}}");
 }
 
 #[test]
