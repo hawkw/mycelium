@@ -30,6 +30,20 @@ implemented for the [Mycelium] operating system. Currently, it provides an
 [intrusive doubly-linked list][list] and an [intrusive, lock-free MPSC
 queue][queue].
 
+> **Note**
+>
+> This is a hobby project. I'm working on it in my spare time, for my own
+> personal use. I'm very happy to share it with the broader Rust community, and
+> [contributions] and [bug reports] are always welcome. However, please remember
+> that I'm working on this library _for fun_, and if it stops being fun...well,
+> you get the idea.
+>
+> Anyway, feel free to use and enjoy this crate, and to contribute back as much
+> as you want to!
+
+[contributions]: https://github.com/hawkw/mycelium/compare
+[bug reports]: https://github.com/hawkw/mycelium/issues/new
+
 ## intrusive data structures
 
 [Intrusive data structures][intrusive] are node-based data structures where the

@@ -43,6 +43,20 @@ I/O resources, to produce a complete, application-specific async runtime.
 `maitake` was initially designed for use in the [mycelium] and [mnemOS]
 operating systems, but may be useful for other projects as well.
 
+> **Note**
+>
+> This is a hobby project. I'm working on it in my spare time, for my own
+> personal use. I'm very happy to share it with the broader Rust community, and
+> [contributions] and [bug reports] are always welcome. However, please remember
+> that I'm working on this library _for fun_, and if it stops being fun...well,
+> you get the idea.
+>
+> Anyway, feel free to use and enjoy this crate, and to contribute back as much
+> as you want to!
+
+[contributions]: https://github.com/hawkw/mycelium/compare
+[bug reports]: https://github.com/hawkw/mycelium/issues/new
+
 [`core::task`]: https://doc.rust-lang.org/stable/core/task/index.html
 [`core::future`]: https://doc.rust-lang.org/stable/core/future/index.html
 [task]: https://mycelium.elizas.website/maitake/task/index.html
@@ -50,7 +64,8 @@ operating systems, but may be useful for other projects as well.
 [timer]: https://mycelium.elizas.website/maitake/time/struct.Timer.html
 [sync]: https://mycelium.elizas.website/maitake/sync/index.html
 [mycelium]: https://github.com/hawkw/mycelium
-[mnemOS]: https://mnemos.jamesmunns.com
+[mnemOS]: https://mnemos.dev
+
 ## a tour of `maitake`
 
 `maitake` currently provides the following major API components:

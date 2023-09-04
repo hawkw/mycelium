@@ -35,6 +35,20 @@ This crate was originally implemented for usage in the [Mycelium operating
 system][Mycelium], although it is usable in other projects and does not depend
 on any Mycelium-specific libraries.
 
+> **Note**
+>
+> This is a hobby project. I'm working on it in my spare time, for my own
+> personal use. I'm very happy to share it with the broader Rust community, and
+> [contributions] and [bug reports] are always welcome. However, please remember
+> that I'm working on this library _for fun_, and if it stops being fun...well,
+> you get the idea.
+>
+> Anyway, feel free to use and enjoy this crate, and to contribute back as much
+> as you want to!
+
+[contributions]: https://github.com/hawkw/mycelium/compare
+[bug reports]: https://github.com/hawkw/mycelium/issues/new
+
 ## comparison with other crates
 
 There are several other crates implementing bitfields or bitfield-related
