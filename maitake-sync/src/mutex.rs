@@ -5,7 +5,8 @@
 //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
 use crate::{
     loom::cell::{MutPtr, UnsafeCell},
-    sync::wait_queue::{self, WaitQueue},
+    util::fmt,
+    wait_queue::{self, WaitQueue},
 };
 use core::{
     future::Future,
@@ -13,7 +14,6 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use mycelium_util::{fmt, unreachable_unchecked};
 use pin_project::pin_project;
 
 #[cfg(test)]
@@ -31,8 +31,8 @@ mod tests;
 /// [`lock`] method will wait by causing the current [task] to yield until the
 /// shared data is available. This is in contrast to *blocking* mutices, such as
 /// [`std::sync::Mutex`], which wait by blocking the current thread[^1], or
-/// *spinlock* based mutices, such as [`mycelium_util::sync::spin::Mutex`],
-/// which wait by spinning in a busy loop.
+/// *spinlock* based mutices, such as [`spin::Mutex`], which wait by spinning
+/// in a busy loop.
 ///
 /// The [`futures-util`] crate also provides an implementation of an asynchronous
 /// mutex, [`futures_util::lock::Mutex`]. However, this mutex requires the Rust
@@ -50,18 +50,18 @@ mod tests;
 /// will not acquire the lock until every other task ahead of it in the queue
 /// has had a chance to lock the shared data. Again, this is in contrast to
 /// [`std::sync::Mutex`], where fairness depends on the underlying OS' locking
-/// primitives; and [`mycelium_util::sync::spin::Mutex`] and
-/// [`futures_util::lock::Mutex`], which will never guarantee fairness.
+/// primitives; and [`spin::Mutex`] and [`futures_util::lock::Mutex`], which
+/// will never guarantee fairness.
 ///
 /// Finally, this mutex does not implement [poisoning][^3], unlike
 /// [`std::sync::Mutex`].
 ///
 /// [^1]: And therefore require an operating system to manage threading.
 ///
-/// [^2]: The [tasks][crate::task::Task] themselves must, of course, be stored
+/// [^2]: The [tasks](core::task) themselves must, of course, be stored
 ///     somewhere, but this need not be a heap allocation in systems with a
-///     fixed set of  statically-allocated tasks. And, when tasks *are*
-///     heap-allocated, these  allocations [need not be provided by
+///     fixed set of statically-allocated tasks. And, when tasks *are*
+///     heap-allocated, these allocations [need not be provided by
 ///     `liballoc`][storage].
 ///
 /// [^3]: In fact, this mutex _cannot_ implement poisoning, as poisoning
@@ -72,17 +72,17 @@ mod tests;
 /// [RAII guards]: MutexGuard
 /// [`lock`]: Self::lock
 /// [`try_lock`]: Self::try_lock
-/// [task]: crate::task
+/// [task]: core::task
 /// [fairly queued]: https://en.wikipedia.org/wiki/Unbounded_nondeterminism#Fairness
 /// [`std::sync::Mutex`]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
-/// [`mycelium_util::sync::spin::Mutex`]: https://mycelium.elizas.website/mycelium_util/sync/spin/struct.mutex
+/// [`spin::Mutex`]: crate::spin::Mutex
 /// [`futures-util`]: https://crates.io/crate/futures-util
 /// [`futures_util::lock::Mutex`]: https://docs.rs/futures-util/latest/futures_util/lock/struct.Mutex.html
-/// [intrusive linked list]: crate::sync::WaitQueue#implementation-notes
+/// [intrusive linked list]: crate::WaitQueue#implementation-notes
 /// [poisoning]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html#poisoning
 // for some reason, intra-doc links don't work in footnotes?
-/// [storage]: ../task/trait.Storage.html
-/// [no-unwinding]: ../index.html#maitake-does-not-support-unwinding
+/// [storage]: https://mycelium.elizas.website/maitake/task/trait.Storage.html
+/// [no-unwinding]: https://mycelium.elizas.website/maitake/index.html#maitake-does-not-support-unwinding
 
 pub struct Mutex<T: ?Sized> {
     wait: WaitQueue,
@@ -141,14 +141,14 @@ impl<T> Mutex<T> {
         /// # Examples
         ///
         /// ```
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         ///
         /// let lock = Mutex::new(42);
         /// ```
         ///
         /// As this is a `const fn`, it may be used in a `static` initializer:
         /// ```
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         ///
         /// static GLOBAL_LOCK: Mutex<usize> = Mutex::new(42);
         /// ```
@@ -176,7 +176,7 @@ impl<T: ?Sized> Mutex<T> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::Mutex;
+    /// use maitake_sync::Mutex;
     ///
     /// async fn example() {
     ///     let mutex = Mutex::new(1);
@@ -204,7 +204,7 @@ impl<T: ?Sized> Mutex<T> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::Mutex;
+    /// use maitake_sync::Mutex;
     /// # async fn dox() -> Option<()> {
     ///
     /// let mutex = Mutex::new(1);
@@ -374,7 +374,7 @@ feature! {
         /// # // in these examples, rather than `std`...but i don't want to make
         /// # // the tests actually `#![no_std]`...
         /// # use std as alloc;
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         /// use alloc::sync::Arc;
         ///
         /// # fn main() {
@@ -422,7 +422,7 @@ feature! {
         /// # // in these examples, rather than `std`...but i don't want to make
         /// # // the tests actually `#![no_std]`...
         /// # use std as alloc;
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         /// use alloc::sync::Arc;
         ///
         /// # fn main() {

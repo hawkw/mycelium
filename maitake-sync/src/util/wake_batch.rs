@@ -1,5 +1,5 @@
+use super::CheckedMaybeUninit;
 use core::{ptr, task::Waker};
-use mycelium_util::mem::CheckedMaybeUninit;
 
 /// A utility for waking multiple tasks in a batch, without reallocating.
 ///

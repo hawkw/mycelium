@@ -10,14 +10,14 @@ readme = "README.md"
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = []
-alloc = ["cordyceps/alloc"]
-no-cache-pad = ["cordyceps/no-cache-pad"]
+alloc = ["cordyceps/alloc", "maitake-sync/alloc"]
+no-cache-pad = ["cordyceps/no-cache-pad", "maitake-sync/no-cache-pad"]
 
 [dependencies]
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }
 cordyceps = { path = "../cordyceps", default-features = false }
 mycelium-bitfield = { path = "../bitfield", default-features = false }
-
+maitake-sync = { path = "../maitake-sync", default-features = false }
 
 [dev-dependencies]
 proptest = "1"
@@ -25,7 +25,7 @@ tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = [
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes", "std"] }
 
 [target.'cfg(loom)'.dependencies]
-loom = "0.5.5"
+loom = "0.7"
 
 [target.'cfg(loom)'.dev-dependencies]
 tracing_01 = { package = "tracing", version = "0.1.36" }

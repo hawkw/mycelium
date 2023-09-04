@@ -81,10 +81,14 @@ fn empty_task_size() {
         "            state: {}B",
         size_of_val(&task.schedulable.header.state)
     );
-    println!(
-        "            vtable: {}B",
-        size_of_val(&task.schedulable.header.vtable)
-    );
+
+    // clippy warns us that the vtable field on `schedulable.header` is a
+    // reference, and that we probably want to dereference it to get the actual
+    // size of the vtable. but...we *don't*. we want the size of the reference,
+    // since we care about the actual header size here.
+    #[allow(clippy::size_of_ref)]
+    let vtable_ptr = size_of_val(&task.schedulable.header.vtable);
+    println!("            vtable (ptr): {vtable_ptr}B",);
     println!(
         "            id: {}B",
         size_of_val(&task.schedulable.header.id)

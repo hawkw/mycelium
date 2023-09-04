@@ -2,18 +2,14 @@
 //!
 //! This module provides:
 //!
-//! - [`InitOnce`]: a cell storing a [`CheckedMaybeUninit`] value which must be
-//!       manually initialized prior to use.
+//! - [`InitOnce`]: a cell storing a [`MaybeUninit`](core::mem::MaybeUninit)
+//!       value which must be manually initialized prior to use.
 //! - [`Lazy`]: an [`InitOnce`] cell coupled with an initializer function. The
 //!       [`Lazy`] cell ensures the initializer is called to initialize the
 //!       value the first time it is accessed.
 use crate::{
-    mem::CheckedMaybeUninit,
-    sync::{
-        atomic::{AtomicU8, Ordering},
-        spin::Backoff,
-    },
-    unreachable_unchecked,
+    loom::sync::atomic::{AtomicU8, Ordering},
+    util::{Backoff, CheckedMaybeUninit},
 };
 use core::{
     any,
@@ -407,4 +403,5 @@ impl<T> fmt::Display for TryInitError<T> {
     }
 }
 
-impl<T> crate::error::Error for TryInitError<T> {}
+#[cfg(feature = "core-error")]
+impl<T> core::error::Error for TryInitError<T> {}

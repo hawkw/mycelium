@@ -1,5 +1,5 @@
 use crate::loom::{self, future};
-use crate::sync::Mutex;
+use crate::Mutex;
 
 #[test]
 fn basic_single_threaded() {

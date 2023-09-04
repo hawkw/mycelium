@@ -12,8 +12,8 @@ use crate::{
             spin::{Mutex, MutexGuard},
         },
     },
-    sync::{self, WaitResult},
-    util::WakeBatch,
+    util::{fmt, CachePadded, WakeBatch},
+    WaitResult,
 };
 use cordyceps::{
     list::{self, List},
@@ -27,7 +27,6 @@ use core::{
     ptr::{self, NonNull},
     task::{Context, Poll, Waker},
 };
-use mycelium_util::{fmt, sync::CachePadded};
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -63,18 +62,22 @@ mod tests;
 /// Using a semaphore to limit concurrency:
 ///
 /// ```
+/// # use tokio::task;
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn test() {
 /// # use std as alloc;
-/// use maitake::{scheduler::Scheduler, sync::Semaphore};
+/// use maitake_sync::Semaphore;
 /// use alloc::sync::Arc;
 ///
-/// let scheduler = Scheduler::new();
+/// # let mut tasks = Vec::new();
 /// // Allow 4 tasks to run concurrently at a time.
 /// let semaphore = Arc::new(Semaphore::new(4));
 ///
 /// for _ in 0..8 {
 ///     // Clone the `Arc` around the semaphore.
 ///     let semaphore = semaphore.clone();
-///     scheduler.spawn(async move {
+///     # let t =
+///     task::spawn(async move {
 ///         // Acquire a permit from the semaphore, returning a RAII guard that
 ///         // releases the permit back to the semaphore when dropped.
 ///         //
@@ -87,9 +90,11 @@ mod tests;
 ///
 ///         // do some work...
 ///     });
+///     # tasks.push(t);
 /// }
-///
-/// scheduler.tick();
+/// # for task in tasks { task.await.unwrap() };
+/// # }
+/// # test();
 /// ```
 ///
 /// A semaphore may also be used to cause a task to run once all of a set of
@@ -101,20 +106,22 @@ mod tests;
 /// For example:
 ///
 /// ```
+/// # use tokio::task;
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn test() {
 /// # use std as alloc;
-/// use maitake::{scheduler::Scheduler, sync::Semaphore};
+/// use maitake_sync::Semaphore;
 /// use alloc::sync::Arc;
 ///
 /// // How many tasks will we be waiting for the completion of?
 /// const TASKS: usize = 4;
 ///
-/// let scheduler = Scheduler::new();
-///
 /// // Create the semaphore with 0 permits.
 /// let semaphore = Arc::new(Semaphore::new(0));
 ///
 /// // Spawn the "B" task that will wait for the 4 "A" tasks to complete.
-/// scheduler.spawn({
+/// # let b_task =
+/// task::spawn({
 ///     let semaphore = semaphore.clone();
 ///     async move {
 ///         println!("Task B starting...");
@@ -132,9 +139,11 @@ mod tests;
 ///     }
 /// });
 ///
+/// # let mut tasks = Vec::new();
 /// for i in 0..TASKS {
 ///     let semaphore = semaphore.clone();
-///     scheduler.spawn(async move {
+///     # let t =
+///     task::spawn(async move {
 ///         println!("Task A {i} starting...");
 ///
 ///         // Add a single permit to the semaphore. Once all 4 tasks have
@@ -146,9 +155,13 @@ mod tests;
 ///
 ///         println!("Task A {i} done");
 ///     });
+///     # tasks.push(t);
 /// }
 ///
-/// scheduler.tick();
+/// # for t in tasks { t.await.unwrap() };
+/// # b_task.await.unwrap();
+/// # }
+/// # test();
 /// ```
 ///
 /// [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
@@ -322,21 +335,14 @@ impl Semaphore {
     /// were requested. If an [`Acquire`] future is dropped before it completes,
     /// the task will lose its place in the queue.
     ///
-    /// [`Closed`]: crate::sync::Closed
+    /// [`Closed`]: crate::Closed
     /// [closed]: Semaphore::close
     pub fn acquire(&self, permits: usize) -> Acquire<'_> {
         Acquire {
             semaphore: self,
             queued: false,
             permits,
-            waiter: Waiter {
-                node: UnsafeCell::new(Node {
-                    links: list::Links::new(),
-                    waker: None,
-                    _pin: PhantomPinned,
-                }),
-                remaining_permits: RemainingPermits(AtomicUsize::new(permits)),
-            },
+            waiter: Waiter::new(permits),
         }
     }
 
@@ -375,7 +381,7 @@ impl Semaphore {
     /// - `Err(`[`TryAcquireError::InsufficientPermits`]`)` if the semaphore had
     ///   fewer than `permits` permits available.
     ///
-    /// [`Closed`]: crate::sync::Closed
+    /// [`Closed`]: crate::Closed
     /// [closed]: Semaphore::close
     pub fn try_acquire(&self, permits: usize) -> Result<Permit<'_>, TryAcquireError> {
         trace!(permits, "Semaphore::try_acquire");
@@ -431,7 +437,7 @@ impl Semaphore {
         let mut waiters = loop {
             // semaphore has closed
             if sem_curr == Self::CLOSED {
-                return sync::closed();
+                return crate::closed();
             }
 
             // the total number of permits currently available to this waiter
@@ -519,7 +525,7 @@ impl Semaphore {
                 queued,
                 "Semaphore::poll_acquire -> semaphore closed"
             );
-            return sync::closed();
+            return crate::closed();
         }
 
         // add permits to the waiter, returning whether we added enough to wake
@@ -861,7 +867,7 @@ feature! {
         /// completes,   the task will lose its place in the queue.
         ///
         /// [`acquire`]: Semaphore::acquire
-        /// [`Closed`]: crate::sync::Closed
+        /// [`Closed`]: crate::Closed
         /// [closed]: Semaphore::close
         pub fn acquire_owned(self: &Arc<Self>, permits: usize) -> AcquireOwned {
             AcquireOwned {
@@ -891,7 +897,7 @@ feature! {
         ///
         ///
         /// [`try_acquire`]: Semaphore::try_acquire
-        /// [`Closed`]: crate::sync::Closed
+        /// [`Closed`]: crate::Closed
         /// [closed]: Semaphore::close
         pub fn try_acquire_owned(self: &Arc<Self>, permits: usize) -> Result<OwnedPermit, TryAcquireError> {
             trace!(permits, "Semaphore::try_acquire_owned");

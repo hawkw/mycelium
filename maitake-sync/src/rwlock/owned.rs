@@ -1,5 +1,5 @@
 use super::*;
-use crate::sync::Semaphore;
+use crate::Semaphore;
 use alloc::sync::Arc;
 
 /// Owned [RAII] structure used to release the shared read access of a
@@ -127,16 +127,15 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
-    /// # fn main() {
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
     /// # // since we are targeting no-std, it makes more sense to use `alloc`
     /// # // in these examples, rather than `std`...but i don't want to make
     /// # // the tests actually `#![no_std]`...
     /// # use std as alloc;
-    /// use maitake::scheduler::Scheduler;
-    /// use maitake::sync::RwLock;
+    /// use maitake_sync::RwLock;
     /// use alloc::sync::Arc;
-    ///
-    /// let scheduler = Arc::new(Scheduler::new());
     ///
     /// let lock = Arc::new(RwLock::new(1));
     /// // hold the lock for reading in `main`.
@@ -145,7 +144,8 @@ impl<T: ?Sized> RwLock<T> {
     ///     .expect("read lock must be acquired, as the lock is unlocked");
     /// assert_eq!(*n, 1);
     ///
-    /// scheduler.spawn({
+    /// # let task =
+    /// task::spawn({
     ///     let lock = lock.clone();
     ///     async move {
     ///         // While main has an active read lock, this task can acquire
@@ -154,9 +154,9 @@ impl<T: ?Sized> RwLock<T> {
     ///         assert_eq!(*n, 1);
     ///     }
     /// });
-    ///
-    /// scheduler.tick();
+    /// # task.await.unwrap();
     /// # }
+    /// # test();
     /// ```
     ///
     /// [priority policy]: Self#priority-policy
@@ -193,26 +193,26 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
-    /// # fn main() {
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
     /// # // since we are targeting no-std, it makes more sense to use `alloc`
     /// # // in these examples, rather than `std`...but i don't want to make
     /// # // the tests actually `#![no_std]`...
     /// # use std as alloc;
-    /// use maitake::scheduler::Scheduler;
-    /// use maitake::sync::RwLock;
+    /// use maitake_sync::RwLock;
     /// use alloc::sync::Arc;
-    ///
-    /// let scheduler = Arc::new(Scheduler::new());
     ///
     /// let lock = Arc::new(RwLock::new(1));
     ///
-    /// scheduler.spawn(async move {
+    /// # let task =
+    /// task::spawn(async move {
     ///     let mut guard = lock.write_owned().await;
     ///     *guard += 1;
     /// });
-    ///
-    /// scheduler.tick();
+    /// # task.await.unwrap();
     /// # }
+    /// # test();
     /// ```
     ///
     /// [guard]: OwnedRwLockWriteGuard
@@ -246,7 +246,7 @@ impl<T: ?Sized> RwLock<T> {
     /// # // in these examples, rather than `std`...but i don't want to make
     /// # // the tests actually `#![no_std]`...
     /// # use std as alloc;
-    /// use maitake::sync::RwLock;
+    /// use maitake_sync::RwLock;
     /// use alloc::sync::Arc;
     ///
     /// let lock = Arc::new(RwLock::new(1));
@@ -293,7 +293,7 @@ impl<T: ?Sized> RwLock<T> {
     /// # // in these examples, rather than `std`...but i don't want to make
     /// # // the tests actually `#![no_std]`...
     /// # use std as alloc;
-    /// use maitake::sync::RwLock;
+    /// use maitake_sync::RwLock;
     /// use alloc::sync::Arc;
     ///
     /// let lock = Arc::new(RwLock::new(1));

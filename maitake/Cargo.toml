@@ -30,13 +30,14 @@ links = "maitake"
 
 [features]
 default = ["alloc"]
-alloc = ["cordyceps/alloc"]
-no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad"]
-core-error = []
+alloc = ["cordyceps/alloc", "maitake-sync/alloc"]
+no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad", "maitake-sync/no-cache-pad"]
+core-error = ["maitake-sync/core-error"]
 
 [dependencies]
 mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }
+maitake-sync = { path = "../maitake-sync" }
 cordyceps = { path = "../cordyceps" }
 pin-project = "1"
 portable-atomic = "1.2"
@@ -65,7 +66,7 @@ console-subscriber = "0.1.6"
 proptest = "1"
 
 [target.'cfg(loom)'.dev-dependencies]
-loom = { version = "0.5.5", features = ["futures", "checkpoint"] }
+loom = { version = "0.7", features = ["futures", "checkpoint"] }
 tracing_01 = { package = "tracing", version = "0.1", default_features = false }
 tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
 

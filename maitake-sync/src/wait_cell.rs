@@ -1,13 +1,16 @@
 //! An atomically registered [`Waker`], for waking a single task.
 //!
 //! See the documentation for the [`WaitCell`] type for details.
-use super::Closed;
-use crate::loom::{
-    cell::UnsafeCell,
-    sync::atomic::{
-        AtomicUsize,
-        Ordering::{self, *},
+use crate::{
+    loom::{
+        cell::UnsafeCell,
+        sync::atomic::{
+            AtomicUsize,
+            Ordering::{self, *},
+        },
     },
+    util::{fmt, CachePadded},
+    Closed,
 };
 use core::{
     future::Future,
@@ -15,7 +18,6 @@ use core::{
     pin::Pin,
     task::{self, Context, Poll, Waker},
 };
-use mycelium_util::{fmt, sync::CachePadded};
 
 /// An atomically registered [`Waker`].
 ///
@@ -255,7 +257,7 @@ impl WaitCell {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::WaitCell;
+    /// use maitake_sync::WaitCell;
     ///
     /// // Perform an operation that results in a concurrent wakeup, such as
     /// // unmasking an interrupt.
@@ -538,33 +540,27 @@ impl fmt::Debug for State {
 #[cfg(all(feature = "alloc", not(loom), test))]
 mod tests {
     use super::*;
-    use crate::scheduler::Scheduler;
     use alloc::sync::Arc;
 
     use tokio_test::{assert_pending, assert_ready, assert_ready_ok, task};
 
     #[test]
     fn wait_smoke() {
-        static COMPLETED: AtomicUsize = AtomicUsize::new(0);
         let _trace = crate::util::test::trace_init();
 
-        let sched = Scheduler::new();
         let wait = Arc::new(WaitCell::new());
 
-        let wait2 = wait.clone();
-        sched.spawn(async move {
-            wait2.wait().await.unwrap();
-            COMPLETED.fetch_add(1, Ordering::Relaxed);
+        let mut task = task::spawn({
+            let wait = wait.clone();
+            async move { wait.wait().await }
         });
 
-        let tick = sched.tick();
-        assert_eq!(tick.completed, 0);
-        assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_pending!(task.poll());
 
         assert!(wait.wake());
-        let tick = sched.tick();
-        assert_eq!(tick.completed, 1);
-        assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
+
+        assert!(task.is_woken());
+        assert_ready_ok!(task.poll());
     }
 
     /// Reproduces https://github.com/hawkw/mycelium/issues/449
@@ -690,66 +686,6 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test_util {
-    use super::*;
-
-    use crate::loom::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-    use std::sync::Arc;
-
-    #[derive(Debug)]
-    pub(crate) struct Chan {
-        num: AtomicUsize,
-        task: WaitCell,
-        num_notify: usize,
-    }
-
-    impl Chan {
-        pub(crate) fn new(num_notify: usize) -> Arc<Self> {
-            Arc::new(Self {
-                num: AtomicUsize::new(0),
-                task: WaitCell::new(),
-                num_notify,
-            })
-        }
-
-        pub(crate) async fn wait(self: Arc<Chan>) {
-            let this = Arc::downgrade(&self);
-            drop(self);
-            futures_util::future::poll_fn(move |cx| {
-                let Some(this) = this.upgrade() else {return Poll::Ready(()) };
-
-                let res = this.task.wait();
-                futures_util::pin_mut!(res);
-
-                if this.num_notify == this.num.load(Relaxed) {
-                    return Poll::Ready(());
-                }
-
-                res.poll(cx).map(drop)
-            })
-            .await
-        }
-
-        pub(crate) fn wake(&self) {
-            self.num.fetch_add(1, Relaxed);
-            self.task.wake();
-        }
-
-        #[allow(dead_code)]
-        pub(crate) fn close(&self) {
-            self.num.fetch_add(1, Relaxed);
-            self.task.close();
-        }
-    }
-
-    impl Drop for Chan {
-        fn drop(&mut self) {
-            debug!(chan = ?fmt::alt(&self), "drop");
-        }
-    }
-}
-
 #[cfg(all(loom, test))]
 mod loom {
     use super::*;
@@ -765,19 +701,19 @@ mod loom {
             let closer = wait.clone();
 
             thread::spawn(move || {
-                info!("waking");
+                tracing::info!("waking");
                 waker.wake();
-                info!("woken");
+                tracing::info!("woken");
             });
             thread::spawn(move || {
-                info!("closing");
+                tracing::info!("closing");
                 closer.close();
-                info!("closed");
+                tracing::info!("closed");
             });
 
-            info!("waiting");
+            tracing::info!("waiting");
             let _ = future::block_on(wait.wait());
-            info!("wait'd");
+            tracing::info!("wait'd");
         });
     }
 
@@ -791,15 +727,15 @@ mod loom {
                 thread::spawn({
                     let waker = cell.clone();
                     move || {
-                        info!("waking");
+                        tracing::info!("waking");
                         waker.wake();
-                        info!("woken");
+                        tracing::info!("woken");
                     }
                 });
 
-                info!("waiting");
+                tracing::info!("waiting");
                 wait.await.expect("wait should be woken, not closed");
-                info!("wait'd");
+                tracing::info!("wait'd");
             });
         });
     }

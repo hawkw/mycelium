@@ -1,23 +1,5 @@
 use core::ptr::NonNull;
 
-mod wake_batch;
-pub(crate) use self::wake_batch::WakeBatch;
-
-macro_rules! fmt_bits {
-    ($self: expr, $f: expr, $has_states: ident, $($name: ident),+) => {
-        $(
-            if $self.contains(Self::$name) {
-                if $has_states {
-                    $f.write_str(" | ")?;
-                }
-                $f.write_str(stringify!($name))?;
-                $has_states = true;
-            }
-        )+
-
-    };
-}
-
 macro_rules! feature {
     (
         #![$meta:meta]
@@ -172,11 +154,4 @@ pub(crate) mod test {
             _x1: collector.set_default(),
         }
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn assert_send<T: Send>() {}
-
-    #[allow(dead_code)]
-    pub(crate) fn assert_sync<T: Sync>() {}
-    pub(crate) fn assert_send_sync<T: Send + Sync>() {}
 }

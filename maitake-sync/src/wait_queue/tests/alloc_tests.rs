@@ -1,40 +1,41 @@
 use super::*;
 use crate::loom::sync::Arc;
-use crate::scheduler::Scheduler;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use tokio_test::{assert_pending, assert_ready, assert_ready_ok, task};
+
+const TASKS: usize = 10;
 
 #[test]
 fn wake_all() {
     let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    let scheduler = Scheduler::new();
     let q = Arc::new(WaitQueue::new());
 
-    const TASKS: usize = 10;
+    let mut tasks = (0..TASKS)
+        .map(|_| {
+            let q = q.clone();
+            task::spawn(async move {
+                q.wait().await.unwrap();
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            })
+        })
+        .collect::<Vec<_>>();
 
-    for _ in 0..TASKS {
-        let q = q.clone();
-        scheduler.spawn(async move {
-            q.wait().await.unwrap();
-            COMPLETED.fetch_add(1, Ordering::SeqCst);
-        });
+    for task in &mut tasks {
+        assert_pending!(task.poll());
     }
 
-    let tick = scheduler.tick();
-
-    assert_eq!(tick.completed, 0);
     assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-    assert!(!tick.has_remaining);
 
     q.wake_all();
 
-    let tick = scheduler.tick();
+    for task in &mut tasks {
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
+    }
 
-    assert_eq!(tick.completed, TASKS);
     assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-    assert!(!tick.has_remaining);
 }
 
 #[test]
@@ -42,32 +43,30 @@ fn close() {
     let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    let scheduler = Scheduler::new();
     let q = Arc::new(WaitQueue::new());
 
-    const TASKS: usize = 10;
+    let mut tasks = (0..TASKS)
+        .map(|_| {
+            let wait = q.wait_owned();
+            task::spawn(async move {
+                wait.await.expect_err("dropping the queue must close it");
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+            })
+        })
+        .collect::<Vec<_>>();
 
-    for _ in 0..TASKS {
-        let wait = q.wait_owned();
-        scheduler.spawn(async move {
-            wait.await.expect_err("dropping the queue must close it");
-            COMPLETED.fetch_add(1, Ordering::SeqCst);
-        });
+    for task in &mut tasks {
+        assert_pending!(task.poll());
     }
-
-    let tick = scheduler.tick();
-
-    assert_eq!(tick.completed, 0);
-    assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-    assert!(!tick.has_remaining);
 
     q.close();
 
-    let tick = scheduler.tick();
+    for task in &mut tasks {
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
+    }
 
-    assert_eq!(tick.completed, TASKS);
     assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-    assert!(!tick.has_remaining);
 }
 
 #[test]
@@ -75,51 +74,51 @@ fn wake_one() {
     let _trace = crate::util::trace_init();
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
-    let scheduler = Scheduler::new();
     let q = Arc::new(WaitQueue::new());
 
-    const TASKS: usize = 10;
+    let mut tasks = (0..TASKS)
+        .map(|_| {
+            let q = q.clone();
+            task::spawn(async move {
+                q.wait().await.unwrap();
+                COMPLETED.fetch_add(1, Ordering::SeqCst);
+                q.wake();
+            })
+        })
+        .collect::<Vec<_>>();
 
-    for _ in 0..TASKS {
-        let q = q.clone();
-        scheduler.spawn(async move {
-            q.wait().await.unwrap();
-            COMPLETED.fetch_add(1, Ordering::SeqCst);
-            q.wake();
-        });
+    for task in &mut tasks {
+        assert_pending!(task.poll());
     }
 
-    let tick = scheduler.tick();
-
-    assert_eq!(tick.completed, 0);
     assert_eq!(COMPLETED.load(Ordering::SeqCst), 0);
-    assert!(!tick.has_remaining);
 
     q.wake();
 
-    let tick = scheduler.tick();
+    for task in &mut tasks {
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
+    }
 
-    assert_eq!(tick.completed, TASKS);
     assert_eq!(COMPLETED.load(Ordering::SeqCst), TASKS);
-    assert!(!tick.has_remaining);
 }
 
 #[test]
 fn wake_not_subscribed() {
     let _trace = crate::util::trace_init();
 
-    let scheduler = Scheduler::new();
     let q = Arc::new(WaitQueue::new());
-    let task = scheduler.spawn({
+    let mut task = task::spawn({
         let q = q.clone();
         async move { q.wait().await.unwrap() }
     });
 
+    assert_pending!(task.poll());
+
     q.wake();
 
-    let tick = scheduler.tick();
-    assert_eq!(tick.completed, 1);
-    assert!(task.is_complete());
+    assert!(task.is_woken());
+    assert_ready!(task.poll());
 }
 
 #[test]

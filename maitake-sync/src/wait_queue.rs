@@ -2,6 +2,8 @@
 //! all at once).
 //!
 //! See the [`WaitQueue`] type's documentation for details.
+#[cfg(any(test, maitake_ultraverbose))]
+use crate::util::fmt;
 use crate::{
     loom::{
         cell::UnsafeCell,
@@ -10,8 +12,8 @@ use crate::{
             spin::{Mutex, MutexGuard},
         },
     },
-    sync::{self, WaitResult},
-    util::WakeBatch,
+    util::{CachePadded, WakeBatch},
+    WaitResult,
 };
 use cordyceps::{
     list::{self, List},
@@ -26,9 +28,6 @@ use core::{
     task::{Context, Poll, Waker},
 };
 use mycelium_bitfield::{bitfield, enum_from_bits, FromBits};
-#[cfg(any(test, maitake_ultraverbose))]
-use mycelium_util::fmt;
-use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -53,9 +52,10 @@ mod tests;
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
 ///
-/// ```
+/// ```ignore
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+/// use maitake::scheduler::Scheduler;
+/// use maitake_sync::WaitQueue;
 ///
 /// const TASKS: usize = 10;
 ///
@@ -99,9 +99,10 @@ mod tests;
 ///
 /// Waking all tasks using [`wake_all`][wake_all]:
 ///
-/// ```
+/// ```ignore
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+/// use maitake::scheduler::Scheduler;
+/// use maitake_sync::WaitQueue;
 ///
 /// const TASKS: usize = 10;
 ///
@@ -171,7 +172,7 @@ mod tests;
 /// [`UnsafeCell`]: core::cell::UnsafeCell
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
-/// [mutex]: crate::sync::Mutex
+/// [mutex]: crate::Mutex
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
 pub struct WaitQueue {
@@ -322,7 +323,7 @@ enum State {
     /// *Note*: This *must* correspond to all state bits being set, as it's set
     /// via a [`fetch_or`].
     ///
-    /// [`Closed`]: crate::sync::Closed
+    /// [`Closed`]: crate::Closed
     /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
     Closed = 0b11,
 }
@@ -387,15 +388,15 @@ impl WaitQueue {
     /// # Examples
     ///
     /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
     /// use std::sync::Arc;
-    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
-    ///
-    /// // In order to spawn tasks, we need a `Scheduler` instance.
-    /// let scheduler = Scheduler::new();
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue = Arc::new(WaitQueue::new());
     ///
-    /// scheduler.spawn({
+    /// let waiter = task::spawn({
     ///     // clone the queue to move into the spawned task
     ///     let queue = queue.clone();
     ///     async move {
@@ -404,15 +405,12 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// let waiter = scheduler.spawn(async move {
-    ///     println!("waking task...");
-    ///     queue.wake();
-    /// });
+    /// println!("waking task...");
+    /// queue.wake();
     ///
-    /// // run the scheduler so that the spawned tasks can run.
-    /// scheduler.tick();
-    ///
-    /// assert!(waiter.is_complete());
+    /// waiter.await.unwrap();
+    /// # }
+    /// # test();
     /// ```
     #[inline]
     pub fn wake(&self) {
@@ -466,16 +464,16 @@ impl WaitQueue {
     /// # Examples
     ///
     /// ```
-    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
+    /// use maitake_sync::WaitQueue;
     /// use std::sync::Arc;
-    ///
-    /// // In order to spawn tasks, we need a `Scheduler` instance.
-    /// let scheduler = Scheduler::new();
     ///
     /// let queue = Arc::new(WaitQueue::new());
     ///
     /// // spawn multiple tasks to wait on the queue.
-    /// let task1 = scheduler.spawn({
+    /// let task1 = task::spawn({
     ///     let queue = queue.clone();
     ///     async move {
     ///         println!("task 1 waiting...");
@@ -484,7 +482,7 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// let task2 = scheduler.spawn({
+    /// let task2 = task::spawn({
     ///     let queue = queue.clone();
     ///     async move {
     ///         println!("task 2 waiting...");
@@ -493,21 +491,24 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// // tick the scheduler so that both tasks register
+    /// // yield to the scheduler so that both tasks register
     /// // themselves to wait on the queue.
-    /// scheduler.tick();
+    /// task::yield_now().await;
     ///
     /// // neither task will have been woken.
-    /// assert!(!task1.is_complete());
-    /// assert!(!task2.is_complete());
+    /// assert!(!task1.is_finished());
+    /// assert!(!task2.is_finished());
     ///
     /// // wake all tasks waiting on the queue.
     /// queue.wake_all();
     ///
-    /// // tick the scheduler again so that the tasks can execute.
-    /// scheduler.tick();
-    /// assert!(task1.is_complete());
-    /// assert!(task2.is_complete());
+    /// // yield to the scheduler again so that the tasks can execute.
+    /// task::yield_now().await;
+    ///
+    /// assert!(task1.is_finished());
+    /// assert!(task2.is_finished());
+    /// # }
+    /// # test();
     /// ```
     ///
     /// [`wake()`]: Self::wake
@@ -615,15 +616,15 @@ impl WaitQueue {
     /// # Examples
     ///
     /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
     /// use std::sync::Arc;
-    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
-    ///
-    /// // In order to spawn tasks, we need a `Scheduler` instance.
-    /// let scheduler = Scheduler::new();
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue = Arc::new(WaitQueue::new());
     ///
-    /// scheduler.spawn({
+    /// let waiter = task::spawn({
     ///     // clone the queue to move into the spawned task
     ///     let queue = queue.clone();
     ///     async move {
@@ -632,20 +633,17 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// let waiter = scheduler.spawn(async move {
-    ///     println!("waking task...");
-    ///     queue.wake();
-    /// });
+    /// println!("waking task...");
+    /// queue.wake();
     ///
-    /// // run the scheduler so that the spawned tasks can run.
-    /// scheduler.tick();
-    ///
-    /// assert!(waiter.is_complete());
+    /// waiter.await.unwrap();
+    /// # }
+    /// # test();
     /// ```
     ///
     /// [`wake()`]: Self::wake
     /// [`wake_all()`]: Self::wake_all
-    /// [`Closed`]: crate::sync::Closed
+    /// [`Closed`]: crate::Closed
     pub fn wait(&self) -> Wait<'_> {
         Wait {
             queue: self,
@@ -664,7 +662,7 @@ impl WaitQueue {
         }
 
         match state.get(QueueState::STATE) {
-            State::Closed => sync::closed(),
+            State::Closed => crate::closed(),
             _ if state.get(QueueState::WAKE_ALLS) > initial_wake_alls => Poll::Ready(Ok(())),
             State::Empty | State::Waiting => Poll::Pending,
             State::Woken => Poll::Ready(Ok(())),
@@ -914,7 +912,7 @@ impl Waiter {
                                 Err(actual) => queue_state = actual,
                             }
                         }
-                        State::Closed => return sync::closed(),
+                        State::Closed => return crate::closed(),
                     }
                 }
 
@@ -958,7 +956,7 @@ impl Waiter {
                         }
                         Wakeup::Closed => {
                             this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                            sync::closed()
+                            crate::closed()
                         }
                         Wakeup::Empty => {
                             if let Some(waker) = waker {
@@ -1048,7 +1046,7 @@ impl Wait<'_> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::WaitQueue;
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue1 = WaitQueue::new();
     /// let queue2 = WaitQueue::new();
@@ -1071,7 +1069,7 @@ impl Wait<'_> {
     /// Two [`Wait`] futures waiting on the same [`WaitQueue`] return `true`:
     ///
     /// ```
-    /// use maitake::sync::WaitQueue;
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue = WaitQueue::new();
     ///
@@ -1084,7 +1082,7 @@ impl Wait<'_> {
     /// Two [`Wait`] futures waiting on different [`WaitQueue`]s return `false`:
     ///
     /// ```
-    /// use maitake::sync::WaitQueue;
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue1 = WaitQueue::new();
     /// let queue2 = WaitQueue::new();
@@ -1191,9 +1189,7 @@ impl FromBits<usize> for State {
             bits if bits == Self::Woken as u8 => Self::Woken,
             bits if bits == Self::Closed as u8 => Self::Closed,
             _ => unsafe {
-                mycelium_util::unreachable_unchecked!(
-                    "all potential 2-bit patterns should be covered!"
-                )
+                unreachable_unchecked!("all potential 2-bit patterns should be covered!")
             },
         })
     }
@@ -1269,7 +1265,7 @@ feature! {
         /// [`wake_all()`]: Self::wake_all
         /// [`wait()`]: Self::wait
         /// [closed]: Self::close
-        /// [`Closed`]: crate::sync::Closed
+        /// [`Closed`]: crate::Closed
         pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
             let waiter = self.waiter();
             let queue = self.clone();
@@ -1280,13 +1276,13 @@ feature! {
     // === impl WaitOwned ===
 
     impl WaitOwned {
-                /// Returns `true` if this `WaitOwned` future is waiting for a
+        /// Returns `true` if this `WaitOwned` future is waiting for a
         /// notification from the provided [`WaitQueue`].
         ///
         /// # Examples
         ///
         /// ```
-        /// use maitake::sync::WaitQueue;
+        /// use maitake_sync::WaitQueue;
         /// use std::sync::Arc;
         ///
         /// let queue1 = Arc::new(WaitQueue::new());
@@ -1311,7 +1307,7 @@ feature! {
         /// `true`:
         ///
         /// ```
-        /// use maitake::sync::WaitQueue;
+        /// use maitake_sync::WaitQueue;
         /// use std::sync::Arc;
         ///
         /// let queue = Arc::new(WaitQueue::new());
@@ -1326,7 +1322,7 @@ feature! {
         /// `false`:
         ///
         /// ```
-        /// use maitake::sync::WaitQueue;
+        /// use maitake_sync::WaitQueue;
         /// use std::sync::Arc;
         ///
         /// let queue1 = Arc::new(WaitQueue::new());

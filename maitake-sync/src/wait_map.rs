@@ -10,7 +10,7 @@ use crate::{
             spin::{Mutex, MutexGuard},
         },
     },
-    util::WakeBatch,
+    util::{fmt, CachePadded, WakeBatch},
 };
 use cordyceps::{
     list::{self, List},
@@ -26,8 +26,6 @@ use core::{
     task::{Context, Poll, Waker},
 };
 use mycelium_bitfield::{enum_from_bits, FromBits};
-use mycelium_util::fmt;
-use mycelium_util::sync::CachePadded;
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -91,12 +89,10 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
 ///
-/// ```
+/// ```ignore
 /// use std::sync::Arc;
-/// use maitake::{
-///     scheduler::Scheduler,
-///     sync::wait_map::{WaitMap, WakeOutcome},
-/// };
+/// use maitake::scheduler;
+/// use maitake_sync::wait_map::{WaitMap, WakeOutcome};
 ///
 /// const TASKS: usize = 10;
 ///
@@ -237,12 +233,10 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// use maitake::{
-    ///     scheduler::Scheduler,
-    ///     sync::wait_map::{WaitMap, WakeOutcome},
-    /// };
+    /// use maitake::scheduler;
+    /// use maitake_sync::wait_map::{WaitMap, WakeOutcome};
     /// use futures_util::pin_mut;
     ///
     /// let scheduler = Scheduler::new();
@@ -380,7 +374,7 @@ enum State {
     /// *Note*: This *must* correspond to all state bits being set, as it's set
     /// via a [`fetch_or`].
     ///
-    /// [`Closed`]: crate::sync::Closed
+    /// [`Closed`]: crate::Closed
     /// [`fetch_or`]: core::sync::atomic::AtomicUsize::fetch_or
     Closed = 0b11,
 }
@@ -926,9 +920,7 @@ impl FromBits<usize> for State {
             bits if bits == Self::Closed as u8 => Self::Closed,
             _ => unsafe {
                 // TODO(AJM): this isn't *totally* true anymore...
-                mycelium_util::unreachable_unchecked!(
-                    "all potential 2-bit patterns should be covered!"
-                )
+                unreachable_unchecked!("all potential 2-bit patterns should be covered!")
             },
         })
     }
