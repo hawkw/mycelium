@@ -1,10 +1,14 @@
 use super::PollResult;
-use crate::loom::sync::atomic::{
-    self, AtomicUsize,
-    Ordering::{self, *},
+use crate::{
+    loom::sync::atomic::{
+        self, AtomicUsize,
+        Ordering::{self, *},
+    },
+    sync::util::Backoff,
 };
+
 use core::fmt;
-use mycelium_util::{sync::spin::Backoff, unreachable_unchecked};
+use mycelium_util::unreachable_unchecked;
 
 mycelium_bitfield::bitfield! {
     /// A snapshot of a task's current state.

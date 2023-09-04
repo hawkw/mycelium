@@ -30,13 +30,14 @@ links = "maitake"
 
 [features]
 default = ["alloc"]
-alloc = ["cordyceps/alloc"]
-no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad"]
-core-error = []
+alloc = ["cordyceps/alloc", "maitake-sync/alloc"]
+no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad", "maitake-sync/no-cache-pad"]
+core-error = ["maitake-sync/core-error"]
 
 [dependencies]
 mycelium-bitfield = { path = "../bitfield" }
 mycelium-util = { path = "../util" }
+maitake-sync = { path = "../maitake-sync" }
 cordyceps = { path = "../cordyceps" }
 pin-project = "1"
 portable-atomic = "1.2"

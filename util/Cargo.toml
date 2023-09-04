@@ -10,14 +10,14 @@ readme = "README.md"
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = []
-alloc = ["cordyceps/alloc"]
-no-cache-pad = ["cordyceps/no-cache-pad"]
+alloc = ["cordyceps/alloc", "maitake-sync/alloc"]
+no-cache-pad = ["cordyceps/no-cache-pad", "maitake-sync/no-cache-pad"]
 
 [dependencies]
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }
 cordyceps = { path = "../cordyceps", default-features = false }
 mycelium-bitfield = { path = "../bitfield", default-features = false }
-
+maitake-sync = { path = "../maitake-sync", default-features = false }
 
 [dev-dependencies]
 proptest = "1"

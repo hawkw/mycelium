@@ -59,6 +59,8 @@ jobs:
             maitake:
               paths:
                 - 'maitake/**/*.rs'
+                - 'maitake-sync/**/*.rs'
+                - 'maitake-sync/Cargo.toml'
                 - 'maitake/Cargo.toml'
                 - '.github/workflows/ci.yml'
                 - 'justfile'
@@ -275,8 +277,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: install nextest
       uses: taiki-e/install-action@nextest
-    - name: run loom tests
+    - name: run loom tests (maitake)
       run: just loom maitake
+    - name: run loom tests (maitake-sync)
+      run: just loom maitake-sync
 
   ### mycelium-util ###
 
