@@ -701,19 +701,19 @@ mod loom {
             let closer = wait.clone();
 
             thread::spawn(move || {
-                info!("waking");
+                tracing::info!("waking");
                 waker.wake();
-                info!("woken");
+                tracing::info!("woken");
             });
             thread::spawn(move || {
-                info!("closing");
+                tracing::info!("closing");
                 closer.close();
-                info!("closed");
+                tracing::info!("closed");
             });
 
-            info!("waiting");
+            tracing::info!("waiting");
             let _ = future::block_on(wait.wait());
-            info!("wait'd");
+            tracing::info!("wait'd");
         });
     }
 
@@ -727,15 +727,15 @@ mod loom {
                 thread::spawn({
                     let waker = cell.clone();
                     move || {
-                        info!("waking");
+                        tracing::info!("waking");
                         waker.wake();
-                        info!("woken");
+                        tracing::info!("woken");
                     }
                 });
 
-                info!("waiting");
+                tracing::info!("waiting");
                 wait.await.expect("wait should be woken, not closed");
-                info!("wait'd");
+                tracing::info!("wait'd");
             });
         });
     }
