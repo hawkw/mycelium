@@ -62,29 +62,25 @@ mod tests;
 /// ```
 /// use maitake_sync::RwLock;
 ///
-/// async fn example() {
-///     let lock = RwLock::new(5);
+/// # async fn example() {
+/// let lock = RwLock::new(5);
 ///
-///     // many reader locks can be held at once
-///     {
-///         let r1 = lock.read().await;
-///         let r2 = lock.read().await;
-///         assert_eq!(*r1, 5);
-///         assert_eq!(*r2, 5);
-///     } // read locks are dropped at this point
+/// // many reader locks can be held at once
+/// {
+///     let r1 = lock.read().await;
+///     let r2 = lock.read().await;
+///     assert_eq!(*r1, 5);
+///     assert_eq!(*r2, 5);
+/// } // read locks are dropped at this point
 ///
-///     // only one write lock may be held, however
-///     {
-///         let mut w = lock.write().await;
-///         *w += 1;
-///         assert_eq!(*w, 6);
-///     } // write lock is dropped here
-/// }
-///
-/// # use maitake::scheduler::Scheduler;
-/// # let scheduler = std::sync::Arc::new(Scheduler::new());
-/// # scheduler.spawn(example());
-/// # scheduler.tick();
+/// // only one write lock may be held, however
+/// {
+///     let mut w = lock.write().await;
+///     *w += 1;
+///     assert_eq!(*w, 6);
+/// } // write lock is dropped here
+/// # }
+/// # futures::executor::block_on(example());
 /// ```
 ///
 /// [`Mutex`]: crate::Mutex
@@ -174,7 +170,7 @@ impl<T> RwLock<T> {
         /// # Examples
         ///
         /// ```
-        /// use maitake::sync::RwLock;
+        /// use maitake_sync::RwLock;
         ///
         /// let lock = RwLock::new(5);
         /// # drop(lock)
@@ -184,7 +180,7 @@ impl<T> RwLock<T> {
         /// initializers:
         ///
         /// ```
-        /// use maitake::sync::RwLock;
+        /// use maitake_sync::RwLock;
         ///
         /// static LOCK: RwLock<usize> = RwLock::new(5);
         /// ```
@@ -226,25 +222,26 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
-    /// # fn main() {
+    /// # #[tokio::main(flavor="current_thread")]
+    /// # async fn test() {
     /// # // since we are targeting no-std, it makes more sense to use `alloc`
     /// # // in these examples, rather than `std`...but i don't want to make
     /// # // the tests actually `#![no_std]`...
     /// # use std as alloc;
-    /// use maitake::scheduler::Scheduler;
-    /// use maitake::sync::RwLock;
+    /// # use tokio::task;
+    /// use maitake_sync::RwLock;
     /// use alloc::sync::Arc;
     ///
-    /// let scheduler = Arc::new(Scheduler::new());
-    ///
     /// let lock = Arc::new(RwLock::new(1));
+    ///
     /// // hold the lock for reading in `main`.
     /// let n = lock
     ///     .try_read()
     ///     .expect("read lock must be acquired, as the lock is unlocked");
     /// assert_eq!(*n, 1);
     ///
-    /// scheduler.spawn({
+    /// # let task2 =
+    /// task::spawn({
     ///     let lock = lock.clone();
     ///     async move {
     ///         // While main has an active read lock, this task can acquire
@@ -254,8 +251,9 @@ impl<T: ?Sized> RwLock<T> {
     ///     }
     /// });
     ///
-    /// scheduler.tick();
+    /// # task2.await.unwrap();
     /// # }
+    /// # test();
     /// ```
     ///
     /// [priority policy]: Self#priority-policy
@@ -291,26 +289,26 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
-    /// # fn main() {
+    /// # #[tokio::main(flavor="current_thread")]
+    /// # async fn test() {
     /// # // since we are targeting no-std, it makes more sense to use `alloc`
     /// # // in these examples, rather than `std`...but i don't want to make
     /// # // the tests actually `#![no_std]`...
     /// # use std as alloc;
-    /// use maitake::scheduler::Scheduler;
-    /// use maitake::sync::RwLock;
+    /// # use tokio::task;
+    /// use maitake_sync::RwLock;
     /// use alloc::sync::Arc;
-    ///
-    /// let scheduler = Arc::new(Scheduler::new());
     ///
     /// let lock = Arc::new(RwLock::new(1));
     ///
-    /// scheduler.spawn(async move {
+    /// # let task =
+    /// task::spawn(async move {
     ///     let mut guard = lock.write().await;
     ///     *guard += 1;
     /// });
-    ///
-    /// scheduler.tick();
+    /// # task.await.unwrap()
     /// # }
+    /// # test();
     /// ```
     pub async fn write(&self) -> RwLockWriteGuard<'_, T> {
         let _permit = self
@@ -336,7 +334,7 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::RwLock;
+    /// use maitake_sync::RwLock;
     ///
     /// let lock = RwLock::new(1);
     ///
@@ -376,7 +374,7 @@ impl<T: ?Sized> RwLock<T> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::RwLock;
+    /// use maitake_sync::RwLock;
     ///
     /// let lock = RwLock::new(1);
     ///

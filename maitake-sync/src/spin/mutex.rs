@@ -60,7 +60,7 @@ impl<T> Mutex<T> {
         /// # Examples
         ///
         /// ```
-        /// use mycelium_util::sync::spin::Mutex;
+        /// use maitake_sync::spin::Mutex;
         ///
         /// let mutex = Mutex::new(0);
         /// ```

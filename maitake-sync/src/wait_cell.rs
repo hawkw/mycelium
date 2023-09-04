@@ -257,7 +257,7 @@ impl WaitCell {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::WaitCell;
+    /// use maitake_sync::WaitCell;
     ///
     /// // Perform an operation that results in a concurrent wakeup, such as
     /// // unmasking an interrupt.

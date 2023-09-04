@@ -52,9 +52,10 @@ mod tests;
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
 ///
-/// ```
+/// ```ignore
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+/// use maitake::scheduler::Scheduler;
+/// use maitake_sync::WaitQueue;
 ///
 /// const TASKS: usize = 10;
 ///
@@ -98,9 +99,10 @@ mod tests;
 ///
 /// Waking all tasks using [`wake_all`][wake_all]:
 ///
-/// ```
+/// ```ignore
 /// use std::sync::Arc;
-/// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+/// use maitake::scheduler::Scheduler;
+/// use maitake_sync::WaitQueue;
 ///
 /// const TASKS: usize = 10;
 ///
@@ -386,15 +388,15 @@ impl WaitQueue {
     /// # Examples
     ///
     /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
     /// use std::sync::Arc;
-    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
-    ///
-    /// // In order to spawn tasks, we need a `Scheduler` instance.
-    /// let scheduler = Scheduler::new();
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue = Arc::new(WaitQueue::new());
     ///
-    /// scheduler.spawn({
+    /// let waiter = task::spawn({
     ///     // clone the queue to move into the spawned task
     ///     let queue = queue.clone();
     ///     async move {
@@ -403,15 +405,12 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// let waiter = scheduler.spawn(async move {
-    ///     println!("waking task...");
-    ///     queue.wake();
-    /// });
+    /// println!("waking task...");
+    /// queue.wake();
     ///
-    /// // run the scheduler so that the spawned tasks can run.
-    /// scheduler.tick();
-    ///
-    /// assert!(waiter.is_complete());
+    /// waiter.await.unwrap();
+    /// # }
+    /// # test();
     /// ```
     #[inline]
     pub fn wake(&self) {
@@ -465,16 +464,16 @@ impl WaitQueue {
     /// # Examples
     ///
     /// ```
-    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
+    /// use maitake_sync::WaitQueue;
     /// use std::sync::Arc;
-    ///
-    /// // In order to spawn tasks, we need a `Scheduler` instance.
-    /// let scheduler = Scheduler::new();
     ///
     /// let queue = Arc::new(WaitQueue::new());
     ///
     /// // spawn multiple tasks to wait on the queue.
-    /// let task1 = scheduler.spawn({
+    /// let task1 = task::spawn({
     ///     let queue = queue.clone();
     ///     async move {
     ///         println!("task 1 waiting...");
@@ -483,7 +482,7 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// let task2 = scheduler.spawn({
+    /// let task2 = task::spawn({
     ///     let queue = queue.clone();
     ///     async move {
     ///         println!("task 2 waiting...");
@@ -492,21 +491,24 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// // tick the scheduler so that both tasks register
+    /// // yield to the scheduler so that both tasks register
     /// // themselves to wait on the queue.
-    /// scheduler.tick();
+    /// task::yield_now().await;
     ///
     /// // neither task will have been woken.
-    /// assert!(!task1.is_complete());
-    /// assert!(!task2.is_complete());
+    /// assert!(!task1.is_finished());
+    /// assert!(!task2.is_finished());
     ///
     /// // wake all tasks waiting on the queue.
     /// queue.wake_all();
     ///
-    /// // tick the scheduler again so that the tasks can execute.
-    /// scheduler.tick();
-    /// assert!(task1.is_complete());
-    /// assert!(task2.is_complete());
+    /// // yield to the scheduler again so that the tasks can execute.
+    /// task::yield_now().await;
+    ///
+    /// assert!(task1.is_finished());
+    /// assert!(task2.is_finished());
+    /// # }
+    /// # test();
     /// ```
     ///
     /// [`wake()`]: Self::wake
@@ -614,15 +616,15 @@ impl WaitQueue {
     /// # Examples
     ///
     /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
     /// use std::sync::Arc;
-    /// use maitake::{scheduler::Scheduler, sync::WaitQueue};
-    ///
-    /// // In order to spawn tasks, we need a `Scheduler` instance.
-    /// let scheduler = Scheduler::new();
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue = Arc::new(WaitQueue::new());
     ///
-    /// scheduler.spawn({
+    /// let waiter = task::spawn({
     ///     // clone the queue to move into the spawned task
     ///     let queue = queue.clone();
     ///     async move {
@@ -631,15 +633,12 @@ impl WaitQueue {
     ///     }
     /// });
     ///
-    /// let waiter = scheduler.spawn(async move {
-    ///     println!("waking task...");
-    ///     queue.wake();
-    /// });
+    /// println!("waking task...");
+    /// queue.wake();
     ///
-    /// // run the scheduler so that the spawned tasks can run.
-    /// scheduler.tick();
-    ///
-    /// assert!(waiter.is_complete());
+    /// waiter.await.unwrap();
+    /// # }
+    /// # test();
     /// ```
     ///
     /// [`wake()`]: Self::wake
@@ -1047,7 +1046,7 @@ impl Wait<'_> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::WaitQueue;
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue1 = WaitQueue::new();
     /// let queue2 = WaitQueue::new();
@@ -1070,7 +1069,7 @@ impl Wait<'_> {
     /// Two [`Wait`] futures waiting on the same [`WaitQueue`] return `true`:
     ///
     /// ```
-    /// use maitake::sync::WaitQueue;
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue = WaitQueue::new();
     ///
@@ -1083,7 +1082,7 @@ impl Wait<'_> {
     /// Two [`Wait`] futures waiting on different [`WaitQueue`]s return `false`:
     ///
     /// ```
-    /// use maitake::sync::WaitQueue;
+    /// use maitake_sync::WaitQueue;
     ///
     /// let queue1 = WaitQueue::new();
     /// let queue2 = WaitQueue::new();
@@ -1277,13 +1276,13 @@ feature! {
     // === impl WaitOwned ===
 
     impl WaitOwned {
-                /// Returns `true` if this `WaitOwned` future is waiting for a
+        /// Returns `true` if this `WaitOwned` future is waiting for a
         /// notification from the provided [`WaitQueue`].
         ///
         /// # Examples
         ///
         /// ```
-        /// use maitake::sync::WaitQueue;
+        /// use maitake_sync::WaitQueue;
         /// use std::sync::Arc;
         ///
         /// let queue1 = Arc::new(WaitQueue::new());
@@ -1308,7 +1307,7 @@ feature! {
         /// `true`:
         ///
         /// ```
-        /// use maitake::sync::WaitQueue;
+        /// use maitake_sync::WaitQueue;
         /// use std::sync::Arc;
         ///
         /// let queue = Arc::new(WaitQueue::new());
@@ -1323,7 +1322,7 @@ feature! {
         /// `false`:
         ///
         /// ```
-        /// use maitake::sync::WaitQueue;
+        /// use maitake_sync::WaitQueue;
         /// use std::sync::Arc;
         ///
         /// let queue1 = Arc::new(WaitQueue::new());

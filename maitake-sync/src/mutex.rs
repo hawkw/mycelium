@@ -141,14 +141,14 @@ impl<T> Mutex<T> {
         /// # Examples
         ///
         /// ```
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         ///
         /// let lock = Mutex::new(42);
         /// ```
         ///
         /// As this is a `const fn`, it may be used in a `static` initializer:
         /// ```
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         ///
         /// static GLOBAL_LOCK: Mutex<usize> = Mutex::new(42);
         /// ```
@@ -176,7 +176,7 @@ impl<T: ?Sized> Mutex<T> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::Mutex;
+    /// use maitake_sync::Mutex;
     ///
     /// async fn example() {
     ///     let mutex = Mutex::new(1);
@@ -204,7 +204,7 @@ impl<T: ?Sized> Mutex<T> {
     /// # Examples
     ///
     /// ```
-    /// use maitake::sync::Mutex;
+    /// use maitake_sync::Mutex;
     /// # async fn dox() -> Option<()> {
     ///
     /// let mutex = Mutex::new(1);
@@ -374,7 +374,7 @@ feature! {
         /// # // in these examples, rather than `std`...but i don't want to make
         /// # // the tests actually `#![no_std]`...
         /// # use std as alloc;
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         /// use alloc::sync::Arc;
         ///
         /// # fn main() {
@@ -422,7 +422,7 @@ feature! {
         /// # // in these examples, rather than `std`...but i don't want to make
         /// # // the tests actually `#![no_std]`...
         /// # use std as alloc;
-        /// use maitake::sync::Mutex;
+        /// use maitake_sync::Mutex;
         /// use alloc::sync::Arc;
         ///
         /// # fn main() {

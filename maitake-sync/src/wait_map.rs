@@ -89,12 +89,10 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
 ///
-/// ```
+/// ```ignore
 /// use std::sync::Arc;
-/// use maitake::{
-///     scheduler::Scheduler,
-///     sync::wait_map::{WaitMap, WakeOutcome},
-/// };
+/// use maitake::scheduler;
+/// use maitake_sync::wait_map::{WaitMap, WakeOutcome};
 ///
 /// const TASKS: usize = 10;
 ///
@@ -235,12 +233,10 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// use maitake::{
-    ///     scheduler::Scheduler,
-    ///     sync::wait_map::{WaitMap, WakeOutcome},
-    /// };
+    /// use maitake::scheduler;
+    /// use maitake_sync::wait_map::{WaitMap, WakeOutcome};
     /// use futures_util::pin_mut;
     ///
     /// let scheduler = Scheduler::new();
