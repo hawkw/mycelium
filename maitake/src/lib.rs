@@ -47,11 +47,18 @@ pub mod sync {
     //! - [`WaitMap`], a set of waiting tasks associated with keys, in which a task
     //!       can be woken by its key
     //!
+    //! **Note**: `maitake`'s synchronization primitives *do not* require the
+    //! `maitake` runtime, and can be used with any async executor. Therefore,
+    //! they are provided by a separate [`maitake-sync`] crate, which can be
+    //! used without depending on the rest of the `maitake` runtime. This module
+    //! re-exports these APIs from [`maitake-sync`].
+    //!
     //! [primitives]: https://wiki.osdev.org/Synchronization_Primitives
     //! [tasks]: crate::task
     //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
     //! [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
     //! [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
     //! [`Waker`]: core::task::Waker
+    //! [`maitake-sync`]: https://crates.io/crates/maitake-sync
     pub use maitake_sync::*;
 }
