@@ -4,6 +4,7 @@ pub(crate) use self::inner::*;
 #[cfg(loom)]
 mod inner {
     #![allow(dead_code)]
+    #![allow(unused_imports)]
 
     #[cfg(feature = "alloc")]
     pub(crate) mod alloc {
@@ -13,7 +14,6 @@ mod inner {
             pin::Pin,
             task::{Context, Poll},
         };
-        #[allow(unused_imports)]
         pub(crate) use loom::alloc::*;
 
         #[derive(Debug)]
@@ -65,7 +65,9 @@ mod inner {
         }
     }
 
-    pub(crate) use loom::{cell, future, hint, model, thread};
+    #[cfg(test)]
+    pub(crate) use loom::future;
+    pub(crate) use loom::{cell, hint, model, thread};
 
     pub(crate) mod sync {
         pub(crate) use loom::sync::*;
