@@ -30,7 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 pin-project = "1"
 
 [target.'cfg(loom)'.dependencies]
-loom = "0.5.5"
+loom = "0.7"
 tracing = { version = "0.1" }
 
 [package.metadata.docs.rs]

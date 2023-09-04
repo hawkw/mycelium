@@ -529,7 +529,7 @@ dependencies = [
 name = "cordyceps"
 version = "0.3.2"
 dependencies = [
- "loom 0.5.6",
+ "loom",
  "pin-project",
  "proptest",
  "tracing 0.1.37",
@@ -1281,22 +1281,6 @@ dependencies = [
 
 [[package]]
 name = "loom"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff50ecb28bb86013e935fb6683ab1f6d3a20016f123c76fd4c27470076ac30f5"
-dependencies = [
- "cfg-if",
- "generator",
- "pin-utils",
- "scoped-tls",
- "serde",
- "serde_json",
- "tracing 0.1.37",
- "tracing-subscriber 0.3.16",
-]
-
-[[package]]
-name = "loom"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86a17963e5073acf8d3e2637402657c6b467218f36fe10d696b3e1095ae019bf"
@@ -1319,7 +1303,7 @@ dependencies = [
  "cordyceps",
  "futures",
  "futures-util",
- "loom 0.5.6",
+ "loom",
  "maitake-sync",
  "mycelium-bitfield",
  "mycelium-util",
@@ -1340,7 +1324,7 @@ dependencies = [
  "cordyceps",
  "futures",
  "futures-util",
- "loom 0.7.0",
+ "loom",
  "mycelium-bitfield",
  "pin-project",
  "portable-atomic",
@@ -1508,7 +1492,7 @@ name = "mycelium-util"
 version = "0.1.0"
 dependencies = [
  "cordyceps",
- "loom 0.5.6",
+ "loom",
  "maitake-sync",
  "mycelium-bitfield",
  "proptest",

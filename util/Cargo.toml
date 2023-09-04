@@ -25,7 +25,7 @@ tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", features = [
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes", "std"] }
 
 [target.'cfg(loom)'.dependencies]
-loom = "0.5.5"
+loom = "0.7"
 
 [target.'cfg(loom)'.dev-dependencies]
 tracing_01 = { package = "tracing", version = "0.1.36" }
