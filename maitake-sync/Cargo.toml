@@ -33,6 +33,12 @@ pin-project = "1"
 portable-atomic = "1.2"
 tracing = { version = "0.1", default_features = false, optional = true }
 
+# this is a normal dependency, rather than a dev dependency, so that
+# `maitake-sync` may be used in other crates' loom tests as well (but only when
+# the cfg is enabled).
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.7", default_features = false }
+
 [dev-dependencies]
 futures-util = "0.3"
 futures = "0.3"
