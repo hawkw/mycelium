@@ -13,6 +13,7 @@ mod inner {
             pin::Pin,
             task::{Context, Poll},
         };
+        #[allow(unused_imports)]
         pub(crate) use loom::alloc::*;
 
         #[derive(Debug)]
@@ -64,7 +65,7 @@ mod inner {
         }
     }
 
-    pub(crate) use loom::{cell, future, model, thread};
+    pub(crate) use loom::{cell, future, hint, model, thread};
 
     pub(crate) mod sync {
         pub(crate) use loom::sync::*;

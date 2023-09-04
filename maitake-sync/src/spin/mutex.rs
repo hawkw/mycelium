@@ -1,7 +1,7 @@
 use crate::{
     loom::{
-        atomic::{AtomicBool, Ordering::*},
         cell::{MutPtr, UnsafeCell},
+        sync::atomic::{AtomicBool, Ordering::*},
     },
     util::Backoff,
 };

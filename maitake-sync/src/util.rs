@@ -196,7 +196,7 @@ macro_rules! unreachable_unchecked {
     });
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 pub(crate) use self::test::trace_init;
 
 #[cfg(test)]
@@ -208,6 +208,7 @@ pub(crate) mod test {
     ///
     /// Exists to abstract over tracing 01/02 guard type differences.
     #[must_use]
+    #[cfg(all(test, not(loom)))]
     pub struct TestGuard {
         _x1: tracing::subscriber::DefaultGuard,
     }
@@ -216,6 +217,8 @@ pub(crate) mod test {
     ///
     /// Returns a [TestGuard] that must be held for the duration of test to ensure
     /// tracing messages are correctly output
+
+    #[cfg(all(test, not(loom)))]
     pub(crate) fn trace_init() -> TestGuard {
         trace_init_with_default("maitake=debug,cordyceps=debug")
     }
@@ -224,6 +227,7 @@ pub(crate) mod test {
     ///
     /// Returns a [TestGuard] that must be held for the duration of test to ensure
     /// tracing messages are correctly output
+    #[cfg(all(test, not(loom)))]
     pub(crate) fn trace_init_with_default(default: &str) -> TestGuard {
         use tracing_subscriber::{
             filter::{EnvFilter, LevelFilter},
