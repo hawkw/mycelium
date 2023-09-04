@@ -537,272 +537,206 @@ impl fmt::Debug for State {
     }
 }
 
-// #[cfg(all(feature = "alloc", not(loom), test))]
-// mod tests {
-//     use super::*;
-//     use crate::scheduler::Scheduler;
-//     use alloc::sync::Arc;
+#[cfg(all(feature = "alloc", not(loom), test))]
+mod tests {
+    use super::*;
+    use alloc::sync::Arc;
 
-//     use tokio_test::{assert_pending, assert_ready, assert_ready_ok, task};
+    use tokio_test::{assert_pending, assert_ready, assert_ready_ok, task};
 
-//     #[test]
-//     fn wait_smoke() {
-//         static COMPLETED: AtomicUsize = AtomicUsize::new(0);
-//         let _trace = crate::util::test::trace_init();
+    #[test]
+    fn wait_smoke() {
+        let _trace = crate::util::test::trace_init();
 
-//         let sched = Scheduler::new();
-//         let wait = Arc::new(WaitCell::new());
+        let wait = Arc::new(WaitCell::new());
 
-//         let wait2 = wait.clone();
-//         sched.spawn(async move {
-//             wait2.wait().await.unwrap();
-//             COMPLETED.fetch_add(1, Ordering::Relaxed);
-//         });
+        let mut task = task::spawn({
+            let wait = wait.clone();
+            async move { wait.wait().await }
+        });
 
-//         let tick = sched.tick();
-//         assert_eq!(tick.completed, 0);
-//         assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
+        assert_pending!(task.poll());
 
-//         assert!(wait.wake());
-//         let tick = sched.tick();
-//         assert_eq!(tick.completed, 1);
-//         assert_eq!(COMPLETED.load(Ordering::Relaxed), 1);
-//     }
+        assert!(wait.wake());
 
-//     /// Reproduces https://github.com/hawkw/mycelium/issues/449
-//     #[test]
-//     fn wait_spurious_poll() {
-//         let _trace = crate::util::test::trace_init();
+        assert!(task.is_woken());
+        assert_ready_ok!(task.poll());
+    }
 
-//         let cell = Arc::new(WaitCell::new());
-//         let mut task = task::spawn({
-//             let cell = cell.clone();
-//             async move { cell.wait().await }
-//         });
+    /// Reproduces https://github.com/hawkw/mycelium/issues/449
+    #[test]
+    fn wait_spurious_poll() {
+        let _trace = crate::util::test::trace_init();
 
-//         assert_pending!(task.poll(), "first poll should be pending");
-//         assert_pending!(task.poll(), "second poll should be pending");
+        let cell = Arc::new(WaitCell::new());
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move { cell.wait().await }
+        });
 
-//         cell.wake();
+        assert_pending!(task.poll(), "first poll should be pending");
+        assert_pending!(task.poll(), "second poll should be pending");
 
-//         assert_ready_ok!(task.poll(), "should have been woken");
-//     }
+        cell.wake();
 
-//     #[test]
-//     fn subscribe() {
-//         let _trace = crate::util::test::trace_init();
-//         futures::executor::block_on(async {
-//             let cell = WaitCell::new();
-//             let wait = cell.subscribe().await;
-//             cell.wake();
-//             wait.await.unwrap();
-//         })
-//     }
+        assert_ready_ok!(task.poll(), "should have been woken");
+    }
 
-//     #[test]
-//     fn wake_before_subscribe() {
-//         let _trace = crate::util::test::trace_init();
-//         let cell = Arc::new(WaitCell::new());
-//         cell.wake();
+    #[test]
+    fn subscribe() {
+        let _trace = crate::util::test::trace_init();
+        futures::executor::block_on(async {
+            let cell = WaitCell::new();
+            let wait = cell.subscribe().await;
+            cell.wake();
+            wait.await.unwrap();
+        })
+    }
 
-//         let mut task = task::spawn({
-//             let cell = cell.clone();
-//             async move {
-//                 let wait = cell.subscribe().await;
-//                 wait.await.unwrap();
-//             }
-//         });
+    #[test]
+    fn wake_before_subscribe() {
+        let _trace = crate::util::test::trace_init();
+        let cell = Arc::new(WaitCell::new());
+        cell.wake();
 
-//         assert_ready!(task.poll(), "woken task should complete");
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+            }
+        });
 
-//         let mut task = task::spawn({
-//             let cell = cell.clone();
-//             async move {
-//                 let wait = cell.subscribe().await;
-//                 wait.await.unwrap();
-//             }
-//         });
+        assert_ready!(task.poll(), "woken task should complete");
 
-//         assert_pending!(task.poll(), "wait cell hasn't been woken yet");
-//         cell.wake();
-//         assert!(task.is_woken());
-//         assert_ready!(task.poll());
-//     }
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+            }
+        });
 
-//     #[test]
-//     fn wake_debounce() {
-//         let _trace = crate::util::test::trace_init();
-//         let cell = Arc::new(WaitCell::new());
+        assert_pending!(task.poll(), "wait cell hasn't been woken yet");
+        cell.wake();
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
+    }
 
-//         let mut task = task::spawn({
-//             let cell = cell.clone();
-//             async move {
-//                 cell.wait().await.unwrap();
-//             }
-//         });
+    #[test]
+    fn wake_debounce() {
+        let _trace = crate::util::test::trace_init();
+        let cell = Arc::new(WaitCell::new());
 
-//         assert_pending!(task.poll());
-//         cell.wake();
-//         cell.wake();
-//         assert!(task.is_woken());
-//         assert_ready!(task.poll());
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                cell.wait().await.unwrap();
+            }
+        });
 
-//         let mut task = task::spawn({
-//             let cell = cell.clone();
-//             async move {
-//                 cell.wait().await.unwrap();
-//             }
-//         });
+        assert_pending!(task.poll());
+        cell.wake();
+        cell.wake();
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
 
-//         assert_pending!(task.poll());
-//         assert!(!task.is_woken());
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                cell.wait().await.unwrap();
+            }
+        });
 
-//         cell.wake();
-//         assert!(task.is_woken());
-//         assert_ready!(task.poll());
-//     }
+        assert_pending!(task.poll());
+        assert!(!task.is_woken());
 
-//     #[test]
-//     fn subscribe_doesnt_self_wake() {
-//         let _trace = crate::util::test::trace_init();
-//         let cell = Arc::new(WaitCell::new());
+        cell.wake();
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
+    }
 
-//         let mut task = task::spawn({
-//             let cell = cell.clone();
-//             async move {
-//                 let wait = cell.subscribe().await;
-//                 wait.await.unwrap();
-//                 let wait = cell.subscribe().await;
-//                 wait.await.unwrap();
-//             }
-//         });
-//         assert_pending!(task.poll());
-//         assert!(!task.is_woken());
+    #[test]
+    fn subscribe_doesnt_self_wake() {
+        let _trace = crate::util::test::trace_init();
+        let cell = Arc::new(WaitCell::new());
 
-//         cell.wake();
-//         assert!(task.is_woken());
-//         assert_pending!(task.poll());
+        let mut task = task::spawn({
+            let cell = cell.clone();
+            async move {
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+                let wait = cell.subscribe().await;
+                wait.await.unwrap();
+            }
+        });
+        assert_pending!(task.poll());
+        assert!(!task.is_woken());
 
-//         assert!(!task.is_woken());
-//         assert_pending!(task.poll());
+        cell.wake();
+        assert!(task.is_woken());
+        assert_pending!(task.poll());
 
-//         cell.wake();
-//         assert!(task.is_woken());
-//         assert_ready!(task.poll());
-//     }
-// }
+        assert!(!task.is_woken());
+        assert_pending!(task.poll());
 
-// #[cfg(test)]
-// pub(crate) mod test_util {
-//     use super::*;
+        cell.wake();
+        assert!(task.is_woken());
+        assert_ready!(task.poll());
+    }
+}
 
-//     use crate::loom::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-//     use std::sync::Arc;
+#[cfg(all(loom, test))]
+mod loom {
+    use super::*;
+    use crate::loom::{future, sync::Arc, thread};
+    use tokio_test::assert_pending;
 
-//     #[derive(Debug)]
-//     pub(crate) struct Chan {
-//         num: AtomicUsize,
-//         task: WaitCell,
-//         num_notify: usize,
-//     }
+    #[test]
+    fn basic() {
+        crate::loom::model(|| {
+            let wait = Arc::new(WaitCell::new());
 
-//     impl Chan {
-//         pub(crate) fn new(num_notify: usize) -> Arc<Self> {
-//             Arc::new(Self {
-//                 num: AtomicUsize::new(0),
-//                 task: WaitCell::new(),
-//                 num_notify,
-//             })
-//         }
+            let waker = wait.clone();
+            let closer = wait.clone();
 
-//         pub(crate) async fn wait(self: Arc<Chan>) {
-//             let this = Arc::downgrade(&self);
-//             drop(self);
-//             futures_util::future::poll_fn(move |cx| {
-//                 let Some(this) = this.upgrade() else {return Poll::Ready(()) };
+            thread::spawn(move || {
+                info!("waking");
+                waker.wake();
+                info!("woken");
+            });
+            thread::spawn(move || {
+                info!("closing");
+                closer.close();
+                info!("closed");
+            });
 
-//                 let res = this.task.wait();
-//                 futures_util::pin_mut!(res);
+            info!("waiting");
+            let _ = future::block_on(wait.wait());
+            info!("wait'd");
+        });
+    }
 
-//                 if this.num_notify == this.num.load(Relaxed) {
-//                     return Poll::Ready(());
-//                 }
+    #[test]
+    fn subscribe() {
+        crate::loom::model(|| {
+            future::block_on(async move {
+                let cell = Arc::new(WaitCell::new());
+                let wait = cell.subscribe().await;
 
-//                 res.poll(cx).map(drop)
-//             })
-//             .await
-//         }
+                thread::spawn({
+                    let waker = cell.clone();
+                    move || {
+                        info!("waking");
+                        waker.wake();
+                        info!("woken");
+                    }
+                });
 
-//         pub(crate) fn wake(&self) {
-//             self.num.fetch_add(1, Relaxed);
-//             self.task.wake();
-//         }
-
-//         #[allow(dead_code)]
-//         pub(crate) fn close(&self) {
-//             self.num.fetch_add(1, Relaxed);
-//             self.task.close();
-//         }
-//     }
-
-//     impl Drop for Chan {
-//         fn drop(&mut self) {
-//             debug!(chan = ?fmt::alt(&self), "drop");
-//         }
-//     }
-// }
-
-// #[cfg(all(loom, test))]
-// mod loom {
-//     use super::*;
-//     use crate::loom::{future, sync::Arc, thread};
-//     use tokio_test::assert_pending;
-
-//     #[test]
-//     fn basic() {
-//         crate::loom::model(|| {
-//             let wait = Arc::new(WaitCell::new());
-
-//             let waker = wait.clone();
-//             let closer = wait.clone();
-
-//             thread::spawn(move || {
-//                 info!("waking");
-//                 waker.wake();
-//                 info!("woken");
-//             });
-//             thread::spawn(move || {
-//                 info!("closing");
-//                 closer.close();
-//                 info!("closed");
-//             });
-
-//             info!("waiting");
-//             let _ = future::block_on(wait.wait());
-//             info!("wait'd");
-//         });
-//     }
-
-//     #[test]
-//     fn subscribe() {
-//         crate::loom::model(|| {
-//             future::block_on(async move {
-//                 let cell = Arc::new(WaitCell::new());
-//                 let wait = cell.subscribe().await;
-
-//                 thread::spawn({
-//                     let waker = cell.clone();
-//                     move || {
-//                         info!("waking");
-//                         waker.wake();
-//                         info!("woken");
-//                     }
-//                 });
-
-//                 info!("waiting");
-//                 wait.await.expect("wait should be woken, not closed");
-//                 info!("wait'd");
-//             });
-//         });
-//     }
-// }
+                info!("waiting");
+                wait.await.expect("wait should be woken, not closed");
+                info!("wait'd");
+            });
+        });
+    }
+}
