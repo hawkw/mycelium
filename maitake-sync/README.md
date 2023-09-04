@@ -33,6 +33,9 @@ supporting `#![no_std]` projects. It was initially developed as part of
 [mycelium] and [mnemOS] operating systems, but it may be useful for other
 projects as well.
 
+To learn a bit of the backstory behind `maitake-sync`, see the [announcement
+post](https://www.elizas.website/announcing-maitake-sync.html)!
+
 > **Note**
 >
 > This is a hobby project. I'm working on it in my spare time, for my own
@@ -75,7 +78,7 @@ The following synchronization primitives are provided:
 In addition, the [`util` module] contains a collection of general-purpose
 utilities for implementing synchronization primitives, and the [`spin` module]
 contains implementations of *non-async*, spinning-based synchronization
-primitives. 
+primitives.
 
 [`core::task`]: https://doc.rust-lang.org/stable/core/task/index.html
 [`core::future`]: https://doc.rust-lang.org/stable/core/future/index.html
