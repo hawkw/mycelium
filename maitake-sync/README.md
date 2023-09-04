@@ -33,6 +33,20 @@ supporting `#![no_std]` projects. It was initially developed as part of
 [mycelium] and [mnemOS] operating systems, but it may be useful for other
 projects as well.
 
+> **Note**
+>
+> This is a hobby project. I'm working on it in my spare time, for my own
+> personal use. I'm very happy to share it with the broader Rust community, and
+> [contributions] and [bug reports] are always welcome. However, please remember
+> that I'm working on this library _for fun_, and if it stops being fun...well,
+> you get the idea.
+>
+> Anyway, feel free to use and enjoy this crate, and to contribute back as much
+> as you want to!
+
+[contributions]: https://github.com/hawkw/mycelium/compare
+[bug reports]: https://github.com/hawkw/mycelium/issues/new
+
 [_Synchronization primitives_][primitives] are tools for implementing
 synchronization between [tasks][`core::task`]: to control which tasks can run at
 any given time, and in what order, and to coordinate tasks' access to shared
