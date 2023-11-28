@@ -46,7 +46,7 @@ jobs:
         components: rust-src, llvm-tools-preview
         toolchain: nightly
         override: true
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: print current nightly
       run: rustc --version && cargo --version
     - run: cargo build-x64
@@ -62,7 +62,7 @@ jobs:
         components: clippy
         toolchain: nightly
         override: true
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: print current nightly
       run: rustc --version && cargo --version
     - name: install Just
