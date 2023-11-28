@@ -6,8 +6,9 @@
 //! The bit packing utilities consist of a type that defines a specification for
 //! a bit range to pack into, and a wrapper type for an unsigned integer
 //! defining methods to pack bit ranges into it. Packing specs are defined for
-//! [`u64`],  [`u32`], [`u16`], and [`u8`], as [`Pack64`], [`Pack32`],
-//! [`Pack16`], and [`Pack8`], respectively.
+//! [`usize`], [`u128`], [`u64`], [`u32`], [`u16`], and [`u8`], as
+//! [`PackUsize`], [`Pack128`], [`Pack64`], [`Pack32`], [`Pack16`], and
+//! [`Pack8`], respectively.
 //!
 //! Note that the bit packing utilities are generic using macros, rather than
 //! using generics and traits, because they are intended to be usable in
@@ -1079,6 +1080,7 @@ macro_rules! make_packers {
 
 make_packers! {
     pub struct PackUsize { bits: usize, packing: PackingUsize, pair: PairUsize }
+    pub struct Pack128 { bits: u128, packing: Packing128, pair: Pair128 }
     pub struct Pack64 { bits: u64, packing: Packing64, pair: Pair64, }
     pub struct Pack32 { bits: u32, packing: Packing32, pair: Pair32, }
     pub struct Pack16 { bits: u16, packing: Packing16, pair: Pair16, }
@@ -1281,6 +1283,7 @@ mod tests {
     }
 
     test_pack_unpack! {
+        fn pack_unpack_128<Pack128, u128>(128);
         fn pack_unpack_64<Pack64, u64>(64);
         fn pack_unpack_32<Pack32, u32>(32);
         fn pack_unpack_16<Pack16, u16>(16);
@@ -1288,6 +1291,8 @@ mod tests {
     }
 
     test_pack_methods! {
+
+        fn pack_methods_128<Pack128, u128>(128);
         fn pack_methods_64<Pack64, u64>(64);
         fn pack_methods_32<Pack32, u32>(32);
         fn pack_methods_16<Pack16, u16>(16);
@@ -1295,6 +1300,7 @@ mod tests {
     }
 
     test_from_range! {
+        fn pack_from_src_range_128<Pack128, u128>(128);
         fn pack_from_src_range_64<Pack64, u64>(64);
         fn pack_from_src_range_32<Pack32, u32>(32);
         fn pack_from_src_range_16<Pack16, u16>(16);
@@ -1302,6 +1308,8 @@ mod tests {
     }
 
     test_pair_least_sig_zeroed! {
+
+        fn pair_least_sig_zeroed_128<Pack128, u128>(128);
         fn pair_least_sig_zeroed_64<Pack64, u64>(64);
         fn pair_least_sig_zeroed_32<Pack32, u32>(32);
         fn pair_least_sig_zeroed_16<Pack16, u16>(16);
@@ -1309,6 +1317,7 @@ mod tests {
     }
 
     test_pair_least_sig_arbitrary! {
+        fn pair_least_sig_arbitrary_128<Pack128, u128>(128);
         fn pair_least_sig_arbitrary_64<Pack64, u64>(64);
         fn pair_least_sig_arbitrary_32<Pack32, u32>(32);
         fn pair_least_sig_arbitrary_16<Pack16, u16>(16);
