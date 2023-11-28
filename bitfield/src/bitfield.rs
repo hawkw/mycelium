@@ -11,8 +11,8 @@
 /// # Generated Implementations
 ///
 /// The `bitfield!` macro generates a type with the following functions, where
-/// `{int}` is the integer type that represents the bitfield (one of `u8`,
-/// `u16`,`u32`, `u64`, or `usize`):
+/// `{int}` is the integer type that represents the bitfield (one of [`u8`],
+/// [`u16`], [`u32`], [`u64`], [`u128`], or [`usize`]):
 ///
 /// - `const fn new() -> Self`: Returns a new instance of the bitfield type with
 ///   all bits zeroed.
@@ -833,11 +833,12 @@ macro_rules! bitfield {
     // };
 
     (@t usize, $V:ty, $F:ty) => { $crate::PackUsize<$V, $F> };
+    (@t u128, $V:ty, $F:ty) => { $crate::Pack128<$V, $F> };
     (@t u64, $V:ty, $F:ty) => { $crate::Pack64<$V, $F> };
     (@t u32, $V:ty, $F:ty) => { $crate::Pack32<$V, $F> };
     (@t u16, $V:ty, $F:ty) => { $crate::Pack16<$V, $F> };
     (@t u8, $V:ty, $F:ty) => { $crate::Pack8<$V, $F> };
-    (@t $T:ty, $V:ty, $F:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u64`, `u32`, `u16`, or `u8`")) }
+    (@t $T:ty, $V:ty, $F:ty) => { compile_error!(concat!("unsupported bitfield type `", stringify!($T), "`; expected one of `usize`, `u128`, `u64`, `u32`, `u16`, or `u8`")) }
 }
 
 #[cfg(test)]
@@ -854,6 +855,21 @@ mod tests {
             const LOTS = 5;
             const OF = 1;
             const FUN = 6;
+        }
+    }
+
+    bitfield! {
+        /// This is only here to ensure it compiles...
+        #[allow(dead_code)]
+        struct TestBitfieldHuge<u128> {
+            const HELLO = 4;
+            const _RESERVED_1 = 3;
+            const WORLD: bool;
+            const HAVE: TestEnum;
+            const LOTS = 5;
+            const OF = 1;
+            const FUN = 6;
+            const REST = ..;
         }
     }
 
@@ -882,6 +898,19 @@ mod tests {
 
         fn into_bits(self) -> u32 {
             self as u8 as u32
+        }
+    }
+
+    impl FromBits<u128> for TestEnum {
+        const BITS: u32 = 2;
+        type Error = core::convert::Infallible;
+
+        fn try_from_bits(bits: u128) -> Result<Self, Self::Error> {
+            FromBits::<u32>::try_from_bits(bits as u32)
+        }
+
+        fn into_bits(self) -> u128 {
+            self as u8 as u128
         }
     }
 
