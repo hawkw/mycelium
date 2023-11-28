@@ -3,9 +3,22 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## mycelium-bitfield-v0.1.4 - (2023-11-28)
+
+[3063b08](https://github.com/hawkw/mycelium/3063b0807bbcdd7f1f7abab4df8d9709064fe1bc)...[d62f966](https://github.com/hawkw/mycelium/d62f96697e26c4f3cb32e7a18d5fc949dd11ac05)
+
+
+### Added
+
+- Add `u128` support ([d62f966](https://github.com/hawkw/mycelium/d62f96697e26c4f3cb32e7a18d5fc949dd11ac05), closes [#466](https://github.com/hawkw/mycelium/issues/466))
+
+### Documented
+
+- Hobby project disclaimer for published libs ([#463](https://github.com/hawkw/mycelium/issues/463)) ([230afdb](https://github.com/hawkw/mycelium/230afdbeae7cb4719c2bf177a6fe92a2ca4517ba))
+
 ## mycelium-bitfield-v0.1.3 - (2023-07-23)
 
-[d0a6f13](https://github.com/hawkw/mycelium/d0a6f13cc53e0cd5dbd493b63ba0711fd06dc985)...[ab096b4](https://github.com/hawkw/mycelium/ab096b4bcf64beda092b3980ca32cb50ad4c2682)
+[d0a6f13](https://github.com/hawkw/mycelium/d0a6f13cc53e0cd5dbd493b63ba0711fd06dc985)...[3063b08](https://github.com/hawkw/mycelium/3063b0807bbcdd7f1f7abab4df8d9709064fe1bc)
 
 
 ### Added
@@ -13,6 +26,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Generate `fmt::UpperHex` and `LowerHex` ([#292](https://github.com/hawkw/mycelium/issues/292)) ([b6138c8](https://github.com/hawkw/mycelium/b6138c8b7b704c59e394fd5600c321d7eede0a46))
 - Add `Pack::pair_with` ([#294](https://github.com/hawkw/mycelium/issues/294)) ([47b08b7](https://github.com/hawkw/mycelium/47b08b7506712cf5664cf62bf5f0c72fa226a994))
 - Add `Pair::pack_from_{src, dst}` ([#294](https://github.com/hawkw/mycelium/issues/294)) ([48f48ca](https://github.com/hawkw/mycelium/48f48cab628c88edc4fa3ce6a045c522976a62e7))
+- Use a separate IST stack for double faults ([#112](https://github.com/hawkw/mycelium/issues/112)) ([cff7467](https://github.com/hawkw/mycelium/cff74670029b2a797db4cb8664b5b513dd831b55), closes [#56](https://github.com/hawkw/mycelium/issues/56))
 - Skip `_` fields in `fmt::Debug` ([#375](https://github.com/hawkw/mycelium/issues/375)) ([46ca526](https://github.com/hawkw/mycelium/46ca52615338f5341fd0006b56a20379a1a797de))
 - Add `display_ascii` to generated bitfields ([#420](https://github.com/hawkw/mycelium/issues/420)) ([7842802](https://github.com/hawkw/mycelium/7842802e1b52da0d7939c972b69964cddc4f875a))
 - Select Unicode format with `Display` alt-mode ([#420](https://github.com/hawkw/mycelium/issues/420)) ([a09d55b](https://github.com/hawkw/mycelium/a09d55b7dd81aed292ec8265ce28c8f70f0b293d))
@@ -29,7 +43,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Don't have `fmt::alt` control struct formatting ([#292](https://github.com/hawkw/mycelium/issues/292)) ([03055f0](https://github.com/hawkw/mycelium/03055f086dbdbb68be6cb2a6eef96ffa450df61c))
 - Make `pair_with` work with other bitfields ([#295](https://github.com/hawkw/mycelium/issues/295)) ([532ee98](https://github.com/hawkw/mycelium/532ee987e0eddd203fc7ff3698a4c9f36232c669))
 - Make `Packing` work with typed specs ([#295](https://github.com/hawkw/mycelium/issues/295)) ([7b86e81](https://github.com/hawkw/mycelium/7b86e811a77831f4745e2b9437b3125ac27be8c8))
-
 
 ## mycelium-bitfield-v0.1.2 - (2022-07-25)
 
