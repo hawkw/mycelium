@@ -901,12 +901,9 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// If the closure returns `false`, the element will remain in the list and
     /// will not be yielded by the iterator.
     ///
-    /// Note that *unlike* the [`drain_filter` method][std-filter] on
-    /// [`std::collections::LinkedList`], the closure is *not* permitted to
-    /// mutate the elements of the list, as a mutable reference could be used to
-    /// improperly unlink list nodes.
-    ///
-    /// [std-filter]: std::collections::LinkedList::drain_filter
+    /// Note that the closure is *not* permitted to mutate the elements of the
+    /// list, as a mutable reference could be used to improperly unlink list
+    /// nodes.
     #[must_use]
     pub fn drain_filter<F>(&mut self, pred: F) -> DrainFilter<'_, T, F>
     where

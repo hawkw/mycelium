@@ -132,7 +132,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
 
     /// Wraps `self` with a predicate that takes a span or event's [`Metadata`]
     /// and returns a `bool`. The returned [`MakeWriter`]'s
-    /// [`MakeWriter::make_writer_for`][mwf] method will check the predicate to
+    /// [`MakeWriter::make_writer_for`] method will check the predicate to
     /// determine if  a writer should be produced for a given span or event.
     ///
     /// If the predicate returns `false`, the wrapped [`MakeWriter`]'s
@@ -242,7 +242,7 @@ pub struct BoxMakeWriter {
 }
  */
 
-/// A [writer] that is one of two types implementing [`fmt::Write`][writer].
+/// A [writer] that is one of two types implementing [`fmt::Write`].
 ///
 /// This may be used by [`MakeWriter`] implementations that may conditionally
 /// return one of two writers.
