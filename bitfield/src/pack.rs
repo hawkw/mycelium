@@ -703,11 +703,7 @@ macro_rules! make_packers {
 
             impl<T, F> Clone for $Pack<T, F> {
                 fn clone(&self) -> Self {
-                    Self {
-                        mask: self.mask,
-                        shift: self.shift,
-                        _dst_ty: PhantomData,
-                    }
+                   *self
                 }
             }
 
@@ -992,12 +988,7 @@ macro_rules! make_packers {
 
             impl<T> Clone for $Pair<T> {
                 fn clone(&self) -> Self {
-                    Self {
-                        src: self.src,
-                        dst: self.dst,
-                        dst_shl: self.dst_shl,
-                        dst_shr: self.dst_shr,
-                    }
+                    *self
                 }
             }
 

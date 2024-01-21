@@ -309,11 +309,7 @@ impl<V> Msr<V> {
 impl<V> Clone for Msr<V> {
     #[inline]
     fn clone(&self) -> Self {
-        Self {
-            num: self.num,
-            name: self.name,
-            _ty: PhantomData,
-        }
+        *self
     }
 }
 
