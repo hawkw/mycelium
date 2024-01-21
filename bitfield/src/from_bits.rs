@@ -150,7 +150,7 @@ macro_rules! enum_from_bits {
         }
 
         impl $Type {
-            const VARIANTS: &[Self] = &[
+            const VARIANTS: &'static [Self] = &[
                 Self::$Variant1,
                 $(
                     Self::$Variant,
