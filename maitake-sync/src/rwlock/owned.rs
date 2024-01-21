@@ -101,7 +101,7 @@ impl<T: ?Sized> RwLock<T> {
     ///
     /// This method is identical to [`RwLock::read`], execept that it requires
     /// the `RwLock` to be wrapped in an [`Arc`], and returns an
-    /// [`OwnedRwLockReadGuard`][guard] that clones the [`Arc`] rather than
+    /// [`OwnedRwLockReadGuard`] that clones the [`Arc`] rather than
     /// borrowing the lock. Therefore, the returned guard is valid for the
     /// `'static` lifetime.
     ///
@@ -171,7 +171,7 @@ impl<T: ?Sized> RwLock<T> {
     ///
     /// This method is identical to [`RwLock::write`], execept that it requires
     /// the `RwLock` to be wrapped in an [`Arc`], and returns an
-    /// [`OwnedRwLockWriteGuard`][guard] that clones the [`Arc`] rather than
+    /// [`OwnedRwLockWriteGuard`] that clones the [`Arc`] rather than
     /// borrowing the lock. Therefore, the returned guard is valid for the
     /// `'static` lifetime.
     ///
@@ -226,7 +226,7 @@ impl<T: ?Sized> RwLock<T> {
     ///
     /// This method is identical to [`RwLock::try_read`], execept that it requires
     /// the `RwLock` to be wrapped in an [`Arc`], and returns an
-    /// [`OwnedRwLockReadGuard`][guard] that clones the [`Arc`] rather than
+    /// [`OwnedRwLockReadGuard`] that clones the [`Arc`] rather than
     /// borrowing the lock. Therefore, the returned guard is valid for the
     /// `'static` lifetime.
     ///
@@ -273,7 +273,7 @@ impl<T: ?Sized> RwLock<T> {
     ///
     /// This method is identical to [`RwLock::try_write`], execept that it requires
     /// the `RwLock` to be wrapped in an [`Arc`], and returns an
-    /// [`OwnedRwLockWriteGuard`][guard] that clones the [`Arc`] rather than
+    /// [`OwnedRwLockWriteGuard`] that clones the [`Arc`] rather than
     /// borrowing the lock. Therefore, the returned guard is valid for the
     /// `'static` lifetime.
     ///
