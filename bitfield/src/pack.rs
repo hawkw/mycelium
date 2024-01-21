@@ -769,14 +769,14 @@ macro_rules! make_packers {
             impl<A, B, F> PartialEq<&'_ $Pack<B, F>> for $Pack<A, F> {
                 #[inline]
                 fn eq(&self, other: &&'_ $Pack<B, F>) -> bool {
-                    self.eq(*other)
+                    <Self as PartialEq<$Pack<B, F>>>::eq(self, *other)
                 }
             }
 
             impl<A, B, F> PartialEq<$Pack<B, F>> for &'_ $Pack<A, F> {
                 #[inline]
                 fn eq(&self, other: &$Pack<B, F>) -> bool {
-                    (*self).eq(other)
+                    <$Pack<A, F> as PartialEq<$Pack<B, F>>>::eq(*self, other)
                 }
             }
 
@@ -1052,14 +1052,14 @@ macro_rules! make_packers {
             impl<A, B> PartialEq<&'_ $Pair<B>> for $Pair<A> {
                 #[inline]
                 fn eq(&self, other: &&'_ $Pair<B>) -> bool {
-                    self.eq(*other)
+                    <Self as PartialEq<$Pair<B>>>::eq(self, *other)
                 }
             }
 
             impl<A, B> PartialEq<$Pair<B>> for &'_ $Pair<A> {
                 #[inline]
                 fn eq(&self, other: &$Pair<B>) -> bool {
-                    (*self).eq(other)
+                    <$Pair<A> as PartialEq<$Pair<B>>>::eq(*self, other)
                 }
             }
 
