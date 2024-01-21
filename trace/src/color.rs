@@ -236,7 +236,7 @@ where
 }
 
 impl<W> AnsiEscapes<W> {
-    const ANSI_FG_COLOR_TABLE: [&str; 17] = [
+    const ANSI_FG_COLOR_TABLE: [&'static str; 17] = [
         "30", // black
         "31", // red
         "32", // green
