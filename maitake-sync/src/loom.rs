@@ -287,7 +287,7 @@ mod inner {
             }
 
             thread_local! {
-                static REGISTRY: RefCell<Option<Registry>> = RefCell::new(None);
+                static REGISTRY: RefCell<Option<Registry>> = const { RefCell::new(None) };
             }
 
             impl Registry {
