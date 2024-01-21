@@ -112,9 +112,9 @@ impl BootInfo for BootloaderApiBootInfo {
                 let com1 = AnsiEscapes::new(com1);
                 com1.with_filter(serial_filter as for<'a, 'b> fn(&'a tracing::Metadata<'b>) -> bool)
             });
-            Subscriber::display_only(display_writer).with_serial(serial)
+            Subscriber::<_, Option<FilteredSerial>>::display_only(display_writer)
+                .with_serial(serial)
         });
-
         Some(tracing::Dispatch::from_static(collector))
     }
 

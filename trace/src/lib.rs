@@ -77,7 +77,8 @@ struct Visitor<'writer, W> {
 
 impl<D> Default for Subscriber<D>
 where
-    for<'a> D: MakeWriter<'a>,
+    for<'a> D: MakeWriter<'a> + 'static,
+    for<'a> <D as MakeWriter<'a>>::Writer: SetColor,
     D: Default,
 {
     fn default() -> Self {
@@ -92,8 +93,10 @@ const _ACTUAL_ID_BITS: u64 = !(SERIAL_BIT | VGA_BIT);
 impl<D, S> Subscriber<D, S> {
     pub fn display_only(display: D) -> Self
     where
-        for<'a> D: MakeWriter<'a>,
-        for<'a> S: MakeWriter<'a>,
+        for<'a> D: MakeWriter<'a> + 'static,
+        // for<'a> <D as MakeWriter<'a>>::Writer: SetColor,
+        for<'a> S: MakeWriter<'a> + 'static,
+        // for<'a> <S as MakeWriter<'a>>::Writer: SetColor,
         S: Default,
     {
         Self {
@@ -103,9 +106,10 @@ impl<D, S> Subscriber<D, S> {
         }
     }
 
-    pub fn with_serial(self, port: S) -> Subscriber<D, S>
+    pub fn with_serial<S2>(self, port: S2) -> Subscriber<D, S2>
     where
-        for<'a> S: MakeWriter<'a>,
+        for<'a> S2: MakeWriter<'a> + 'static,
+        // for<'a> <S2 as MakeWriter<'a>>::Writer: SetColor,
     {
         Subscriber {
             serial: Output::new(port, Self::SERIAL_INDENT_CFG),
@@ -139,12 +143,12 @@ impl<D, S> Subscriber<D, S> {
     }
 }
 
-impl<D, S, DW, SW> tracing_core::Collect for Subscriber<D, S>
+impl<D, S> tracing_core::Collect for Subscriber<D, S>
 where
-    for<'a> D: MakeWriter<'a, Writer = DW> + 'static,
-    DW: Write + SetColor,
-    for<'a> S: MakeWriter<'a, Writer = SW> + 'static,
-    SW: Write + SetColor,
+    for<'a> D: MakeWriter<'a> + 'static,
+    for<'a> <D as MakeWriter<'a>>::Writer: SetColor,
+    for<'a> S: MakeWriter<'a> + 'static,
+    for<'a> <S as MakeWriter<'a>>::Writer: SetColor,
 {
     fn enabled(&self, meta: &Metadata) -> bool {
         self.display.enabled(meta) || self.serial.enabled(meta)

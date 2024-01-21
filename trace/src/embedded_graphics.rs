@@ -45,7 +45,7 @@ const fn unpack_point(u: u64) -> Point {
     Point { x, y }
 }
 
-impl<'mk, D> fmt::Write for TextWriter<'mk, D>
+impl<D> fmt::Write for TextWriter<'_, D>
 where
     D: Draw,
 {

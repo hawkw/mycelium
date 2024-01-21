@@ -243,7 +243,7 @@ impl<'a> Lock<'a> {
     }
 }
 
-impl<'a, B> Lock<'a, B> {
+impl<B> Lock<'_, B> {
     /// Set the serial port's baud rate for this `Lock`.
     ///
     /// When the `Lock` is dropped, the baud rate will be set to the previous value.
@@ -281,7 +281,7 @@ impl<'a, B> Lock<'a, B> {
     }
 }
 
-impl<'a> io::Read for Lock<'a, Blocking> {
+impl io::Read for Lock<'_, Blocking> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         for byte in buf.iter_mut() {
             *byte = self.inner.read_blocking();
@@ -290,7 +290,7 @@ impl<'a> io::Read for Lock<'a, Blocking> {
     }
 }
 
-impl<'a> io::Read for Lock<'a, Nonblocking> {
+impl io::Read for Lock<'_, Nonblocking> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         for byte in buf.iter_mut() {
             *byte = self.inner.read_nonblocking()?;
@@ -299,7 +299,7 @@ impl<'a> io::Read for Lock<'a, Nonblocking> {
     }
 }
 
-impl<'a> io::Write for Lock<'a, Blocking> {
+impl io::Write for Lock<'_, Blocking> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         for &byte in buf.iter() {
             self.inner.write_blocking(byte)
@@ -313,7 +313,7 @@ impl<'a> io::Write for Lock<'a, Blocking> {
     }
 }
 
-impl<'a> fmt::Write for Lock<'a, Blocking> {
+impl fmt::Write for Lock<'_, Blocking> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for byte in s.bytes() {
             self.inner.write_blocking(byte)
@@ -322,7 +322,7 @@ impl<'a> fmt::Write for Lock<'a, Blocking> {
     }
 }
 
-impl<'a> io::Write for Lock<'a, Nonblocking> {
+impl io::Write for Lock<'_, Nonblocking> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         for &byte in buf.iter() {
             self.inner.write_nonblocking(byte)?;
@@ -336,7 +336,7 @@ impl<'a> io::Write for Lock<'a, Nonblocking> {
     }
 }
 
-impl<'a> LockInner<'a> {
+impl LockInner<'_> {
     #[inline(always)]
     fn is_write_ready(&self) -> bool {
         self.inner.is_write_ready()
@@ -373,7 +373,7 @@ impl<'a> LockInner<'a> {
     }
 }
 
-impl<'a> Drop for LockInner<'a> {
+impl Drop for LockInner<'_> {
     fn drop(&mut self) {
         if let Some(divisor) = self.prev_divisor {
             // Disable IRQs.
@@ -385,7 +385,7 @@ impl<'a> Drop for LockInner<'a> {
     }
 }
 
-impl<'a> mycelium_trace::writer::MakeWriter<'a> for &'static Port {
+impl<'a> mycelium_trace::writer::MakeWriter<'a> for &Port {
     type Writer = Lock<'a, Blocking>;
     fn make_writer(&'a self) -> Self::Writer {
         self.lock()
