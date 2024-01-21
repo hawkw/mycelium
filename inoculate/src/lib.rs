@@ -301,7 +301,7 @@ impl Paths {
 // === impl BootloaderOptions ===
 
 impl BootloaderOptions {
-    const ARG_GROUP: &str = "boot-opts";
+    const ARG_GROUP: &'static str = "boot-opts";
 
     fn boot_config(&self) -> bootloader_boot_config::BootConfig {
         let mut bootcfg = bootloader::BootConfig::default();
