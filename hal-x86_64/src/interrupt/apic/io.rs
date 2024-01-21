@@ -280,6 +280,7 @@ impl Default for DeliveryMode {
     }
 }
 
+#[cfg(test)]
 mod test {
     use super::*;
 

@@ -63,7 +63,7 @@ mod inner {
 
 #[cfg(not(loom))]
 mod inner {
-    #![allow(dead_code)]
+    #![allow(dead_code, unused_imports)]
     pub(crate) mod sync {
         pub use core::sync::*;
 

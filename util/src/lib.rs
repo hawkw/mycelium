@@ -18,7 +18,6 @@ pub mod sync;
 
 pub(crate) mod loom;
 
-pub use self::macros::*;
 pub use cordyceps as intrusive;
 pub use mycelium_bitfield as bits;
 
