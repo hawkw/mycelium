@@ -205,7 +205,7 @@ struct CountDropKey {
 
 impl PartialEq for CountDropKey {
     fn eq(&self, other: &Self) -> bool {
-        self.idx.eq(&other.idx)
+        self.idx == other.idx
     }
 }
 
