@@ -365,7 +365,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         let split_idx = match at {
             // trying to split at the 0th index. we can just return the whole
             // list, leaving `self` empty.
-            at if at == 0 => return Some(mem::replace(self, Self::new())),
+            0 => return Some(mem::replace(self, Self::new())),
             // trying to split at the last index. the new list will be empty.
             at if at == len => return Some(Self::new()),
             // we cannot split at an index that is greater than the length of
