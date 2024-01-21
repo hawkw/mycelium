@@ -1516,7 +1516,7 @@ mod tests {
 mod test_util {
     use super::*;
     use crate::loom::alloc;
-    pub use std::{boxed::Box, pin::Pin, println, ptr, vec, vec::Vec};
+    pub use std::{boxed::Box, pin::Pin, ptr, vec::Vec};
 
     pub(super) struct Entry {
         links: Links<Entry>,
