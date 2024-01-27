@@ -690,7 +690,6 @@ mod tests {
 mod loom {
     use super::*;
     use crate::loom::{future, sync::Arc, thread};
-    use tokio_test::assert_pending;
 
     #[test]
     fn basic() {
