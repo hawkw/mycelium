@@ -1,3 +1,8 @@
+/// A spinlock-based [readers-writer lock].
+///
+/// See the documentation for the [`RwLock`] type for more information.
+///
+/// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 use crate::{
     loom::{
         cell::{ConstPtr, MutPtr, UnsafeCell},
@@ -181,6 +186,34 @@ impl<T: ?Sized> RwLock<T> {
         }
     }
 
+    /// Returns the current number of readers holding a read lock.
+    ///
+    /// # Note
+    ///
+    /// This method is not synchronized with attempts to increment the reader
+    /// count, and its value may become out of date as soon as it is read. This
+    /// is **not** intended to be used for synchronization purposes! It is
+    /// intended only for debugging purposes or for use as a heuristic.
+    #[inline]
+    #[must_use]
+    pub fn reader_count(&self) -> usize {
+        self.state.load(Relaxed) >> 1
+    }
+
+    /// Returns `true` if there is currently a writer holding a write lock.
+    ///
+    /// # Note
+    ///
+    /// This method is not synchronized its value may become out of date as soon
+    /// as it is read. This is **not** intended to be used for synchronization
+    /// purposes! It is intended only for debugging purposes or for use as a
+    /// heuristic.
+    #[inline]
+    #[must_use]
+    pub fn has_writer(&self) -> bool {
+        self.state.load(Relaxed) & WRITER == 1
+    }
+
     /// Attempts to acquire this `RwLock` for exclusive write access.
     ///
     /// If the access could not be granted at this time, this method returns
@@ -238,6 +271,19 @@ impl<T: fmt::Debug> fmt::Debug for RwLock<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = &self.state.load(Relaxed);
         f.debug_struct("RwLock")
+            // N.B.: this does *not* use the `reader_count` and `has_writer`
+            // methods *intentionally*, because those two methods perform
+            // independent reads of the lock's state, and may race with other
+            // lock operations that occur concurrently. If, for example, we read
+            // a non-zero reader count, and then read the state again to check
+            // for a writer, the reader may have been released and a write lock
+            // acquired between the two reads, resulting in the `Debug` impl
+            // displaying an invalid state when the lock was not actually *in*
+            // such a state!
+            //
+            // Therefore, we instead perform a single load to snapshot the state
+            // and unpack both the reader count and the writer count from the
+            // lock.
             .field("readers", &(state >> 1))
             .field("writer", &(state & WRITER))
             .field(
