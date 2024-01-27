@@ -163,6 +163,13 @@ impl<T> Mutex<T> {
             }
         }
     }
+
+    /// Consumes this `Mutex`, returning the guarded data.
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
 }
 
 impl<T: ?Sized> Mutex<T> {
