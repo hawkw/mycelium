@@ -155,7 +155,7 @@ impl<T> Mutex<T> {
         #[must_use]
         pub fn new(data: T) -> Self {
             Self {
-                // The queue must start with a single stored wakeup, so that the
+                // The queue must start with a single store d wakeup, so that the
                 // first task that tries to acquire the lock will succeed
                 // immediately.
                 wait: WaitQueue::new_woken(),
@@ -231,6 +231,27 @@ impl<T: ?Sized> Mutex<T> {
             Poll::Ready(Err(_)) => unsafe {
                 unreachable_unchecked!("`Mutex` never calls `WaitQueue::close`")
             },
+        }
+    }
+
+    /// Returns a mutable reference to the underlying data.
+    ///
+    /// Since this call borrows the `Mutex` mutably, no actual locking needs to
+    /// take place -- the mutable borrow statically guarantees no locks exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut lock = maitake_sync::Mutex::new(0);
+    /// *lock.get_mut() = 10;
+    /// assert_eq!(*lock.try_lock().unwrap(), 10);
+    /// ```
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe {
+            // Safety: since this call borrows the `Mutex` mutably, no actual
+            // locking needs to take place -- the mutable borrow statically
+            // guarantees no locks exist.
+            self.data.with_mut(|data| &mut *data)
         }
     }
 
