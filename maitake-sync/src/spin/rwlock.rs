@@ -205,6 +205,27 @@ impl<T: ?Sized> RwLock<T> {
 
         None
     }
+
+    /// Returns a mutable reference to the underlying data.
+    ///
+    /// Since this call borrows the `RwLock` mutably, no actual locking needs to
+    /// take place -- the mutable borrow statically guarantees no locks exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut lock = maitake_sync::spin::RwLock::new(0);
+    /// *lock.get_mut() = 10;
+    /// assert_eq!(*lock.read(), 10);
+    /// ```
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe {
+            // Safety: since this call borrows the `RwLock` mutably, no actual
+            // locking needs to take place -- the mutable borrow statically
+            // guarantees no locks exist.
+            self.data.with_mut(|data| &mut *data)
+        }
+    }
 }
 
 impl<T> RwLock<T> {

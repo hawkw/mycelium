@@ -146,6 +146,27 @@ impl<T> Mutex<T> {
     pub fn into_inner(self) -> T {
         self.data.into_inner()
     }
+
+    /// Returns a mutable reference to the underlying data.
+    ///
+    /// Since this call borrows the `Mutex` mutably, no actual locking needs to
+    /// take place -- the mutable borrow statically guarantees no locks exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut lock = maitake_sync::spin::Mutex::new(0);
+    /// *lock.get_mut() = 10;
+    /// assert_eq!(*lock.lock(), 10);
+    /// ```
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe {
+            // Safety: since this call borrows the `Mutex` mutably, no actual
+            // locking needs to take place -- the mutable borrow statically
+            // guarantees no locks exist.
+            self.data.with_mut(|data| &mut *data)
+        }
+    }
 }
 
 unsafe impl<T: Send> Send for Mutex<T> {}
