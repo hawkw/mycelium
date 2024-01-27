@@ -117,16 +117,34 @@ mod inner {
 
     #[cfg(test)]
     pub(crate) mod thread {
+
         pub(crate) use std::thread::{yield_now, JoinHandle};
+
         pub(crate) fn spawn<F, T>(f: F) -> JoinHandle<T>
         where
             F: FnOnce() -> T + Send + 'static,
             T: Send + 'static,
         {
+            use super::atomic::{AtomicUsize, Ordering::Relaxed};
+            thread_local! {
+                static CHILDREN: AtomicUsize = const { AtomicUsize::new(1) };
+            }
+
             let track = super::alloc::track::Registry::current();
+            let subscriber = tracing_02::Dispatch::default();
+            let span = tracing_02::Span::current();
+            let num = CHILDREN.with(|children| children.fetch_add(1, Relaxed));
             std::thread::spawn(move || {
+                let _tracing = tracing_02::dispatch::set_default(&subscriber);
+                let _span =
+                    tracing_02::info_span!(parent: span.id(), "thread", message = num).entered();
+
+                tracing_02::info!(num, "spawned child thread");
                 let _tracking = track.map(|track| track.set_default());
-                f()
+                let res = f();
+                tracing_02::info!(num, "child thread completed");
+
+                res
             })
         }
     }
@@ -153,9 +171,19 @@ mod inner {
             }
 
             pub(crate) fn check(&self, f: impl FnOnce()) {
+                let _trace = crate::util::test::trace_init();
+                let _span = tracing_02::info_span!(
+                    "test",
+                    message = std::thread::current().name().unwrap_or("<unnamed>")
+                )
+                .entered();
                 let registry = super::alloc::track::Registry::default();
                 let _tracking = registry.set_default();
+
+                tracing_02::info!("started test...");
                 f();
+                tracing_02::info!("test completed successfully!");
+
                 registry.check();
             }
         }
@@ -163,7 +191,6 @@ mod inner {
 
     #[cfg(test)]
     pub(crate) fn model(f: impl FnOnce()) {
-        let _trace = crate::util::test::trace_init();
         model::Builder::new().check(f)
     }
 
