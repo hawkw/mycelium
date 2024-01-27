@@ -9,14 +9,6 @@
 //!
 //! - [`Backoff`]: exponential backoff for spin loops
 //! - [`CachePadded`]: pads and aligns a value to the size of a cache line
-mod backoff;
-mod cache_pad;
-pub(crate) mod fmt;
-mod maybe_uninit;
-mod wake_batch;
-
-pub use self::{backoff::Backoff, cache_pad::CachePadded};
-pub(crate) use self::{maybe_uninit::CheckedMaybeUninit, wake_batch::WakeBatch};
 
 #[cfg(any(test, feature = "tracing"))]
 macro_rules! trace {
@@ -196,8 +188,16 @@ macro_rules! unreachable_unchecked {
     });
 }
 
+mod backoff;
+mod cache_pad;
+pub(crate) mod fmt;
+mod maybe_uninit;
+mod wake_batch;
+
 #[cfg(all(test, not(loom)))]
 pub(crate) use self::test::trace_init;
+pub use self::{backoff::Backoff, cache_pad::CachePadded};
+pub(crate) use self::{maybe_uninit::CheckedMaybeUninit, wake_batch::WakeBatch};
 
 #[cfg(test)]
 pub(crate) mod test {

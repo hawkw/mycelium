@@ -1,5 +1,3 @@
-use crate::loom::hint;
-
 /// An [exponential backoff] for spin loops.
 ///
 /// This is a helper struct for spinning in a busy loop, with an exponentially
@@ -53,8 +51,16 @@ impl Backoff {
     #[inline(always)]
     pub fn spin(&mut self) {
         // Issue 2^exp pause instructions.
-        for _ in 0..1 << self.exp {
-            hint::spin_loop();
+        let spins = 1 << self.exp;
+        #[cfg(not(loom))]
+        for _ in 0..spins {
+            crate::loom::hint::spin_loop();
+        }
+
+        #[cfg(loom)]
+        {
+            test_debug!("would back off for {spins} spins");
+            loom::thread::yield_now();
         }
 
         if self.exp < self.max {
