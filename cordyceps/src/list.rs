@@ -18,6 +18,7 @@ use core::{
 mod tests;
 
 mod cursor;
+mod shared_push;
 pub use self::cursor::{Cursor, CursorMut};
 
 /// An [intrusive] doubly-linked list.
