@@ -49,7 +49,7 @@ pub struct RwLock<T: ?Sized> {
 ///
 /// [`read`]: RwLock::read
 /// [`try_read`]: RwLock::try_read
-#[must_use]
+#[must_use = "if unused, the `RwLock` will immediately unlock"]
 pub struct RwLockReadGuard<'lock, T: ?Sized> {
     ptr: ConstPtr<T>,
     state: &'lock AtomicUsize,
@@ -66,7 +66,7 @@ pub struct RwLockReadGuard<'lock, T: ?Sized> {
 ///
 /// [`write`]: RwLock::write
 /// [`try_write`]: RwLock::try_write
-#[must_use = "if unused the RwLock will immediately unlock"]
+#[must_use = "if unused, the `RwLock` will immediately unlock"]
 pub struct RwLockWriteGuard<'lock, T: ?Sized> {
     ptr: MutPtr<T>,
     state: &'lock AtomicUsize,
