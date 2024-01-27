@@ -3,12 +3,9 @@ use crate::{
         cell::{ConstPtr, MutPtr, UnsafeCell},
         sync::atomic::{AtomicUsize, Ordering::*},
     },
-    util::Backoff,
+    util::{fmt, Backoff},
 };
-use core::{
-    fmt,
-    ops::{Deref, DerefMut},
-};
+use core::ops::{Deref, DerefMut};
 
 /// A spinlock-based [readers-writer lock].
 ///
@@ -239,13 +236,15 @@ impl<T> RwLock<T> {
 
 impl<T: fmt::Debug> fmt::Debug for RwLock<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = f.debug_struct("RwLock");
-        s.field("state", &self.state.load(Relaxed));
-        match self.try_read() {
-            Some(read) => s.field("data", &read),
-            None => s.field("data", &format_args!("<write locked>")),
-        };
-        s.finish()
+        let state = &self.state.load(Relaxed);
+        f.debug_struct("RwLock")
+            .field("readers", &(state >> 1))
+            .field("writer", &(state & WRITER))
+            .field(
+                "data",
+                &fmt::opt(&self.try_read()).or_else("<write locked>"),
+            )
+            .finish()
     }
 }
 

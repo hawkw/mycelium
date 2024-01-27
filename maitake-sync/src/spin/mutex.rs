@@ -3,12 +3,9 @@ use crate::{
         cell::{MutPtr, UnsafeCell},
         sync::atomic::{AtomicBool, Ordering::*},
     },
-    util::Backoff,
+    util::{fmt, Backoff},
 };
-use core::{
-    fmt,
-    ops::{Deref, DerefMut},
-};
+use core::ops::{Deref, DerefMut};
 
 /// A spinlock-based mutual exclusion lock for protecting shared data
 ///
@@ -29,7 +26,6 @@ use core::{
 ///
 /// [`lock`]: Mutex::lock
 /// [`try_lock`]: Mutex::try_lock
-#[derive(Debug)]
 pub struct Mutex<T> {
     locked: AtomicBool,
     data: UnsafeCell<T>,
@@ -173,6 +169,14 @@ impl<T> Mutex<T> {
 impl<T: Default> Default for Mutex<T> {
     fn default() -> Self {
         Self::new(Default::default())
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Mutex")
+            .field("data", &fmt::opt(&self.try_lock()).or_else("<locked>"))
+            .finish()
     }
 }
 
