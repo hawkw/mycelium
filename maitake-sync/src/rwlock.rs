@@ -431,6 +431,12 @@ impl<T: ?Sized> RwLock<T> {
     }
 }
 
+impl<T: Default> Default for RwLock<T> {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
 impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLock<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { sem, data: _ } = self;
