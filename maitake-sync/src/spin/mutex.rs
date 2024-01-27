@@ -46,6 +46,7 @@ pub struct Mutex<T> {
 ///
 /// [`lock`]: Mutex::lock
 /// [`try_lock`]: Mutex::try_lock
+#[must_use = "if unused, the `Mutex` will immediately unlock"]
 pub struct MutexGuard<'a, T> {
     ptr: MutPtr<T>,
     locked: &'a AtomicBool,

@@ -104,7 +104,7 @@ pub struct Mutex<T: ?Sized> {
 /// [`lock`]: Mutex::lock
 /// [`try_lock`]: Mutex::try_lock
 /// [RAII]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
-#[must_use = "if unused, the Mutex will immediately unlock"]
+#[must_use = "if unused, the `Mutex` will immediately unlock"]
 pub struct MutexGuard<'a, T: ?Sized> {
     /// /!\ WARNING: semi-load-bearing drop order /!\
     ///

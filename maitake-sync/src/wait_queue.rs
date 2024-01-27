@@ -564,7 +564,7 @@ impl WaitQueue {
         }
 
         let mut batch = WakeBatch::new();
-        self.drain_to_wake_batch(&mut batch, self.queue.lock(), Wakeup::Closed);
+        let _ = self.drain_to_wake_batch(&mut batch, self.queue.lock(), Wakeup::Closed);
 
         // wake any tasks that were woken in the last iteration of the batch loop.
         batch.wake_all();
@@ -772,7 +772,7 @@ impl WaitQueue {
             let Some(waker) = Waiter::wake(node, &mut queue, wakeup.clone()) else {
                 // this waiter was enqueued by `Wait::register` and doesn't have
                 // a waker, just keep going.
-                continue
+                continue;
             };
 
             if batch.add_waker(waker) {
