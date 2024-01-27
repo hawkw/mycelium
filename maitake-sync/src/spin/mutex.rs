@@ -139,6 +139,13 @@ impl<T> Mutex<T> {
     pub unsafe fn force_unlock(&self) {
         self.locked.store(false, Release);
     }
+
+    /// Consumes this `Mutex`, returning the guarded data.
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
 }
 
 unsafe impl<T: Send> Send for Mutex<T> {}

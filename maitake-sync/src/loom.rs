@@ -234,6 +234,14 @@ mod inner {
             }
         }
 
+        impl<T> UnsafeCell<T> {
+            #[inline(always)]
+            #[must_use]
+            pub(crate) fn into_inner(self) -> T {
+                self.0.into_inner()
+            }
+        }
+
         #[derive(Debug)]
         pub(crate) struct ConstPtr<T: ?Sized>(*const T);
 

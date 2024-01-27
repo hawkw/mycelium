@@ -207,6 +207,15 @@ impl<T: ?Sized> RwLock<T> {
     }
 }
 
+impl<T> RwLock<T> {
+    /// Consumes this `RwLock`, returning the guarded data.
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
+}
+
 impl<T: fmt::Debug> fmt::Debug for RwLock<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = f.debug_struct("RwLock");

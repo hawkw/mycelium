@@ -192,6 +192,13 @@ impl<T> RwLock<T> {
             }
         }
     }
+
+    /// Consumes this `RwLock`, returning the guarded data.
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
 }
 
 impl<T: ?Sized> RwLock<T> {
