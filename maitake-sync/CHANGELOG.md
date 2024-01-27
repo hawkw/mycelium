@@ -3,6 +3,30 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## maitake-sync-v0.1.1 - (2024-01-27)
+
+[6919b82](https://github.com/hawkw/mycelium/6919b8233eb5394edf836fde1fcbedae6721ae6c)...[dba0827](https://github.com/hawkw/mycelium/dba0827aae2f18bad477e7d82af17cc018bfe0c2)
+
+
+### Added
+
+- Add `spin::RwLock` ([#472](https://github.com/hawkw/mycelium/issues/472)) ([d6199bf](https://github.com/hawkw/mycelium/d6199bf365191f12df742fe9bdf5009a6da66810), closes [#470](https://github.com/hawkw/mycelium/issues/470))
+- Add `into_inner` to locks ([#473](https://github.com/hawkw/mycelium/issues/473)) ([2c431d0](https://github.com/hawkw/mycelium/2c431d057c39db29a43448d1860f2a1739331b5a))
+- Add `get_mut` to locks ([#473](https://github.com/hawkw/mycelium/issues/473)) ([98b362a](https://github.com/hawkw/mycelium/98b362a40007d51a6fbcd7f9c09dd02eb0ced281))
+- Impl `Default` for locks ([#473](https://github.com/hawkw/mycelium/issues/473)) ([6adf597](https://github.com/hawkw/mycelium/6adf5978a1c80b69f164272a3058c75b83dc50b6))
+- Nicer `Debug` impls for spinlocks ([#473](https://github.com/hawkw/mycelium/issues/473)) ([b3615cd](https://github.com/hawkw/mycelium/b3615cdff2120ae58adf2eb4fd47ec2da9173f43))
+- Add `spin::RwLock::{reader_count, has_writer}` ([#473](https://github.com/hawkw/mycelium/issues/473)) ([dba0827](https://github.com/hawkw/mycelium/dba0827aae2f18bad477e7d82af17cc018bfe0c2))
+
+### Documented
+
+- Link to announcement in readme ([3dcf582](https://github.com/hawkw/mycelium/3dcf582a141088866e3d24953c1ea5d4c47248fe))
+- Fix docs lints ([#468](https://github.com/hawkw/mycelium/issues/468)) ([b904673](https://github.com/hawkw/mycelium/b90467361f8df44a81e01ce12d30dab76f04879b))
+
+### Fixed
+
+- Fix unconditional recursion in `PartialEq` ([#468](https://github.com/hawkw/mycelium/issues/468)) ([7a8c368](https://github.com/hawkw/mycelium/7a8c36895dad2e7f5d58a839090ad8ff821d4040))
+- Add `#[must_use]` for locks ([#473](https://github.com/hawkw/mycelium/issues/473)) ([f5a9e18](https://github.com/hawkw/mycelium/f5a9e1880c07c40673aeeae532e708b062e44c23))
+
 ## maitake-sync-v0.1.0 - (2023-09-04)
 
 
