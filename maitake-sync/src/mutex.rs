@@ -242,7 +242,7 @@ impl<T: ?Sized> Mutex<T> {
     /// # Examples
     ///
     /// ```
-    /// let mut lock = maitake_sync::Mutex::new(0);
+    /// let mut lock = maitake_sync::spin::Mutex::new(0);
     /// *lock.get_mut() = 10;
     /// assert_eq!(*lock.try_lock().unwrap(), 10);
     /// ```
@@ -265,6 +265,12 @@ impl<T: ?Sized> Mutex<T> {
             _wake: WakeOnDrop(self),
             data: self.data.get_mut(),
         }
+    }
+}
+
+impl<T: Default> Default for Mutex<T> {
+    fn default() -> Self {
+        Self::new(Default::default())
     }
 }
 

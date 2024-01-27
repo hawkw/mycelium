@@ -169,6 +169,12 @@ impl<T> Mutex<T> {
     }
 }
 
+impl<T: Default> Default for Mutex<T> {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
 unsafe impl<T: Send> Send for Mutex<T> {}
 unsafe impl<T: Send> Sync for Mutex<T> {}
 
