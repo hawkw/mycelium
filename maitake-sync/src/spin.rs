@@ -21,6 +21,7 @@
 //! This module provides the following APIs:
 //!
 //! - [`Mutex`]: a synchronous [mutual exclusion] spinlock.
+//! - [`RwLock`]: a synchronous [reader-writer] spinlock.
 //! - [`InitOnce`]: a cell storing a [`MaybeUninit`](core::mem::MaybeUninit)
 //!       value which must be manually initialized prior to use.
 //! - [`Lazy`]: an [`InitOnce`] cell coupled with an initializer function. The
@@ -28,10 +29,13 @@
 //!       value the first time it is accessed.
 //!
 //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
+//! [reader-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 mod mutex;
 pub mod once;
+mod rwlock;
 
 pub use self::{
     mutex::*,
     once::{InitOnce, Lazy},
+    rwlock::*,
 };
