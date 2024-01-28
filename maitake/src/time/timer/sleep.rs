@@ -84,7 +84,7 @@ impl<'timer> Sleep<'timer> {
 
     /// Returns the [`Duration`] that this `Sleep` future will sleep for.
     pub fn duration(&self) -> Duration {
-        super::ticks_to_dur(self.timer.tick_duration, self.entry.ticks)
+        self.timer.ticks_to_dur(self.entry.ticks)
     }
 }
 
