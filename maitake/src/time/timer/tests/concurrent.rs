@@ -39,7 +39,7 @@ fn one_sleep() {
 
         for _ in 0..10 {
             clock.advance(Duration::from_secs(1));
-            timer.advance(Duration::from_secs(1));
+            timer.try_turn();
             thread::yield_now();
         }
 
@@ -74,7 +74,7 @@ fn two_sleeps_parallel() {
 
         for _ in 0..10 {
             clock.advance(Duration::from_secs(1));
-            timer.advance(Duration::from_secs(1));
+            timer.try_turn();
             thread::yield_now();
         }
 
@@ -103,7 +103,7 @@ fn two_sleeps_sequential() {
 
         for _ in 0..10 {
             clock.advance(Duration::from_secs(1));
-            timer.advance(Duration::from_secs(1));
+            timer.try_turn();
             thread::yield_now();
         }
 
@@ -175,7 +175,7 @@ fn reregister_waker() {
 
         for _ in 0..10 {
             clock.advance(Duration::from_secs(1));
-            timer.advance(Duration::from_secs(1));
+            timer.try_turn();
             thread::yield_now();
         }
 

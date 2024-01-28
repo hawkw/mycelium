@@ -408,47 +408,8 @@ impl Timer {
         self.pending_ticks.fetch_add(ticks as usize, Release);
     }
 
-    /// Advance the timer by `duration`, potentially waking any [`Sleep`] futures
-    /// that have completed.
-    ///
-    /// # Returns
-    ///
-    /// - [`Some`]`(`[`Turn`]`)` if the lock was acquired and the wheel was
-    ///   advanced. A [`Turn`] structure describes what occurred during this
-    ///   turn of the wheel, including the [current time][elapsed] and the
-    ///   [deadline of the next expiring timer][next], if one exists.
-    /// - [`None`] if the wheel was not advanced because the lock was already
-    ///   held.
-    ///
-    /// [elapsed]: Turn::elapsed
-    /// [next]: Turn::time_to_next_deadline
-    ///
-    /// # Interrupt Safety
-    ///
-    /// This method will *never* spin if the timer wheel lock is held; instead,
-    /// it will add any new ticks to a counter of "pending" ticks and return
-    /// immediately. Therefore, it is safe to call this method in an interrupt
-    /// handler, as it will never acquire a lock that may already be locked.
-    ///
-    /// The [`force_advance`] method will spin to lock the timer wheel lock if
-    /// it is currently held, *ensuring* that any pending wakeups are processed.
-    /// That method should never be called in an interrupt handler.
-    ///
-    /// If a timer is driven primarily by calling `advance` in an interrupt
-    /// handler, it may be desirable to occasionally call [`force_advance`]
-    /// *outside* of an interrupt handler (i.e., as as part of an occasional
-    /// runtime bookkeeping process). This ensures that any pending ticks are
-    /// observed by the timer in a relatively timely manner.
-    ///
-    /// [`force_advance`]: Timer::force_advance
-    #[inline]
-    pub fn advance(&self, duration: Duration) {
-        let ticks = expect_display(self.dur_to_ticks(duration), "cannot advance timer");
-        self.advance_ticks(ticks)
-    }
-
-    /// Advance the timer by `ticks` timer ticks, potentially waking any [`Sleep`]
-    /// futures that have completed.
+    /// Attempt to turn the timer to the current `now` if the timer is not
+    /// locked, potentially waking any [`Sleep`] futures that have completed.
     ///
     /// # Returns
     ///
@@ -481,26 +442,21 @@ impl Timer {
     ///
     /// [`force_advance_ticks`]: Timer::force_advance_ticks
     #[inline]
-    pub fn advance_ticks(&self, ticks: Ticks) {
+    pub fn try_turn(&self) -> Option<Turn> {
         // `advance` may be called in an ISR, so it can never actually spin.
         // instead, if the timer wheel is busy (e.g. the timer ISR was called on
         // another core, or if a `Sleep` future is currently canceling itself),
         // we just add to a counter of pending ticks, and bail.
         if let Some(core) = self.core.try_lock() {
-            trace!(ticks, "locked timer wheel; advancing");
-            self.advance_locked(core, ticks);
+            Some(self.advance_locked(core))
         } else {
-            trace!(ticks, "could not lock timer wheel; pending");
-            // if the core of the timer wheel is already locked, add to the pending
-            // tick count, which we will then advance the wheel by when it becomes
-            // available.
-            // TODO(eliza): if pending ticks overflows that's probably Bad News
-            self.pend_ticks(ticks)
+            trace!("could not lock timer wheel");
+            None
         }
     }
 
-    /// Advance the timer by `duration`, ensuring any `Sleep` futures that have
-    /// completed are woken, even if a lock must be acquired.
+    /// Advance the timer to the current time, ensuring any [`Sleep`] futures that
+    /// have completed are woken, even if a lock must be acquired.
     ///
     /// # Returns
     ///
@@ -525,39 +481,8 @@ impl Timer {
     ///
     /// [`advance`]: Timer::advance
     #[inline]
-    pub fn force_advance(&self, duration: Duration) -> Turn {
-        let ticks = expect_display(self.dur_to_ticks(duration), "cannot advance timer");
-        self.force_advance_ticks(ticks)
-    }
-
-    /// Advance the timer by `ticks` timer ticks, ensuring any `Sleep` futures
-    /// that have completed are woken, even if a lock must be acquired.
-    ///
-    /// # Returns
-    ///
-    /// A [`Turn`] structure describing what occurred during this turn of the
-    /// wheel, including including the [current time][elapsed] and the [deadline
-    /// of the next expiring timer][next], if one exists.
-    ///
-    /// [elapsed]: Turn::elapsed
-    /// [next]: Turn::time_to_next_deadline
-    ///
-    /// # Interrupt Safety
-    ///
-    /// This method will spin to acquire the timer wheel lock if it is currently
-    /// held elsewhere. Therefore, this method must *NEVER* be called in an
-    /// interrupt handler!
-    ///
-    /// If a timer is advanced inside an interrupt handler, use the [`advance_ticks`]
-    /// method instead. If a timer is advanced primarily by calls to
-    /// [`advance_ticks`], it may be desirable to occasionally call `force_advance`
-    /// outside an interrupt handler, to ensure that pending ticks are drained
-    /// frequently.
-    ///
-    /// [`advance_ticks`]: Timer::advance_ticks
-    #[inline]
-    pub fn force_advance_ticks(&self, ticks: Ticks) -> Turn {
-        self.advance_locked(self.core.lock(), ticks)
+    pub fn turn(&self) -> Turn {
+        self.advance_locked(self.core.lock())
     }
 
     pub(in crate::time) fn ticks_to_dur(&self, ticks: Ticks) -> Duration {
@@ -568,23 +493,36 @@ impl Timer {
         clock::dur_to_ticks(self.clock.tick_duration(), duration)
     }
 
-    fn advance_locked(&self, mut core: MutexGuard<'_, wheel::Core>, ticks: Ticks) -> Turn {
+    fn advance_locked(&self, mut core: MutexGuard<'_, wheel::Core>) -> Turn {
         // take any pending ticks.
         let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
         // we do two separate `advance` calls here instead of advancing once
         // with the sum, because `ticks` + `pending_ticks` could overflow.
-        let mut pend_exp = 0;
+        let mut expired: usize = 0;
         if pending_ticks > 0 {
-            let (expired, _next_deadline) = core.advance(pending_ticks);
-            pend_exp = expired;
+            let (expiring, _next_deadline) = core.turn_to(pending_ticks);
+            expired = expired.saturating_add(expiring);
         }
-        let (expired, next_deadline) = core.advance(ticks);
 
-        Turn {
-            expired: expired.saturating_add(pend_exp),
-            next_deadline_ticks: next_deadline.map(|d| d.ticks),
-            now: core.now(),
-            tick_duration: self.clock.tick_duration(),
+        let mut now = self.clock.now_ticks();
+        loop {
+            let (expiring, next_deadline) = core.turn_to(now);
+            expired = expired.saturating_add(expiring);
+            if let Some(next) = next_deadline {
+                now = self.clock.now_ticks();
+                if now >= next.ticks {
+                    // we've advanced past the next deadline, so we need to
+                    // advance again.
+                    continue;
+                }
+            }
+
+            return Turn {
+                expired,
+                next_deadline_ticks: next_deadline.map(|d| d.ticks),
+                now,
+                tick_duration: self.clock.tick_duration(),
+            };
         }
     }
 
