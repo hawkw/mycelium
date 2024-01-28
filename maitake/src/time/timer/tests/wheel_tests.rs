@@ -169,7 +169,8 @@ impl SleepGroupTest {
             .sum();
 
         // advance the timer.
-        self.timer.advance_ticks(ticks);
+        let turn = self.timer.try_turn();
+        debug!(?turn);
 
         let completed = self.scheduler.tick().completed;
 
@@ -221,7 +222,7 @@ fn pend_advance_wakes() {
     };
 
     // Call force, which will "notice" the pending ticks
-    let turn = test.timer.force_advance_ticks(0);
+    let turn = test.timer.turn();
     assert_eq!(turn.expired, expected_complete);
 
     // NOW the tasks will show up as scheduled, and complete
@@ -339,7 +340,7 @@ fn expired_shows_up() {
     // advance the timer by 50 more ticks, NOT past our new sleeps,
     // but forward
     test.clock.advance_ticks(50);
-    let turn = test.timer.force_advance_ticks(50);
+    let turn = test.timer.turn();
     assert_eq!(turn.ticks_to_next_deadline(), Some(10));
 
     let tick = test.scheduler.tick();

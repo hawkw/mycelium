@@ -100,8 +100,7 @@ impl Core {
     }
 
     #[inline(never)]
-    pub(super) fn advance(&mut self, ticks: Ticks) -> (usize, Option<Deadline>) {
-        let now = self.now + ticks;
+    pub(super) fn turn_to(&mut self, now: Ticks) -> (usize, Option<Deadline>) {
         let mut fired = 0;
 
         // sleeps that need to be rescheduled on lower-level wheels need to be

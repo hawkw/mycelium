@@ -127,7 +127,7 @@ impl Core {
 
         // turn the timer wheel if it wasn't turned recently and no one else is
         // holding a lock, ensuring any pending timer ticks are consumed.
-        TIMER.advance_ticks(0);
+        TIMER.turn();
 
         // if there are remaining tasks to poll, continue without stealing.
         if tick.has_remaining {
