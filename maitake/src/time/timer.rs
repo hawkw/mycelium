@@ -6,6 +6,7 @@
 //! [`Sleep`]: crate::time::Sleep
 //! [`Timeout`]: crate::time::Timeout
 //! [future]: core::future::Future
+use super::clock::{self, Clock, Instant, Ticks};
 use crate::{
     loom::sync::{
         atomic::{AtomicUsize, Ordering::*},
@@ -185,11 +186,7 @@ use self::sleep::Sleep;
 /// [`try_timeout`]: crate::time::try_timeout()
 /// [global]: crate::time#global-timers
 pub struct Timer {
-    /// The duration represented by one tick of this timer.
-    ///
-    /// This represents the timer's finest granularity; durations shorter than
-    /// this are rounded up to one tick.
-    tick_duration: Duration,
+    clock: Clock,
 
     /// A count of how many timer ticks have elapsed since the last time the
     /// timer's [`Core`] was updated.
@@ -254,9 +251,6 @@ pub struct Turn {
     tick_duration: Duration,
 }
 
-/// Timer ticks are always counted by a 64-bit unsigned integer.
-pub type Ticks = u64;
-
 /// Errors returned by [`Timer::try_sleep`], [`Timer::try_timeout`], and the
 /// global [`try_sleep`] and [`try_timeout`] functions.
 ///
@@ -299,21 +293,24 @@ pub enum TimerError {
 
 impl Timer {
     loom_const_fn! {
-        /// Returns a new `Timer` with the specified `tick_duration` for a single timer
-        /// tick.
+        /// Returns a new `Timer` with the specified hardware [`Clock`].
         #[must_use]
-        pub fn new(tick_duration: Duration) -> Self {
+        pub fn new(clock: Clock) -> Self {
             Self {
-                tick_duration,
+                clock,
                 pending_ticks: AtomicUsize::new(0),
                 core: Mutex::new(wheel::Core::new()),
             }
         }
     }
 
+    pub fn now(&self) -> Instant {
+        self.clock.now()
+    }
+
     /// Returns the maximum duration of [`Sleep`] futures driven by this timer.
     pub fn max_duration(&self) -> Duration {
-        ticks_to_dur(self.tick_duration, u64::MAX)
+        self.clock.max_duration()
     }
 
     /// Returns a [`Future`] that will complete in `duration`.
@@ -563,6 +560,14 @@ impl Timer {
         self.advance_locked(self.core.lock(), ticks)
     }
 
+    pub(in crate::time) fn ticks_to_dur(&self, ticks: Ticks) -> Duration {
+        clock::ticks_to_dur(self.clock.tick_duration(), ticks)
+    }
+
+    pub(in crate::time) fn dur_to_ticks(&self, duration: Duration) -> Result<Ticks, TimerError> {
+        clock::dur_to_ticks(self.clock.tick_duration(), duration)
+    }
+
     fn advance_locked(&self, mut core: MutexGuard<'_, wheel::Core>, ticks: Ticks) -> Turn {
         // take any pending ticks.
         let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
@@ -579,22 +584,12 @@ impl Timer {
             expired: expired.saturating_add(pend_exp),
             next_deadline_ticks: next_deadline.map(|d| d.ticks),
             now: core.now(),
-            tick_duration: self.tick_duration,
+            tick_duration: self.clock.tick_duration(),
         }
     }
 
     fn core(&self) -> MutexGuard<'_, wheel::Core> {
         self.core.lock()
-    }
-
-    #[track_caller]
-    fn dur_to_ticks(&self, dur: Duration) -> Result<Ticks, TimerError> {
-        (dur.as_nanos() / self.tick_duration.as_nanos())
-            .try_into()
-            .map_err(|_| TimerError::DurationTooLong {
-                requested: dur,
-                max: self.max_duration(),
-            })
     }
 
     #[cfg(all(test, not(loom)))]
@@ -607,10 +602,16 @@ impl Timer {
 
 impl fmt::Debug for Timer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            clock,
+            pending_ticks,
+            core,
+        } = self;
         f.debug_struct("Timer")
-            .field("tick_duration", &self.tick_duration)
-            .field("pending_ticks", &self.pending_ticks.load(Acquire))
-            .field("core", &fmt::opt(&self.core.try_lock()).or_else("<locked>"))
+            .field("clock", &clock)
+            .field("tick_duration", &clock.tick_duration())
+            .field("pending_ticks", &pending_ticks.load(Acquire))
+            .field("core", &fmt::opt(&core.try_lock()).or_else("<locked>"))
             .finish()
     }
 }
@@ -633,14 +634,15 @@ impl Turn {
     #[inline]
     #[must_use]
     pub fn time_to_next_deadline(&self) -> Option<Duration> {
-        self.ticks_to_next_deadline().map(|deadline| ticks_to_dur(self.tick_duration, deadline))
+        self.ticks_to_next_deadline()
+            .map(|deadline| clock::ticks_to_dur(self.tick_duration, deadline))
     }
 
     /// Returns the total elapsed time since this timer wheel started running.
     #[inline]
     #[must_use]
     pub fn elapsed(&self) -> Duration {
-        ticks_to_dur(self.tick_duration, self.now)
+        clock::ticks_to_dur(self.tick_duration, self.now)
     }
 
     /// Returns `true` if there are currently pending [`Sleep`] futures
@@ -650,15 +652,6 @@ impl Turn {
     pub fn has_remaining(&self) -> bool {
         self.next_deadline_ticks.is_some()
     }
-}
-
-#[track_caller]
-#[inline]
-#[must_use]
-fn ticks_to_dur(tick_duration: Duration, ticks: Ticks) -> Duration {
-    let nanos = tick_duration.subsec_nanos() as u64 * ticks;
-    let secs = tick_duration.as_secs() * ticks;
-    Duration::new(secs, nanos as u32)
 }
 
 // === impl TimerError ====

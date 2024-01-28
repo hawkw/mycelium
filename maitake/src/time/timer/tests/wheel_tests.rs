@@ -10,9 +10,9 @@ use std::sync::{
 use proptest::{collection::vec, proptest};
 
 struct SleepGroupTest {
+    clock: ClockHandle,
     scheduler: Scheduler,
     timer: &'static Timer,
-    now: Ticks,
     groups: BTreeMap<Ticks, SleepGroup>,
     next_id: usize,
 
@@ -31,14 +31,19 @@ struct SleepGroup {
 impl SleepGroupTest {
     fn new(timer: &'static Timer) -> Self {
         let _guard = crate::util::test::trace_init_with_default("info,maitake::time=trace");
+        trace!(timer = ?fmt::alt(timer), "starting test");
         Self {
+            clock: TestClock::start(),
             scheduler: Scheduler::new(),
             timer,
-            now: 0,
             groups: BTreeMap::new(),
             next_id: 0,
             _guard,
         }
+    }
+
+    fn now(&self) -> Ticks {
+        self.clock.ticks()
     }
 
     fn spawn_group(&mut self, duration: Ticks, tasks: usize) {
@@ -61,10 +66,10 @@ impl SleepGroupTest {
             "spawned sleep group to sleep for {duration} ticks"
         );
         self.groups.insert(
-            self.now + duration,
+            self.now() + duration,
             SleepGroup {
                 duration,
-                t_start: self.now,
+                t_start: self.now(),
                 tasks,
                 count,
                 id,
@@ -85,7 +90,7 @@ impl SleepGroupTest {
 
     #[track_caller]
     fn assert_all_complete(&self) {
-        let t_1 = self.now;
+        let t_1 = self.now();
         for (
             &t_done,
             SleepGroup {
@@ -116,7 +121,7 @@ impl SleepGroupTest {
 
     #[track_caller]
     fn assert(&self) {
-        let t_1 = self.now;
+        let t_1 = self.now();
         for (
             &t_done,
             SleepGroup {
@@ -150,16 +155,16 @@ impl SleepGroupTest {
 
     #[track_caller]
     fn advance(&mut self, ticks: Ticks) {
-        let t_0 = self.now;
-        self.now += ticks;
+        let t_0 = self.now();
+        self.clock.advance_ticks(ticks);
         info!("");
-        let _span = span!(Level::INFO, "advance", ticks, from = t_0, to = self.now).entered();
-        info!("advancing test timer to {}", self.now);
+        let _span = span!(Level::INFO, "advance", ticks, from = t_0, to = self.now()).entered();
+        let t_1 = self.now();
         // how many tasks are expected to complete?
         let expected_complete: usize = self
             .groups
             .iter_mut()
-            .take_while(|(&t, _)| t <= self.now)
+            .take_while(|(&t, _)| t <= t_1)
             .map(|(_, g)| std::mem::replace(&mut g.tasks, 0))
             .sum();
 
@@ -174,18 +179,16 @@ impl SleepGroupTest {
         self.assert();
 
         assert_eq!(
-            completed,
-            expected_complete,
+            completed, expected_complete,
             "expected {expected_complete} tasks to complete when advancing \
              the timer from {t_0} to {t_1}",
-            t_1 = self.now,
         );
     }
 }
 
 #[test]
 fn pend_advance_wakes() {
-    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    static TIMER: Timer = Timer::new(TestClock::clock());
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(100, 2);
@@ -200,7 +203,7 @@ fn pend_advance_wakes() {
 
     // advance the timer by 50 more ticks
     // but ONLY by pending
-    test.now += 50;
+    test.clock.advance_ticks(50);
     test.timer.pend_ticks(50);
 
     // Tick the scheduler, nothing should have happened
@@ -208,12 +211,14 @@ fn pend_advance_wakes() {
     assert_eq!(tick.completed, 0);
 
     // How many do we expect to complete "now"? (it's two)
-    let expected_complete: usize = test
-        .groups
-        .iter_mut()
-        .take_while(|(&t, _)| t <= test.now)
-        .map(|(_, g)| std::mem::replace(&mut g.tasks, 0))
-        .sum();
+    let expected_complete: usize = {
+        let now = test.now();
+        test.groups
+            .iter_mut()
+            .take_while(|(&t, _)| t <= now)
+            .map(|(_, g)| std::mem::replace(&mut g.tasks, 0))
+            .sum()
+    };
 
     // Call force, which will "notice" the pending ticks
     let turn = test.timer.force_advance_ticks(0);
@@ -228,7 +233,7 @@ fn pend_advance_wakes() {
 
 #[test]
 fn timer_basically_works() {
-    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    static TIMER: Timer = Timer::new(TestClock::clock());
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(100, 2);
@@ -264,7 +269,7 @@ fn timer_basically_works() {
 
 #[test]
 fn schedule_after_start() {
-    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    static TIMER: Timer = Timer::new(TestClock::clock());
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(100, 2);
@@ -305,7 +310,7 @@ fn schedule_after_start() {
 
 #[test]
 fn expired_shows_up() {
-    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    static TIMER: Timer = Timer::new(TestClock::clock());
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(150, 2);
@@ -333,7 +338,7 @@ fn expired_shows_up() {
 
     // advance the timer by 50 more ticks, NOT past our new sleeps,
     // but forward
-    test.now += 50;
+    test.clock.advance_ticks(50);
     let turn = test.timer.force_advance_ticks(50);
     assert_eq!(turn.ticks_to_next_deadline(), Some(10));
 
@@ -354,7 +359,7 @@ fn expired_shows_up() {
 
 #[test]
 fn max_sleep() {
-    static TIMER: Timer = Timer::new(Duration::from_millis(1));
+    static TIMER: Timer = Timer::new(TestClock::clock());
     let mut test = SleepGroupTest::new(&TIMER);
 
     test.spawn_group(wheel::Core::MAX_SLEEP_TICKS, 2);
@@ -421,7 +426,7 @@ proptest! {
     #[test]
     fn fuzz_timer(actions in vec(fuzz_action_strategy(), 0..MAX_FUZZ_ACTIONS)) {
         static FUZZ_RUNS: AtomicUsize = AtomicUsize::new(1);
-        static TIMER: Timer = Timer::new(Duration::from_millis(1));
+        static TIMER: Timer = Timer::new(TestClock::clock());
 
         TIMER.reset();
         let mut test = SleepGroupTest::new(&TIMER);

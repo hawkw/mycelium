@@ -43,14 +43,18 @@
 //! [wheel]: http://www.cs.columbia.edu/~nahum/w6998/papers/sosp87-timing-wheels.pdf
 //! [driving-timers]: Timer#driving-timers
 #![warn(missing_docs, missing_debug_implementations)]
+mod clock;
 pub mod timeout;
 mod timer;
 
 use crate::util;
 
 #[doc(inline)]
-pub use self::timeout::Timeout;
-pub use self::timer::{set_global_timer, sleep::Sleep, AlreadyInitialized, Timer, TimerError, Turn};
+pub use self::{
+    clock::{Clock, Instant},
+    timeout::Timeout,
+    timer::{set_global_timer, sleep::Sleep, AlreadyInitialized, Timer, TimerError, Turn},
+};
 pub use core::time::Duration;
 
 use core::future::Future;
