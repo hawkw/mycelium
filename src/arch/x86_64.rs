@@ -2,7 +2,7 @@ use bootloader_api::config::{BootloaderConfig, Mapping};
 use hal_core::boot::BootInfo;
 use hal_x86_64::{
     cpu::{self, local::GsLocalData},
-    vga,
+    time, vga,
 };
 pub use hal_x86_64::{
     cpu::{entropy::seed_rng, local::LocalKey, wait_for_interrupt},
@@ -67,7 +67,7 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     }
     tracing::info!("set up the boot processor's local data");
 
-    if let Some(rsdp) = archinfo.rsdp_addr {
+    let did_acpi_irq_init = if let Some(rsdp) = archinfo.rsdp_addr {
         let acpi = acpi::acpi_tables(rsdp);
         let platform_info = acpi.and_then(|acpi| acpi.platform_info());
         match platform_info {
@@ -76,17 +76,32 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
                 interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
                 acpi::bringup_smp(&platform)
                     .expect("failed to bring up application processors! this is bad news!");
-                return;
+                true
             }
-            Err(error) => tracing::warn!(?error, "missing ACPI platform info"),
+            Err(error) => {
+                tracing::warn!(?error, "missing ACPI platform info");
+                false
+            }
         }
     } else {
         // TODO(eliza): try using MP Table to bringup application processors?
         tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
+        false
+    };
+
+    if !did_acpi_irq_init {
+        // no ACPI
+        interrupt::enable_hardware_interrupts(None);
     }
 
-    // no ACPI
-    interrupt::enable_hardware_interrupts(None);
+    match time::Rdtsc::new() {
+        Ok(rdtsc) => {
+            let rdtsc_clock = rdtsc.into_maitake_clock();
+
+            tracing::info!(?rdtsc_clock, "calibrated TSC");
+        }
+        Err(error) => tracing::warn!(%error, "no RDTSC support"),
+    }
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be

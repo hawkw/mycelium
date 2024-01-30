@@ -165,6 +165,7 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
 }
 
 fn kernel_main(bootinfo: impl BootInfo) -> ! {
+    loop {}
     rt::spawn(keyboard_demo());
 
     let mut core = rt::Core::new();

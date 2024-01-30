@@ -13,6 +13,7 @@ alloc = []
 [dependencies]
 acpi = "4.1.1"
 hal-core = { path = "../hal-core" }
+maitake = { path = "../maitake" }
 mycelium-util = { path = "../util" }
 mycelium-trace = { path = "../trace" }
 mycotest = { path = "../mycotest"}
