@@ -152,6 +152,15 @@ impl LocalApic {
         // CPUID didn't help, so fall back to calibrating the APIC frequency
         // using the PIT.
         tracing::debug!("calibrating APIC timer frequency using PIT...");
+
+        // lock the PIT now, before actually starting the timer IRQ, so that we
+        // don't include any time spent waiting for the PIT lock.
+        //
+        // since we only run this code on startup, before any other cores have
+        // been started, this probably never actually waits for a lock. but...we
+        // should do it the right way, anyway.
+        let mut pit = crate::time::PIT.lock();
+
         unsafe {
             // set timer divisor to 16
             self.write_register(TIMER_DIVISOR, 0b11);
@@ -166,9 +175,7 @@ impl LocalApic {
         }
 
         // use the PIT to sleep for 10ms
-        crate::time::PIT
-            .lock()
-            .sleep_blocking(Duration::from_millis(10))
+        pit.sleep_blocking(Duration::from_millis(10))
             .expect("the PIT should be able to send a 10ms interrupt...");
 
         unsafe {

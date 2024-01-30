@@ -100,7 +100,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
     }
 
     fn timer_tick() {
-        crate::rt::TIMER.pend_ticks(1);
+        // crate::rt::TIMER.pend_ticks(1);
     }
 
     fn ps2_keyboard(scancode: u8) {

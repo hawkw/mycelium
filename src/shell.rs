@@ -98,12 +98,12 @@ const DUMP: Command = Command::new("dump")
         Command::new("archinfo")
             .with_help("print the architecture information structure")
             .with_fn(|ctx| Err(ctx.other_error("not yet implemented"))),
-        Command::new("timer")
-            .with_help("print the timer wheel")
-            .with_fn(|_| {
-                tracing::info!(target: "shell", timer = ?rt::TIMER);
-                Ok(())
-            }),
+        // Command::new("timer")
+        //     .with_help("print the timer wheel")
+        //     .with_fn(|_| {
+        //         tracing::info!(target: "shell", timer = ?rt::TIMER);
+        //         Ok(())
+        //     }),
         rt::DUMP_RT,
         crate::arch::shell::DUMP_ARCH,
         Command::new("heap")
