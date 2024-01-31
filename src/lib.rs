@@ -153,10 +153,10 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
 
     // perform arch-specific initialization once we have an allocator and
     // tracing.
-    arch::init(&bootinfo, &archinfo);
+    let clock = arch::init(&bootinfo, &archinfo);
 
     // initialize the kernel runtime.
-    rt::init();
+    rt::init(clock);
 
     #[cfg(test)]
     arch::run_tests();
@@ -165,7 +165,6 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
 }
 
 fn kernel_main(bootinfo: impl BootInfo) -> ! {
-    loop {}
     rt::spawn(keyboard_demo());
 
     let mut core = rt::Core::new();

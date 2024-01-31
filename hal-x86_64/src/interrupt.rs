@@ -1,4 +1,4 @@
-use crate::{cpu, mm, segment, PAddr, VAddr};
+use crate::{cpu, mm, segment, time, PAddr, VAddr};
 use core::{arch::asm, marker::PhantomData, time::Duration};
 use hal_core::interrupt::Control;
 use hal_core::interrupt::{ctx, Handlers};
@@ -36,6 +36,12 @@ pub struct CodeFault<'a> {
 
 /// An interrupt service routine.
 pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
+
+#[derive(Debug)]
+pub enum PeriodicTimerError {
+    Pit(time::PitError),
+    Apic(time::InvalidDuration),
+}
 
 #[derive(Debug)]
 #[repr(C)]
@@ -229,6 +235,7 @@ impl Controller {
         // `sti` may not be called until the interrupt controller static is
         // fully initialized, as an interrupt that occurs before it is
         // initialized may attempt to access the static to finish the interrupt!
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
         unsafe {
             crate::cpu::intrinsics::sti();
         }
@@ -238,15 +245,15 @@ impl Controller {
 
     /// Starts a periodic timer which fires the `timer_tick` interrupt of the
     /// provided [`Handlers`] every time `interval` elapses.
-    pub fn start_periodic_timer(
-        &self,
-        interval: Duration,
-    ) -> Result<(), crate::time::InvalidDuration> {
+    pub fn start_periodic_timer(&self, interval: Duration) -> Result<(), PeriodicTimerError> {
         match self.model {
-            InterruptModel::Pic(_) => crate::time::PIT.lock().start_periodic_timer(interval),
-            InterruptModel::Apic { ref local, .. } => {
-                local.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
-            }
+            InterruptModel::Pic(_) => crate::time::PIT
+                .lock()
+                .start_periodic_timer(interval)
+                .map_err(PeriodicTimerError::Pit),
+            InterruptModel::Apic { ref local, .. } => local
+                .start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
+                .map_err(PeriodicTimerError::Apic),
         }
     }
 }
@@ -388,14 +395,8 @@ impl hal_core::interrupt::Control for Idt {
         }
 
         extern "x86-interrupt" fn pit_timer_isr<H: Handlers<Registers>>(_regs: Registers) {
-            use core::sync::atomic::Ordering;
-            // if we weren't trying to do a PIT sleep, handle the timer tick
-            // instead.
-            let was_sleeping = crate::time::pit::SLEEPING
-                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok();
-            if !was_sleeping {
-                H::timer_tick();
+            if crate::time::Pit::handle_interrupt() {
+                H::timer_tick()
             } else {
                 tracing::trace!("PIT sleep completed");
             }

@@ -58,7 +58,7 @@ pub fn arch_entry(info: &'static mut bootloader_api::BootInfo) -> ! {
     crate::kernel_start(boot_info, archinfo);
 }
 
-pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
+pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) -> maitake::time::Clock {
     pci::init_pci();
 
     // init boot processor's core-local data
@@ -67,41 +67,40 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) {
     }
     tracing::info!("set up the boot processor's local data");
 
-    let did_acpi_irq_init = if let Some(rsdp) = archinfo.rsdp_addr {
+    if let Some(rsdp) = archinfo.rsdp_addr {
         let acpi = acpi::acpi_tables(rsdp);
         let platform_info = acpi.and_then(|acpi| acpi.platform_info());
         match platform_info {
             Ok(platform) => {
                 tracing::debug!("found ACPI platform info");
-                interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
+                let irq_ctrl =
+                    interrupt::enable_hardware_interrupts(Some(&platform.interrupt_model));
                 acpi::bringup_smp(&platform)
                     .expect("failed to bring up application processors! this is bad news!");
-                true
+                irq_ctrl
             }
             Err(error) => {
                 tracing::warn!(?error, "missing ACPI platform info");
-                false
+                interrupt::enable_hardware_interrupts(None)
             }
         }
     } else {
         // TODO(eliza): try using MP Table to bringup application processors?
         tracing::warn!("no RSDP from bootloader, skipping SMP bringup");
-        false
+        interrupt::enable_hardware_interrupts(None)
     };
 
-    if !did_acpi_irq_init {
-        // no ACPI
-        interrupt::enable_hardware_interrupts(None);
-    }
-
-    match time::Rdtsc::new() {
-        Ok(rdtsc) => {
-            let rdtsc_clock = rdtsc.into_maitake_clock();
-
-            tracing::info!(?rdtsc_clock, "calibrated TSC");
-        }
-        Err(error) => tracing::warn!(%error, "no RDTSC support"),
-    }
+    time::Rdtsc::new()
+        .map_err(|error| {
+            tracing::warn!(%error, "RDTSC not supported");
+        })
+        .and_then(|rdtsc| {
+            rdtsc
+                .into_maitake_clock()
+                .inspect(|clock| tracing::info!(?clock, "calibrated RDTSC clock"))
+                .map_err(|error| tracing::warn!(%error, "could not calibrate RDTSC clock"))
+        })
+        .unwrap_or(interrupt::IDIOTIC_CLOCK)
 }
 
 // TODO(eliza): this is now in arch because it uses the serial port, would be

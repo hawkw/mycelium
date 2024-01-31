@@ -2,7 +2,10 @@ use super::{
     timer::{self, TimerError},
     Duration,
 };
-use core::ops::{Add, AddAssign, Sub, SubAssign};
+use core::{
+    fmt,
+    ops::{Add, AddAssign, Sub, SubAssign},
+};
 
 // /// A hardware clock.
 // pub trait Clock: Send + Sync + 'static {
@@ -59,6 +62,7 @@ use core::ops::{Add, AddAssign, Sub, SubAssign};
 pub struct Clock {
     now: fn() -> Ticks,
     tick_duration: Duration,
+    name: Option<&'static str>,
 }
 
 /// A measurement of a monotonically nondecreasing clock.
@@ -82,17 +86,25 @@ pub struct Clock {
 /// allows measuring the duration between two instants (or comparing two
 /// instants).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub struct Instant {
-    now: Ticks,
-    tick_duration: Duration,
-}
+pub struct Instant(Duration);
 
 /// Timer ticks are always counted by a 64-bit unsigned integer.
 pub type Ticks = u64;
 
 impl Clock {
-    pub const fn new(now: fn() -> Ticks, tick_duration: Duration) -> Self {
-        Self { now, tick_duration }
+    pub const fn new(tick_duration: Duration, now: fn() -> Ticks) -> Self {
+        Self {
+            now,
+            tick_duration,
+            name: None,
+        }
+    }
+
+    pub const fn named(self, name: &'static str) -> Self {
+        Self {
+            name: Some(name),
+            ..self
+        }
     }
 
     #[must_use]
@@ -109,7 +121,7 @@ impl Clock {
     pub fn now(&self) -> Instant {
         let now = self.now_ticks();
         let tick_duration = self.tick_duration();
-        Instant { now, tick_duration }
+        Instant(ticks_to_dur(tick_duration, now))
     }
 
     pub fn max_duration(&self) -> Duration {
@@ -166,7 +178,7 @@ impl Instant {
     /// [global]: crate::time#global-timers
     #[must_use]
     pub fn now() -> Instant {
-        todo!()
+        Self::try_now().expect("no global timer set")
     }
 
     /// Returns an instant corresponding to "now", without panicking.
@@ -197,15 +209,13 @@ impl Instant {
     /// or [`None`]` if that instant is later than this one.
     #[must_use]
     pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
-        todo!()
-        // self.0.checked_sub(earlier.0)
+        self.0.checked_sub(earlier.0)
     }
 
     /// Returns the amount of time elapsed since this instant.
     #[must_use]
     pub fn elapsed(&self) -> Duration {
-        todo!()
-        // self.duration_since(Instant::now())
+        self.0
     }
 
     /// Returns `Some(t)` where `t` is the time `self + duration` if `t` can be represented as
@@ -213,8 +223,7 @@ impl Instant {
     /// otherwise.
     #[must_use]
     pub fn checked_add(&self, duration: Duration) -> Option<Instant> {
-        todo!()
-        // self.0.checked_add(duration).map(Instant)
+        self.0.checked_add(duration).map(Instant)
     }
 
     /// Returns `Some(t)` where `t` is the time `self - duration` if `t` can be represented as
@@ -222,8 +231,7 @@ impl Instant {
     /// otherwise.
     #[must_use]
     pub fn checked_sub(&self, duration: Duration) -> Option<Instant> {
-        todo!()
-        // self.0.checked_sub(duration).map(Instant)
+        self.0.checked_sub(duration).map(Instant)
     }
 }
 
@@ -271,9 +279,9 @@ impl Sub<Instant> for Instant {
     }
 }
 
-// impl fmt::Display for Instant {
-//     #[inline]
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         fmt::Debug::fmt(&self.0, f)
-//     }
-// }
+impl fmt::Display for Instant {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}

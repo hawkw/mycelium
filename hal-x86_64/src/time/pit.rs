@@ -3,7 +3,7 @@ use super::InvalidDuration;
 use crate::cpu::{self, Port};
 use core::{
     convert::TryFrom,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::Duration,
 };
 use mycelium_util::{
@@ -84,6 +84,17 @@ pub struct Pit {
     /// as a `Duration` so that we can reset to periodic mode after firing a
     /// sleep interrupt.
     channel0_interval: Option<Duration>,
+}
+
+/// Errors returned by [`Pit::start_periodic_timer`] and [`Pit::sleep_blocking`].
+#[derive(Debug)]
+pub enum PitError {
+    /// The periodic timer is already running.
+    AlreadyRunning,
+    /// A [`Pit::sleep_blocking`] call is in progress.
+    SleepInProgress,
+    /// The provided duration was invalid.
+    InvalidDuration(InvalidDuration),
 }
 
 bitfield! {
@@ -202,7 +213,7 @@ enum_from_bits! {
 pub static PIT: Mutex<Pit> = Mutex::new(Pit::new());
 
 /// Are we currently sleeping on an interrupt?
-pub(crate) static SLEEPING: AtomicBool = AtomicBool::new(false);
+static SLEEPING: AtomicBool = AtomicBool::new(false);
 
 impl Pit {
     /// The PIT's base frequency runs at roughly 1.193182 MHz, for [extremely
@@ -267,11 +278,12 @@ impl Pit {
         fields(?duration),
         err,
     )]
-    pub fn sleep_blocking(&mut self, duration: Duration) -> Result<(), InvalidDuration> {
+    pub fn sleep_blocking(&mut self, duration: Duration) -> Result<(), PitError> {
         SLEEPING
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .expect("if another CPU core is sleeping, it should be holding the lock on the PIT, preventing us from starting a sleep!");
-        self.interrupt_in(duration)?;
+            .map_err(|_| PitError::SleepInProgress)?;
+        self.interrupt_in(duration)
+            .map_err(PitError::InvalidDuration)?;
         tracing::debug!("started PIT sleep");
 
         // spin until the sleep interrupt fires.
@@ -306,21 +318,20 @@ impl Pit {
         fields(?interval),
         err,
     )]
-    pub fn start_periodic_timer(&mut self, interval: Duration) -> Result<(), InvalidDuration> {
-        debug_assert!(
-            !SLEEPING.load(Ordering::Acquire),
-            "tried to start a periodic timer while a sleep was in progress!"
-        );
+    pub fn start_periodic_timer(&mut self, interval: Duration) -> Result<(), PitError> {
+        if SLEEPING.load(Ordering::Acquire) {
+            return Err(PitError::SleepInProgress);
+        }
 
         let interval_ms = usize::try_from(interval.as_millis()).map_err(|_| {
-            InvalidDuration::new(
+            PitError::invalid_duration(
                 interval,
                 "PIT periodic timer interval as milliseconds would exceed a `usize`",
             )
         })?;
         let interval_ticks = Self::TICKS_PER_MS * interval_ms;
         let divisor = u16::try_from(interval_ticks).map_err(|_| {
-            InvalidDuration::new(interval, "PIT channel 0 divisor would exceed a `u16`")
+            PitError::invalid_duration(interval, "PIT channel 0 divisor would exceed a `u16`")
         })?;
 
         // store the periodic timer interval so we can reset later.
@@ -394,6 +405,10 @@ impl Pit {
         Ok(())
     }
 
+    pub(crate) fn handle_interrupt() -> bool {
+        SLEEPING.swap(false, Ordering::AcqRel)
+    }
+
     fn set_divisor(&mut self, divisor: u16) {
         tracing::trace!(divisor = &fmt::hex(divisor), "Pit::set_divisor");
         let low = divisor as u8;
@@ -410,6 +425,24 @@ impl Pit {
         tracing::debug!(?command, "Pit::send_command");
         unsafe {
             self.command.writeb(command.bits());
+        }
+    }
+}
+
+// === impl PitError ===
+
+impl PitError {
+    fn invalid_duration(duration: Duration, msg: &'static str) -> Self {
+        Self::InvalidDuration(InvalidDuration::new(duration, msg))
+    }
+}
+
+impl fmt::Display for PitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AlreadyRunning => write!(f, "PIT periodic timer is already running"),
+            Self::SleepInProgress => write!(f, "a PIT sleep is currently in progress"),
+            Self::InvalidDuration(e) => write!(f, "invalid PIT duration: {e}"),
         }
     }
 }

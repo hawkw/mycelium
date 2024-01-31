@@ -7,6 +7,7 @@ use core::{
 };
 use maitake::{
     scheduler::{self, StaticScheduler, Stealer},
+    sync::spin,
     time,
 };
 use mycelium_util::{fmt, sync::InitOnce};
@@ -52,7 +53,7 @@ struct Runtime {
 /// 512 CPU cores ought to be enough for anybody...
 pub const MAX_CORES: usize = 512;
 
-// pub static TIMER: time::Timer = time::Timer::new(arch::interrupt::TIMER_INTERVAL);
+static TIMER: spin::InitOnce<time::Timer> = spin::InitOnce::uninitialized();
 
 static RUNTIME: Runtime = {
     // This constant is used as an array initializer; the clippy warning that it
@@ -89,8 +90,9 @@ where
 }
 
 /// Initialize the kernel runtime.
-pub fn init() {
-    // time::set_global_timer(&TIMER).expect("`rt::init` should only be called once!");
+pub fn init(clock: maitake::time::Clock) {
+    let timer = TIMER.init(time::Timer::new(clock));
+    time::set_global_timer(timer).expect("`rt::init` should only be called once!");
 
     tracing::info!("kernel runtime initialized");
 }
@@ -127,7 +129,7 @@ impl Core {
 
         // turn the timer wheel if it wasn't turned recently and no one else is
         // holding a lock, ensuring any pending timer ticks are consumed.
-        // TIMER.turn();
+        TIMER.get().turn();
 
         // if there are remaining tasks to poll, continue without stealing.
         if tick.has_remaining {
