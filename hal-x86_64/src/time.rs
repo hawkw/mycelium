@@ -2,7 +2,7 @@
 pub(crate) mod pit;
 mod tsc;
 pub use self::{
-    pit::{Pit, PIT},
+    pit::{Pit, PitError, PIT},
     tsc::Rdtsc,
 };
 use core::fmt;

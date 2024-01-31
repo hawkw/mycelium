@@ -38,7 +38,7 @@ impl TestClock {
     }
 
     pub const fn clock() -> Clock {
-        Clock::new(Self::now, Duration::from_millis(1))
+        Clock::new(Duration::from_millis(1), Self::now)
     }
 
     fn now() -> u64 {

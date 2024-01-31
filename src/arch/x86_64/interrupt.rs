@@ -1,5 +1,5 @@
 use super::{oops, Oops};
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use hal_core::{interrupt, VAddr};
 pub use hal_x86_64::interrupt::*;
 use hal_x86_64::{
@@ -20,12 +20,13 @@ pub fn enable_exceptions() {
 }
 
 #[tracing::instrument(skip(acpi))]
-pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) {
-    let controller = Controller::enable_hardware_interrupts(acpi, &crate::ALLOC);
-    controller
-        .start_periodic_timer(TIMER_INTERVAL)
-        .expect("10ms should be a reasonable interval for the PIT or local APIC timer...");
-    tracing::info!(granularity = ?TIMER_INTERVAL, "global timer initialized")
+pub fn enable_hardware_interrupts(acpi: Option<&acpi::InterruptModel>) -> &'static Controller {
+    let irq_ctrl = Controller::enable_hardware_interrupts(acpi, &crate::ALLOC);
+
+    irq_ctrl
+        .start_periodic_timer(IDIOTIC_CLOCK_INTERVAL)
+        .expect("failed to start periodic timer");
+    irq_ctrl
 }
 
 // TODO(eliza): put this somewhere good.
@@ -55,9 +56,17 @@ static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
 
 pub(in crate::arch) static GDT: sync::InitOnce<Gdt> = sync::InitOnce::uninitialized();
 
-pub const TIMER_INTERVAL: time::Duration = time::Duration::from_millis(10);
+const IDIOTIC_CLOCK_INTERVAL: time::Duration = time::Duration::from_millis(10);
+
+static IDIOTIC_CLOCK_TICKS: AtomicU64 = AtomicU64::new(0);
 
 static TEST_INTERRUPT_WAS_FIRED: AtomicUsize = AtomicUsize::new(0);
+
+pub const IDIOTIC_CLOCK: maitake::time::Clock =
+    maitake::time::Clock::new(IDIOTIC_CLOCK_INTERVAL, || {
+        IDIOTIC_CLOCK_TICKS.load(Ordering::Relaxed)
+    })
+    .named("CLOCK_IDIOTIC");
 
 pub(crate) struct InterruptHandlers;
 
@@ -100,7 +109,7 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
     }
 
     fn timer_tick() {
-        // crate::rt::TIMER.pend_ticks(1);
+        IDIOTIC_CLOCK_TICKS.fetch_add(1, Ordering::Release);
     }
 
     fn ps2_keyboard(scancode: u8) {
