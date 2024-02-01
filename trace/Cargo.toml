@@ -12,6 +12,7 @@ embedded-graphics = ["dep:embedded-graphics", "hal-core/embedded-graphics-core"]
 default = ["embedded-graphics",]
 
 [dependencies]
+maitake = { path = "../maitake" }
 tracing-core = {git = "https://github.com/tokio-rs/tracing", default_features = false }
 tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false }
 hal-core = { path = "../hal-core" }
