@@ -124,7 +124,7 @@ impl<D, S> Subscriber<D, S> {
         event: "├",
     };
     const DISPLAY_INDENT_CFG: IndentCfg = IndentCfg {
-        indent: " ",
+        indent: "",
         new_span: "> ",
         event: " ",
     };
@@ -177,13 +177,14 @@ where
         };
 
         let mut writer = self.writer(meta);
+        let _ = write_timestamp(&mut writer);
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent_initial(IndentKind::NewSpan);
         let _ = writer.with_bold().write_str(meta.name());
         let _ = writer.with_fg_color(Color::BrightBlack).write_str(": ");
 
         // ensure the span's fields are nicely indented if they wrap by
-        // "entering" and then "exiting"
+        // "entering" and then "exiting"`````findent`
         // the span.
         self.enter(&id);
         span.record(&mut Visitor::new(&mut writer, false));
@@ -203,6 +204,7 @@ where
     fn event(&self, event: &Event) {
         let meta = event.metadata();
         let mut writer = self.writer(meta);
+        let _ = write_timestamp(&mut writer);
         let _ = write_level(&mut writer, meta.level());
         let _ = writer.indent_initial(IndentKind::Event);
         let _ = write!(
@@ -239,7 +241,7 @@ impl<W, const BIT: u64> Output<W, BIT> {
         W: MakeWriter<'a>,
     {
         let cfg = OutputCfg {
-            line_len: make_writer.line_len(),
+            line_len: make_writer.line_len() - 16,
             indent: AtomicU64::new(0),
             indent_cfg,
         };
@@ -396,7 +398,8 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 
     fn write_newline(&mut self) -> fmt::Result {
-        self.writer.write_str("   ")?;
+        // including width of the 16-character timestamp bit
+        self.writer.write_str("                  ")?;
         self.current_line = 3;
         self.indent(IndentKind::Indent)
     }
@@ -490,6 +493,27 @@ where
         Level::ERROR => w.with_fg_color(Color::BrightRed).write_char('x'),
     }?;
     w.write_char(']')
+}
+
+#[inline]
+fn write_timestamp<W>(w: &mut W) -> fmt::Result
+where
+    W: fmt::Write + SetColor,
+{
+    w.write_char('[')?;
+    if let Ok(now) = maitake::time::Instant::try_now() {
+        let now = now.elapsed();
+        write!(
+            w.with_fg_color(Color::BrightBlack),
+            "{:>6}.{:06}",
+            now.as_secs(),
+            now.subsec_micros()
+        )?;
+    } else {
+        write!(w.with_fg_color(Color::BrightBlack), "     ?.??????")?;
+    }
+    w.write_char(']')?;
+    Ok(())
 }
 
 impl<'writer, W> Visitor<'writer, W>
