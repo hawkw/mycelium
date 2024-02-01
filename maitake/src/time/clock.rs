@@ -133,9 +133,7 @@ impl Clock {
 #[inline]
 #[must_use]
 pub(in crate::time) fn ticks_to_dur(tick_duration: Duration, ticks: Ticks) -> Duration {
-    let nanos = tick_duration.subsec_nanos() as u64 * ticks;
-    let secs = tick_duration.as_secs() * ticks;
-    Duration::new(secs, nanos as u32)
+    tick_duration.saturating_mul(ticks as u32)
 }
 
 #[track_caller]
