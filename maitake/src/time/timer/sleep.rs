@@ -67,7 +67,15 @@ enum State {
 
 impl<'timer> Sleep<'timer> {
     pub(super) fn new(timer: &'timer Timer, ticks: Ticks) -> Self {
-        let deadline = timer.core().now() + ticks;
+        let now = timer.clock().now_ticks();
+        let deadline = now + ticks;
+        debug!(
+            target: "maitake::time::sleep",
+            now,
+            sleep.ticks = ticks,
+            sleep.deadline = deadline,
+            "Sleep::new({ticks})"
+        );
         Self {
             state: State::Unregistered,
             timer,
@@ -93,7 +101,12 @@ impl Future for Sleep<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut().project();
-        trace!(sleep.addr = ?format_args!("{:p}", this.entry), "Sleep::poll");
+        trace!(
+            target: "maitake::time::sleep",
+            addr = ?fmt::ptr(&*this.entry),
+            state = ?*this.state,
+            "Sleep::poll"
+        );
         // If necessary, register the sleep
         match test_dbg!(*this.state) {
             State::Unregistered => {

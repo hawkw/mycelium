@@ -308,6 +308,12 @@ impl Timer {
         self.clock.now()
     }
 
+    /// Returns the hardware [`Clock`] definition used by this timer.
+    #[must_use]
+    pub fn clock(&self) -> &Clock {
+        &self.clock
+    }
+
     /// Returns the maximum duration of [`Sleep`] futures driven by this timer.
     pub fn max_duration(&self) -> Duration {
         self.clock.max_duration()

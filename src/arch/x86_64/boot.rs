@@ -95,7 +95,7 @@ impl BootInfo for BootloaderApiBootInfo {
             // TODO(eliza): it would be nice if this was configured by
             // non-arch-specific OS code...
             const DISABLED_TARGETS: &[&str] = &[
-                "maitake::time",
+                // "maitake::time::timer",
                 "maitake::task",
                 "runtime::waker",
                 "mycelium_alloc",

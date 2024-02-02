@@ -157,16 +157,19 @@ impl Core {
         self.now = now;
 
         // reschedule pending sleeps.
-        debug!(
-            now = self.now,
-            fired,
-            rescheduled = pending_reschedule.len(),
-            ?next_deadline,
-            "wheel turned to"
-        );
 
         // If we need to reschedule something, we may need to recalculate the next deadline
         let any = !pending_reschedule.is_empty();
+
+        if any || fired > 0 {
+            debug!(
+                now = self.now,
+                fired,
+                rescheduled = pending_reschedule.len(),
+                ?next_deadline,
+                "the Wheel of Time has turned"
+            );
+        }
 
         for entry in pending_reschedule {
             let deadline = unsafe { entry.as_ref().deadline };
@@ -238,7 +241,7 @@ impl Core {
     fn next_deadline(&self) -> Option<Deadline> {
         self.wheels.iter().find_map(|wheel| {
             let next_deadline = wheel.next_deadline(self.now)?;
-            trace!(
+            test_trace!(
                 now = self.now,
                 next_deadline.ticks,
                 next_deadline.wheel,

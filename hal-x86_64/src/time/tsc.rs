@@ -39,6 +39,10 @@ impl Rdtsc {
     /// Returns a [`maitake::time::Clock`] defining a clock that uses `rdtsc`
     /// timestamps to produce `maitake` ticks.
     pub fn into_maitake_clock(self) -> Result<Clock, &'static str> {
+        // TODO(eliza): fix this
+        #![allow(unreachable_code)]
+        return Err("calibration routine doesn't really work yet, sorry!");
+
         const NOT_YET_CALIBRATED: u32 = u32::MAX;
 
         // 50ms is stolen from Linux, so i'm assuming its a reasonable duration
@@ -47,8 +51,6 @@ impl Rdtsc {
         const PIT_SLEEP_DURATION: Duration = Duration::from_millis(50);
 
         static MAITAKE_TICK_SHIFT: AtomicU32 = AtomicU32::new(NOT_YET_CALIBRATED);
-
-        return Err("calibration routine doesn't really work yet, sorry!");
 
         fn now() -> u64 {
             let rdtsc = unsafe { intrinsics::rdtsc() };

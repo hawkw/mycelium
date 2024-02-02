@@ -62,7 +62,7 @@ use core::{
 pub struct Clock {
     now: fn() -> Ticks,
     tick_duration: Duration,
-    name: Option<&'static str>,
+    name: &'static str,
 }
 
 /// A measurement of a monotonically nondecreasing clock.
@@ -92,19 +92,18 @@ pub struct Instant(Duration);
 pub type Ticks = u64;
 
 impl Clock {
+    #[must_use]
     pub const fn new(tick_duration: Duration, now: fn() -> Ticks) -> Self {
         Self {
             now,
             tick_duration,
-            name: None,
+            name: "<unnamed mystery clock>",
         }
     }
 
+    #[must_use]
     pub const fn named(self, name: &'static str) -> Self {
-        Self {
-            name: Some(name),
-            ..self
-        }
+        Self { name, ..self }
     }
 
     #[must_use]
@@ -124,8 +123,14 @@ impl Clock {
         Instant(ticks_to_dur(tick_duration, now))
     }
 
+    #[must_use]
     pub fn max_duration(&self) -> Duration {
         max_duration(self.tick_duration())
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        self.name
     }
 }
 
@@ -133,7 +138,22 @@ impl Clock {
 #[inline]
 #[must_use]
 pub(in crate::time) fn ticks_to_dur(tick_duration: Duration, ticks: Ticks) -> Duration {
-    tick_duration.saturating_mul(ticks as u32)
+    const NANOS_PER_SEC: u32 = 1_000_000_000;
+    // Multiply nanoseconds as u64, because it cannot overflow that way.
+    let total_nanos = tick_duration.subsec_nanos() as u64 * ticks;
+    let extra_secs = total_nanos / (NANOS_PER_SEC as u64);
+    let nanos = (total_nanos % (NANOS_PER_SEC as u64)) as u32;
+    let Some(secs) = tick_duration.as_secs().checked_mul(ticks) else {
+        panic!(
+            "ticks_to_dur({tick_duration:?}, {ticks}): multiplying tick \
+            duration seconds by ticks would overflow"
+        );
+    };
+    let Some(secs) = secs.checked_add(extra_secs) else {
+        panic!("ticks_to_dur({tick_duration:?}, {ticks}): extra seconds from nanos ({extra_secs}s) would overflow total seconds")
+    };
+    debug_assert!(nanos < NANOS_PER_SEC);
+    Duration::new(secs, nanos)
 }
 
 #[track_caller]
@@ -155,7 +175,7 @@ pub(in crate::time) fn dur_to_ticks(
 #[inline]
 #[must_use]
 pub(in crate::time) fn max_duration(tick_duration: Duration) -> Duration {
-    ticks_to_dur(tick_duration, Ticks::MAX)
+    tick_duration.saturating_mul(u32::MAX)
 }
 
 impl Instant {

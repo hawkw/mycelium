@@ -91,6 +91,11 @@ where
 
 /// Initialize the kernel runtime.
 pub fn init(clock: maitake::time::Clock) {
+    tracing::info!(
+        clock = %clock.name(),
+        clock.max_duration = ?clock.max_duration(),
+        "initializing kernel runtime...",
+    );
     let timer = TIMER.init(time::Timer::new(clock));
     time::set_global_timer(timer).expect("`rt::init` should only be called once!");
 
