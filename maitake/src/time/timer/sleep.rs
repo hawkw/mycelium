@@ -47,7 +47,7 @@ pub(super) struct Entry {
     /// The wheel's elapsed timestamp when this `sleep` future was first polled.
     pub(super) deadline: Ticks,
 
-    pub(super) ticks: Ticks,
+    pub(in crate::time::timer) ticks: Ticks,
 
     pub(super) linked: AtomicBool,
 
@@ -112,7 +112,17 @@ impl Future for Sleep<'_> {
             State::Unregistered => {
                 let ptr =
                     unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
-                match test_dbg!(this.timer.core().register_sleep(ptr)) {
+                // Acquire the wheel lock to insert the sleep.
+                let mut core: maitake_sync::spin::MutexGuard<'_, crate::time::timer::wheel::Core> =
+                    this.timer.core();
+
+                // While we are holding the wheel lock, go ahead and advance the
+                // timer, too. This way, the timer wheel gets advanced more
+                // frequently than just when a scheduler tick completes or a
+                // timer IRQ fires, helping to increase timer accuracy.
+                this.timer.advance_locked(&mut core);
+
+                match test_dbg!(core.register_sleep(ptr)) {
                     Poll::Ready(()) => {
                         *this.state = State::Completed;
                         return Poll::Ready(());

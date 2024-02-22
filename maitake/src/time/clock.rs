@@ -7,52 +7,6 @@ use core::{
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
-// /// A hardware clock.
-// pub trait Clock: Send + Sync + 'static {
-//     /// Returns the current hardware timestamp, in ticks of this `Clock`.
-//     ///
-//     /// # Monotonicity
-//     ///
-//     /// Implementations of this method MUST ensure that timestampss returned by
-//     /// `now()` MUST be [monontonically non-decreasing]. This means that a call
-//     /// to `now()` MUST NOT ever  return a value less than the value returned by
-//     /// a previous call to`now()`.
-//     ///
-//     /// Note that this means that timestamps returned by `now()` are expected
-//     /// not to overflow. Of course, all integers *will* overflow eventually, so
-//     /// this requirement can reasonably be weakened to expecting that timestamps
-//     /// returned by `now()` will not overflow unless the system has been running
-//     /// for a duration substantially longer than the system is expected to run
-//     /// for. For example, if a system is expected to run for as long as a year
-//     /// without being restarted, it's not unreasonable for timestamps returned
-//     /// by `now()` to overflow after, say, 100 years. Ideally, a general-purpose
-//     /// `Clock` implementation would not overflow for, say, 1,000 years.
-//     ///
-//     /// The implication of this is that if the timestamp counters provided by
-//     /// the hardware platform are less than 64 bits wide (e.g., 16- or 32-bit
-//     /// timestamps), the `Clock` implementation is responsible for ensuring that
-//     /// they are extended to 64 bits, such as by counting overflows in the
-//     /// `Clock` implementation.
-//     ///
-//     /// [monotonic]: https://en.wikipedia.org/wiki/Monotonic_function
-//     #[must_use]
-//     fn now_ticks(&self) -> Ticks;
-
-//     #[must_use]
-//     fn tick_duration(&self) -> Duration;
-
-//     #[must_use]
-//     fn now(&self) -> Instant {
-//         let now = self.now_ticks();
-//         let tick_duration = self.tick_duration();
-//         Instant { now, tick_duration }
-//     }
-
-//     fn max_duration(&self) -> Duration {
-//         max_duration(self.tick_duration())
-//     }
-// }
-
 /// A hardware clock definition.
 ///
 /// A `Clock` consists of a function that returns the hardware clock's current
@@ -68,7 +22,7 @@ pub struct Clock {
 /// A measurement of a monotonically nondecreasing clock.
 /// Opaque and useful only with [`Duration`].
 ///
-/// Provided that the [`Clock` implementation is correct, `Instant`s are always
+/// Provided that the [`Clock`] implementation is correct, `Instant`s are always
 /// guaranteed to be no less than any previously measured instant when created,
 /// and are often useful for tasks such as measuring benchmarks or timing how
 /// long an operation takes.
@@ -92,6 +46,38 @@ pub struct Instant(Duration);
 pub type Ticks = u64;
 
 impl Clock {
+    /// Returns a new [`Clock`] with the provided tick [`Duration`] and `now()`
+    /// function.
+    ///
+    /// # Implementing `now()`
+    ///
+    /// The `now` function provided when constructing a [`Clock`] is a function
+    /// that returns the current hardware timestamp in a 64-bit number of
+    /// _ticks_. The period of time represented by a tick is indicated by the
+    /// `tick_duration` argument.
+    ///
+    /// Implementations of `now()` MUST ensure that timestamps returned by
+    /// `now()` MUST be [monontonically non-decreasing]. This means that a call
+    /// to `now()` MUST NOT ever  return a value less than the value returned by
+    /// a previous call to`now()`.
+    ///
+    /// Note that this means that timestamps returned by `now()` are expected
+    /// not to overflow. Of course, all integers *will* overflow eventually, so
+    /// this requirement can reasonably be weakened to expecting that timestamps
+    /// returned by `now()` will not overflow unless the system has been running
+    /// for a duration substantially longer than the system is expected to run
+    /// for. For example, if a system is expected to run for as long as a year
+    /// without being restarted, it's not unreasonable for timestamps returned
+    /// by `now()` to overflow after, say, 100 years. Ideally, a general-purpose
+    /// `Clock` implementation would not overflow for, say, 1,000 years.
+    ///
+    /// The implication of this is that if the timestamp counters provided by
+    /// the hardware platform are less than 64 bits wide (e.g., 16- or 32-bit
+    /// timestamps), the `Clock` implementation is responsible for ensuring that
+    /// they are extended to 64 bits, such as by counting overflows in the
+    /// `Clock` implementation.
+    ///
+    /// [monotonic]: https://en.wikipedia.org/wiki/Monotonic_function
     #[must_use]
     pub const fn new(tick_duration: Duration, now: fn() -> Ticks) -> Self {
         Self {
@@ -101,21 +87,30 @@ impl Clock {
         }
     }
 
+    /// Add an arbitrary user-defined name to this `Clock`.
+    ///
+    /// This is generally used to describe the hardware time source used by the
+    /// `now()` function for this `Clock`.
     #[must_use]
     pub const fn named(self, name: &'static str) -> Self {
         Self { name, ..self }
     }
 
+    /// Returns the current `now` timestamp, in [`Ticks`] of this clock's base
+    /// tick duration.
     #[must_use]
     pub(crate) fn now_ticks(&self) -> Ticks {
         (self.now)()
     }
 
+    /// Returns the [`Duration`] of one tick of this clock.
     #[must_use]
     pub fn tick_duration(&self) -> Duration {
         self.tick_duration
     }
 
+    /// Returns an [`Instant`] representing the current timestamp according to
+    /// this [`Clock`].
     #[must_use]
     pub fn now(&self) -> Instant {
         let now = self.now_ticks();
@@ -123,11 +118,14 @@ impl Clock {
         Instant(ticks_to_dur(tick_duration, now))
     }
 
+    /// Returns the maximum duration of this clock.
     #[must_use]
     pub fn max_duration(&self) -> Duration {
         max_duration(self.tick_duration())
     }
 
+    /// Returns this `Clock`'s name, if it was given one using the [`named`]
+    /// method.
     #[must_use]
     pub fn name(&self) -> &'static str {
         self.name
@@ -158,7 +156,6 @@ pub(in crate::time) fn ticks_to_dur(tick_duration: Duration, ticks: Ticks) -> Du
 
 #[track_caller]
 #[inline]
-#[must_use]
 pub(in crate::time) fn dur_to_ticks(
     tick_duration: Duration,
     dur: Duration,

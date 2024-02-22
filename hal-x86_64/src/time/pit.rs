@@ -3,7 +3,7 @@ use super::InvalidDuration;
 use crate::cpu::{self, Port};
 use core::{
     convert::TryFrom,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use mycelium_util::{

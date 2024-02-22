@@ -304,11 +304,13 @@ impl Timer {
         }
     }
 
+    /// Returns the current timestamp according to this timer's hardware
+    /// [`Clock`], as an [`Instant`].
     pub fn now(&self) -> Instant {
         self.clock.now()
     }
 
-    /// Returns the hardware [`Clock`] definition used by this timer.
+    /// Borrows the hardware [`Clock`] definition used by this timer.
     #[must_use]
     pub fn clock(&self) -> &Clock {
         &self.clock
@@ -453,8 +455,8 @@ impl Timer {
         // instead, if the timer wheel is busy (e.g. the timer ISR was called on
         // another core, or if a `Sleep` future is currently canceling itself),
         // we just add to a counter of pending ticks, and bail.
-        if let Some(core) = self.core.try_lock() {
-            Some(self.advance_locked(core))
+        if let Some(mut core) = self.core.try_lock() {
+            Some(self.advance_locked(&mut core))
         } else {
             trace!("could not lock timer wheel");
             None
@@ -488,7 +490,7 @@ impl Timer {
     /// [`advance`]: Timer::advance
     #[inline]
     pub fn turn(&self) -> Turn {
-        self.advance_locked(self.core.lock())
+        self.advance_locked(&mut self.core.lock())
     }
 
     pub(in crate::time) fn ticks_to_dur(&self, ticks: Ticks) -> Duration {
@@ -499,7 +501,7 @@ impl Timer {
         clock::dur_to_ticks(self.clock.tick_duration(), duration)
     }
 
-    fn advance_locked(&self, mut core: MutexGuard<'_, wheel::Core>) -> Turn {
+    fn advance_locked(&self, core: &mut MutexGuard<'_, wheel::Core>) -> Turn {
         // take any pending ticks.
         let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
         // we do two separate `advance` calls here instead of advancing once

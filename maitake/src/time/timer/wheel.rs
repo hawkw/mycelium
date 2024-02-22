@@ -95,10 +95,6 @@ impl Core {
         }
     }
 
-    pub(super) fn now(&self) -> Ticks {
-        self.now
-    }
-
     #[inline(never)]
     pub(super) fn turn_to(&mut self, now: Ticks) -> (usize, Option<Deadline>) {
         let mut fired = 0;
@@ -191,7 +187,6 @@ impl Core {
         let deadline = sleep.deadline;
         trace!(
             sleep.addr = ?format_args!("{sleep:p}"),
-            sleep.ticks = *sleep.as_ref().project_ref().ticks,
             sleep.deadline = deadline,
             now = self.now,
             "canceling sleep"
