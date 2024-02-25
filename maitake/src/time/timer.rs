@@ -501,7 +501,7 @@ impl Timer {
         clock::dur_to_ticks(self.clock.tick_duration(), duration)
     }
 
-    fn advance_locked(&self, core: &mut MutexGuard<'_, wheel::Core>) -> Turn {
+    fn advance_locked(&self, core: &mut wheel::Core) -> Turn {
         // take any pending ticks.
         let pending_ticks = self.pending_ticks.swap(0, AcqRel) as Ticks;
         // we do two separate `advance` calls here instead of advancing once

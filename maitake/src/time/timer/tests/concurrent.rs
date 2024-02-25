@@ -108,6 +108,7 @@ fn two_sleeps_sequential() {
         }
 
         thread.join().unwrap();
+        drop(clock);
     })
 }
 

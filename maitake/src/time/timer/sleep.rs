@@ -113,8 +113,7 @@ impl Future for Sleep<'_> {
                 let ptr =
                     unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
                 // Acquire the wheel lock to insert the sleep.
-                let mut core: maitake_sync::spin::MutexGuard<'_, crate::time::timer::wheel::Core> =
-                    this.timer.core();
+                let mut core = this.timer.core();
 
                 // While we are holding the wheel lock, go ahead and advance the
                 // timer, too. This way, the timer wheel gets advanced more
