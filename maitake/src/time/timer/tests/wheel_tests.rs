@@ -188,7 +188,7 @@ impl SleepGroupTest {
 }
 
 #[test]
-fn pend_advance_wakes() {
+fn turn_wakes() {
     static TIMER: Timer = Timer::new(TestClock::clock());
     let mut test = SleepGroupTest::new(&TIMER);
 
@@ -205,7 +205,6 @@ fn pend_advance_wakes() {
     // advance the timer by 50 more ticks
     // but ONLY by pending
     test.clock.advance_ticks(50);
-    test.timer.pend_ticks(50);
 
     // Tick the scheduler, nothing should have happened
     let tick = test.scheduler.tick();

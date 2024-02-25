@@ -5,8 +5,8 @@ use core::cell::RefCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-thread_local! {
-    static CLOCK: RefCell<Option<Arc<TestClockState>>> = const { RefCell::new(None) };
+crate::loom::thread_local! {
+    static CLOCK: RefCell<Option<Arc<TestClockState>>> = RefCell::new(None);
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +58,8 @@ impl ClockHandle {
         self.advance_ticks_inner(duration.as_millis() as u64)
     }
 
+    // This function isn't used in loom tests.
+    #[cfg_attr(loom, allow(dead_code))]
     pub fn advance_ticks(&self, ticks: Ticks) {
         info!(ticks, "advancing test clock by");
         self.advance_ticks_inner(ticks)
@@ -71,6 +73,8 @@ impl ClockHandle {
         );
     }
 
+    // This function isn't used in loom tests.
+    #[cfg_attr(loom, allow(dead_code))]
     pub fn ticks(&self) -> Ticks {
         self.0.now.load(Ordering::SeqCst)
     }

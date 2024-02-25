@@ -4,6 +4,7 @@ pub(crate) use self::inner::*;
 #[cfg(loom)]
 mod inner {
     #![allow(dead_code)]
+    pub(crate) use loom::thread_local;
 
     #[cfg(feature = "alloc")]
     pub(crate) mod alloc {
@@ -101,6 +102,10 @@ mod inner {
 #[cfg(not(loom))]
 mod inner {
     #![allow(dead_code, unused_imports)]
+
+    #[cfg(test)]
+    pub(crate) use std::thread_local;
+
     pub(crate) mod sync {
         #[cfg(feature = "alloc")]
         pub use alloc::sync::*;
