@@ -43,7 +43,7 @@
 //! [wheel]: http://www.cs.columbia.edu/~nahum/w6998/papers/sosp87-timing-wheels.pdf
 //! [driving-timers]: Timer#driving-timers
 #![warn(missing_docs, missing_debug_implementations)]
-mod clock;
+pub mod clock;
 pub mod timeout;
 mod timer;
 
