@@ -61,9 +61,24 @@ use self::sleep::Sleep;
 /// upon by an outside force!*
 ///
 /// Since `maitake` is intended for bare-metal platforms without an operating
-/// system, a `Timer` instance cannot automatically advance time. Instead, it
-/// must be driven by a *time source*, which calls the [`Timer::advance`] method
-/// and/or the [`Timer::pend_duration`] and [`Timer::force_advance`] methods.
+/// system, a `Timer` instance cannot automatically advance time. Instead, the
+/// operating system's run loop must periodically call the [`Timer::turn`]
+/// method, which advances the timer wheel to the current time and wakes any
+/// futures whose timers have completed.
+///
+/// The [`Timer::turn`] method may be called on a periodic interrupt, or on
+/// every iteration of a system run loop. If the system is also using the
+/// [`maitake::scheduler`](crate::scheduler) module, calling [`Timer::turn`]
+/// after a call to [`Scheduler::tick`] is generally appropriate.
+///
+/// # Clocks
+///
+/// In addition to driving the timer, user code must also provide a [`Clock`]
+/// when constructing a [`Timer`]. The [`Clock`] is a representation of a
+/// hardware time source used to determine the current timestamp. See the
+/// [`Clock`] type's documentation for details on implementing clocks.
+///
+/// ## Hardware Time Sources
 ///
 /// Depending on the hardware platform, a time source may be a timer interrupt
 /// that fires on a known interval[^1], or a timestamp that's read by reading
@@ -71,35 +86,11 @@ use self::sleep::Sleep;
 /// special instruction[^3]. A combination of multiple time sources can also be
 /// used.
 ///
-/// In any case, the timer must be advanced periodically by the time source.
-///
 /// [^1]: Such as the [8253 PIT interrupt] on most x86 systems.
 ///
 /// [^2]: Such as the [`CCNT` register] on ARMv7.
 ///
 /// [^3]: Such as the [`rdtsc` instruction] on x86_64.
-///
-/// ### Interrupt-Driven Timers
-///
-/// When the timer is interrupt-driven, the interrupt handler for the timer
-/// interrupt should call either the [`Timer::pend_duration`] or
-/// [`Timer::advance`] methods.
-///
-/// [`Timer::advance`] will attempt to optimistically acquire a spinlock, and
-/// advance the timer if it is acquired, or add to the pending tick counter if
-/// the timer wheel is currently locked. Therefore, it is safe to call in an
-/// interrupt handler, as it and cannot cause a deadlock.
-///
-/// However, if interrupt handlers must be extremely short, the
-/// [`Timer::pend_duration`] method can be used, instead. This method will
-/// *never* acquire a lock, and does not actually turn the timer wheel. Instead,
-/// it always performs only a single atomic add. If the time source is an
-/// interrupt handler which calls [`Timer::pend_duration`], though, the timer
-/// wheel must be turned externally. This can be done by calling the
-/// [`Timer::force_advance_ticks`] method periodically outside of the interrupt
-/// handler, with a duration of 0 ticks. In general, this should be done as some
-/// form of runtime bookkeeping action. For example, the timer can be advanced
-/// in a system's run loop every time the [`Scheduler::tick`] method completes.
 ///
 /// ### Periodic and One-Shot Timer Interrupts
 ///
@@ -111,9 +102,8 @@ use self::sleep::Sleep;
 ///
 /// Using a periodic timer with the `maitake` timer wheel is quite simple:
 /// construct the timer wheel with the minimum [granularity](#timer-granularity)
-/// set to the period of the timer interrupt, and call
-/// [`Timer::advance_ticks`]`(1)` or [`Timer::pend_ticks`]`(1)` in the interrupt
-/// handler, as discused [above](#interrupt-driven-timers).
+/// set to the period of the timer interrupt, and call [`Timer::try_turn`] every
+/// time the periodic interrupt occurs.
 ///
 /// However, if the hardware platform provides a way to put the processor in a
 /// low-power state while waiting for an interrupt, it may be desirable to
@@ -131,46 +121,31 @@ use self::sleep::Sleep;
 /// ### Timestamp-Driven Timers
 ///
 /// When the timer is advanced by reading from a time source, the
-/// [`Timer::advance`] method should generally be used to drive the timer. Prior
-/// to calling [`Timer::advance`], the time source is read to determine the
-/// duration that has elapsed since the last time [`Timer::advance`] was called,
-/// and that duration is provided when calling `advance`.
-///
-/// This should occur periodically as part of a runtime loop (as discussed in
-/// the previous section), such as every time [the scheduler is
-/// ticked][`Scheduler::tick`]. Advancing the timer more frequently will result
-/// in [`Sleep`] futures firing with a higher resolution, while less frequent
-/// calls to [`Timer::advance`] will result in more noise in when [`Sleep`]
+/// [`Timer::turn`] method should be called periodically as part of a runtime
+/// loop (as discussed in he previous section), such as every time [the
+/// scheduler is ticked][`Scheduler::tick`]. Advancing the timer more frequently
+/// will result in [`Sleep`] futures firing with a higher resolution, while less
+/// frequent calls to [`Timer::turn`] will result in more noise in when [`Sleep`]
 /// futures actually complete.
 ///
-/// # Timer Granularity
+/// ## Timer Granularity
 ///
 /// Within the timer wheel, the duration of a [`Sleep`] future is represented as
 /// a number of abstract "timer ticks". The actual duration in real life time
 /// that's represented by a number of ticks depends on the timer's _granularity.
 ///
-/// When constructing a `Timer` (e.g. by calling [`Timer::new`]), the minimum
-/// granularity of the timer is selected by providing the [`Duration`]
-/// represented by a single timer tick. The selected tick duration influences
-/// both the resolution of the timer (i.e. the minimum difference in duration
-/// between two `Sleep` futures that can be distinguished by the timer), and
-/// the maximum duration that can be represented by a `Sleep` future (which is
-/// limited by the size of a 64-bit integer).
+/// When constructing `Timer` (e.g. by calling [`Timer::new`]), the minimum
+/// granularity of the timer is determined by the [`Clock`]'s `tick_duration`
+/// value. The selected tick duration influences both the resolution of the
+/// timer (i.e. the minimum difference in duration between two `Sleep` futures
+/// that can be distinguished by the timer), and the maximum duration that can
+/// be represented by a `Sleep` future (which is limited by the size of a 64-bit
+/// integer).
 ///
 /// A longer tick duration will allow represented longer sleeps, as the maximum
 /// allowable sleep is the timer's granularity multiplied by [`u64::MAX`]. A
 /// shorter tick duration will allow for more precise sleeps at the expense of
 /// reducing the maximum allowed sleep.
-///
-/// When using an [interrupt-driven time source](#interrupt-driven-timers), the
-/// tick duration should generally be the interval that the timer interrupt
-/// fires at. A finer resolution won't have any benefit, as the timer only fires
-/// at that frequency, and all sleeps that complete between two timer interrupts
-/// will be woken at the same time anyway.
-///
-/// When using a [timestamp-driven time source](#timestamp-driven-timers),
-/// selecting the resolution of the timestamp counter as the timer's tick
-/// duration is probably a good choice.
 ///
 /// [`Sleep`]: crate::time::Sleep
 /// [`Timeout`]: crate::time::Timeout
@@ -381,41 +356,6 @@ impl Timer {
         Sleep::new(self, ticks)
     }
 
-    /// Add pending time to the timer *without* turning the wheel.
-    ///
-    /// This function will *never* acquire a lock, and will *never* notify any
-    /// waiting [`Sleep`] futures. It can be called in an interrupt handler that
-    /// cannot perform significant amounts of work.
-    ///
-    /// However, if this method is used, then [`Timer::force_advance`] must be
-    /// called frequently from outside of the interrupt handler.
-    #[inline(always)]
-    pub fn pend_duration(&self, duration: Duration) {
-        let ticks = expect_display(
-            self.dur_to_ticks(duration),
-            "cannot add to pending duration",
-        );
-        self.pend_ticks(ticks)
-    }
-
-    /// Add pending ticks to the timer *without* turning the wheel.
-    ///
-    /// This function will *never* acquire a lock, and will *never* notify any
-    /// waiting [`Sleep`] futures. It can be called in an interrupt handler that
-    /// cannot perform significant amounts of work.
-    ///
-    /// However, if this method is used, then [`Timer::force_advance`] must be
-    /// called frequently from outside of the interrupt handler.
-    #[inline(always)]
-    #[track_caller]
-    pub fn pend_ticks(&self, ticks: Ticks) {
-        debug_assert!(
-            ticks < usize::MAX as u64,
-            "cannot pend more than `usize::MAX` ticks at once!"
-        );
-        self.pending_ticks.fetch_add(ticks as usize, Release);
-    }
-
     /// Attempt to turn the timer to the current `now` if the timer is not
     /// locked, potentially waking any [`Sleep`] futures that have completed.
     ///
@@ -438,20 +378,18 @@ impl Timer {
     /// immediately. Therefore, it is safe to call this method in an interrupt
     /// handler, as it will never acquire a lock that may already be locked.
     ///
-    /// The [`force_advance_ticks`] method will spin to lock the timer wheel lock if
+    /// The [`Timer::turn`] method will spin to lock the timer wheel lock if
     /// it is currently held, *ensuring* that any pending wakeups are processed.
     /// That method should never be called in an interrupt handler.
     ///
-    /// If a timer is driven primarily by calling `advance` in an interrupt
-    /// handler, it may be desirable to occasionally call [`force_advance_ticks`]
+    /// If a timer is driven primarily by calling `try_turn` in an interrupt
+    /// handler, it may be desirable to occasionally call [`Timer::turn`]
     /// *outside* of an interrupt handler (i.e., as as part of an occasional
     /// runtime bookkeeping process). This ensures that any pending ticks are
     /// observed by the timer in a relatively timely manner.
-    ///
-    /// [`force_advance_ticks`]: Timer::force_advance_ticks
     #[inline]
     pub fn try_turn(&self) -> Option<Turn> {
-        // `advance` may be called in an ISR, so it can never actually spin.
+        // `try_turn` may be called in an ISR, so it can never actually spin.
         // instead, if the timer wheel is busy (e.g. the timer ISR was called on
         // another core, or if a `Sleep` future is currently canceling itself),
         // we just add to a counter of pending ticks, and bail.
@@ -481,13 +419,11 @@ impl Timer {
     /// held elsewhere. Therefore, this method must *NEVER* be called in an
     /// interrupt handler!
     ///
-    /// If a timer is advanced inside an interrupt handler, use the [`advance`]
-    /// method instead. If a timer is advanced primarily by calls to
-    /// [`advance`], it may be desirable to occasionally call `force_advance`
-    /// outside an interrupt handler, to ensure that pending ticks are drained
-    /// frequently.
-    ///
-    /// [`advance`]: Timer::advance
+    /// If a timer is advanced inside an interrupt handler, use the
+    /// [`Timer::try_turn`] method instead. If a timer is advanced primarily by
+    /// calls to [`Timer::try_turn`] in an interrupt handler, it may be
+    /// desirable to occasionally call `turn` outside an interrupt handler, to
+    /// ensure that pending ticks are drained frequently.
     #[inline]
     pub fn turn(&self) -> Turn {
         self.advance_locked(&mut self.core.lock())

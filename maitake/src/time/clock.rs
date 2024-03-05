@@ -1,3 +1,6 @@
+//! [`Clock`]s provide a mechanism for tracking the current time.
+//!
+//! See the documentation for the [`Clock`] type for more details.
 use super::{
     timer::{self, TimerError},
     Duration,
@@ -10,8 +13,179 @@ use core::{
 /// A hardware clock definition.
 ///
 /// A `Clock` consists of a function that returns the hardware clock's current
-/// timestamp in [`Ticks`], and a [`Duration`] that defines the amount of time
-/// represented by a single tick of the clock.
+/// timestamp in [`Ticks`] (`now()`), and a [`Duration`] that defines the amount
+/// of time represented by a single tick of the clock.
+///
+/// # Using `Clock`s
+///
+/// A `Clock` must be provided when [constructing a `Timer`](super::Timer::new).
+/// The `Clock` provided to [`Timer::new`](super::Timer::new) is used to
+/// determine the time to advance to when turning the timer wheel, and to
+/// determine the start time when adding a [`Sleep`](super::Sleep) future to the
+/// timer wheel.
+///
+/// In addition, once a global timer is set using the
+/// [`set_global_timer`](super::set_global_timer) function, the
+/// [`Instant::now()`] function may be used to produce [`Instant`]s representing
+/// the current timestamp according to that timer's [`Clock`]. The [`Instant`]
+/// type is analogous to the [`std::time::Instant`] type in the Rust standard
+/// library, and may be used to compare the time elapsed between two events, as
+/// a timestamp for logs and other diagnostics, and similar purposes.
+///
+/// # Implementing `now()`
+///
+/// Constructing a [new `Clock` definition](Self::new) takes a function, called
+/// `now()`, that returns the current hardware timestamp in a 64-bit number of,
+/// _ticks_. The period of time represented by a tick is indicated by the
+/// `tick_duration` argument to [`Clock::new`]. In order to define a `Clock`
+/// representing a particular hardware time source, a `now()` function must be
+/// implemented using that time source.
+///
+/// ## Monotonicity
+///
+/// Implementations of `now()` MUST ensure that timestamps returned by
+/// `now()` MUST be [monontonically non-decreasing][monotonic]. This means that
+/// a call to `now()` MUST NOT ever return a value less than the value returned
+/// by a previous call to`now()`.
+///
+/// Note that this means that timestamps returned by `now()` are expected
+/// not to overflow. Of course, all integers *will* overflow eventually, so
+/// this requirement can reasonably be weakened to expecting that timestamps
+/// returned by `now()` will not overflow unless the system has been running
+/// for a duration substantially longer than the system is expected to run
+/// for. For example, if a system is expected to run for as long as a year
+/// without being restarted, it's not unreasonable for timestamps returned
+/// by `now()` to overflow after, say, 100 years. Ideally, a general-purpose
+/// `Clock` implementation would not overflow for, say, 1,000 years.
+///
+/// The implication of this is that if the timestamp counters provided by
+/// the hardware platform are less than 64 bits wide (e.g., 16- or 32-bit
+/// timestamps), the `Clock` implementation is responsible for ensuring that
+/// they are extended to 64 bits, such as by counting overflows in the
+/// `Clock` implementation.
+///
+/// ## Examples
+///
+/// The simplest possible `Clock` implementation is one for a
+/// timestamp-counter-style hardware clock, where the timestamp counter is
+/// incremented on a fixed interval by the hardware. For such a counter, the
+/// `Clock` definition might look something like this:
+///
+///```rust
+/// use maitake::time::{Clock, Duration};
+/// # mod arch {
+/// #     pub fn read_timestamp_counter() -> u64 { 0 }
+/// #     pub const TIMESTAMP_COUNTER_FREQUENCY_HZ: u64 = 50_000_000;
+/// # }
+///
+/// // The fixed interval at which the timestamp counter is incremented.
+/// //
+/// // This is a made-up value; for real hardware, this value would be
+/// // determined from information provided by the hardware manufacturer,
+/// // and may need to be calculated based on the system's clock frequency.
+/// const TICK_DURATION: Duration = {
+///     let dur_ns = 1_000_000_000 / arch::TIMESTAMP_COUNTER_FREQUENCY_HZ;
+///     Duration::from_nanos(dur_ns)
+/// };
+///
+/// // Define a `Clock` implementation for the timestamp counter.
+/// let clock = Clock::new(TICK_DURATION, || {
+///     // A (pretend) function that reads the value of the timestamp
+///     // counter. In real life, this might be a specific instruction,
+///     // or a read from a timestamp counter register.
+///     arch::read_timestamp_counter()
+/// })
+///     // Adding a name to the clock definition allows it to be i
+///     // identified in fmt::Debug output.
+///     .named("timestamp-counter");
+///```
+///
+/// On some platforms, the frequency with which a timestamp counter is
+/// incremented may be configured by setting a divisor that divides the base
+/// frequency of the clock. On such a platform, it is possible to select the
+/// tick duration when constructing a new `Clock`. We could then provide a
+/// function that returns a clock with a requested tick duration:
+///
+///```rust
+/// use maitake::time::{Clock, Duration};
+/// # mod arch {
+/// #     pub fn read_timestamp_counter() -> u64 { 0 }
+/// #     pub fn set_clock_divisor(divisor: u32) {}
+/// #     pub const CLOCK_BASE_DURATION_NS: u32 = 100;
+/// # }
+///
+/// fn new_clock(tick_duration: Duration) -> Clock {
+///     // Determine the divisor necessary to achieve the requested tick
+///     // duration, based on the hardware clock's base frequency.
+///     let divisor = {
+///         let duration_ns = tick_duration.as_nanos();
+///         assert!(
+///             duration_ns as u32 >= arch::CLOCK_BASE_DURATION_NS,
+///             "tick duration too short"
+///         );
+///         let div_u128 = duration_ns / arch::CLOCK_BASE_DURATION_NS as u128;
+///         u32::try_from(div_u128).expect("tick duration too long")
+///     };
+///
+///     // Set the divisor to the hardware clock. On real hardware, this
+///     // might be a write to a register or memory-mapped IO location
+///     // that controls the clock's divisor.
+///     arch::set_clock_divisor(divisor as u32);
+///
+///     // Define a `Clock` implementation for the timestamp counter.
+///     Clock::new(tick_duration, arch::read_timestamp_counter)
+///         .named("timestamp-counter")
+/// }
+///```
+///
+/// In addition to timestamp-counter-based hardware clocks, a `Clock` definition
+/// can be provided for an interrupt-based hardware clock. In this case, we
+/// would provide an interrupt handler for the hardware timer interrupt that
+/// increments an [`AtomicU64`](core::sync::atomic::AtomicU64) counter, and a
+/// `now()` function that reads the counter. Essentially, we are reimplementing
+/// a hardware timestamp counter in software, using the hardware timer interrupt
+/// to increment the counter. For example:
+///
+/// ```rust
+/// use maitake::time::{Clock, Duration};
+/// use core::sync::atomic::{AtomicU64, Ordering};
+/// # mod arch {
+/// #    pub fn start_periodic_timer() -> u64 { 0 }
+/// #    pub fn set_timer_period_ns(_: u64) {}
+/// #    pub fn set_interrupt_handler(_: Interrupt, _: fn()) {}
+/// #    pub enum Interrupt { Timer }
+/// # }
+///
+/// // A counter that is incremented by the hardware timer interrupt.
+/// static CLOCK_TICKS: AtomicU64 = AtomicU64::new(0);
+///
+/// // The hardware timer interrupt handler.
+/// fn timer_interrupt_handler() {
+///     // Increment the counter.
+///     CLOCK_TICKS.fetch_add(1, Ordering::Relaxed);
+/// }
+///
+/// // Returns the current timestamp by reading the counter.
+/// fn now() -> u64 {
+///     CLOCK_TICKS.load(Ordering::Relaxed)
+/// }
+///
+/// fn new_clock(tick_duration: Duration) -> Clock {
+///     // Set the hardware timer to generate periodic interrupts.
+///     arch::set_timer_period_ns(tick_duration.as_nanos() as u64);
+///
+///     // Set the interrupt handler for the hardware timer interrupt,
+///     // and start the timer.
+///     arch::set_interrupt_handler(arch::Interrupt::Timer, timer_interrupt_handler);
+///     arch::start_periodic_timer();
+///
+///    // Define a `Clock` implementation for the interrupt-based timer.
+///    Clock::new(tick_duration, now)
+///         .named("periodic-timer")
+/// }
+/// ```
+/// [`std::time::Instant`]: https://doc.rust-lang.org/std/time/struct.Instant.html
+/// [monotonic]: https://en.wikipedia.org/wiki/Monotonic_function
 #[derive(Clone, Debug)]
 pub struct Clock {
     now: fn() -> Ticks,
@@ -19,7 +193,7 @@ pub struct Clock {
     name: &'static str,
 }
 
-/// A measurement of a monotonically nondecreasing clock.
+/// A measurement of a monotonically nondecreasing [`Clock`].
 /// Opaque and useful only with [`Duration`].
 ///
 /// Provided that the [`Clock`] implementation is correct, `Instant`s are always
@@ -34,50 +208,18 @@ pub struct Clock {
 /// backwards.
 /// As part of this non-guarantee it is also not specified whether system suspends count as
 /// elapsed time or not. The behavior varies across platforms and rust versions.
-///
-/// Instants are opaque types that can only be compared to one another. There is
-/// no method to get "the number of seconds" from an instant. Instead, it only
-/// allows measuring the duration between two instants (or comparing two
-/// instants).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct Instant(Duration);
 
-/// Timer ticks are always counted by a 64-bit unsigned integer.
+/// [`Clock`] ticks are always counted by a 64-bit unsigned integer.
 pub type Ticks = u64;
 
 impl Clock {
     /// Returns a new [`Clock`] with the provided tick [`Duration`] and `now()`
     /// function.
     ///
-    /// # Implementing `now()`
-    ///
-    /// The `now` function provided when constructing a [`Clock`] is a function
-    /// that returns the current hardware timestamp in a 64-bit number of
-    /// _ticks_. The period of time represented by a tick is indicated by the
-    /// `tick_duration` argument.
-    ///
-    /// Implementations of `now()` MUST ensure that timestamps returned by
-    /// `now()` MUST be [monontonically non-decreasing]. This means that a call
-    /// to `now()` MUST NOT ever  return a value less than the value returned by
-    /// a previous call to`now()`.
-    ///
-    /// Note that this means that timestamps returned by `now()` are expected
-    /// not to overflow. Of course, all integers *will* overflow eventually, so
-    /// this requirement can reasonably be weakened to expecting that timestamps
-    /// returned by `now()` will not overflow unless the system has been running
-    /// for a duration substantially longer than the system is expected to run
-    /// for. For example, if a system is expected to run for as long as a year
-    /// without being restarted, it's not unreasonable for timestamps returned
-    /// by `now()` to overflow after, say, 100 years. Ideally, a general-purpose
-    /// `Clock` implementation would not overflow for, say, 1,000 years.
-    ///
-    /// The implication of this is that if the timestamp counters provided by
-    /// the hardware platform are less than 64 bits wide (e.g., 16- or 32-bit
-    /// timestamps), the `Clock` implementation is responsible for ensuring that
-    /// they are extended to 64 bits, such as by counting overflows in the
-    /// `Clock` implementation.
-    ///
-    /// [monotonic]: https://en.wikipedia.org/wiki/Monotonic_function
+    /// See the [type-level documentation for `Clock`](Self#implementing-now)
+    /// for details on implementing the `now()` function.
     #[must_use]
     pub const fn new(tick_duration: Duration, now: fn() -> Ticks) -> Self {
         Self {
@@ -112,7 +254,7 @@ impl Clock {
     /// Returns an [`Instant`] representing the current timestamp according to
     /// this [`Clock`].
     #[must_use]
-    pub fn now(&self) -> Instant {
+    pub(crate) fn now(&self) -> Instant {
         let now = self.now_ticks();
         let tick_duration = self.tick_duration();
         Instant(ticks_to_dur(tick_duration, now))
@@ -124,7 +266,7 @@ impl Clock {
         max_duration(self.tick_duration())
     }
 
-    /// Returns this `Clock`'s name, if it was given one using the [`named`]
+    /// Returns this `Clock`'s name, if it was given one using the [`Clock::named`]
     /// method.
     #[must_use]
     pub fn name(&self) -> &'static str {
