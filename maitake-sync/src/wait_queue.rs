@@ -202,6 +202,21 @@ pub struct WaitQueue {
 ///
 /// This future is fused, so once it has completed, any future calls to poll
 /// will immediately return [`Poll::Ready`].
+///
+/// # Notes
+///
+/// This future is `!Unpin`, as it is unsafe to [`core::mem::forget`] a `Wait`
+/// future once it has been polled. For instance, the following code must not
+/// compile:
+///
+///```compile_fail
+/// use maitake_sync::wait_queue::Wait;
+///
+/// // Calls to this function should only compile if `T` is `Unpin`.
+/// fn assert_unpin<T: Unpin>() {}
+///
+/// assert_unpin::<Wait<'_>>();
+/// ```
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
@@ -1220,6 +1235,21 @@ feature! {
     ///
     /// This future is fused, so once it has completed, any future calls to poll
     /// will immediately return [`Poll::Ready`].
+    ///
+    /// # Notes
+    ///
+    /// This future is `!Unpin`, as it is unsafe to [`core::mem::forget`] a
+    /// `WaitOwned`  future once it has been polled. For instance, the following
+    /// code must not compile:
+    ///
+    ///```compile_fail
+    /// use maitake_sync::wait_queue::WaitOwned;
+    ///
+    /// // Calls to this function should only compile if `T` is `Unpin`.
+    /// fn assert_unpin<T: Unpin>() {}
+    ///
+    /// assert_unpin::<WaitOwned<'_>>();
+    /// ```
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
     pub struct WaitOwned {

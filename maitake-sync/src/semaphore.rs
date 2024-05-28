@@ -199,6 +199,21 @@ pub struct Permit<'sem> {
 }
 
 /// The future returned by the [`Semaphore::acquire`] method.
+///
+/// # Notes
+///
+/// This future is `!Unpin`, as it is unsafe to [`core::mem::forget`] an
+/// `Acquire` future once it has been polled. For instance, the following code
+/// must not compile:
+///
+///```compile_fail
+/// use maitake_sync::semaphore::Acquire;
+///
+/// // Calls to this function should only compile if `T` is `Unpin`.
+/// fn assert_unpin<T: Unpin>() {}
+///
+/// assert_unpin::<Acquire<'_>>();
+/// ```
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
@@ -811,6 +826,21 @@ feature! {
     /// [`Arc`] reference to the [`Semaphore`], allowing the returned future to
     /// live for the `'static` lifetime, and returns an [`OwnedPermit`] (rather
     /// than a [`Permit`]), which is also valid for the `'static` lifetime.
+    ///
+    /// # Notes
+    ///
+    /// This future is `!Unpin`, as it is unsafe to [`core::mem::forget`] an
+    /// `AcquireOwned` future once it has been polled. For instance, the
+    /// following code must not compile:
+    ///
+    ///```compile_fail
+    /// use maitake_sync::semaphore::AcquireOwned;
+    ///
+    /// // Calls to this function should only compile if `T` is `Unpin`.
+    /// fn assert_unpin<T: Unpin>() {}
+    ///
+    /// assert_unpin::<AcquireOwned<'_>>();
+    /// ```
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
     #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]

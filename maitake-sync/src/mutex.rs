@@ -116,6 +116,21 @@ pub struct MutexGuard<'a, T: ?Sized> {
 /// A [future] returned by the [`Mutex::lock`] method.
 ///
 /// [future]: core::future::Future
+///
+/// # Notes
+///
+/// This future is `!Unpin`, as it is unsafe to [`core::mem::forget`] a
+/// `Lock` future once it has been polled. For instance, the following code
+/// must not compile:
+///
+///```compile_fail
+/// use maitake_sync::mutex::Lock;
+///
+/// // Calls to this function should only compile if `T` is `Unpin`.
+/// fn assert_unpin<T: Unpin>() {}
+///
+/// assert_unpin::<Lock<'_, ()>>();
+/// ```
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[pin_project]
 #[derive(Debug)]
