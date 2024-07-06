@@ -684,6 +684,56 @@ impl WaitQueue {
         }
     }
 
+    /// Asynchronously poll the [`WaitQueue`] until a condition occurs
+    ///
+    /// This can be used to implement a "wait loop", turning a "try" function
+    /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
+    /// "recv" or "send").
+    ///
+    /// Consider using [`Self::wait_for_value()`] if your function does return a value.
+    ///
+    /// * Returns `Ok(T)` if the closure returns `Some(T)`.
+    /// * Returns `Err(Closed)` if the [`WaitQueue`] is closed.
+    pub async fn wait_for<F: FnMut() -> bool>(&self, mut f: F) -> WaitResult<()> {
+        loop {
+            let wait = self.wait();
+            let mut pwait = core::pin::pin!(wait);
+            match pwait.as_mut().subscribe() {
+                Poll::Ready(wr) => wr?,
+                Poll::Pending => {}
+            }
+            if f() {
+                return Ok(());
+            }
+            pwait.await?;
+        }
+    }
+
+    /// Asynchronously poll the [`WaitQueue`] until a condition occurs
+    ///
+    /// This can be used to implement a "wait loop", turning a "try" function
+    /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
+    /// "recv" or "send").
+    ///
+    /// Consider using [`Self::wait_for()`] if your function does not return a value.
+    ///
+    /// * Returns `Ok(T)` if the closure returns `Some(T)`.
+    /// * Returns `Err(Closed)` if the [`WaitQueue`] is closed.
+    pub async fn wait_for_value<T, F: FnMut() -> Option<T>>(&self, mut f: F) -> WaitResult<T> {
+        loop {
+            let wait = self.wait();
+            let mut pwait = core::pin::pin!(wait);
+            match pwait.as_mut().subscribe() {
+                Poll::Ready(wr) => wr?,
+                Poll::Pending => {}
+            }
+            if let Some(t) = f() {
+                return Ok(t);
+            }
+            pwait.await?;
+        }
+    }
+
     /// Returns a [`Waiter`] entry in this queue.
     ///
     /// This is factored out into a separate function because it's used by both

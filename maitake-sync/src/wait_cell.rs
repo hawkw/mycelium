@@ -327,6 +327,46 @@ impl WaitCell {
         }
     }
 
+    /// Asynchronously poll the [`WaitCell`] until a condition occurs
+    ///
+    /// This can be used to implement a "wait loop", turning a "try" function
+    /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
+    /// "recv" or "send").
+    ///
+    /// Consider using [`Self::wait_for_value()`] if your function does return a value.
+    ///
+    /// * Returns `Ok(T)` if the closure returns `Some(T)`.
+    /// * Returns `Err(Closed)` if the [`WaitCell`] is closed.
+    pub async fn wait_for<F: FnMut() -> bool>(&self, mut f: F) -> Result<(), Closed> {
+        loop {
+            let wait = self.subscribe().await;
+            if f() {
+                return Ok(());
+            }
+            wait.await?;
+        }
+    }
+
+    /// Asynchronously poll the [`WaitCell`] until a condition occurs
+    ///
+    /// This can be used to implement a "wait loop", turning a "try" function
+    /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
+    /// "recv" or "send").
+    ///
+    /// Consider using [`Self::wait_for()`] if your function does not return a value.
+    ///
+    /// * Returns `Ok(T)` if the closure returns `Some(T)`.
+    /// * Returns `Err(Closed)` if the [`WaitCell`] is closed.
+    pub async fn wait_for_value<T, F: FnMut() -> Option<T>>(&self, mut f: F) -> Result<T, Closed> {
+        loop {
+            let wait = self.subscribe().await;
+            if let Some(t) = f() {
+                return Ok(t);
+            }
+            wait.await?;
+        }
+    }
+
     // TODO(eliza): is this an API we want to have?
     /*
     /// Returns `true` if this `WaitCell` is [closed](Self::close).
