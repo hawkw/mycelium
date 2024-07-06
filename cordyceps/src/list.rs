@@ -494,7 +494,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         let tail_links = unsafe { T::links(tail) };
         let head_links = unsafe { head_links.as_ref() };
         let tail_links = unsafe { tail_links.as_ref() };
-        if head == tail {
+        if core::ptr::addr_eq(head.as_ptr(), tail.as_ptr()) {
             assert_eq!(
                 head_links, tail_links,
                 "{name}if the head and tail nodes are the same, their links must be the same"
@@ -963,7 +963,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         let start_links = T::links(splice_start).as_mut();
         let end_links = T::links(splice_end).as_mut();
         debug_assert!(
-            splice_start == splice_end
+            core::ptr::addr_eq(splice_start.as_ptr(), splice_end.as_ptr())
                 || (start_links.next().is_some() && end_links.prev().is_some()),
             "splice_start must be ahead of splice_end!\n   \
             splice_start: {splice_start:?}\n    \
