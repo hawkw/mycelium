@@ -692,8 +692,10 @@ impl WaitQueue {
     ///
     /// Consider using [`Self::wait_for_value()`] if your function does return a value.
     ///
-    /// * Returns `Ok(())` if the closure returns `true`.
-    /// * Returns `Err(Closed)` if the [`WaitQueue`] is closed.
+    /// # Returns
+    ///
+    /// * [`Ok`]`(())` if the closure returns `true`.
+    /// * [`Err`]`(`[`Closed`]`)` if the [`WaitQueue`] is closed.
     pub async fn wait_for<F: FnMut() -> bool>(&self, mut f: F) -> WaitResult<()> {
         loop {
             let wait = self.wait();
