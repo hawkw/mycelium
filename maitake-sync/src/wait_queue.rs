@@ -700,10 +700,7 @@ impl WaitQueue {
         loop {
             let wait = self.wait();
             let mut pwait = core::pin::pin!(wait);
-            match pwait.as_mut().subscribe() {
-                Poll::Ready(wr) => wr?,
-                Poll::Pending => {}
-            }
+            let _ = pwait.as_mut().subscribe()?;
             if f() {
                 return Ok(());
             }
@@ -719,8 +716,8 @@ impl WaitQueue {
     ///
     /// Consider using [`Self::wait_for()`] if your function does not return a value.
     ///
-    /// * Returns `Ok(T)` if the closure returns `Some(T)`.
-    /// * Returns `Err(Closed)` if the [`WaitQueue`] is closed.
+    /// * [`Ok`]`(T)` if the closure returns [`Some`]`(T)`.
+    /// * [`Err`]`(`[`Closed`]`)` if the [`WaitQueue`] is closed.
     pub async fn wait_for_value<T, F: FnMut() -> Option<T>>(&self, mut f: F) -> WaitResult<T> {
         loop {
             let wait = self.wait();
