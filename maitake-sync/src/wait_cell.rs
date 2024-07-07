@@ -335,8 +335,10 @@ impl WaitCell {
     ///
     /// Consider using [`Self::wait_for_value()`] if your function does return a value.
     ///
-    /// * Returns `Ok(())` if the closure returns `true`.
-    /// * Returns `Err(Closed)` if the [`WaitCell`] is closed.
+    /// # Returns
+    ///
+    /// * [`Ok`]`(())` if the closure returns `true`.
+    /// * [`Err`]`(`[`Closed`]`)` if the [`WaitCell`] is closed.
     pub async fn wait_for<F: FnMut() -> bool>(&self, mut f: F) -> Result<(), Closed> {
         loop {
             let wait = self.subscribe().await;
@@ -355,8 +357,10 @@ impl WaitCell {
     ///
     /// Consider using [`Self::wait_for()`] if your function does not return a value.
     ///
-    /// * Returns `Ok(T)` if the closure returns `Some(T)`.
-    /// * Returns `Err(Closed)` if the [`WaitCell`] is closed.
+    /// # Returns
+    ///
+    /// * [`Ok`]`(T)` if the closure returns [`Some`]`(T)`.
+    /// * [`Err`]`(`[`Closed`]`)` if the [`WaitCell`] is closed.
     pub async fn wait_for_value<T, F: FnMut() -> Option<T>>(&self, mut f: F) -> Result<T, Closed> {
         loop {
             let wait = self.subscribe().await;
