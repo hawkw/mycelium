@@ -126,7 +126,7 @@ impl<T, Lock> Mutex<T, Lock>
 where
     Lock: RawMutex,
 {
-    fn guard<'mutex>(&'mutex self) -> MutexGuard<'mutex, T, Lock> {
+    fn guard(&self) -> MutexGuard<'_, T, Lock> {
         MutexGuard {
             ptr: self.data.get_mut(),
             lock: &self.lock,
@@ -213,25 +213,30 @@ impl<T: Default, Lock: Default> Default for Mutex<T, Lock> {
     fn default() -> Self {
         Self {
             lock: Default::default(),
-            data: Default::default(),
+            data: UnsafeCell::new(Default::default()),
         }
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Mutex<T> {
+impl<T, Lock> fmt::Debug for Mutex<T, Lock>
+where
+    T: fmt::Debug,
+    Lock: fmt::Debug + RawMutex,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Mutex")
             .field("data", &fmt::opt(&self.try_lock()).or_else("<locked>"))
+            .field("lock", &self.lock)
             .finish()
     }
 }
 
-unsafe impl<T: Send> Send for Mutex<T> {}
-unsafe impl<T: Send> Sync for Mutex<T> {}
+unsafe impl<T: Send, Lock> Send for Mutex<T, Lock> {}
+unsafe impl<T: Send, Lock> Sync for Mutex<T, Lock> {}
 
 // === impl MutexGuard ===
 
-impl<T, Lock> Deref for MutexGuard<'_, T, Lock> {
+impl<T, Lock: RawMutex> Deref for MutexGuard<'_, T, Lock> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -289,7 +294,7 @@ where
 
 impl<T, Lock> fmt::Debug for MutexGuard<'_, T, Lock>
 where
-    T: fmt::Display,
+    T: fmt::Debug,
     Lock: RawMutex,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

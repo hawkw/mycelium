@@ -71,7 +71,7 @@ impl<T: Debug> Debug for FmtOption<'_, T> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self.opt {
-            Some(val) => val.fmt(f),
+            Some(val) => Debug::fmt(val, f),
             None => f.write_str(self.or_else),
         }
     }

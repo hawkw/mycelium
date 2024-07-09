@@ -73,28 +73,70 @@ mod inner {
         pub(crate) use loom::sync::*;
 
         pub(crate) mod spin {
-            pub(crate) use loom::sync::MutexGuard;
+            use core::{
+                marker::PhantomData,
+                ops::{Deref, DerefMut},
+            };
+
+            use alloc::fmt;
 
             /// Mock version of mycelium's spinlock, but using
             /// `loom::sync::Mutex`. The API is slightly different, since the
             /// mycelium mutex does not support poisoning.
-            #[derive(Debug)]
-            pub(crate) struct Mutex<T>(loom::sync::Mutex<T>);
+            pub(crate) struct Mutex<T, Lock = crate::spin::Spinlock>(
+                loom::sync::Mutex<T>,
+                PhantomData<Lock>,
+            );
 
-            impl<T> Mutex<T> {
+            pub(crate) struct MutexGuard<'a, T, Lock = crate::spin::Spinlock>(
+                loom::sync::MutexGuard<'a, T>,
+                PhantomData<Lock>,
+            );
+
+            impl<T, Lock> Mutex<T, Lock> {
                 #[track_caller]
                 pub(crate) fn new(t: T) -> Self {
-                    Self(loom::sync::Mutex::new(t))
+                    Self(loom::sync::Mutex::new(t), PhantomData)
                 }
 
                 #[track_caller]
-                pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-                    self.0.try_lock().ok()
+                pub fn try_lock(&self) -> Option<MutexGuard<'_, T, Lock>> {
+                    self.0.try_lock().map(|x| MutexGuard(x, PhantomData)).ok()
                 }
 
                 #[track_caller]
-                pub fn lock(&self) -> MutexGuard<'_, T> {
-                    self.0.lock().expect("loom mutex will never poison")
+                pub fn lock(&self) -> MutexGuard<'_, T, Lock> {
+                    self.0
+                        .lock()
+                        .map(|x| MutexGuard(x, PhantomData))
+                        .expect("loom mutex will never poison")
+                }
+            }
+
+            impl<T: fmt::Debug, Lock> fmt::Debug for Mutex<T, Lock> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.0.fmt(f)
+                }
+            }
+
+            impl<T, Lock> Deref for MutexGuard<'_, T, Lock> {
+                type Target = T;
+                #[inline]
+                fn deref(&self) -> &Self::Target {
+                    self.0.deref()
+                }
+            }
+
+            impl<T, Lock> DerefMut for MutexGuard<'_, T, Lock> {
+                #[inline]
+                fn deref_mut(&mut self) -> &mut Self::Target {
+                    self.0.deref_mut()
+                }
+            }
+
+            impl<T: fmt::Debug, Lock> fmt::Debug for MutexGuard<'_, T, Lock> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.0.fmt(f)
                 }
             }
         }
