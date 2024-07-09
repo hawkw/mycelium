@@ -13,6 +13,7 @@ pub(crate) mod loom;
 #[macro_use]
 pub mod util;
 
+pub mod blocking;
 pub mod mutex;
 pub mod rwlock;
 pub mod semaphore;

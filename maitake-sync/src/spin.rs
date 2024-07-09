@@ -30,12 +30,211 @@
 //!
 //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
 //! [reader-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
-mod mutex;
 pub mod once;
-mod rwlock;
 
-pub use self::{
-    mutex::*,
-    once::{InitOnce, Lazy},
-    rwlock::*,
+pub use self::once::{InitOnce, Lazy};
+pub use crate::blocking::*;
+use crate::{
+    loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
+    util::{fmt, Backoff},
 };
+
+/// A spinlock-based [`RawMutex`] implementation.
+///
+/// This mutex will spin with an exponential backoff while waiting for the lock
+/// to become available.
+#[derive(Debug)]
+pub struct Spinlock {
+    locked: AtomicBool,
+}
+
+/// A spinlock-based [`RawRwLock`] implementation.
+pub struct RwSpinlock {
+    state: AtomicUsize,
+}
+
+// === impl RawSpinlock ===
+
+impl Spinlock {
+    loom_const_fn! {
+        pub(crate) fn new() -> Self {
+            Self { locked: AtomicBool::new(false) }
+        }
+    }
+}
+
+impl Default for Spinlock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+unsafe impl RawMutex for Spinlock {
+    type GuardMarker = ();
+
+    #[cfg_attr(test, track_caller)]
+    fn lock(&self) {
+        let mut boff = Backoff::default();
+        while test_dbg!(self
+            .locked
+            .compare_exchange(false, true, Acquire, Acquire)
+            .is_err())
+        {
+            while test_dbg!(self.is_locked()) {
+                boff.spin();
+            }
+        }
+    }
+
+    #[cfg_attr(test, track_caller)]
+    #[inline]
+    fn try_lock(&self) -> bool {
+        test_dbg!(self
+            .locked
+            .compare_exchange(false, true, Acquire, Acquire)
+            .is_ok())
+    }
+
+    #[cfg_attr(test, track_caller)]
+    #[inline]
+    unsafe fn unlock(&self) {
+        test_dbg!(self.locked.store(false, Release));
+    }
+
+    #[inline]
+    fn is_locked(&self) -> bool {
+        self.locked.load(Relaxed)
+    }
+}
+
+const UNLOCKED: usize = 0;
+const WRITER: usize = 1 << 0;
+const READER: usize = 1 << 1;
+
+impl RwSpinlock {
+    loom_const_fn! {
+        pub(crate) fn new() -> Self {
+            Self {
+                state: AtomicUsize::new(UNLOCKED),
+            }
+        }
+    }
+
+    pub(crate) fn reader_count(&self) -> usize {
+        self.state.load(Relaxed) >> 1
+    }
+}
+
+unsafe impl RawRwLock for RwSpinlock {
+    type GuardMarker = ();
+
+    #[cfg_attr(test, track_caller)]
+    fn lock_shared(&self) {
+        let mut boff = Backoff::new();
+        while !self.try_lock_shared() {
+            boff.spin();
+        }
+    }
+
+    #[cfg_attr(test, track_caller)]
+    fn try_lock_shared(&self) -> bool {
+        // Add a reader.
+        let state = test_dbg!(self.state.fetch_add(READER, Acquire));
+
+        // Ensure we don't overflow the reader count and clobber the lock's
+        // state.
+        assert!(
+            state < usize::MAX - (READER * 2),
+            "read lock counter overflow! this is very bad"
+        );
+
+        // Is the write lock held? If so, undo the increment and bail.
+        if state & WRITER == 1 {
+            test_dbg!(self.state.fetch_sub(READER, Release));
+            false
+        } else {
+            true
+        }
+    }
+
+    #[cfg_attr(test, track_caller)]
+    #[inline]
+    unsafe fn unlock_shared(&self) {
+        let _val = test_dbg!(self.state.fetch_sub(READER, Release));
+        debug_assert_eq!(
+            _val & WRITER,
+            0,
+            "tried to drop a read guard while write locked, something is Very Wrong!"
+        )
+    }
+
+    #[cfg_attr(test, track_caller)]
+    fn lock_exclusive(&self) {
+        let mut backoff = Backoff::new();
+
+        // Wait for the lock to become available and set the `WRITER` bit.
+        //
+        // Note that, unlike the `lock_shared` method, we don't use the
+        // `try_lock_exclusive` method here, as we would like to use
+        // `compare_exchange_weak` to allow spurious failures for improved
+        // performance. The `try_lock_exclusive` method  cannot use
+        // `compare_exchange_weak`, because it will never retry, and
+        // a spurious failure means we would incorrectly fail to lock the RwLock
+        // when we should have successfully locked it.
+        while test_dbg!(self
+            .state
+            .compare_exchange_weak(UNLOCKED, WRITER, Acquire, Relaxed))
+        .is_err()
+        {
+            test_dbg!(backoff.spin());
+        }
+    }
+
+    #[cfg_attr(test, track_caller)]
+    #[inline]
+    fn try_lock_exclusive(&self) -> bool {
+        test_dbg!(self
+            .state
+            .compare_exchange(UNLOCKED, WRITER, Acquire, Relaxed))
+        .is_ok()
+    }
+
+    #[cfg_attr(test, track_caller)]
+    #[inline]
+    unsafe fn unlock_exclusive(&self) {
+        let _val = test_dbg!(self.state.swap(UNLOCKED, Release));
+    }
+
+    #[inline]
+    fn is_locked(&self) -> bool {
+        self.state.load(Relaxed) & (WRITER | READER) != 0
+    }
+
+    #[inline]
+    fn is_locked_exclusive(&self) -> bool {
+        self.state.load(Relaxed) & WRITER == 1
+    }
+}
+
+impl fmt::Debug for RwSpinlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = &self.state.load(Relaxed);
+        f.debug_struct("RawSpinRwLock")
+            // N.B.: this does *not* use the `reader_count` and `has_writer`
+            // methods *intentionally*, because those two methods perform
+            // independent reads of the lock's state, and may race with other
+            // lock operations that occur concurrently. If, for example, we read
+            // a non-zero reader count, and then read the state again to check
+            // for a writer, the reader may have been released and a write lock
+            // acquired between the two reads, resulting in the `Debug` impl
+            // displaying an invalid state when the lock was not actually *in*
+            // such a state!
+            //
+            // Therefore, we instead perform a single load to snapshot the state
+            // and unpack both the reader count and the writer count from the
+            // lock.
+            .field("readers", &(state >> 1))
+            .field("writer", &(state & WRITER))
+            .finish()
+    }
+}
