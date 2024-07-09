@@ -5,7 +5,7 @@
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 use crate::{
     loom::cell::{ConstPtr, MutPtr, UnsafeCell},
-    spin,
+    spin::RwSpinlock,
     util::fmt,
 };
 use core::ops::{Deref, DerefMut};
@@ -33,7 +33,7 @@ use core::ops::{Deref, DerefMut};
 ///
 /// [`spin::Mutex`]: crate::spin::Mutex
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
-pub struct RwLock<T: ?Sized, Lock = spin::RwSpinlock> {
+pub struct RwLock<T: ?Sized, Lock = RwSpinlock> {
     lock: Lock,
     data: UnsafeCell<T>,
 }
@@ -50,7 +50,7 @@ pub struct RwLock<T: ?Sized, Lock = spin::RwSpinlock> {
 /// [`read`]: RwLock::read
 /// [`try_read`]: RwLock::try_read
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
-pub struct RwLockReadGuard<'lock, T: ?Sized, Lock: RawRwLock = spin::RwSpinlock> {
+pub struct RwLockReadGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
     ptr: ConstPtr<T>,
     lock: &'lock Lock,
 }
@@ -67,7 +67,7 @@ pub struct RwLockReadGuard<'lock, T: ?Sized, Lock: RawRwLock = spin::RwSpinlock>
 /// [`write`]: RwLock::write
 /// [`try_write`]: RwLock::try_write
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
-pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawRwLock = spin::RwSpinlock> {
+pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
     ptr: MutPtr<T>,
     lock: &'lock Lock,
 }
@@ -145,10 +145,6 @@ unsafe impl<T: lock_api::RawRwLock> RawRwLock for T {
     }
 }
 
-const UNLOCKED: usize = 0;
-const WRITER: usize = 1 << 0;
-const READER: usize = 1 << 1;
-
 impl<T> RwLock<T> {
     loom_const_fn! {
         /// Creates a new, unlocked `RwLock<T>` protecting the provided `data`.
@@ -164,7 +160,7 @@ impl<T> RwLock<T> {
         #[must_use]
         pub fn new(data: T) -> Self {
             Self {
-                lock: todo!(),
+                lock: RwSpinlock::new(),
                 data: UnsafeCell::new(data),
             }
         }
@@ -307,7 +303,9 @@ impl<T: ?Sized, Lock: RawRwLock> RwLock<T, Lock> {
             self.data.with_mut(|data| &mut *data)
         }
     }
+}
 
+impl<T, Lock: RawRwLock> RwLock<T, Lock> {
     /// Consumes this `RwLock`, returning the guarded data.
     #[inline]
     #[must_use]
@@ -318,7 +316,7 @@ impl<T: ?Sized, Lock: RawRwLock> RwLock<T, Lock> {
 
 impl<T: Default, Lock: Default> Default for RwLock<T, Lock> {
     /// Creates a new `RwLock<T>`, with the `Default` value for T.
-    fn default() -> RwLock<T> {
+    fn default() -> RwLock<T, Lock> {
         RwLock {
             data: UnsafeCell::new(Default::default()),
             lock: Default::default(),
@@ -331,6 +329,22 @@ impl<T> From<T> for RwLock<T> {
     /// This is equivalent to [`RwLock::new`].
     fn from(t: T) -> Self {
         RwLock::new(t)
+    }
+}
+
+impl<T, Lock> fmt::Debug for RwLock<T, Lock>
+where
+    T: fmt::Debug,
+    Lock: fmt::Debug + RawRwLock,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RwLock")
+            .field(
+                "data",
+                &fmt::opt(&self.try_read()).or_else("<write locked>"),
+            )
+            .field("lock", &self.lock)
+            .finish()
     }
 }
 
@@ -382,7 +396,7 @@ where
 
 impl<T, Lock> fmt::Display for RwLockReadGuard<'_, T, Lock>
 where
-    T: ?Sized + fmt::Debug,
+    T: ?Sized + fmt::Display,
     Lock: RawRwLock,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

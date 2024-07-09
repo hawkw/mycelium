@@ -5,6 +5,7 @@
 #[cfg(any(test, maitake_ultraverbose))]
 use crate::util::fmt;
 use crate::{
+    blocking::RawMutex,
     loom::{
         cell::UnsafeCell,
         sync::{
@@ -12,6 +13,7 @@ use crate::{
             spin::{Mutex, MutexGuard},
         },
     },
+    spin::Spinlock,
     util::{CachePadded, WakeBatch},
     WaitResult,
 };
@@ -175,7 +177,7 @@ mod tests;
 /// [mutex]: crate::Mutex
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
-pub struct WaitQueue {
+pub struct WaitQueue<Lock: RawMutex = Spinlock> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -191,11 +193,10 @@ pub struct WaitQueue {
     /// lock must be held when modifying the
     /// node.
     ///
-    /// A spinlock (from `mycelium_util`) is used here, in order to support
-    /// `no_std` platforms; when running `loom` tests, a `loom` mutex is used
-    /// instead to simulate the spinlock, because loom doesn't play nice with
-    /// real spinlocks.
-    queue: Mutex<List<Waiter>>,
+    /// A spinlock is used here, in order to support `no_std` platforms; when
+    /// running `loom` tests, a `loom` mutex is used instead to simulate the
+    /// spinlock, because loom doesn't play nice with  real spinlocks.
+    queue: Mutex<List<Waiter>, Lock>,
 }
 
 /// Future returned from [`WaitQueue::wait()`].
@@ -220,9 +221,9 @@ pub struct WaitQueue {
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a> {
+pub struct Wait<'a, Lock: RawMutex = Spinlock> {
     /// The [`WaitQueue`] being waited on.
-    queue: &'a WaitQueue,
+    queue: &'a WaitQueue<Lock>,
 
     /// Entry in the wait queue linked list.
     #[pin]
@@ -359,7 +360,7 @@ impl WaitQueue {
         /// Returns a new `WaitQueue`.
         #[must_use]
         pub fn new() -> Self {
-            Self::new_with_state(State::Empty)
+            Self::make(State::Empty, Mutex::new(List::new()))
         }
     }
 
@@ -372,16 +373,32 @@ impl WaitQueue {
         // TODO(eliza): should this be a public API?
         #[must_use]
         pub(crate) fn new_woken() -> Self {
-            Self::new_with_state(State::Woken)
+            Self::make(State::Woken, Mutex::new(List::new()))
         }
     }
+}
 
+#[cfg(all(feature = "lock_api", not(loom)))]
+impl<Lock> WaitQueue<Lock>
+where
+    Lock: lock_api::RawMutex,
+{
+    #[must_use]
+    pub const fn with_raw_mutex() -> Self {
+        Self::make(State::Empty, Mutex::with_raw_mutex(List::new()))
+    }
+}
+
+impl<Lock> WaitQueue<Lock>
+where
+    Lock: RawMutex,
+{
     loom_const_fn! {
         #[must_use]
-        fn new_with_state(state: State) -> Self {
+        fn make(state: State, queue: Mutex<List<Waiter>, Lock>) -> Self {
             Self {
                 state: CachePadded::new(AtomicUsize::new(state.into_usize())),
-                queue: Mutex::new(List::new()),
+                queue,
             }
         }
     }
@@ -659,7 +676,7 @@ impl WaitQueue {
     /// [`wake()`]: Self::wake
     /// [`wake_all()`]: Self::wake_all
     /// [`Closed`]: crate::Closed
-    pub fn wait(&self) -> Wait<'_> {
+    pub fn wait(&self) -> Wait<'_, Lock> {
         Wait {
             queue: self,
             waiter: self.waiter(),
@@ -977,9 +994,9 @@ impl WaitQueue {
     fn drain_to_wake_batch<'q>(
         &'q self,
         batch: &mut WakeBatch,
-        mut queue: MutexGuard<'q, List<Waiter>>,
+        mut queue: MutexGuard<'q, List<Waiter>, Lock>,
         wakeup: Wakeup,
-    ) -> MutexGuard<'q, List<Waiter>> {
+    ) -> MutexGuard<'q, List<Waiter>, Lock> {
         while let Some(node) = queue.pop_back() {
             let Some(waker) = Waiter::wake(node, &mut queue, wakeup.clone()) else {
                 // this waiter was enqueued by `Wait::register` and doesn't have
@@ -1058,11 +1075,14 @@ impl Waiter {
         }
     }
 
-    fn poll_wait(
+    fn poll_wait<Lock>(
         mut self: Pin<&mut Self>,
-        queue: &WaitQueue,
+        queue: &WaitQueue<Lock>,
         waker: Option<&Waker>,
-    ) -> Poll<WaitResult<()>> {
+    ) -> Poll<WaitResult<()>>
+    where
+        Lock: RawMutex,
+    {
         test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let mut this = self.as_mut().project();
 
@@ -1188,10 +1208,13 @@ impl Waiter {
     ///
     /// This is called from the `drop` implementation for the [`Wait`] and
     /// [`WaitOwned`] futures.
-    fn release(mut self: Pin<&mut Self>, queue: &WaitQueue) {
+    fn release<Lock>(mut self: Pin<&mut Self>, queue: &WaitQueue<Lock>)
+    where
+        Lock: RawMutex,
+    {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
-        test_debug!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
+        test_debug!(self = ?fmt::ptr(ptr), ?state, ?queue.state, "Waiter::release");
 
         // if we're not enqueued, we don't have to do anything else.
         if state.get(WaitStateBits::STATE) != WaitState::Waiting {
@@ -1251,7 +1274,7 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
 
 // === impl Wait ===
 
-impl Wait<'_> {
+impl<Lock: RawMutex> Wait<'_, Lock> {
     /// Returns `true` if this `Wait` future is waiting for a notification from
     /// the provided [`WaitQueue`].
     ///
@@ -1269,7 +1292,7 @@ impl Wait<'_> {
     /// ```
     #[inline]
     #[must_use]
-    pub fn waits_on(&self, queue: &WaitQueue) -> bool {
+    pub fn waits_on(&self, queue: &WaitQueue<Lock>) -> bool {
         ptr::eq(self.queue, queue)
     }
 
@@ -1306,7 +1329,7 @@ impl Wait<'_> {
     /// ```
     #[inline]
     #[must_use]
-    pub fn same_queue(&self, other: &Wait<'_>) -> bool {
+    pub fn same_queue(&self, other: &Wait<'_, Lock>) -> bool {
         ptr::eq(self.queue, other.queue)
     }
 
@@ -1363,7 +1386,7 @@ impl Wait<'_> {
     }
 }
 
-impl Future for Wait<'_> {
+impl<Lock: RawMutex> Future for Wait<'_, Lock> {
     type Output = WaitResult<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1373,7 +1396,7 @@ impl Future for Wait<'_> {
 }
 
 #[pinned_drop]
-impl PinnedDrop for Wait<'_> {
+impl<Lock: RawMutex> PinnedDrop for Wait<'_, Lock> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
         this.waiter.release(this.queue);
@@ -1449,16 +1472,16 @@ feature! {
     /// ```
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned {
+    pub struct WaitOwned<Lock: RawMutex = Spinlock> {
         /// The `WaitQueue` being waited on.
-        queue: Arc<WaitQueue>,
+        queue: Arc<WaitQueue<Lock>>,
 
         /// Entry in the wait queue.
         #[pin]
         waiter: Waiter,
     }
 
-    impl WaitQueue {
+    impl<Lock: RawMutex> WaitQueue<Lock> {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
@@ -1493,7 +1516,7 @@ feature! {
         /// [`wait()`]: Self::wait
         /// [closed]: Self::close
         /// [`Closed`]: crate::Closed
-        pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
+        pub fn wait_owned(self: &Arc<Self>) -> WaitOwned<Lock> {
             let waiter = self.waiter();
             let queue = self.clone();
             WaitOwned { queue, waiter }
@@ -1502,7 +1525,7 @@ feature! {
 
     // === impl WaitOwned ===
 
-    impl WaitOwned {
+    impl<Lock: RawMutex> WaitOwned<Lock> {
         /// Returns `true` if this `WaitOwned` future is waiting for a
         /// notification from the provided [`WaitQueue`].
         ///
@@ -1521,7 +1544,7 @@ feature! {
         /// ```
         #[inline]
         #[must_use]
-        pub fn waits_on(&self, queue: &WaitQueue) -> bool {
+        pub fn waits_on(&self, queue: &WaitQueue<Lock>) -> bool {
             ptr::eq(&*self.queue, queue)
         }
 
@@ -1562,7 +1585,7 @@ feature! {
         /// ```
         #[inline]
         #[must_use]
-        pub fn same_queue(&self, other: &WaitOwned) -> bool {
+        pub fn same_queue(&self, other: &WaitOwned<Lock>) -> bool {
             Arc::ptr_eq(&self.queue, &other.queue)
         }
 
@@ -1621,7 +1644,7 @@ feature! {
         }
     }
 
-    impl Future for WaitOwned {
+    impl<Lock: RawMutex> Future for WaitOwned<Lock> {
         type Output = WaitResult<()>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1631,7 +1654,7 @@ feature! {
     }
 
     #[pinned_drop]
-    impl PinnedDrop for WaitOwned {
+    impl<Lock: RawMutex> PinnedDrop for WaitOwned<Lock> {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
             this.waiter.release(&*this.queue);
