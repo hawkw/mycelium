@@ -202,7 +202,7 @@ impl<T> RwLock<T> {
 }
 
 impl<T: ?Sized> RwLock<T> {
-    const MAX_READERS: usize = Semaphore::MAX_PERMITS;
+    const MAX_READERS: usize = semaphore::MAX_PERMITS;
 
     /// Locks this `RwLock` with shared read access, causing the current task
     /// to yield until the lock has been acquired.
