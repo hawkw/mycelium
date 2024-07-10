@@ -5,7 +5,9 @@
 //! [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 use super::semaphore::{self, Semaphore};
 use crate::{
+    blocking::RawMutex,
     loom::cell::{self, UnsafeCell},
+    spin::Spinlock,
     util::fmt,
 };
 use core::ops::{Deref, DerefMut};
@@ -89,12 +91,12 @@ mod tests;
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 /// [_write-preferring_]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock#Priority_policies
 /// [`std::sync::RwLock`]: https://doc.rust-lang.org/stable/std/sync/struct.RwLock.html
-pub struct RwLock<T: ?Sized> {
+pub struct RwLock<T: ?Sized, Lock: RawMutex = Spinlock> {
     /// The semaphore used to control access to `data`.
     ///
     /// To read `data`, a single permit must be acquired. To write to `data`,
     /// all the permits in the semaphore must be acquired.
-    sem: Semaphore,
+    sem: Semaphore<Lock>,
 
     /// The data protected by the lock.
     data: UnsafeCell<T>,
@@ -116,7 +118,7 @@ pub struct RwLock<T: ?Sized> {
 /// [`read`]: RwLock::read
 /// [`try_read`]: RwLock::try_read
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
-pub struct RwLockReadGuard<'lock, T: ?Sized> {
+pub struct RwLockReadGuard<'lock, T: ?Sized, Lock: RawMutex = Spinlock> {
     /// /!\ WARNING: semi-load-bearing drop order /!\
     ///
     /// This struct's field ordering is important for Loom tests; the `ConstPtr`
@@ -124,7 +126,7 @@ pub struct RwLockReadGuard<'lock, T: ?Sized> {
     /// another task that wants to access the cell, and Loom will still consider the data to
     /// be "accessed" until the `ConstPtr` is dropped.
     data: cell::ConstPtr<T>,
-    _permit: semaphore::Permit<'lock>,
+    _permit: semaphore::Permit<'lock, Lock>,
 }
 
 /// [RAII] structure used to release the exclusive write access of a [`RwLock`] when
@@ -143,7 +145,7 @@ pub struct RwLockReadGuard<'lock, T: ?Sized> {
 /// [`write`]: RwLock::write
 /// [`try_write`]: RwLock::try_write
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
-pub struct RwLockWriteGuard<'lock, T: ?Sized> {
+pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawMutex = Spinlock> {
     /// /!\ WARNING: semi-load-bearing drop order /!\
     ///
     /// This struct's field ordering is important for Loom tests; the `MutPtr`
@@ -151,7 +153,7 @@ pub struct RwLockWriteGuard<'lock, T: ?Sized> {
     /// another task that wants to access the cell, and Loom will still consider
     /// the data to be "accessed mutably" until the `MutPtr` is dropped.
     data: cell::MutPtr<T>,
-    _permit: semaphore::Permit<'lock>,
+    _permit: semaphore::Permit<'lock, Lock>,
 }
 
 feature! {
@@ -192,7 +194,20 @@ impl<T> RwLock<T> {
             }
         }
     }
+}
 
+#[cfg(feature = "lock_api")]
+impl<T, Lock: lock_api::RawMutex> RwLock<T, Lock> {
+    #[must_use]
+    pub const fn with_raw_mutex(data: T) -> Self {
+        Self {
+            sem: Semaphore::with_raw_mutex(Self::MAX_READERS),
+            data: UnsafeCell::new(data),
+        }
+    }
+}
+
+impl<T, Lock: RawMutex> RwLock<T, Lock> {
     /// Consumes this `RwLock`, returning the guarded data.
     #[inline]
     #[must_use]
@@ -201,7 +216,7 @@ impl<T> RwLock<T> {
     }
 }
 
-impl<T: ?Sized> RwLock<T> {
+impl<T: ?Sized, Lock: RawMutex> RwLock<T, Lock> {
     const MAX_READERS: usize = semaphore::MAX_PERMITS;
 
     /// Locks this `RwLock` with shared read access, causing the current task
@@ -265,7 +280,7 @@ impl<T: ?Sized> RwLock<T> {
     ///
     /// [priority policy]: Self#priority-policy
     /// [an RAII guard]:
-    pub async fn read(&self) -> RwLockReadGuard<'_, T> {
+    pub async fn read(&self) -> RwLockReadGuard<'_, T, Lock> {
         let _permit = self
             .sem
             .acquire(1)
@@ -317,7 +332,7 @@ impl<T: ?Sized> RwLock<T> {
     /// # }
     /// # test();
     /// ```
-    pub async fn write(&self) -> RwLockWriteGuard<'_, T> {
+    pub async fn write(&self) -> RwLockWriteGuard<'_, T, Lock> {
         let _permit = self
             .sem
             .acquire(Self::MAX_READERS)
@@ -356,7 +371,7 @@ impl<T: ?Sized> RwLock<T> {
     /// ```
     ///
     /// [an RAII guard]: RwLockReadGuard
-    pub fn try_read(&self) -> Option<RwLockReadGuard<'_, T>> {
+    pub fn try_read(&self) -> Option<RwLockReadGuard<'_, T, Lock>> {
         match self.sem.try_acquire(1) {
             Ok(_permit) => Some(RwLockReadGuard {
                 data: self.data.get(),
@@ -396,7 +411,7 @@ impl<T: ?Sized> RwLock<T> {
     /// ```
     ///
     /// [an RAII guard]: RwLockWriteGuard
-    pub fn try_write(&self) -> Option<RwLockWriteGuard<'_, T>> {
+    pub fn try_write(&self) -> Option<RwLockWriteGuard<'_, T, Lock>> {
         match self.sem.try_acquire(Self::MAX_READERS) {
             Ok(_permit) => Some(RwLockWriteGuard {
                 data: self.data.get_mut(),
@@ -433,11 +448,15 @@ impl<T: ?Sized> RwLock<T> {
 
 impl<T: Default> Default for RwLock<T> {
     fn default() -> Self {
-        Self::new(Default::default())
+        Self::new(T::default())
     }
 }
 
-impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLock<T> {
+impl<T, Lock> fmt::Debug for RwLock<T, Lock>
+where
+    T: ?Sized + fmt::Debug,
+    Lock: RawMutex + fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { sem, data: _ } = self;
         f.debug_struct("RwLock")
@@ -450,12 +469,22 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLock<T> {
 // Safety: if `T` is `Send + Sync`, an `RwLock<T>` can safely be sent or shared
 // between threads. If `T` wasn't `Send`, this would be unsafe, since the
 // `RwLock` exposes access to the `T`.
-unsafe impl<T> Send for RwLock<T> where T: ?Sized + Send {}
-unsafe impl<T> Sync for RwLock<T> where T: ?Sized + Send + Sync {}
+unsafe impl<T, Lock> Send for RwLock<T, Lock>
+where
+    T: ?Sized + Send,
+    Lock: RawMutex + Send,
+{
+}
+unsafe impl<T, Lock> Sync for RwLock<T, Lock>
+where
+    T: ?Sized + Send + Sync,
+    Lock: RawMutex + Sync,
+{
+}
 
 // === impl RwLockReadGuard ===
 
-impl<T: ?Sized> Deref for RwLockReadGuard<'_, T> {
+impl<T: ?Sized, Lock: RawMutex> Deref for RwLockReadGuard<'_, T, Lock> {
     type Target = T;
 
     #[inline]
@@ -468,7 +497,7 @@ impl<T: ?Sized> Deref for RwLockReadGuard<'_, T> {
     }
 }
 
-impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLockReadGuard<'_, T> {
+impl<T: ?Sized + fmt::Debug, Lock: RawMutex> fmt::Debug for RwLockReadGuard<'_, T, Lock> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.deref().fmt(f)
     }
@@ -477,12 +506,22 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLockReadGuard<'_, T> {
 // Safety: A read guard can be shared or sent between threads as long as `T` is
 // `Sync`. It can implement `Send` even if `T` does not implement `Send`, as
 // long as `T` is `Sync`, because the read guard only permits borrowing the `T`.
-unsafe impl<T> Send for RwLockReadGuard<'_, T> where T: ?Sized + Sync {}
-unsafe impl<T> Sync for RwLockReadGuard<'_, T> where T: ?Sized + Send + Sync {}
+unsafe impl<T, Lock> Send for RwLockReadGuard<'_, T, Lock>
+where
+    T: ?Sized + Sync,
+    Lock: RawMutex + Sync,
+{
+}
+unsafe impl<T, Lock> Sync for RwLockReadGuard<'_, T, Lock>
+where
+    T: ?Sized + Send + Sync,
+    Lock: RawMutex + Sync,
+{
+}
 
 // === impl RwLockWriteGuard ===
 
-impl<T: ?Sized> Deref for RwLockWriteGuard<'_, T> {
+impl<T: ?Sized, Lock: RawMutex> Deref for RwLockWriteGuard<'_, T, Lock> {
     type Target = T;
 
     #[inline]

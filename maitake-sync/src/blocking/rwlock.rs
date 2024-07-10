@@ -348,8 +348,8 @@ where
     }
 }
 
-unsafe impl<T: ?Sized + Send, Lock> Send for RwLock<T, Lock> {}
-unsafe impl<T: ?Sized + Send + Sync, Lock> Sync for RwLock<T, Lock> {}
+unsafe impl<T: ?Sized + Send, Lock: Send> Send for RwLock<T, Lock> {}
+unsafe impl<T: ?Sized + Send + Sync, Lock: Sync> Sync for RwLock<T, Lock> {}
 
 // === impl RwLockReadGuard ===
 
