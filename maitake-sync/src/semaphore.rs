@@ -5,6 +5,7 @@
 //!
 //! [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
 use crate::{
+    blocking::RawMutex,
     loom::{
         cell::UnsafeCell,
         sync::{
@@ -12,6 +13,7 @@ use crate::{
             spin::{Mutex, MutexGuard},
         },
     },
+    spin::Spinlock,
     util::{fmt, CachePadded, WakeBatch},
     WaitResult,
 };
@@ -167,7 +169,7 @@ mod tests;
 /// [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
 /// [`acquire`]: Semaphore::acquire
 #[derive(Debug)]
-pub struct Semaphore {
+pub struct Semaphore<Lock: RawMutex = Spinlock> {
     /// The number of permits in the semaphore (or [`usize::MAX] if the
     /// semaphore is closed.
     permits: CachePadded<AtomicUsize>,
@@ -178,7 +180,7 @@ pub struct Semaphore {
     /// `no_std` platforms; when running `loom` tests, a `loom` mutex is used
     /// instead to simulate the spinlock, because loom doesn't play nice with
     /// real spinlocks.
-    waiters: Mutex<SemQueue>,
+    waiters: Mutex<SemQueue, Lock>,
 }
 
 /// A [RAII guard] representing one or more permits acquired from a
@@ -193,9 +195,9 @@ pub struct Semaphore {
 /// [RAII guard]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
 #[derive(Debug)]
 #[must_use = "dropping a `Permit` releases the acquired permits back to the `Semaphore`"]
-pub struct Permit<'sem> {
+pub struct Permit<'sem, Lock: RawMutex = Spinlock> {
     permits: usize,
-    semaphore: &'sem Semaphore,
+    semaphore: &'sem Semaphore<Lock>,
 }
 
 /// The future returned by the [`Semaphore::acquire`] method.
@@ -217,8 +219,8 @@ pub struct Permit<'sem> {
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Acquire<'sem> {
-    semaphore: &'sem Semaphore,
+pub struct Acquire<'sem, Lock: RawMutex = Spinlock> {
+    semaphore: &'sem Semaphore<Lock>,
     queued: bool,
     permits: usize,
     #[pin]
@@ -293,11 +295,6 @@ struct Node {
 // === impl Semaphore ===
 
 impl Semaphore {
-    /// The maximum number of permits a `Semaphore` may contain.
-    pub const MAX_PERMITS: usize = usize::MAX - 1;
-
-    const CLOSED: usize = usize::MAX;
-
     loom_const_fn! {
         /// Returns a new `Semaphore` with `permits` permits available.
         ///
@@ -308,20 +305,45 @@ impl Semaphore {
         /// [`MAX_PERMITS`]: Self::MAX_PERMITS
         #[must_use]
         pub fn new(permits: usize) -> Self {
+            Self::make(
+                permits,
+                Mutex::new(SemQueue::new())
+            )
+        }
+    }
+}
+
+#[cfg(feature = "lock_api")]
+impl<Lock: lock_api::RawMutex> Semaphore<Lock> {
+    #[must_use]
+    pub const fn with_raw_mutex(permits: usize) -> Self {
+        Self::make(permits, Mutex::with_raw_mutex(SemQueue::new()))
+    }
+}
+
+// This is factored out as a free constant in this module so that `RwLock` can
+// depend on it without having to specify `Semaphore`'s type parameters. This is
+// a little annoying but whatever.
+pub(crate) const MAX_PERMITS: usize = usize::MAX - 1;
+
+impl<Lock: RawMutex> Semaphore<Lock> {
+    /// The maximum number of permits a `Semaphore` may contain.
+    pub const MAX_PERMITS: usize = MAX_PERMITS;
+
+    const CLOSED: usize = usize::MAX;
+
+    loom_const_fn! {
+        fn make(permits: usize, waiters: Mutex<SemQueue, Lock>) -> Self {
             assert!(
                 permits <= Self::MAX_PERMITS,
                 "a semaphore may not have more than Semaphore::MAX_PERMITS permits",
-        );
+            );
             Self {
                 permits: CachePadded::new(AtomicUsize::new(permits)),
-                waiters: Mutex::new(SemQueue {
-                    queue: List::new(),
-                    closed: false,
-                }),
+                waiters,
             }
         }
     }
-
     /// Returns the number of permits currently available in this semaphore, or
     /// 0 if the semaphore is [closed].
     ///
@@ -352,7 +374,7 @@ impl Semaphore {
     ///
     /// [`Closed`]: crate::Closed
     /// [closed]: Semaphore::close
-    pub fn acquire(&self, permits: usize) -> Acquire<'_> {
+    pub fn acquire(&self, permits: usize) -> Acquire<'_, Lock> {
         Acquire {
             semaphore: self,
             queued: false,
@@ -398,7 +420,7 @@ impl Semaphore {
     ///
     /// [`Closed`]: crate::Closed
     /// [closed]: Semaphore::close
-    pub fn try_acquire(&self, permits: usize) -> Result<Permit<'_>, TryAcquireError> {
+    pub fn try_acquire(&self, permits: usize) -> Result<Permit<'_, Lock>, TryAcquireError> {
         trace!(permits, "Semaphore::try_acquire");
         self.try_acquire_inner(permits).map(|_| Permit {
             permits,
@@ -595,7 +617,7 @@ impl Semaphore {
     fn add_permits_locked<'sem>(
         &'sem self,
         mut permits: usize,
-        mut waiters: MutexGuard<'sem, SemQueue>,
+        mut waiters: MutexGuard<'sem, SemQueue, Lock>,
     ) {
         trace!(permits, "Semaphore::add_permits");
         if waiters.closed {
@@ -734,11 +756,22 @@ impl Semaphore {
         }
     }
 }
+// === impl SemQueue ===
+
+impl SemQueue {
+    #[must_use]
+    const fn new() -> Self {
+        Self {
+            queue: List::new(),
+            closed: false,
+        }
+    }
+}
 
 // === impl Acquire ===
 
-impl<'sem> Future for Acquire<'sem> {
-    type Output = WaitResult<Permit<'sem>>;
+impl<'sem, Lock: RawMutex> Future for Acquire<'sem, Lock> {
+    type Output = WaitResult<Permit<'sem, Lock>>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let poll = this
@@ -754,7 +787,7 @@ impl<'sem> Future for Acquire<'sem> {
 }
 
 #[pinned_drop]
-impl PinnedDrop for Acquire<'_> {
+impl<Lock: RawMutex> PinnedDrop for Acquire<'_, Lock> {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         trace!(?this.queued, "Acquire::drop");
@@ -768,11 +801,11 @@ impl PinnedDrop for Acquire<'_> {
 // the `Acquire` future will only access this `UnsafeCell` when mutably borrowed
 // (when polling or dropping the future), so the future itself is safe to share
 // immutably between threads.
-unsafe impl Sync for Acquire<'_> {}
+unsafe impl<Lock: RawMutex> Sync for Acquire<'_, Lock> {}
 
 // === impl Permit ===
 
-impl Permit<'_> {
+impl<Lock: RawMutex> Permit<'_, Lock> {
     /// Forget this permit, dropping it *without* returning the number of
     /// acquired permits to the semaphore.
     ///
@@ -790,7 +823,7 @@ impl Permit<'_> {
     }
 }
 
-impl Drop for Permit<'_> {
+impl<Lock: RawMutex> Drop for Permit<'_, Lock> {
     fn drop(&mut self) {
         trace!(?self.permits, "Permit::drop");
         self.semaphore.add_permits(self.permits);
@@ -844,8 +877,8 @@ feature! {
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
     #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-    pub struct AcquireOwned {
-        semaphore: Arc<Semaphore>,
+    pub struct AcquireOwned<Lock: RawMutex = Spinlock> {
+        semaphore: Arc<Semaphore<Lock>>,
         queued: bool,
         permits: usize,
         #[pin]
@@ -868,12 +901,12 @@ feature! {
     /// [RAII guard]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
     #[derive(Debug)]
     #[must_use = "dropping an `OwnedPermit` releases the acquired permits back to the `Semaphore`"]
-    pub struct OwnedPermit {
+    pub struct OwnedPermit<Lock: RawMutex = Spinlock>  {
         permits: usize,
-        semaphore: Arc<Semaphore>,
+        semaphore: Arc<Semaphore<Lock>>,
     }
 
-    impl Semaphore {
+    impl<Lock: RawMutex> Semaphore<Lock> {
         /// Acquire `permits` permits from the `Semaphore`, waiting asynchronously
         /// if there are insufficient permits currently available, and returning
         /// an [`OwnedPermit`].
@@ -899,7 +932,7 @@ feature! {
         /// [`acquire`]: Semaphore::acquire
         /// [`Closed`]: crate::Closed
         /// [closed]: Semaphore::close
-        pub fn acquire_owned(self: &Arc<Self>, permits: usize) -> AcquireOwned {
+        pub fn acquire_owned(self: &Arc<Self>, permits: usize) -> AcquireOwned<Lock> {
             AcquireOwned {
                 semaphore: self.clone(),
                 queued: false,
@@ -929,7 +962,7 @@ feature! {
         /// [`try_acquire`]: Semaphore::try_acquire
         /// [`Closed`]: crate::Closed
         /// [closed]: Semaphore::close
-        pub fn try_acquire_owned(self: &Arc<Self>, permits: usize) -> Result<OwnedPermit, TryAcquireError> {
+        pub fn try_acquire_owned(self: &Arc<Self>, permits: usize) -> Result<OwnedPermit<Lock>, TryAcquireError> {
             trace!(permits, "Semaphore::try_acquire_owned");
             self.try_acquire_inner(permits).map(|_| OwnedPermit {
                 permits,
@@ -940,8 +973,8 @@ feature! {
 
     // === impl AcquireOwned ===
 
-    impl Future for AcquireOwned {
-        type Output = WaitResult<OwnedPermit>;
+    impl<Lock: RawMutex> Future for AcquireOwned<Lock> {
+        type Output = WaitResult<OwnedPermit<Lock>>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
@@ -960,7 +993,7 @@ feature! {
     }
 
     #[pinned_drop]
-    impl PinnedDrop for AcquireOwned {
+    impl<Lock: RawMutex> PinnedDrop for AcquireOwned<Lock> {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
             trace!(?this.queued, "AcquireOwned::drop");
@@ -971,11 +1004,11 @@ feature! {
 
     // safety: this is safe for the same reasons as the `Sync` impl for the
     // `Acquire` future.
-    unsafe impl Sync for AcquireOwned {}
+    unsafe impl<Lock: RawMutex> Sync for AcquireOwned<Lock> {}
 
     // === impl OwnedPermit ===
 
-    impl OwnedPermit {
+    impl<Lock: RawMutex> OwnedPermit<Lock> {
         /// Forget this permit, dropping it *without* returning the number of
         /// acquired permits to the semaphore.
         ///
@@ -993,7 +1026,7 @@ feature! {
         }
     }
 
-    impl Drop for OwnedPermit {
+    impl<Lock: RawMutex> Drop for OwnedPermit<Lock> {
         fn drop(&mut self) {
             trace!(?self.permits, "OwnedPermit::drop");
             self.semaphore.add_permits(self.permits);
