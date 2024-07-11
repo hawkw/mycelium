@@ -861,15 +861,15 @@ impl WaitQueue {
     pub async fn wait_for_value<T, F: FnMut() -> Option<T>>(&self, mut f: F) -> WaitResult<T> {
         loop {
             let wait = self.wait();
-            let mut pwait = core::pin::pin!(wait);
-            match pwait.as_mut().subscribe() {
+            let mut wait = core::pin::pin!(wait);
+            match wait.as_mut().subscribe() {
                 Poll::Ready(wr) => wr?,
                 Poll::Pending => {}
             }
             if let Some(t) = f() {
                 return Ok(t);
             }
-            pwait.await?;
+            wait.await?;
         }
     }
 
