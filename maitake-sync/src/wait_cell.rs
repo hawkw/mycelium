@@ -350,7 +350,8 @@ impl WaitCell {
     ///
     /// Consider using [`Self::wait_for_value()`] if your function does return a value.
     ///
-    /// Consider using [`WaitQueue::wait_for()`] if you need multiple waiters.
+    /// Consider using [`WaitQueue::wait_for()`](super::wait_queue::WaitQueue::wait_for)
+    /// if you need multiple waiters.
     ///
     /// # Returns
     ///
@@ -424,7 +425,7 @@ impl WaitCell {
     ///
     /// Consider using [`Self::wait_for()`] if your function does not return a value.
     ///
-    /// Consider using [`WaitQueue::wait_for_value()`] if you need multiple waiters.
+    /// Consider using [`WaitQueue::wait_for_value()`](super::wait_queue::WaitQueue::wait_for_value) if you need multiple waiters.
     ///
     /// * [`Ok`]`(T)` if the closure returns [`Some`]`(T)`.
     /// * [`Err`]`(`[`Closed`]`)` if the [`WaitCell`] is closed.

@@ -707,12 +707,13 @@ impl WaitQueue {
     ///
     /// Consider using [`Self::wait_for_value()`] if your function does return a value.
     ///
-    /// Consider using [`WaitCell::wait_for()`] if you do not need multiple waiters.
+    /// Consider using [`WaitCell::wait_for()`](super::wait_cell::WaitCell::wait_for)
+    /// if you do not need multiple waiters.
     ///
     /// # Returns
     ///
     /// * [`Ok`]`(())` if the closure returns `true`.
-    /// * [`Err`]`(`[`Closed`]`)` if the [`WaitQueue`] is closed.
+    /// * [`Err`]`(`[`Closed`](crate::Closed)`)` if the [`WaitQueue`] is closed.
     ///
     /// # Examples
     ///
@@ -794,10 +795,11 @@ impl WaitQueue {
     ///
     /// Consider using [`Self::wait_for()`] if your function does not return a value.
     ///
-    /// Consider using [`WaitCell::wait_for_value()`] if you do not need multiple waiters.
+    /// Consider using [`WaitCell::wait_for_value()`](super::wait_cell::WaitCell::wait_for_value)
+    /// if you do not need multiple waiters.
     ///
     /// * [`Ok`]`(T)` if the closure returns [`Some`]`(T)`.
-    /// * [`Err`]`(`[`Closed`]`)` if the [`WaitQueue`] is closed.
+    /// * [`Err`]`(`[`Closed`](crate::Closed)`)` if the [`WaitQueue`] is closed.
     ///
     /// # Examples
     ///
