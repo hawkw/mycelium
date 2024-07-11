@@ -345,7 +345,7 @@ impl WaitCell {
     /// In particular, this can be used in cases where interrupts or events are used
     /// to signify readiness or completion of some task, such as the completion of a
     /// DMA transfer, or reception of an ethernet frame. In cases like this, the interrupt
-    /// can wake the queue, allowing the polling function to check status fields for
+    /// can wake the cell, allowing the polling function to check status fields for
     /// partial progress or completion.
     ///
     /// Consider using [`Self::wait_for_value()`] if your function does return a value.
@@ -419,7 +419,7 @@ impl WaitCell {
     /// In particular, this can be used in cases where interrupts or events are used
     /// to signify readiness or completion of some task, such as the completion of a
     /// DMA transfer, or reception of an ethernet frame. In cases like this, the interrupt
-    /// can wake the queue, allowing the polling function to check status fields for
+    /// can wake the cell, allowing the polling function to check status fields for
     /// partial progress or completion, and also return the status flags at the same time.
     ///
     /// Consider using [`Self::wait_for()`] if your function does not return a value.
