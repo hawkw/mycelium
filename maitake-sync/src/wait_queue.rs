@@ -684,40 +684,180 @@ impl WaitQueue {
         }
     }
 
-    /// Asynchronously poll the [`WaitQueue`] until a condition occurs
+    /// Asynchronously poll the given function `f` until a condition occurs,
+    /// using the [`WaitQueue`] to only re-poll when notified.
     ///
     /// This can be used to implement a "wait loop", turning a "try" function
     /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
     /// "recv" or "send").
     ///
+    /// In particular, this function correctly *registers* interest in the [`WaitQueue`]
+    /// prior to polling the function, ensuring that there is not a chance of a race
+    /// where the condition occurs AFTER checking but BEFORE registering interest
+    /// in the [`WaitQueue`], which could lead to deadlock.
+    ///
+    /// This is intended to have similar behavior to `Condvar` in the standard library,
+    /// but asynchronous, and not requiring operating system intervention (or existence).
+    ///
+    /// In particular, this can be used in cases where interrupts or events are used
+    /// to signify readiness or completion of some task, such as the completion of a
+    /// DMA transfer, or reception of an ethernet frame. In cases like this, the interrupt
+    /// can wake the queue, allowing the polling function to check status fields for
+    /// partial progress or completion.
+    ///
     /// Consider using [`Self::wait_for_value()`] if your function does return a value.
+    ///
+    /// Consider using [`WaitCell::wait_for()`] if you do not need multiple waiters.
     ///
     /// # Returns
     ///
     /// * [`Ok`]`(())` if the closure returns `true`.
     /// * [`Err`]`(`[`Closed`]`)` if the [`WaitQueue`] is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
+    /// use std::sync::Arc;
+    /// use maitake_sync::WaitQueue;
+    /// use std::sync::atomic::{AtomicU8, Ordering};
+    ///
+    /// let queue = Arc::new(WaitQueue::new());
+    /// let num = Arc::new(AtomicU8::new(0));
+    ///
+    /// let waiter1 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let queue = queue.clone();
+    ///     let num = num.clone();
+    ///     async move {
+    ///         queue.wait_for(|| num.load(Ordering::Relaxed) > 5).await;
+    ///         println!("received wakeup!");
+    ///     }
+    /// });
+    ///
+    /// let waiter2 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let queue = queue.clone();
+    ///     let num = num.clone();
+    ///     async move {
+    ///         queue.wait_for(|| num.load(Ordering::Relaxed) > 10).await;
+    ///         println!("received wakeup!");
+    ///     }
+    /// });
+    ///
+    /// println!("poking task...");
+    ///
+    /// for i in 0..20 {
+    ///     num.store(i, Ordering::Relaxed);
+    ///     queue.wake();
+    /// }
+    ///
+    /// waiter1.await.unwrap();
+    /// waiter2.await.unwrap();
+    /// # }
+    /// # test();
+    /// ```
     pub async fn wait_for<F: FnMut() -> bool>(&self, mut f: F) -> WaitResult<()> {
         loop {
             let wait = self.wait();
-            let mut pwait = core::pin::pin!(wait);
-            let _ = pwait.as_mut().subscribe()?;
+            let mut wait = core::pin::pin!(wait);
+            let _ = wait.as_mut().subscribe()?;
             if f() {
                 return Ok(());
             }
-            pwait.await?;
+            wait.await?;
         }
     }
 
-    /// Asynchronously poll the [`WaitQueue`] until a condition occurs
+    /// Asynchronously poll the given function `f` until a condition occurs,
+    /// using the [`WaitQueue`] to only re-poll when notified.
     ///
     /// This can be used to implement a "wait loop", turning a "try" function
     /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
     /// "recv" or "send").
     ///
+    /// In particular, this function correctly *registers* interest in the [`WaitQueue`]
+    /// prior to polling the function, ensuring that there is not a chance of a race
+    /// where the condition occurs AFTER checking but BEFORE registering interest
+    /// in the [`WaitQueue`], which could lead to deadlock.
+    ///
+    /// This is intended to have similar behavior to `Condvar` in the standard library,
+    /// but asynchronous, and not requiring operating system intervention (or existence).
+    ///
+    /// In particular, this can be used in cases where interrupts or events are used
+    /// to signify readiness or completion of some task, such as the completion of a
+    /// DMA transfer, or reception of an ethernet frame. In cases like this, the interrupt
+    /// can wake the queue, allowing the polling function to check status fields for
+    /// partial progress or completion, and also return the status flags at the same time.
+    ///
     /// Consider using [`Self::wait_for()`] if your function does not return a value.
+    ///
+    /// Consider using [`WaitCell::wait_for_value()`] if you do not need multiple waiters.
     ///
     /// * [`Ok`]`(T)` if the closure returns [`Some`]`(T)`.
     /// * [`Err`]`(`[`Closed`]`)` if the [`WaitQueue`] is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
+    /// use std::sync::Arc;
+    /// use maitake_sync::WaitQueue;
+    /// use std::sync::atomic::{AtomicU8, Ordering};
+    ///
+    /// let queue = Arc::new(WaitQueue::new());
+    /// let num = Arc::new(AtomicU8::new(0));
+    ///
+    /// let waiter1 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let queue = queue.clone();
+    ///     let num = num.clone();
+    ///     async move {
+    ///         let rxd = queue.wait_for_value(|| {
+    ///             let val = num.load(Ordering::Relaxed);
+    ///             if val > 5 {
+    ///                 return Some(val);
+    ///             }
+    ///             None
+    ///         }).await.unwrap();
+    ///         assert!(rxd > 5);
+    ///         println!("received wakeup with value: {rxd}");
+    ///     }
+    /// });
+    ///
+    /// let waiter2 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let queue = queue.clone();
+    ///     let num = num.clone();
+    ///     async move {
+    ///         let rxd = queue.wait_for_value(|| {
+    ///             let val = num.load(Ordering::Relaxed);
+    ///             if val > 10 {
+    ///                 return Some(val);
+    ///             }
+    ///             None
+    ///         }).await.unwrap();
+    ///         assert!(rxd > 10);
+    ///         println!("received wakeup with value: {rxd}");
+    ///     }
+    /// });
+    ///
+    /// println!("poking task...");
+    ///
+    /// for i in 0..20 {
+    ///     num.store(i, Ordering::Relaxed);
+    ///     queue.wake();
+    /// }
+    ///
+    /// waiter1.await.unwrap();
+    /// waiter2.await.unwrap();
+    /// # }
+    /// # test();
+    /// ```
     pub async fn wait_for_value<T, F: FnMut() -> Option<T>>(&self, mut f: F) -> WaitResult<T> {
         loop {
             let wait = self.wait();
