@@ -44,6 +44,8 @@ pub struct MutexGuard<'a, T, Lock: RawMutex = Spinlock> {
     lock: &'a Lock,
 }
 
+/// Trait abstracting over blocking [`Mutex`] implementations (`maitake-sync`'s
+/// version).
 pub unsafe trait RawMutex {
     type GuardMarker;
 
