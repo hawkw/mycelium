@@ -72,23 +72,64 @@ pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
     lock: &'lock Lock,
 }
 
+/// Trait abstracting over blocking [`RwLock`] implementations (`maitake-sync`'s
+/// version).
+///
+/// This trait is essentially a duplicate of the [`lock_api::RawRwLock`] trait.
+/// `maitake-sync` defines its own version of `RawRwLock` so that the `lock_api`
+/// dependency can be optional, and can be disabled when only using
+/// `maitake-sync`'s spinlocks. When the "lock_api" feature flag is enabled,
+/// this trait will be implemented for all types implementing
+/// [`lock_api::RawRwLock`]. Users who wish to provide their own `RawRwLock`
+/// implementations should implement the [`lock_api::RawRwLock`] trait, *not*
+/// this trait.
+///
+/// # Safety
+///
+/// Implementations of this trait must ensure that the `RwLock` is actually
+/// exclusive: an exclusive lock can't be acquired while an exclusive or shared
+/// lock exists, and a shared lock can't be acquire while an exclusive lock
+/// exists.
 pub unsafe trait RawRwLock {
+    /// Marker type which determines whether a lock guard should be [`Send`].
+    ///
+    /// Implementations should use  one of the [`lock_api::GuardSend`] or
+    /// [`lock_api::GuardNoSend`] helper types here.
     type GuardMarker;
 
+    /// Acquires a shared lock, blocking the current thread/CPU core until it is
+    /// able to do so.
     fn lock_shared(&self);
 
+    /// Attempts to acquire a shared lock without blocking.
     fn try_lock_shared(&self) -> bool;
 
+    /// Releases a shared lock.
+    ///
+    /// # Safety
+    ///
+    /// This method may only be called if a shared lock is held in the current context.
     unsafe fn unlock_shared(&self);
 
+    /// Acquires an exclusive lock, blocking the current thread/CPU core until
+    /// it is able to do so.
     fn lock_exclusive(&self);
 
+    /// Attempts to acquire an exclusive lock without blocking.
     fn try_lock_exclusive(&self) -> bool;
 
+    /// Releases an exclusive lock.
+    ///
+    /// # Safety
+    ///
+    /// This method may only be called if an exclusive lock is held in the
+    /// current context.
     unsafe fn unlock_exclusive(&self);
 
+    /// Returns `true` if this `RwLock` is currently locked in any way.
     fn is_locked(&self) -> bool;
 
+    /// Returns `true` if this `RwLock` is currently locked exclusively.
     fn is_locked_exclusive(&self) -> bool;
 }
 
