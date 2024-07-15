@@ -46,15 +46,48 @@ pub struct MutexGuard<'a, T, Lock: RawMutex = Spinlock> {
 
 /// Trait abstracting over blocking [`Mutex`] implementations (`maitake-sync`'s
 /// version).
+///
+/// This trait is essentially a duplicate of the [`lock_api::RawMutex`] trait.
+/// `maitake-sync` defines its own version of `RawMutex` so that the `lock_api`
+/// dependency can be optional, and can be disabled when only using
+/// `maitake-sync`'s spinlocks. When the "lock_api" feature flag is enabled,
+/// this trait will be implemented for all types implementing
+/// [`lock_api::RawMutex`]. Users who wish to provide their own `RawMutex`
+/// implementations should implement the [`lock_api::RawMutex`] trait, *not*
+/// this trait.
+///
+/// # Safety
+///
+/// Implementations of this trait must ensure that the mutex is actually
+/// exclusive: a lock can't be acquired while the mutex is already locked.
 pub unsafe trait RawMutex {
+    /// Marker type which determines whether a lock guard should be [`Send`].
+    ///
+    /// Implementations should use  one of the [`lock_api::GuardSend`] or
+    /// [`lock_api::GuardNoSend`] helper types here.
     type GuardMarker;
 
+    /// Acquires this mutex, blocking the current thread/CPU core until it is
+    /// able to do so.
     fn lock(&self);
 
+    /// Attempts to acquire this mutex without blocking. Returns `true`
+    /// if the lock was successfully acquired and `false` otherwise.
     fn try_lock(&self) -> bool;
 
+    /// Unlocks this mutex.
+    ///
+    /// # Safety
+    ///
+    /// This method may only be called if the mutex is held in the current
+    /// context, i.e. it must be paired with a successful call to [`lock`] or
+    /// [`try_lock`].
+    ///
+    /// [`lock`]: RawMutex::lock
+    /// [`try_lock`]: RawMutex::try_lock
     unsafe fn unlock(&self);
 
+    /// Returns `true` if the mutex is currently locked.
     fn is_locked(&self) -> bool;
 }
 
@@ -115,6 +148,17 @@ impl<T, Lock> Mutex<T, Lock>
 where
     Lock: lock_api::RawMutex,
 {
+    /// Returns a new `Mutex` protecting the provided `data`, using the
+    /// `Lock` type parameter as the raw mutex implementation.
+    ///
+    /// This constructor is used to override the internal implementation of
+    /// mutex operations, with an implementation of the [`lock_api::RawMutex`]
+    /// trait. By default, the [`Mutex::new`] constructor uses a [`Spinlock`] as
+    /// the underlying raw mutex implementation, which will spin until the mutex
+    /// is unlocked, without using platform-specific or OS-specific blocking
+    /// mechanisms.
+    ///
+    /// The returned `Mutex` is in an unlocked state, ready for use.
     #[must_use]
     pub const fn with_raw_mutex(data: T) -> Self {
         Self {

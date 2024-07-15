@@ -157,6 +157,15 @@ critical section, are described [here][interrupt-cfgs].
 [single-core]: https://docs.rs/portable-atomic/latest/portable_atomic/#optional-cfg
 [interrupt-cfgs]: https://github.com/taiki-e/portable-atomic/blob/HEAD/src/imp/interrupt/README.md
 
+### `lock_api` support
+
+In addition to async locks, `maitake-sync` also provides a [`blocking`] module,
+which contains blocking `Mutex` and `RwLock` implementations. Many of
+`maitake-sync`'s async synchronization primitives, including `WaitQueue`,
+`Mutex`, `RwLock`, and `Semaphore`, internally use the [`blocking::Mutex`] type
+for wait-list synchronization.
+
+
 ## features
 
 The following features are available (this list is incomplete; you can help by [expanding it].)
@@ -169,8 +178,17 @@ The following features are available (this list is incomplete; you can help by [
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `tracing`      | `false` | Enables support for [`tracing`] diagnostics. Requires `liballoc`.|
 | `core-error`   | `false` | Enables implementations of the [`core::error::Error` trait][core-error] for `maitake-sync`'s error types. *Requires a nightly Rust toolchain*. |
+| `lock_api`     | `false` | Enables support for the [`lock_api`] crate, which can be used to provide custom blocking `Mutex` implementations. See [the section on `lock_api` support](#lock_api-support) for details. |
 
 [`liballoc`]: https://doc.rust-lang.org/alloc/
 [`CachePadded`]: https://docs.rs/maitake-sync/latest/maitake_sync/util/struct.CachePadded.html
 [`tracing`]: https://crates.io/crates/tracing
 [core-error]: https://doc.rust-lang.org/stable/core/error/index.html
+[`lock_api`]: https://docs.rs/lock_api
+[`blocking`]:
+    https://docs.rs/maitake-sync/latest/maitake_sync/blocking/index.html
+[`blocking::Mutex`]:
+    https://docs.rs/maitake-sync/latest/maitake_sync/blocking/struct.Mutex.html
+[`spin`]: https://docs.rs/maitake-sync/latest/maitake_sync/spin/index.html
+[`Spinlock`]:
+    https://docs.rs/maitake-sync/latest/maitake_sync/spin/struct.Spinlock.html
