@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## maitake-sync-v0.1.2 - (2024-07-18)
+
+[c67c62f](https://github.com/hawkw/mycelium/c67c62fd7c7e537833be6e0559f61f30ed40d0ca)...[c67c62f](https://github.com/hawkw/mycelium/c67c62fd7c7e537833be6e0559f61f30ed40d0ca)
+
+
+### Added
+
+- Add `wait_for` and `wait_for_value` to WaitCell and WaitQueue ([#479](https://github.com/hawkw/mycelium/issues/479)) ([6dc5a84](https://github.com/hawkw/mycelium/6dc5a8429ffc170c1f086f756237cef9d451c0f2))
+- Add `is_closed` methods to `WaitCell`/`WaitMap`/`WaitQueue` ([#480](https://github.com/hawkw/mycelium/issues/480)) ([c67c62f](https://github.com/hawkw/mycelium/c67c62fd7c7e537833be6e0559f61f30ed40d0ca))
+
 ## maitake-sync-v0.1.1 - (2024-01-27)
 
 [6919b82](https://github.com/hawkw/mycelium/6919b8233eb5394edf836fde1fcbedae6721ae6c)...[dba0827](https://github.com/hawkw/mycelium/dba0827aae2f18bad477e7d82af17cc018bfe0c2)
