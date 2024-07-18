@@ -876,6 +876,7 @@ impl WaitQueue {
     }
 
     /// Returns `true` if this `WaitQueue` is [closed](Self::close).
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.load().get(QueueState::STATE) == State::Closed
     }

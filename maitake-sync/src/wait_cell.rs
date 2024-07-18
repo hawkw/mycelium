@@ -482,6 +482,7 @@ impl WaitCell {
     }
 
     /// Returns `true` if this `WaitCell` is [closed](Self::close).
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.current_state() == State::CLOSED
     }

@@ -491,6 +491,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 
     /// Returns `true` if this `WaitMap` is [closed](Self::close).
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.load() == State::Closed
     }
