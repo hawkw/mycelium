@@ -490,6 +490,12 @@ impl<K: PartialEq, V> WaitMap<K, V> {
         }
     }
 
+    /// Returns `true` if this `WaitMap` is [closed](Self::close).
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.load() == State::Closed
+    }
+
     /// Close the queue, indicating that it may no longer be used.
     ///
     /// Once a queue is closed, all [`wait`] calls (current or future) will
