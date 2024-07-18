@@ -13,7 +13,7 @@ readme = "README.md"
 keywords = ["async", "no_std", "sync", "mutex", "rwlock"]
 categories = [
     "no-std",
-    "async",
+    "asynchronous",
     "concurrency"
 ]
 edition = "2021"
