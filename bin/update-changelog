@@ -81,9 +81,10 @@ status "Updating" "$changelog_path for tag $tag"
 git_cliff=(
     git-cliff
     --include-path "${path}/**"
-    --output "$changelog_path"
+    --prepend "$changelog_path"
     --config cliff.toml
     --tag "$tag"
+    --unreleased
 )
 if [[ "$verbose" ]]; then
     git_cliff+=("$verbose")
