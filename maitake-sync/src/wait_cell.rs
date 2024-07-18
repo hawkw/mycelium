@@ -481,13 +481,10 @@ impl WaitCell {
         }
     }
 
-    // TODO(eliza): is this an API we want to have?
-    /*
     /// Returns `true` if this `WaitCell` is [closed](Self::close).
-     pub(crate) fn is_closed(&self) -> bool {
-       self.current_state() == State::CLOSED
+    pub fn is_closed(&self) -> bool {
+        self.current_state() == State::CLOSED
     }
-    */
 
     /// Takes this `WaitCell`'s waker.
     // TODO(eliza): could probably be made a public API...
