@@ -44,6 +44,15 @@ pub struct MutexGuard<'a, T, Lock: RawMutex = Spinlock> {
     lock: &'a Lock,
 }
 
+pub unsafe trait RawScopedMutex {
+    fn with<T>(&self, f: impl FnOnce() -> T) -> T;
+
+    fn try_with<T>(&self, f: impl FnOnce() -> T) -> Option<T>;
+
+    /// Returns `true` if the mutex is currently locked.
+    fn is_locked(&self) -> bool;
+}
+
 /// Trait abstracting over blocking [`Mutex`] implementations (`maitake-sync`'s
 /// version).
 ///
@@ -89,6 +98,33 @@ pub unsafe trait RawMutex {
 
     /// Returns `true` if the mutex is currently locked.
     fn is_locked(&self) -> bool;
+}
+
+unsafe impl<L> RawScopedMutex for L
+where
+    L: RawMutex,
+{
+    fn with<T>(&self, f: impl FnOnce() -> T) -> T {
+        // TODO(eliza): RAIIify
+        self.lock();
+        let ret = f();
+        unsafe { self.unlock() }
+        ret
+    }
+
+    fn try_with<T>(&self, f: impl FnOnce() -> T) -> Option<T> {
+        if !self.try_lock() {
+            return None;
+        }
+        let ret = f();
+        unsafe { self.unlock() }
+        Some(ret)
+    }
+
+    /// Returns `true` if the mutex is currently locked.
+    fn is_locked(&self) -> bool {
+        RawMutex::is_locked(self)
+    }
 }
 
 #[cfg(feature = "lock_api")]
@@ -143,6 +179,29 @@ impl<T> Mutex<T> {
     }
 }
 
+impl<T, Lock> Mutex<T, Lock> {
+    loom_const_fn! {
+        /// Returns a new `Mutex` protecting the provided `data`, using the
+        /// `Lock` type parameter as the raw mutex implementation.
+        ///
+        /// This constructor is used to override the internal implementation of
+        /// mutex operations, with an implementation of the [`lock_api::RawMutex`]
+        /// trait. By default, the [`Mutex::new`] constructor uses a [`Spinlock`] as
+        /// the underlying raw mutex implementation, which will spin until the mutex
+        /// is unlocked, without using platform-specific or OS-specific blocking
+        /// mechanisms.
+        ///
+        /// The returned `Mutex` is in an unlocked state, ready for use.
+        #[must_use]
+        pub fn with_raw_mutex(data: T, lock: Lock) -> Self {
+            Self {
+                lock,
+                data: UnsafeCell::new(data),
+            }
+        }
+    }
+}
+
 #[cfg(feature = "lock_api")]
 impl<T, Lock> Mutex<T, Lock>
 where
@@ -160,11 +219,32 @@ where
     ///
     /// The returned `Mutex` is in an unlocked state, ready for use.
     #[must_use]
-    pub const fn with_raw_mutex(data: T) -> Self {
+    pub const fn with_lock_api(data: T) -> Self {
         Self {
             lock: Lock::INIT,
             data: UnsafeCell::new(data),
-        }
+        }    /// Returns a new `Mutex` protecting the provided `data`, using the
+        /// `Lock` type parameter as the raw mutex implementation.
+        ///
+        /// This constructor is used to override the internal implementation of
+        /// mutex operations, with an implementation of the [`lock_api::RawMutex`]
+        /// trait. By default, the [`Mutex::new`] constructor uses a [`Spinlock`] as
+        /// the underlying raw mutex implementation, which will spin until the mutex
+        /// is unlocked, without using platform-specific or OS-specific blocking
+        /// mechanisms.
+        ///
+        /// The returned `Mutex` is in an unlocked state, ready for use.
+    }
+}
+
+impl<T, Lock: RawScopedMutex> Mutex<T, Lock> {
+    pub fn with<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
+        self.lock.with(|| {
+            self.data.with_mut(|data| unsafe {
+                // Safety: we just locked the mutex.
+                f(&mut *data)
+            })
+        })
     }
 }
 

@@ -61,6 +61,12 @@ impl Spinlock {
             Self { locked: AtomicBool::new(false) }
         }
     }
+
+    #[inline]
+    #[must_use]
+    fn is_locked(&self) -> bool {
+        self.locked.load(Relaxed)
+    }
 }
 
 impl Default for Spinlock {
@@ -103,7 +109,7 @@ unsafe impl RawMutex for Spinlock {
 
     #[inline]
     fn is_locked(&self) -> bool {
-        self.locked.load(Relaxed)
+        Spinlock::is_locked(self)
     }
 }
 

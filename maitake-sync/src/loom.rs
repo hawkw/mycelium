@@ -100,6 +100,22 @@ mod inner {
                 }
 
                 #[track_caller]
+                pub(crate) fn with_raw_mutex(t: T, _: Lock) -> Self {
+                    Self::new(t)
+                }
+
+                #[track_caller]
+                pub fn with<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
+                    let location = core::panic::Location::caller();
+                    tracing::debug!( %location, "Mutex::with: locking...",);
+                    let mut guard = self.lock();
+                    tracing::debug!(%location, "Mutex::with: -> locked!",);
+                    let res = f(&mut *guard);
+                    tracing::debug!(%location, "Mutex::with: unlocking...",);
+                    res
+                }
+
+                #[track_caller]
                 pub fn try_lock(&self) -> Option<MutexGuard<'_, T, Lock>> {
                     self.0.try_lock().map(|x| MutexGuard(x, PhantomData)).ok()
                 }
