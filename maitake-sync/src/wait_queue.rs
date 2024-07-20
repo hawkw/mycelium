@@ -550,30 +550,42 @@ where
     /// [`wait()`]: Self::wait
     pub fn wake_all(&self) {
         let mut batch = WakeBatch::new();
-        let mut waking = true;
+        let mut waiters_remaining = true;
 
-        let (current_state, done) = self.queue.with(|queue| {
-            let current_state = self.load();
-            let state = current_state.get(QueueState::STATE);
+        // This is a little bit contorted: we must load the state inside the
+        // lock, but for all states except for `Waiting`, we just need to bail
+        // out...but we can't `return` from the outer function inside the lock
+        // closure. Therefore, we just return a `bool` and, if it's `true`,
+        // return instead of doing more work.
+        let done = self.queue.with(|queue| {
+            let state = self.load();
 
-            // if there are no waiters in the queue, increment the number of
-            // `wake_all` calls and return. incrementing the `wake_all` count
-            // must be performed inside the lock, so we do it here.
-            if let State::Woken | State::Empty = state {
-                self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
-                return (current_state, true);
+            match test_dbg!(state.get(QueueState::STATE)) {
+                // If there are no waiters in the queue, increment the number of
+                // `wake_all` calls and return. incrementing the `wake_all` count
+                // must be performed inside the lock, so we do it here.
+                State::Woken | State::Empty => {
+                    self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
+                    true
+                }
+                // If the queue is already closed, this is a no-op. Just bail.
+                State::Closed => true,
+                // Okay, there are waiters in the queue. Transition to the empty
+                // state inside the lock and start draining the queue.
+                State::Waiting => {
+                    let next_state = QueueState::new()
+                        .with_state(State::Empty)
+                        .with(QueueState::WAKE_ALLS, state.get(QueueState::WAKE_ALLS) + 1);
+                    self.compare_exchange(state, next_state)
+                        .expect("state should not have transitioned while locked");
+
+                    // Drain the first batch of waiters from the queue.
+                    waiters_remaining =
+                        test_dbg!(Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All));
+
+                    false
+                }
             }
-            waking = test_dbg!(Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All));
-            if !waking {
-                let next_state = QueueState::new().with_state(State::Empty).with(
-                    QueueState::WAKE_ALLS,
-                    current_state.get(QueueState::WAKE_ALLS) + 1,
-                );
-                self.compare_exchange(current_state, next_state)
-                    .expect("state should not have transitioned while locked");
-            }
-
-            (current_state, false)
         });
 
         if done {
@@ -581,19 +593,11 @@ where
         }
 
         batch.wake_all();
-        while waking {
+        // As long as there are waiters remaining to wake, lock the queue, drain
+        // another batch, release the lock, and wake them.
+        while waiters_remaining {
             self.queue.with(|queue| {
-                if waking && batch.can_add_waker() {
-                    waking = Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All);
-                }
-                if !waking {
-                    let next_state = QueueState::new().with_state(State::Empty).with(
-                        QueueState::WAKE_ALLS,
-                        current_state.get(QueueState::WAKE_ALLS) + 1,
-                    );
-                    self.compare_exchange(current_state, next_state)
-                        .expect("state should not have transitioned while locked");
-                }
+                waiters_remaining = Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All);
             });
             batch.wake_all();
         }
