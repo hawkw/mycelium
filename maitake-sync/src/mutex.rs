@@ -4,7 +4,7 @@
 //!
 //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
 use crate::{
-    blocking::RawMutex,
+    blocking::RawScopedMutex,
     loom::cell::{MutPtr, UnsafeCell},
     spin::Spinlock,
     util::fmt,
@@ -86,7 +86,7 @@ mod tests;
 /// [storage]: https://mycelium.elizas.website/maitake/task/trait.Storage.html
 /// [no-unwinding]: https://mycelium.elizas.website/maitake/index.html#maitake-does-not-support-unwinding
 
-pub struct Mutex<T: ?Sized, L: RawMutex = Spinlock> {
+pub struct Mutex<T: ?Sized, L: RawScopedMutex = Spinlock> {
     wait: WaitQueue<L>,
     data: UnsafeCell<T>,
 }
@@ -107,7 +107,7 @@ pub struct Mutex<T: ?Sized, L: RawMutex = Spinlock> {
 /// [`try_lock`]: Mutex::try_lock
 /// [RAII]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
 #[must_use = "if unused, the `Mutex` will immediately unlock"]
-pub struct MutexGuard<'a, T: ?Sized, L: RawMutex = Spinlock> {
+pub struct MutexGuard<'a, T: ?Sized, L: RawScopedMutex = Spinlock> {
     /// /!\ WARNING: semi-load-bearing drop order /!\
     ///
     /// This struct's field ordering is important.
@@ -136,7 +136,7 @@ pub struct MutexGuard<'a, T: ?Sized, L: RawMutex = Spinlock> {
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[pin_project]
 #[derive(Debug)]
-pub struct Lock<'a, T: ?Sized, L: RawMutex = Spinlock> {
+pub struct Lock<'a, T: ?Sized, L: RawScopedMutex = Spinlock> {
     #[pin]
     wait: wait_queue::Wait<'a, L>,
     mutex: &'a Mutex<T, L>,
@@ -144,7 +144,7 @@ pub struct Lock<'a, T: ?Sized, L: RawMutex = Spinlock> {
 
 /// This is used in order to ensure that the wakeup is performed only *after*
 /// the data ptr is dropped, in order to keep `loom` happy.
-struct WakeOnDrop<'a, T: ?Sized, L: RawMutex>(&'a Mutex<T, L>);
+struct WakeOnDrop<'a, T: ?Sized, L: RawScopedMutex>(&'a Mutex<T, L>);
 
 // === impl Mutex ===
 
@@ -182,7 +182,7 @@ impl<T> Mutex<T> {
     }
 }
 
-impl<T, L: RawMutex> Mutex<T, L> {
+impl<T, L: RawScopedMutex> Mutex<T, L> {
     /// Consumes this `Mutex`, returning the guarded data.
     #[inline]
     #[must_use]
@@ -191,7 +191,7 @@ impl<T, L: RawMutex> Mutex<T, L> {
     }
 }
 
-impl<T: ?Sized, L: RawMutex> Mutex<T, L> {
+impl<T: ?Sized, L: RawScopedMutex> Mutex<T, L> {
     /// Locks this mutex.
     ///
     /// This returns a [`Lock`] future that will wait until no other task is
@@ -296,7 +296,7 @@ impl<T: Default> Default for Mutex<T> {
 impl<T, L> fmt::Debug for Mutex<T, L>
 where
     T: ?Sized + fmt::Debug,
-    L: RawMutex + fmt::Debug,
+    L: RawScopedMutex + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { data: _, wait } = self;
@@ -307,13 +307,13 @@ where
     }
 }
 
-unsafe impl<T, L: RawMutex> Send for Mutex<T, L>
+unsafe impl<T, L: RawScopedMutex> Send for Mutex<T, L>
 where
     T: ?Sized + Send,
     L: Send,
 {
 }
-unsafe impl<T, L: RawMutex> Sync for Mutex<T, L>
+unsafe impl<T, L: RawScopedMutex> Sync for Mutex<T, L>
 where
     T: ?Sized + Send,
     L: Sync,
@@ -349,7 +349,7 @@ impl<'a, T> Future for Lock<'a, T> {
 impl<T, L> Deref for MutexGuard<'_, T, L>
 where
     T: ?Sized,
-    L: RawMutex,
+    L: RawScopedMutex,
 {
     type Target = T;
 
@@ -365,7 +365,7 @@ where
 impl<T, L> DerefMut for MutexGuard<'_, T, L>
 where
     T: ?Sized,
-    L: RawMutex,
+    L: RawScopedMutex,
 {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -379,7 +379,7 @@ where
 impl<T, L> fmt::Debug for MutexGuard<'_, T, L>
 where
     T: ?Sized + fmt::Debug,
-    L: RawMutex,
+    L: RawScopedMutex,
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -390,18 +390,18 @@ where
 unsafe impl<T, L> Send for MutexGuard<'_, T, L>
 where
     T: ?Sized + Send,
-    L: RawMutex + Sync,
+    L: RawScopedMutex + Sync,
 {
 }
 unsafe impl<T, L> Sync for MutexGuard<'_, T, L>
 where
     T: ?Sized + Send + Sync,
-    // A `MutexGuard`` has a reference to a `L`-typed RawMutex in it, so ``
-    L: RawMutex + Sync,
+    // A `MutexGuard`` has a reference to a `L`-typed RawScopedMutex in it, so ``
+    L: RawScopedMutex + Sync,
 {
 }
 
-impl<T: ?Sized, L: RawMutex> Drop for WakeOnDrop<'_, T, L> {
+impl<T: ?Sized, L: RawScopedMutex> Drop for WakeOnDrop<'_, T, L> {
     fn drop(&mut self) {
         self.0.wait.wake()
     }
@@ -434,7 +434,7 @@ feature! {
     /// [`try_lock_owned`]: Mutex::try_lock_owned
     /// [RAII]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
     #[must_use = "if unused, the Mutex will immediately unlock"]
-    pub struct OwnedMutexGuard<T: ?Sized, L: RawMutex> {
+    pub struct OwnedMutexGuard<T: ?Sized, L: RawScopedMutex> {
         /// /!\ WARNING: semi-load-bearing drop order /!\
         ///
         /// This struct's field ordering is important.
@@ -442,7 +442,7 @@ feature! {
         _wake: WakeArcOnDrop<T, L>,
     }
 
-    impl<T: ?Sized, L: RawMutex> Mutex<T, L> {
+    impl<T: ?Sized, L: RawScopedMutex> Mutex<T, L> {
 
         /// Locks this mutex, returning an [owned RAII guard][`OwnedMutexGuard`].
         ///
@@ -550,14 +550,14 @@ feature! {
         }
     }
 
-    struct WakeArcOnDrop<T: ?Sized, L: RawMutex>(Arc<Mutex<T, L>>);
+    struct WakeArcOnDrop<T: ?Sized, L: RawScopedMutex>(Arc<Mutex<T, L>>);
 
     // === impl OwnedMutexGuard ===
 
     impl<T, L> Deref for OwnedMutexGuard<T, L>
     where
         T: ?Sized,
-        L: RawMutex,
+        L: RawScopedMutex,
     {
         type Target = T;
 
@@ -573,7 +573,7 @@ feature! {
     impl<T, L> DerefMut for OwnedMutexGuard<T, L>
     where
         T: ?Sized,
-        L: RawMutex,
+        L: RawScopedMutex,
     {
         #[inline]
         fn deref_mut(&mut self) -> &mut Self::Target {
@@ -587,7 +587,7 @@ feature! {
     impl<T, L> fmt::Debug for OwnedMutexGuard<T, L>
     where
         T: ?Sized + fmt::Debug,
-        L: RawMutex,
+        L: RawScopedMutex,
     {
         #[inline]
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -598,20 +598,20 @@ feature! {
     unsafe impl<T, L> Send for OwnedMutexGuard<T, L>
     where
         T: ?Sized + Send,
-        L: RawMutex + Sync,
+        L: RawScopedMutex + Sync,
     {
     }
     unsafe impl<T, L> Sync for OwnedMutexGuard<T, L>
     where
         T: ?Sized + Send + Sync,
-        L: RawMutex + Sync,
+        L: RawScopedMutex + Sync,
     {
     }
 
     impl<T, L> Drop for WakeArcOnDrop<T, L>
     where
         T: ?Sized,
-        L: RawMutex,
+        L: RawScopedMutex,
     {
         fn drop(&mut self) {
             self.0.wait.wake()
