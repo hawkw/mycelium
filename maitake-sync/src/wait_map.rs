@@ -267,7 +267,7 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     ///     // first pin the `wait` future, to ensure that it does not move
     ///     // until it has been completed.
     ///     pin_mut!(wait);
-    ///     wait.as_mut().enqueue().await.unwrap();
+    ///     wait.as_mut().subscribe().await.unwrap();
     ///
     ///     // We now know the waiter has been enqueued, at this point we could
     ///     // send a message that will cause key == 0 to be returned, without
@@ -285,8 +285,18 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     ///
     /// assert!(matches!(q.wake(&0, 100), WakeOutcome::Woke));
     /// ```
+    pub fn subscribe(self: Pin<&'wait mut Self>) -> Subscribe<'wait, 'map, K, V> {
+        Subscribe { wait: self }
+    }
+
+    /// Deprecated alias for [`Wait::subscribe`]. See that method for details.
+    #[deprecated(
+        since = "0.1.3",
+        note = "renamed to `subscribe` for consistency, use that instead"
+    )]
+    #[allow(deprecated)] // let us use the deprecated type alias
     pub fn enqueue(self: Pin<&'wait mut Self>) -> EnqueueWait<'wait, 'map, K, V> {
-        EnqueueWait { wait: self }
+        self.subscribe()
     }
 }
 
@@ -662,14 +672,14 @@ feature! {
 
 /// A future that ensures a [`Wait`] has been added to a [`WaitMap`].
 ///
-/// See [`Wait::enqueue`] for more information and usage example.
+/// See [`Wait::subscribe`] for more information and usage example.
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[derive(Debug)]
-pub struct EnqueueWait<'a, 'b, K: PartialEq, V> {
+pub struct Subscribe<'a, 'b, K: PartialEq, V> {
     wait: Pin<&'a mut Wait<'b, K, V>>,
 }
 
-impl<'a, 'b, K: PartialEq, V> Future for EnqueueWait<'a, 'b, K, V> {
+impl<'a, 'b, K: PartialEq, V> Future for Subscribe<'a, 'b, K, V> {
     type Output = WaitResult<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -681,6 +691,14 @@ impl<'a, 'b, K: PartialEq, V> Future for EnqueueWait<'a, 'b, K, V> {
         }
     }
 }
+
+/// Deprecated alias for [`Subscribe`]. See the [`Wait::subscribe`]
+/// documentation for more details.
+#[deprecated(
+    since = "0.1.3",
+    note = "renamed to `Subscribe` for consistency, use that instead"
+)]
+pub type EnqueueWait<'a, 'b, K, V> = Subscribe<'a, 'b, K, V>;
 
 impl<K: PartialEq, V> Waiter<K, V> {
     /// Wake the task that owns this `Waiter`.
