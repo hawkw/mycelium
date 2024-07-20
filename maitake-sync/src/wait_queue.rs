@@ -379,7 +379,15 @@ impl WaitQueue {
 }
 
 #[cfg(all(feature = "lock_api", not(loom)))]
-impl<Lock> WaitQueue<Lock> where Lock: lock_api::RawMutex {}
+impl<Lock> WaitQueue<Lock>
+where
+    Lock: lock_api::RawMutex,
+{
+    #[must_use]
+    pub const fn with_lock_api() -> Self {
+        Self::make(State::Empty, Lock::INIT)
+    }
+}
 
 impl<Lock> WaitQueue<Lock>
 where
