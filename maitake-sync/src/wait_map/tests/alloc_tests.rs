@@ -34,7 +34,7 @@ fn enqueue() {
             let wait = q.wait(1);
 
             pin_mut!(wait);
-            wait.as_mut().enqueue().await.unwrap();
+            wait.as_mut().subscribe().await.unwrap();
             ENQUEUED.fetch_add(1, Ordering::Relaxed);
 
             let val = wait.await.unwrap();
@@ -81,7 +81,7 @@ fn duplicate() {
             let wait = q.wait(0);
 
             pin_mut!(wait);
-            wait.as_mut().enqueue().await.unwrap();
+            wait.as_mut().subscribe().await.unwrap();
             ENQUEUED.fetch_add(1, Ordering::Relaxed);
 
             let val = wait.await.unwrap();
@@ -98,7 +98,7 @@ fn duplicate() {
             let wait = q.wait(0);
 
             pin_mut!(wait);
-            wait.as_mut().enqueue().await
+            wait.as_mut().subscribe().await
         }
     });
 
