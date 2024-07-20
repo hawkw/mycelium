@@ -236,6 +236,15 @@ impl<T, Lock: RawScopedMutex> Mutex<T, Lock> {
             })
         })
     }
+
+    pub fn try_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
+        self.lock.try_with(|| {
+            self.data.with_mut(|data| unsafe {
+                // Safety: we just locked the mutex.
+                f(&mut *data)
+            })
+        })
+    }
 }
 
 impl<T, Lock> Mutex<T, Lock>
@@ -337,13 +346,21 @@ impl<T: Default, Lock: Default> Default for Mutex<T, Lock> {
 impl<T, Lock> fmt::Debug for Mutex<T, Lock>
 where
     T: fmt::Debug,
-    Lock: fmt::Debug + RawMutex,
+    Lock: RawScopedMutex + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Mutex")
-            .field("data", &fmt::opt(&self.try_lock()).or_else("<locked>"))
-            .field("lock", &self.lock)
-            .finish()
+        self.try_with(|data| {
+            f.debug_struct("Mutex")
+                .field("data", data)
+                .field("lock", &self.lock)
+                .finish()
+        })
+        .unwrap_or_else(|| {
+            f.debug_struct("Mutex")
+                .field("data", &format_args!("<locked>"))
+                .field("lock", &self.lock)
+                .finish()
+        })
     }
 }
 
