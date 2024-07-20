@@ -223,17 +223,7 @@ where
         Self {
             lock: Lock::INIT,
             data: UnsafeCell::new(data),
-        }    /// Returns a new `Mutex` protecting the provided `data`, using the
-        /// `Lock` type parameter as the raw mutex implementation.
-        ///
-        /// This constructor is used to override the internal implementation of
-        /// mutex operations, with an implementation of the [`lock_api::RawMutex`]
-        /// trait. By default, the [`Mutex::new`] constructor uses a [`Spinlock`] as
-        /// the underlying raw mutex implementation, which will spin until the mutex
-        /// is unlocked, without using platform-specific or OS-specific blocking
-        /// mechanisms.
-        ///
-        /// The returned `Mutex` is in an unlocked state, ready for use.
+        }
     }
 }
 
