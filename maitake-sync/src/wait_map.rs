@@ -513,7 +513,7 @@ impl<K: PartialEq, V, Lock: RawScopedMutex> WaitMap<K, V, Lock> {
 
         // okay, there are tasks waiting on the queue; we must acquire the lock
         // on the linked list and wake the next task from the queue.
-        self.queue.with(|queue| {
+        self.queue.with_lock(|queue| {
             test_debug!("wake: -> locked");
 
             // the queue's state may have changed while we were waiting to acquire
@@ -557,7 +557,7 @@ impl<K: PartialEq, V, Lock: RawScopedMutex> WaitMap<K, V, Lock> {
         let mut batch = WakeBatch::new();
         let mut waiters_remaining = true;
         while waiters_remaining {
-            waiters_remaining = self.queue.with(|waiters| {
+            waiters_remaining = self.queue.with_lock(|waiters| {
                 while let Some(node) = waiters.pop_back() {
                     let waker = Waiter::wake(node, waiters, Wakeup::Closed);
                     if !batch.add_waker(waker) {
@@ -799,7 +799,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
         // Try to wait...
         test_debug!("poll_wait: locking...");
-        queue.queue.with(|waiters| {
+        queue.queue.with_lock(|waiters| {
             test_debug!("poll_wait: -> locked");
             let mut queue_state = queue.load();
 
@@ -863,7 +863,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
                 // We must lock the linked list in order to safely mutate our node in
                 // the list. We don't actually need the mutable reference to the
                 // queue here, though.
-                queue.queue.with(|_waiters| {
+                queue.queue.with_lock(|_waiters| {
                     this.node.with_mut(|node| unsafe {
                         // safety: we may mutate the node because we are
                         // holding the lock.
@@ -926,7 +926,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
             return;
         }
 
-        queue.queue.with(|waiters| {
+        queue.queue.with_lock(|waiters| {
             let state = queue.load();
 
             // remove the node

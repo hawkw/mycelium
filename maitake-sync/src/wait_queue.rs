@@ -479,7 +479,7 @@ where
 
         // okay, there are tasks waiting on the queue; we must acquire the lock
         // on the linked list and wake the next task from the queue.
-        let waker = self.queue.with(|queue| {
+        let waker = self.queue.with_lock(|queue| {
             test_debug!("wake: -> locked");
 
             // the queue's state may have changed while we were waiting to acquire
@@ -565,7 +565,7 @@ where
         // out...but we can't `return` from the outer function inside the lock
         // closure. Therefore, we just return a `bool` and, if it's `true`,
         // return instead of doing more work.
-        let done = self.queue.with(|queue| {
+        let done = self.queue.with_lock(|queue| {
             let state = self.load();
 
             match test_dbg!(state.get(QueueState::STATE)) {
@@ -604,7 +604,7 @@ where
         // As long as there are waiters remaining to wake, lock the queue, drain
         // another batch, release the lock, and wake them.
         while waiters_remaining {
-            self.queue.with(|queue| {
+            self.queue.with_lock(|queue| {
                 waiters_remaining = Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All);
             });
             batch.wake_all();
@@ -633,7 +633,7 @@ where
         while waking {
             waking = self
                 .queue
-                .with(|queue| Self::drain_to_wake_batch(&mut batch, queue, Wakeup::Closed));
+                .with_lock(|queue| Self::drain_to_wake_batch(&mut batch, queue, Wakeup::Closed));
             batch.wake_all();
         }
     }
@@ -1130,7 +1130,7 @@ impl Waiter {
                 // okay, no pending wakeups. try to wait...
 
                 test_debug!("poll_wait: locking...");
-                queue.queue.with(move |waiters| {
+                queue.queue.with_lock(move |waiters| {
                     test_debug!("poll_wait: -> locked");
                     let mut queue_state = queue.load();
 
@@ -1194,7 +1194,7 @@ impl Waiter {
                 })
             }
             WaitState::Waiting => {
-                queue.queue.with(|_waiters| {
+                queue.queue.with_lock(|_waiters| {
                     this.node.with_mut(|node| unsafe {
                         // safety: we may mutate the node because we are
                         // holding the lock.
@@ -1249,7 +1249,7 @@ impl Waiter {
             return;
         }
 
-        let next_waiter = queue.queue.with(|waiters| {
+        let next_waiter = queue.queue.with_lock(|waiters| {
             let state = queue.load();
             // remove the node
             unsafe {

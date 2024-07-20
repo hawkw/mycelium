@@ -45,9 +45,9 @@ pub struct MutexGuard<'a, T, Lock: RawMutex = Spinlock> {
 }
 
 pub unsafe trait RawScopedMutex {
-    fn with<T>(&self, f: impl FnOnce() -> T) -> T;
+    fn with_lock<T>(&self, f: impl FnOnce() -> T) -> T;
 
-    fn try_with<T>(&self, f: impl FnOnce() -> T) -> Option<T>;
+    fn try_with_lock<T>(&self, f: impl FnOnce() -> T) -> Option<T>;
 
     /// Returns `true` if the mutex is currently locked.
     fn is_locked(&self) -> bool;
@@ -104,7 +104,7 @@ unsafe impl<L> RawScopedMutex for L
 where
     L: RawMutex,
 {
-    fn with<T>(&self, f: impl FnOnce() -> T) -> T {
+    fn with_lock<T>(&self, f: impl FnOnce() -> T) -> T {
         // TODO(eliza): RAIIify
         self.lock();
         let ret = f();
@@ -112,7 +112,7 @@ where
         ret
     }
 
-    fn try_with<T>(&self, f: impl FnOnce() -> T) -> Option<T> {
+    fn try_with_lock<T>(&self, f: impl FnOnce() -> T) -> Option<T> {
         if !self.try_lock() {
             return None;
         }
@@ -228,8 +228,8 @@ where
 }
 
 impl<T, Lock: RawScopedMutex> Mutex<T, Lock> {
-    pub fn with<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
-        self.lock.with(|| {
+    pub fn with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
+        self.lock.with_lock(|| {
             self.data.with_mut(|data| unsafe {
                 // Safety: we just locked the mutex.
                 f(&mut *data)
@@ -237,8 +237,8 @@ impl<T, Lock: RawScopedMutex> Mutex<T, Lock> {
         })
     }
 
-    pub fn try_with<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
-        self.lock.try_with(|| {
+    pub fn try_with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
+        self.lock.try_with_lock(|| {
             self.data.with_mut(|data| unsafe {
                 // Safety: we just locked the mutex.
                 f(&mut *data)
@@ -349,7 +349,7 @@ where
     Lock: RawScopedMutex + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.try_with(|data| {
+        self.try_with_lock(|data| {
             f.debug_struct("Mutex")
                 .field("data", data)
                 .field("lock", &self.lock)
