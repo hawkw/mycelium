@@ -551,6 +551,7 @@ where
     pub fn wake_all(&self) {
         let mut batch = WakeBatch::new();
         let mut waking = true;
+
         let (current_state, done) = self.queue.with(|queue| {
             let current_state = self.load();
             let state = current_state.get(QueueState::STATE);
@@ -558,16 +559,11 @@ where
             // if there are no waiters in the queue, increment the number of
             // `wake_all` calls and return. incrementing the `wake_all` count
             // must be performed inside the lock, so we do it here.
-
-            if state == State::Waiting {
-                // if the queue is closed, or there are no wakers, nothing left to
-                // do here.
-                return (current_state, true);
-            } else if let State::Woken | State::Empty = state {
+            if let State::Woken | State::Empty = state {
                 self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
                 return (current_state, true);
             }
-            waking = Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All);
+            waking = test_dbg!(Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All));
             if !waking {
                 let next_state = QueueState::new().with_state(State::Empty).with(
                     QueueState::WAKE_ALLS,
@@ -1009,29 +1005,20 @@ where
         waker
     }
 
-    /// Drain the queue of all waiters, and push them to `batch`.
-    ///
-    /// When the [`WakeBatch`] is full, this function drops the lock, wakes the
-    /// current contents of the [`WakeBatch`] before reacquiring the lock and
-    /// continuing.
-    ///
-    /// Note that this will *not* wake the final batch of waiters added to the
-    /// batch. Instead, it returns the [`MutexGuard`], in case additional
-    /// operations must be performed with the lock held before waking the final
-    /// batch of waiters.
+    /// Drain waiters from `queue` and add them to `batch`. Returns `true` if
+    /// the batch was filled while more waiters remain in the queue, indicating
+    /// that this function must be called again to wake all waiters.
     fn drain_to_wake_batch(
         batch: &mut WakeBatch,
         queue: &mut List<Waiter>,
         wakeup: Wakeup,
     ) -> bool {
-        let mut enqueued_any = false;
         while let Some(node) = queue.pop_back() {
             let Some(waker) = Waiter::wake(node, queue, wakeup.clone()) else {
                 // this waiter was enqueued by `Wait::register` and doesn't have
                 // a waker, just keep going.
                 continue;
             };
-            enqueued_any = true;
 
             if batch.add_waker(waker) {
                 // there's still room in the wake set, just keep adding to it.
@@ -1042,7 +1029,7 @@ where
             break;
         }
 
-        enqueued_any
+        !queue.is_empty()
     }
 }
 
