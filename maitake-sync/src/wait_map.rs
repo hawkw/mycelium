@@ -3,13 +3,15 @@
 //!
 //! See the documentation for the [`WaitMap`] type for details.
 use crate::{
+    blocking::RawScopedMutex,
     loom::{
         cell::UnsafeCell,
         sync::{
             atomic::{AtomicUsize, Ordering::*},
-            spin::{Mutex, MutexGuard},
+            spin::Mutex,
         },
     },
+    spin::Spinlock,
     util::{fmt, CachePadded, WakeBatch},
 };
 use cordyceps::{
@@ -176,7 +178,7 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-pub struct WaitMap<K: PartialEq, V> {
+pub struct WaitMap<K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -196,10 +198,14 @@ pub struct WaitMap<K: PartialEq, V> {
     /// `no_std` platforms; when running `loom` tests, a `loom` mutex is used
     /// instead to simulate the spinlock, because loom doesn't play nice with
     /// real spinlocks.
-    queue: Mutex<List<Waiter<K, V>>>,
+    queue: Mutex<List<Waiter<K, V>>, Lock>,
 }
 
-impl<K: PartialEq, V> Debug for WaitMap<K, V> {
+impl<K, V, Lock> Debug for WaitMap<K, V, Lock>
+where
+    K: PartialEq,
+    Lock: RawScopedMutex + fmt::Debug,
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("WaitMap")
             .field("state", &self.state)
@@ -230,16 +236,16 @@ impl<K: PartialEq, V> Debug for WaitMap<K, V> {
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a, K: PartialEq, V> {
+pub struct Wait<'a, K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
     /// The [`WaitMap`] being waited on from.
-    queue: &'a WaitMap<K, V>,
+    queue: &'a WaitMap<K, V, Lock>,
 
     /// Entry in the wait queue linked list.
     #[pin]
     waiter: Waiter<K, V>,
 }
 
-impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
+impl<'map, 'wait, K: PartialEq, V, Lock: RawScopedMutex> Wait<'map, K, V, Lock> {
     /// Returns a future that completes when the `Wait` item has been
     /// added to the [`WaitMap`], and is ready to receive data
     ///
@@ -285,7 +291,7 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
     ///
     /// assert!(matches!(q.wake(&0, 100), WakeOutcome::Woke));
     /// ```
-    pub fn subscribe(self: Pin<&'wait mut Self>) -> Subscribe<'wait, 'map, K, V> {
+    pub fn subscribe(self: Pin<&'wait mut Self>) -> Subscribe<'wait, 'map, K, V, Lock> {
         Subscribe { wait: self }
     }
 
@@ -295,7 +301,7 @@ impl<'map, 'wait, K: PartialEq, V> Wait<'map, K, V> {
         note = "renamed to `subscribe` for consistency, use that instead"
     )]
     #[allow(deprecated)] // let us use the deprecated type alias
-    pub fn enqueue(self: Pin<&'wait mut Self>) -> EnqueueWait<'wait, 'map, K, V> {
+    pub fn enqueue(self: Pin<&'wait mut Self>) -> EnqueueWait<'wait, 'map, K, V, Lock> {
         self.subscribe()
     }
 }
@@ -455,6 +461,30 @@ impl<K: PartialEq, V> WaitMap<K, V> {
             queue: Mutex::new(List::new()),
         }
     }
+}
+
+#[cfg(all(feature = "lock_api", not(loom)))]
+impl<K, V, Lock> WaitMap<K, V, Lock>
+where
+    Lock: lock_api::RawMutex,
+    K: PartialEq,
+{
+    #[must_use]
+    pub const fn with_lock_api() -> Self {
+        Self::with_raw_mutex(Lock::INIT)
+    }
+}
+
+impl<K: PartialEq, V, Lock: RawScopedMutex> WaitMap<K, V, Lock> {
+    loom_const_fn! {
+        #[must_use]
+        pub fn with_raw_mutex(lock: Lock) -> Self {
+            Self {
+                state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
+                queue: Mutex::with_raw_mutex(List::new(), lock),
+            }
+        }
+    }
 
     /// Wake a certain task in the queue.
     ///
@@ -483,21 +513,22 @@ impl<K: PartialEq, V> WaitMap<K, V> {
 
         // okay, there are tasks waiting on the queue; we must acquire the lock
         // on the linked list and wake the next task from the queue.
-        let mut queue = self.queue.lock();
-        test_debug!("wake: -> locked");
+        self.queue.with(|queue| {
+            test_debug!("wake: -> locked");
 
-        // the queue's state may have changed while we were waiting to acquire
-        // the lock, so we need to acquire a new snapshot.
-        state = self.load();
+            // the queue's state may have changed while we were waiting to acquire
+            // the lock, so we need to acquire a new snapshot.
+            state = self.load();
 
-        if let Some(node) = self.node_match_locked(key, &mut *queue, state) {
-            let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived(val));
-            drop(queue);
-            waker.wake();
-            WakeOutcome::Woke
-        } else {
-            WakeOutcome::NoMatch(val)
-        }
+            if let Some(node) = self.node_match_locked(key, &mut *queue, state) {
+                let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived(val));
+                drop(queue);
+                waker.wake();
+                WakeOutcome::Woke
+            } else {
+                WakeOutcome::NoMatch(val)
+            }
+        })
     }
 
     /// Returns `true` if this `WaitMap` is [closed](Self::close).
@@ -523,26 +554,21 @@ impl<K: PartialEq, V> WaitMap<K, V> {
             return;
         }
 
-        let mut queue = self.queue.lock();
         let mut batch = WakeBatch::new();
-        while let Some(node) = queue.pop_back() {
-            let waker = Waiter::wake(node, &mut queue, Wakeup::Closed);
-            if batch.add_waker(waker) {
-                // there's still room in the wake set, just keep adding to it.
-                continue;
-            }
-
-            // wake set is full, drop the lock and wake everyone!
-            drop(queue);
+        let mut waiters_remaining = true;
+        while waiters_remaining {
+            waiters_remaining = self.queue.with(|waiters| {
+                while let Some(node) = waiters.pop_back() {
+                    let waker = Waiter::wake(node, waiters, Wakeup::Closed);
+                    if !batch.add_waker(waker) {
+                        // there's still room in the wake set, just keep adding to it.
+                        return true;
+                    }
+                }
+                false
+            });
             batch.wake_all();
-
-            // reacquire the lock and continue waking
-            queue = self.queue.lock();
         }
-
-        // drop the lock and wake the final batch of waiters in the `WakeBatch`.
-        drop(queue);
-        batch.wake_all();
     }
 
     /// Wait to be woken up by this queue.
@@ -555,7 +581,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     /// `WaitMap`, the future will resolve to an Error the first time it is polled
     ///
     /// [`wake`]: Self::wake
-    pub fn wait(&self, key: K) -> Wait<'_, K, V> {
+    pub fn wait(&self, key: K) -> Wait<'_, K, V, Lock> {
         Wait {
             queue: self,
             waiter: self.waiter(key),
@@ -675,11 +701,19 @@ feature! {
 /// See [`Wait::subscribe`] for more information and usage example.
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[derive(Debug)]
-pub struct Subscribe<'a, 'b, K: PartialEq, V> {
-    wait: Pin<&'a mut Wait<'b, K, V>>,
+pub struct Subscribe<'a, 'b, K, V, Lock = Spinlock>
+where
+    K: PartialEq,
+    Lock: RawScopedMutex,
+{
+    wait: Pin<&'a mut Wait<'b, K, V, Lock>>,
 }
 
-impl<'a, 'b, K: PartialEq, V> Future for Subscribe<'a, 'b, K, V> {
+impl<'a, 'b, K, V, Lock> Future for Subscribe<'a, 'b, K, V, Lock>
+where
+    K: PartialEq,
+    Lock: RawScopedMutex,
+{
     type Output = WaitResult<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -698,7 +732,7 @@ impl<'a, 'b, K: PartialEq, V> Future for Subscribe<'a, 'b, K, V> {
     since = "0.1.3",
     note = "renamed to `Subscribe` for consistency, use that instead"
 )]
-pub type EnqueueWait<'a, 'b, K, V> = Subscribe<'a, 'b, K, V>;
+pub type EnqueueWait<'a, 'b, K, V, Lock> = Subscribe<'a, 'b, K, V, Lock>;
 
 impl<K: PartialEq, V> Waiter<K, V> {
     /// Wake the task that owns this `Waiter`.
@@ -748,11 +782,14 @@ impl<K: PartialEq, V> Waiter<K, V> {
     /// Moves a `Wait` from the `Start` condition.
     ///
     /// Caller MUST ensure the `Wait` is in the start condition before calling.
-    fn start_to_wait(
+    fn start_to_wait<Lock>(
         mut self: Pin<&mut Self>,
-        queue: &WaitMap<K, V>,
+        queue: &WaitMap<K, V, Lock>,
         cx: &mut Context<'_>,
-    ) -> Poll<WaitResult<()>> {
+    ) -> Poll<WaitResult<()>>
+    where
+        Lock: RawScopedMutex,
+    {
         let mut this = self.as_mut().project();
 
         debug_assert!(
@@ -762,54 +799,58 @@ impl<K: PartialEq, V> Waiter<K, V> {
 
         // Try to wait...
         test_debug!("poll_wait: locking...");
-        let mut waiters = queue.queue.lock();
-        test_debug!("poll_wait: -> locked");
-        let mut queue_state = queue.load();
+        queue.queue.with(|waiters| {
+            test_debug!("poll_wait: -> locked");
+            let mut queue_state = queue.load();
 
-        // transition the queue to the waiting state
-        'to_waiting: loop {
-            match test_dbg!(queue_state) {
-                // the queue is `Empty`, transition to `Waiting`
-                State::Empty => match queue.compare_exchange(queue_state, State::Waiting) {
-                    Ok(_) => break 'to_waiting,
-                    Err(actual) => queue_state = actual,
-                },
-                // the queue is already `Waiting`
-                State::Waiting => break 'to_waiting,
-                State::Closed => return closed(),
+            // transition the queue to the waiting state
+            'to_waiting: loop {
+                match test_dbg!(queue_state) {
+                    // the queue is `Empty`, transition to `Waiting`
+                    State::Empty => match queue.compare_exchange(queue_state, State::Waiting) {
+                        Ok(_) => break 'to_waiting,
+                        Err(actual) => queue_state = actual,
+                    },
+                    // the queue is already `Waiting`
+                    State::Waiting => break 'to_waiting,
+                    State::Closed => return closed(),
+                }
             }
-        }
 
-        // Check if key already exists
-        //
-        // Note: It's okay not to re-update the state here, if we were empty
-        // this check will never trigger, if we are already waiting, we should
-        // still be waiting.
-        let mut cursor = waiters.cursor_front_mut();
-        if cursor.any(|n| &n.key == this.key) {
-            return duplicate();
-        }
-
-        // enqueue the node
-        *this.state = WaitState::Waiting;
-        this.node.as_mut().with_mut(|node| {
-            unsafe {
-                // safety: we may mutate the node because we are
-                // holding the lock.
-                (*node).waker = Wakeup::Waiting(cx.waker().clone());
+            // Check if key already exists
+            //
+            // Note: It's okay not to re-update the state here, if we were empty
+            // this check will never trigger, if we are already waiting, we should
+            // still be waiting.
+            let mut cursor = waiters.cursor_front_mut();
+            if cursor.any(|n| &n.key == this.key) {
+                return duplicate();
             }
-        });
-        let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self)) };
-        waiters.push_front(ptr);
 
-        Poll::Ready(Ok(()))
+            // enqueue the node
+            *this.state = WaitState::Waiting;
+            this.node.as_mut().with_mut(|node| {
+                unsafe {
+                    // safety: we may mutate the node because we are
+                    // holding the lock.
+                    (*node).waker = Wakeup::Waiting(cx.waker().clone());
+                }
+            });
+            let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self)) };
+            waiters.push_front(ptr);
+
+            Poll::Ready(Ok(()))
+        })
     }
 
-    fn poll_wait(
+    fn poll_wait<Lock>(
         mut self: Pin<&mut Self>,
-        queue: &WaitMap<K, V>,
+        queue: &WaitMap<K, V, Lock>,
         cx: &mut Context<'_>,
-    ) -> Poll<WaitResult<V>> {
+    ) -> Poll<WaitResult<V>>
+    where
+        Lock: RawScopedMutex,
+    {
         test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let this = self.as_mut().project();
 
@@ -819,45 +860,49 @@ impl<K: PartialEq, V> Waiter<K, V> {
                 Poll::Pending
             }
             WaitState::Waiting => {
-                let mut _waiters = queue.queue.lock();
-                this.node.with_mut(|node| unsafe {
-                    // safety: we may mutate the node because we are
-                    // holding the lock.
-                    let node = &mut *node;
-                    let result;
-                    node.waker = match mem::replace(&mut node.waker, Wakeup::Empty) {
-                        // We already had a waker, but are now getting another one.
-                        // Store the new one, droping the old one
-                        Wakeup::Waiting(waker) => {
-                            result = Poll::Pending;
-                            if !waker.will_wake(cx.waker()) {
-                                Wakeup::Waiting(cx.waker().clone())
-                            } else {
-                                Wakeup::Waiting(waker)
+                // We must lock the linked list in order to safely mutate our node in
+                // the list. We don't actually need the mutable reference to the
+                // queue here, though.
+                queue.queue.with(|_waiters| {
+                    this.node.with_mut(|node| unsafe {
+                        // safety: we may mutate the node because we are
+                        // holding the lock.
+                        let node = &mut *node;
+                        let result;
+                        node.waker = match mem::replace(&mut node.waker, Wakeup::Empty) {
+                            // We already had a waker, but are now getting another one.
+                            // Store the new one, droping the old one
+                            Wakeup::Waiting(waker) => {
+                                result = Poll::Pending;
+                                if !waker.will_wake(cx.waker()) {
+                                    Wakeup::Waiting(cx.waker().clone())
+                                } else {
+                                    Wakeup::Waiting(waker)
+                                }
                             }
-                        }
-                        // We have received the data, take the data out of the
-                        // future, and provide it to the poller
-                        Wakeup::DataReceived(val) => {
-                            result = notified(val);
-                            Wakeup::Retreived
-                        }
-                        Wakeup::Retreived => {
-                            result = consumed();
-                            Wakeup::Retreived
-                        }
+                            // We have received the data, take the data out of the
+                            // future, and provide it to the poller
+                            Wakeup::DataReceived(val) => {
+                                result = notified(val);
+                                Wakeup::Retreived
+                            }
+                            Wakeup::Retreived => {
+                                result = consumed();
+                                Wakeup::Retreived
+                            }
 
-                        Wakeup::Closed => {
-                            *this.state = WaitState::Completed;
-                            result = closed();
-                            Wakeup::Closed
-                        }
-                        Wakeup::Empty => {
-                            result = never_added();
-                            Wakeup::Closed
-                        }
-                    };
-                    result
+                            Wakeup::Closed => {
+                                *this.state = WaitState::Completed;
+                                result = closed();
+                                Wakeup::Closed
+                            }
+                            Wakeup::Empty => {
+                                result = never_added();
+                                Wakeup::Closed
+                            }
+                        };
+                        result
+                    })
                 })
             }
             WaitState::Completed => consumed(),
@@ -868,7 +913,10 @@ impl<K: PartialEq, V> Waiter<K, V> {
     ///
     /// This is called from the `drop` implementation for the [`Wait`] and
     /// [`WaitOwned`] futures.
-    fn release(mut self: Pin<&mut Self>, queue: &WaitMap<K, V>) {
+    fn release<Lock>(mut self: Pin<&mut Self>, queue: &WaitMap<K, V, Lock>)
+    where
+        Lock: RawScopedMutex,
+    {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
         test_debug!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
@@ -878,20 +926,21 @@ impl<K: PartialEq, V> Waiter<K, V> {
             return;
         }
 
-        let mut waiters: MutexGuard<List<Waiter<K, V>>> = queue.queue.lock();
-        let state = queue.load();
+        queue.queue.with(|waiters| {
+            let state = queue.load();
 
-        // remove the node
-        unsafe {
-            // safety: we have the lock on the queue, so this is safe.
-            waiters.remove(ptr);
-        };
+            // remove the node
+            unsafe {
+                // safety: we have the lock on the queue, so this is safe.
+                waiters.remove(ptr);
+            };
 
-        // if we removed the last waiter from the queue, transition the state to
-        // `Empty`.
-        if test_dbg!(waiters.is_empty()) && state == State::Waiting {
-            queue.store(State::Empty);
-        }
+            // if we removed the last waiter from the queue, transition the state to
+            // `Empty`.
+            if test_dbg!(waiters.is_empty()) && state == State::Waiting {
+                queue.store(State::Empty);
+            }
+        })
     }
 }
 
@@ -932,7 +981,11 @@ impl<K: PartialEq, V> Future for Wait<'_, K, V> {
 }
 
 #[pinned_drop]
-impl<K: PartialEq, V> PinnedDrop for Wait<'_, K, V> {
+impl<K, V, Lock> PinnedDrop for Wait<'_, K, V, Lock>
+where
+    K: PartialEq,
+    Lock: RawScopedMutex,
+{
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
         this.waiter.release(this.queue);
@@ -1006,16 +1059,16 @@ feature! {
     /// assert_unpin::<WaitOwned<'_, usize, ()>>();
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned<K: PartialEq, V> {
+    pub struct WaitOwned<K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
         /// The `WaitMap` being waited on.
-        queue: Arc<WaitMap<K, V>>,
+        queue: Arc<WaitMap<K, V, Lock>>,
 
         /// Entry in the wait queue.
         #[pin]
         waiter: Waiter<K, V>,
     }
 
-    impl<K: PartialEq, V> WaitMap<K, V> {
+    impl<K: PartialEq, V, Lock: RawScopedMutex> WaitMap<K, V, Lock> {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
@@ -1032,14 +1085,14 @@ feature! {
         ///
         /// [`wake`]: Self::wake
         /// [`wait`]: Self::wait
-        pub fn wait_owned(self: &Arc<Self>, key: K) -> WaitOwned<K, V> {
+        pub fn wait_owned(self: &Arc<Self>, key: K) -> WaitOwned<K, V, Lock> {
             let waiter = self.waiter(key);
             let queue = self.clone();
             WaitOwned { queue, waiter }
         }
     }
 
-    impl<K: PartialEq, V> Future for WaitOwned<K, V> {
+    impl<K: PartialEq, V, Lock: RawScopedMutex> Future for WaitOwned<K, V, Lock> {
         type Output = WaitResult<V>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1049,7 +1102,11 @@ feature! {
     }
 
     #[pinned_drop]
-    impl<K: PartialEq, V> PinnedDrop for WaitOwned<K, V> {
+    impl<K, V, Lock> PinnedDrop for WaitOwned<K, V, Lock>
+    where
+        K: PartialEq,
+        Lock: RawScopedMutex,
+    {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
             this.waiter.release(&*this.queue);
