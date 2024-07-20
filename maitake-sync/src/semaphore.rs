@@ -316,8 +316,8 @@ impl Semaphore {
 #[cfg(feature = "lock_api")]
 impl<Lock: lock_api::RawMutex> Semaphore<Lock> {
     #[must_use]
-    pub const fn with_raw_mutex(permits: usize) -> Self {
-        Self::make(permits, Mutex::with_raw_mutex(SemQueue::new()))
+    pub const fn with_lock_api(permits: usize) -> Self {
+        Self::make(permits, Mutex::with_lock_api(SemQueue::new()))
     }
 }
 
