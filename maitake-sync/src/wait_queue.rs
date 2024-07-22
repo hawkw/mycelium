@@ -5,7 +5,7 @@
 #[cfg(any(test, maitake_ultraverbose))]
 use crate::util::fmt;
 use crate::{
-    blocking::RawScopedMutex,
+    blocking::ScopedRawMutex,
     loom::{
         cell::UnsafeCell,
         sync::{
@@ -177,7 +177,7 @@ mod tests;
 /// [mutex]: crate::Mutex
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
-pub struct WaitQueue<Lock: RawScopedMutex = Spinlock> {
+pub struct WaitQueue<Lock: ScopedRawMutex = Spinlock> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -221,7 +221,7 @@ pub struct WaitQueue<Lock: RawScopedMutex = Spinlock> {
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a, Lock: RawScopedMutex = Spinlock> {
+pub struct Wait<'a, Lock: ScopedRawMutex = Spinlock> {
     /// The [`WaitQueue`] being waited on.
     queue: &'a WaitQueue<Lock>,
 
@@ -391,7 +391,7 @@ where
 
 impl<Lock> WaitQueue<Lock>
 where
-    Lock: RawScopedMutex,
+    Lock: ScopedRawMutex,
 {
     loom_const_fn! {
         #[must_use]
@@ -1105,7 +1105,7 @@ impl Waiter {
         waker: Option<&Waker>,
     ) -> Poll<WaitResult<()>>
     where
-        Lock: RawScopedMutex,
+        Lock: ScopedRawMutex,
     {
         test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self.as_mut())) };
@@ -1238,7 +1238,7 @@ impl Waiter {
     /// [`WaitOwned`] futures.
     fn release<Lock>(mut self: Pin<&mut Self>, queue: &WaitQueue<Lock>)
     where
-        Lock: RawScopedMutex,
+        Lock: ScopedRawMutex,
     {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
@@ -1305,7 +1305,7 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
 
 // === impl Wait ===
 
-impl<Lock: RawScopedMutex> Wait<'_, Lock> {
+impl<Lock: ScopedRawMutex> Wait<'_, Lock> {
     /// Returns `true` if this `Wait` future is waiting for a notification from
     /// the provided [`WaitQueue`].
     ///
@@ -1417,7 +1417,7 @@ impl<Lock: RawScopedMutex> Wait<'_, Lock> {
     }
 }
 
-impl<Lock: RawScopedMutex> Future for Wait<'_, Lock> {
+impl<Lock: ScopedRawMutex> Future for Wait<'_, Lock> {
     type Output = WaitResult<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1427,7 +1427,7 @@ impl<Lock: RawScopedMutex> Future for Wait<'_, Lock> {
 }
 
 #[pinned_drop]
-impl<Lock: RawScopedMutex> PinnedDrop for Wait<'_, Lock> {
+impl<Lock: ScopedRawMutex> PinnedDrop for Wait<'_, Lock> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
         this.waiter.release(this.queue);
@@ -1503,7 +1503,7 @@ feature! {
     /// ```
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned<Lock: RawScopedMutex = Spinlock> {
+    pub struct WaitOwned<Lock: ScopedRawMutex = Spinlock> {
         /// The `WaitQueue` being waited on.
         queue: Arc<WaitQueue<Lock>>,
 
@@ -1512,7 +1512,7 @@ feature! {
         waiter: Waiter,
     }
 
-    impl<Lock: RawScopedMutex> WaitQueue<Lock> {
+    impl<Lock: ScopedRawMutex> WaitQueue<Lock> {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
@@ -1556,7 +1556,7 @@ feature! {
 
     // === impl WaitOwned ===
 
-    impl<Lock: RawScopedMutex> WaitOwned<Lock> {
+    impl<Lock: ScopedRawMutex> WaitOwned<Lock> {
         /// Returns `true` if this `WaitOwned` future is waiting for a
         /// notification from the provided [`WaitQueue`].
         ///
@@ -1675,7 +1675,7 @@ feature! {
         }
     }
 
-    impl<Lock: RawScopedMutex> Future for WaitOwned<Lock> {
+    impl<Lock: ScopedRawMutex> Future for WaitOwned<Lock> {
         type Output = WaitResult<()>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1685,7 +1685,7 @@ feature! {
     }
 
     #[pinned_drop]
-    impl<Lock: RawScopedMutex> PinnedDrop for WaitOwned<Lock> {
+    impl<Lock: ScopedRawMutex> PinnedDrop for WaitOwned<Lock> {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
             this.waiter.release(&*this.queue);

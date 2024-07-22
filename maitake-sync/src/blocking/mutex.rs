@@ -4,6 +4,7 @@ use crate::{
     util::fmt,
 };
 use core::ops::{Deref, DerefMut};
+pub use scoped_mutex_traits::ScopedRawMutex;
 
 /// A blocking mutual exclusion lock for protecting shared data.
 /// Each mutex has a type parameter which represents
@@ -42,15 +43,6 @@ pub struct Mutex<T, Lock = Spinlock> {
 pub struct MutexGuard<'a, T, Lock: RawMutex = Spinlock> {
     ptr: MutPtr<T>,
     lock: &'a Lock,
-}
-
-pub unsafe trait RawScopedMutex {
-    fn with_lock<T>(&self, f: impl FnOnce() -> T) -> T;
-
-    fn try_with_lock<T>(&self, f: impl FnOnce() -> T) -> Option<T>;
-
-    /// Returns `true` if the mutex is currently locked.
-    fn is_locked(&self) -> bool;
 }
 
 /// Trait abstracting over blocking [`Mutex`] implementations (`maitake-sync`'s
@@ -98,33 +90,6 @@ pub unsafe trait RawMutex {
 
     /// Returns `true` if the mutex is currently locked.
     fn is_locked(&self) -> bool;
-}
-
-unsafe impl<L> RawScopedMutex for L
-where
-    L: RawMutex,
-{
-    fn with_lock<T>(&self, f: impl FnOnce() -> T) -> T {
-        // TODO(eliza): RAIIify
-        self.lock();
-        let ret = f();
-        unsafe { self.unlock() }
-        ret
-    }
-
-    fn try_with_lock<T>(&self, f: impl FnOnce() -> T) -> Option<T> {
-        if !self.try_lock() {
-            return None;
-        }
-        let ret = f();
-        unsafe { self.unlock() }
-        Some(ret)
-    }
-
-    /// Returns `true` if the mutex is currently locked.
-    fn is_locked(&self) -> bool {
-        RawMutex::is_locked(self)
-    }
 }
 
 #[cfg(feature = "lock_api")]
@@ -227,7 +192,21 @@ where
     }
 }
 
-impl<T, Lock: RawScopedMutex> Mutex<T, Lock> {
+impl<T, Lock: ScopedRawMutex> Mutex<T, Lock> {
+    /// Lock this `Mutex`, blocking if it is not currently unlocked, and call
+    /// `f()` with the locked data once the lock is acquired.
+    ///
+    /// When the `Mutex` is unlocked, this method locks it, calls `f()` with the
+    /// data protected by the `Mutex`, and then unlocks the `Mutex` and returns
+    /// the result of `f()`. If the `Mutex` is locked, this method blocks until
+    /// it is unlocked, and then takes the lock.
+    ///
+    /// To return immediately rather than blocking, use [`Mutex::try_with_lock`]
+    /// instead.
+    ///
+    /// This method is available when the `Mutex`'s `Lock` type parameter
+    /// implements the [`ScopedRawMutex`] trait.
+    #[track_caller]
     pub fn with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
         self.lock.with_lock(|| {
             self.data.with_mut(|data| unsafe {
@@ -237,6 +216,27 @@ impl<T, Lock: RawScopedMutex> Mutex<T, Lock> {
         })
     }
 
+    /// Attempt to lock this `Mutex` without blocking and call `f()` with the
+    /// locked data if the lock is acquired.
+    ///
+    /// If the `Mutex` is unlocked, this method locks it, calls `f()` with the
+    /// data protected by the `Mutex`, and then unlocks the `Mutex` and returns
+    /// [`Some`]`(U)`. Otherwise, if the lock is already held, this method
+    /// returns `None` immediately, without blocking.
+    ///
+    /// To block until the `Mutex` is unlocked instead of returning `None`, use
+    /// [`Mutex::with_lock`] instead.
+    ///
+    /// This method is available when the `Mutex`'s `Lock` type parameter
+    /// implements the [`ScopedRawMutex`] trait.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(U)` if the lock was acquired, containing the result of
+    ///   `f()`.
+    /// - [`None`] if the lock is currently held and could not be acquired
+    ///   without blocking.
+    #[track_caller]
     pub fn try_with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> Option<U> {
         self.lock.try_with_lock(|| {
             self.data.with_mut(|data| unsafe {
@@ -346,7 +346,7 @@ impl<T: Default, Lock: Default> Default for Mutex<T, Lock> {
 impl<T, Lock> fmt::Debug for Mutex<T, Lock>
 where
     T: fmt::Debug,
-    Lock: RawScopedMutex + fmt::Debug,
+    Lock: ScopedRawMutex + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.try_with_lock(|data| {

@@ -3,7 +3,7 @@
 //!
 //! See the documentation for the [`WaitMap`] type for details.
 use crate::{
-    blocking::RawScopedMutex,
+    blocking::ScopedRawMutex,
     loom::{
         cell::UnsafeCell,
         sync::{
@@ -178,7 +178,7 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-pub struct WaitMap<K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
+pub struct WaitMap<K: PartialEq, V, Lock: ScopedRawMutex = Spinlock> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -204,7 +204,7 @@ pub struct WaitMap<K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
 impl<K, V, Lock> Debug for WaitMap<K, V, Lock>
 where
     K: PartialEq,
-    Lock: RawScopedMutex + fmt::Debug,
+    Lock: ScopedRawMutex + fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("WaitMap")
@@ -236,7 +236,7 @@ where
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a, K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
+pub struct Wait<'a, K: PartialEq, V, Lock: ScopedRawMutex = Spinlock> {
     /// The [`WaitMap`] being waited on from.
     queue: &'a WaitMap<K, V, Lock>,
 
@@ -245,7 +245,7 @@ pub struct Wait<'a, K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
     waiter: Waiter<K, V>,
 }
 
-impl<'map, 'wait, K: PartialEq, V, Lock: RawScopedMutex> Wait<'map, K, V, Lock> {
+impl<'map, 'wait, K: PartialEq, V, Lock: ScopedRawMutex> Wait<'map, K, V, Lock> {
     /// Returns a future that completes when the `Wait` item has been
     /// added to the [`WaitMap`], and is ready to receive data
     ///
@@ -463,19 +463,20 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 }
 
-#[cfg(all(feature = "lock_api", not(loom)))]
-impl<K, V, Lock> WaitMap<K, V, Lock>
-where
-    Lock: lock_api::RawMutex,
-    K: PartialEq,
-{
-    #[must_use]
-    pub const fn with_lock_api() -> Self {
-        Self::with_raw_mutex(Lock::INIT)
-    }
-}
+// TODO(eliza): figure out what to do about `lock_api` not impling `RawScopedMutex`...
+// #[cfg(all(feature = "lock_api", not(loom)))]
+// impl<K, V, Lock> WaitMap<K, V, Lock>
+// where
+//     Lock: lock_api::RawMutex,
+//     K: PartialEq,
+// {
+//     #[must_use]
+//     pub const fn with_lock_api() -> Self {
+//         Self::with_raw_mutex(Lock::INIT)
+//     }
+// }
 
-impl<K: PartialEq, V, Lock: RawScopedMutex> WaitMap<K, V, Lock> {
+impl<K: PartialEq, V, Lock: ScopedRawMutex> WaitMap<K, V, Lock> {
     loom_const_fn! {
         #[must_use]
         pub fn with_raw_mutex(lock: Lock) -> Self {
@@ -704,7 +705,7 @@ feature! {
 pub struct Subscribe<'a, 'b, K, V, Lock = Spinlock>
 where
     K: PartialEq,
-    Lock: RawScopedMutex,
+    Lock: ScopedRawMutex,
 {
     wait: Pin<&'a mut Wait<'b, K, V, Lock>>,
 }
@@ -712,7 +713,7 @@ where
 impl<'a, 'b, K, V, Lock> Future for Subscribe<'a, 'b, K, V, Lock>
 where
     K: PartialEq,
-    Lock: RawScopedMutex,
+    Lock: ScopedRawMutex,
 {
     type Output = WaitResult<()>;
 
@@ -788,7 +789,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
         cx: &mut Context<'_>,
     ) -> Poll<WaitResult<()>>
     where
-        Lock: RawScopedMutex,
+        Lock: ScopedRawMutex,
     {
         let mut this = self.as_mut().project();
 
@@ -849,7 +850,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
         cx: &mut Context<'_>,
     ) -> Poll<WaitResult<V>>
     where
-        Lock: RawScopedMutex,
+        Lock: ScopedRawMutex,
     {
         test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
         let this = self.as_mut().project();
@@ -915,7 +916,7 @@ impl<K: PartialEq, V> Waiter<K, V> {
     /// [`WaitOwned`] futures.
     fn release<Lock>(mut self: Pin<&mut Self>, queue: &WaitMap<K, V, Lock>)
     where
-        Lock: RawScopedMutex,
+        Lock: ScopedRawMutex,
     {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
@@ -984,7 +985,7 @@ impl<K: PartialEq, V> Future for Wait<'_, K, V> {
 impl<K, V, Lock> PinnedDrop for Wait<'_, K, V, Lock>
 where
     K: PartialEq,
-    Lock: RawScopedMutex,
+    Lock: ScopedRawMutex,
 {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
@@ -1059,7 +1060,7 @@ feature! {
     /// assert_unpin::<WaitOwned<'_, usize, ()>>();
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned<K: PartialEq, V, Lock: RawScopedMutex = Spinlock> {
+    pub struct WaitOwned<K: PartialEq, V, Lock: ScopedRawMutex = Spinlock> {
         /// The `WaitMap` being waited on.
         queue: Arc<WaitMap<K, V, Lock>>,
 
@@ -1068,7 +1069,7 @@ feature! {
         waiter: Waiter<K, V>,
     }
 
-    impl<K: PartialEq, V, Lock: RawScopedMutex> WaitMap<K, V, Lock> {
+    impl<K: PartialEq, V, Lock: ScopedRawMutex> WaitMap<K, V, Lock> {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
@@ -1092,7 +1093,7 @@ feature! {
         }
     }
 
-    impl<K: PartialEq, V, Lock: RawScopedMutex> Future for WaitOwned<K, V, Lock> {
+    impl<K: PartialEq, V, Lock: ScopedRawMutex> Future for WaitOwned<K, V, Lock> {
         type Output = WaitResult<V>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1105,7 +1106,7 @@ feature! {
     impl<K, V, Lock> PinnedDrop for WaitOwned<K, V, Lock>
     where
         K: PartialEq,
-        Lock: RawScopedMutex,
+        Lock: ScopedRawMutex,
     {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();

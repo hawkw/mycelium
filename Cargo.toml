@@ -98,6 +98,7 @@ dynamic-range-start = "0xFFFF_8000_0000_0000"
 # use `tracing` 0.2 from git
 tracing = { git = "https://github.com/tokio-rs/tracing" }
 tracing-core = { git = "https://github.com/tokio-rs/tracing" }
+scoped-mutex-traits = { git = "https://github.com/tosc-rs/scoped-mutex" }
 
 # Custom profile for Loom tests: enable release optimizations so that the loom
 # tests are less slow, but don't disable debug assertions.
