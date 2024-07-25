@@ -39,7 +39,7 @@
 //! [spin-loop hint instructions]: core::hint::spin_loop
 //! [`Spinlock`]: crate::spin::Spinlock
 //! [`RwSpinlock`]: crate::spin::RwSpinlock
-mod mutex;
-mod rwlock;
+pub(crate) mod mutex;
+pub(crate) mod rwlock;
 
 pub use self::{mutex::*, rwlock::*};

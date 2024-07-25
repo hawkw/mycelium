@@ -1452,11 +1452,11 @@ dependencies = [
  "futures-util",
  "lock_api",
  "loom",
+ "mutex-traits",
  "mycelium-bitfield",
  "pin-project",
  "portable-atomic",
  "proptest",
- "scoped-mutex-traits",
  "tokio",
  "tokio-test",
  "tracing 0.1.40",
@@ -1540,6 +1540,11 @@ dependencies = [
  "wasi",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "mutex-traits"
+version = "0.999.0"
+source = "git+https://github.com/tosc-rs/scoped-mutex#67dedfa152e553ccee1ae78342eae7f6bb67cb96"
 
 [[package]]
 name = "mycelium-alloc"
@@ -2205,11 +2210,6 @@ name = "ryu"
 version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f98d2aa92eebf49b69786be48e4477826b256916e84a57ff2a4f21923b48eb4c"
-
-[[package]]
-name = "scoped-mutex-traits"
-version = "0.1.0"
-source = "git+https://github.com/tosc-rs/scoped-mutex#13eebe716e9b5945c21fa652ed3adfc7d6ca01ac"
 
 [[package]]
 name = "scoped-tls"

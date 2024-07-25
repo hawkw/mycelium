@@ -204,7 +204,7 @@ pub struct WaitMap<K: PartialEq, V, Lock: ScopedRawMutex = Spinlock> {
 impl<K, V, Lock> Debug for WaitMap<K, V, Lock>
 where
     K: PartialEq,
-    Lock: ScopedRawMutex + fmt::Debug,
+    Lock: ScopedRawMutex,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("WaitMap")
@@ -447,7 +447,7 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
-            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
+            state: Self::mk_state(),
             queue: Mutex::new(List::new()),
         }
     }
@@ -457,33 +457,32 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     #[cfg(loom)]
     pub fn new() -> Self {
         Self {
-            state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
+            state: Self::mk_state(),
             queue: Mutex::new(List::new()),
         }
     }
 }
 
-// TODO(eliza): figure out what to do about `lock_api` not impling `RawScopedMutex`...
-// #[cfg(all(feature = "lock_api", not(loom)))]
-// impl<K, V, Lock> WaitMap<K, V, Lock>
-// where
-//     Lock: lock_api::RawMutex,
-//     K: PartialEq,
-// {
-//     #[must_use]
-//     pub const fn with_lock_api() -> Self {
-//         Self::with_raw_mutex(Lock::INIT)
-//     }
-// }
+impl<K, V, Lock> WaitMap<K, V, Lock>
+where
+    K: PartialEq,
+    Lock: ScopedRawMutex + mutex_traits::ConstInit,
+{
+    loom_const_fn! {
+        #[must_use]
+        pub fn with_raw_mutex() -> Self {
+            Self {
+                state: Self::mk_state(),
+                queue: Mutex::with_raw_mutex(List::new()),
+            }
+        }
+    }
+}
 
 impl<K: PartialEq, V, Lock: ScopedRawMutex> WaitMap<K, V, Lock> {
     loom_const_fn! {
-        #[must_use]
-        pub fn with_raw_mutex(lock: Lock) -> Self {
-            Self {
-                state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
-                queue: Mutex::with_raw_mutex(List::new(), lock),
-            }
+        fn mk_state() -> CachePadded<AtomicUsize> {
+            CachePadded::new(AtomicUsize::new(State::Empty.into_usize()))
         }
     }
 
@@ -514,22 +513,34 @@ impl<K: PartialEq, V, Lock: ScopedRawMutex> WaitMap<K, V, Lock> {
 
         // okay, there are tasks waiting on the queue; we must acquire the lock
         // on the linked list and wake the next task from the queue.
-        self.queue.with_lock(|queue| {
+        let mut val = Some(val);
+        let maybe_waker = self.queue.with_lock(|queue| {
             test_debug!("wake: -> locked");
 
             // the queue's state may have changed while we were waiting to acquire
             // the lock, so we need to acquire a new snapshot.
             state = self.load();
 
-            if let Some(node) = self.node_match_locked(key, &mut *queue, state) {
-                let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived(val));
-                drop(queue);
-                waker.wake();
-                WakeOutcome::Woke
-            } else {
-                WakeOutcome::NoMatch(val)
-            }
-        })
+            let node = self.node_match_locked(key, &mut *queue, state)?;
+            // if there's a node, give it the value and take the waker and
+            // return it. we return the waker from this closure rather than
+            // waking it, because we need to release the lock before waking the
+            // task.
+            let val = val
+                .take()
+                .expect("value is only taken elsewhere if there is no waker, but there is one");
+            let waker = Waiter::<K, V>::wake(node, &mut *queue, Wakeup::DataReceived(val));
+            Some(waker)
+        });
+
+        if let Some(waker) = maybe_waker {
+            waker.wake();
+            WakeOutcome::Woke
+        } else {
+            let val =
+                val.expect("value is only taken elsewhere if there is a waker, and there isn't");
+            WakeOutcome::NoMatch(val)
+        }
     }
 
     /// Returns `true` if this `WaitMap` is [closed](Self::close).
@@ -791,17 +802,17 @@ impl<K: PartialEq, V> Waiter<K, V> {
     where
         Lock: ScopedRawMutex,
     {
-        let mut this = self.as_mut().project();
-
-        debug_assert!(
-            matches!(this.state, WaitState::Start),
-            "start_to_wait should ONLY be called from the Start state!"
-        );
-
         // Try to wait...
         test_debug!("poll_wait: locking...");
-        queue.queue.with_lock(|waiters| {
+        queue.queue.with_lock(move |waiters| {
             test_debug!("poll_wait: -> locked");
+            let mut this = self.as_mut().project();
+
+            debug_assert!(
+                matches!(this.state, WaitState::Start),
+                "start_to_wait should ONLY be called from the Start state!"
+            );
+
             let mut queue_state = queue.load();
 
             // transition the queue to the waiting state

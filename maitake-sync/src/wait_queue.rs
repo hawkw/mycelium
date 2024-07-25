@@ -360,7 +360,7 @@ impl WaitQueue {
         /// Returns a new `WaitQueue`.
         #[must_use]
         pub fn new() -> Self {
-            Self::make(State::Empty, Spinlock::new())
+            Self::make(State::Empty, Mutex::new(List::new()))
         }
     }
 
@@ -373,19 +373,20 @@ impl WaitQueue {
         // TODO(eliza): should this be a public API?
         #[must_use]
         pub(crate) fn new_woken() -> Self {
-            Self::make(State::Woken, Spinlock::new())
+            Self::make(State::Woken, Mutex::new(List::new()))
         }
     }
 }
 
-#[cfg(all(feature = "lock_api", not(loom)))]
 impl<Lock> WaitQueue<Lock>
 where
-    Lock: lock_api::RawMutex,
+    Lock: ScopedRawMutex + mutex_traits::ConstInit,
 {
-    #[must_use]
-    pub const fn with_lock_api() -> Self {
-        Self::make(State::Empty, Lock::INIT)
+    loom_const_fn! {
+        #[must_use]
+        pub fn with_raw_mutex() -> Self {
+            Self::make(State::Empty, Mutex::with_raw_mutex(List::new()))
+        }
     }
 }
 
@@ -395,17 +396,10 @@ where
 {
     loom_const_fn! {
         #[must_use]
-        pub fn with_raw_mutex(lock: Lock) -> Self {
-            Self::make(State::Empty, lock)
-        }
-    }
-
-    loom_const_fn! {
-        #[must_use]
-        fn make(state: State, lock: Lock) -> Self {
+        fn make(state: State, queue: Mutex<List<Waiter>, Lock>) -> Self {
             Self {
                 state: CachePadded::new(AtomicUsize::new(state.into_usize())),
-                queue: Mutex::with_raw_mutex(List::new(), lock)
+                queue,
             }
         }
     }

@@ -196,17 +196,6 @@ impl<T> RwLock<T> {
     }
 }
 
-#[cfg(feature = "lock_api")]
-impl<T, Lock: lock_api::RawMutex> RwLock<T, Lock> {
-    #[must_use]
-    pub const fn with_raw_mutex(data: T) -> Self {
-        Self {
-            sem: Semaphore::with_raw_mutex(Self::MAX_READERS),
-            data: UnsafeCell::new(data),
-        }
-    }
-}
-
 impl<T, Lock: RawMutex> RwLock<T, Lock> {
     /// Consumes this `RwLock`, returning the guarded data.
     #[inline]
