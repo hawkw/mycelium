@@ -33,6 +33,10 @@
 pub mod once;
 
 pub use self::once::{InitOnce, Lazy};
+#[deprecated(
+    since = "0.1.3",
+    note = "moved to the `blocking` module, prefer importing from there"
+)]
 pub use crate::blocking::*;
 use crate::{
     loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
@@ -67,63 +71,11 @@ impl Spinlock {
     fn is_locked(&self) -> bool {
         self.locked.load(Relaxed)
     }
-
-    /// Returns a RAII guard that unlocks this spinlock. This is like a simpler
-    /// version of a real life `MutexGuard` that ensures a `ScopedRawMutex` impl
-    /// is unlocked in the event of a panic
-    ///
-    /// # Safety
-    ///
-    /// The spinlock must be locked.
-    unsafe fn unlock_on_drop(&self) -> impl Drop + '_ {
-        struct Unlock<'lock>(&'lock Spinlock);
-        impl Drop for Unlock<'_> {
-            #[inline(always)]
-            #[track_caller]
-            fn drop(&mut self) {
-                debug_assert!(self.is_locked());
-                unsafe { self.0.unlock() }
-            }
-        }
-
-        debug_assert!(self.is_locked());
-        Unlock(self)
-    }
 }
 
 impl Default for Spinlock {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-unsafe impl ScopedRawMutex for Spinlock {
-    #[inline]
-    fn with_lock<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.lock();
-        let _unlock = unsafe {
-            // Safety: we just took the lock.
-            self.unlock_on_drop()
-        };
-        f()
-    }
-
-    #[inline]
-    fn try_with_lock<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
-        if self.try_lock() {
-            let _unlock = unsafe {
-                // Safety: we just took the lock.
-                self.unlock_on_drop()
-            };
-            Some(f())
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    fn is_locked(&self) -> bool {
-        Spinlock::is_locked(self)
     }
 }
 

@@ -313,14 +313,6 @@ impl Semaphore {
     }
 }
 
-#[cfg(feature = "lock_api")]
-impl<Lock: lock_api::RawMutex> Semaphore<Lock> {
-    #[must_use]
-    pub const fn with_lock_api(permits: usize) -> Self {
-        Self::make(permits, Mutex::with_lock_api(SemQueue::new()))
-    }
-}
-
 // This is factored out as a free constant in this module so that `RwLock` can
 // depend on it without having to specify `Semaphore`'s type parameters. This is
 // a little annoying but whatever.
