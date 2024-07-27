@@ -10,12 +10,30 @@ pub use mutex_traits::{RawMutex, ScopedRawMutex};
 /// A blocking mutual exclusion lock for protecting shared data.
 /// Each mutex has a type parameter which represents
 /// the data that it is protecting. The data can only be accessed through the
-/// RAII guards returned from [`lock`] and [`try_lock`], which guarantees that
+/// RAII guards returned from [`lock`] and [`try_lock`], or within the closures
+/// passed to [`with_lock`] and [`try_with_lock`], which guarantees that
 /// the data is only ever accessed when the mutex is locked.
 ///
 /// # Fairness
 ///
 /// This is *not* a fair mutex.
+///
+/// # Overriding mutex implementations
+///
+/// This type is generic over a `Lock` type parameter which represents a raw
+/// mutex implementation. By default, this is a [`Spinlock`]. To construct a new
+/// `Mutex` with an alternative raw mutex implementation, use the
+/// [`Mutex::with_raw_mutex`] cosntructor. See the [module-level documentation
+/// on overriding mutex
+/// implementations](crate::blocking#overriding-mutex-implementations) for
+/// more details.
+///
+/// When `Lock` implements the [`RawMutex`] trait, the [`Mutex`] type provides
+/// the [`lock`] and [`try_lock`] methods, which return a RAII [`MutexGuard`],
+/// similar to the [`std::sync::Mutex`] API, in addition to the scoped
+/// [`with_lock`] and  [`try_with_lock`] methods. When `Lock` only implements
+/// [`ScopedRawMutex`], the [`Mutex`] type provides only the scoped
+/// [`with_lock`] and  [`try_with_lock`] methods.
 ///
 /// # Loom-specific behavior
 ///
@@ -24,6 +42,9 @@ pub use mutex_traits::{RawMutex, ScopedRawMutex};
 ///
 /// [`lock`]: Mutex::lock
 /// [`try_lock`]: Mutex::try_lock
+/// [`with_lock`]: Mutex::with_lock
+/// [`try_with_lock`]: Mutex::try_with_lock
+/// [`std::sync::Mutex`]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
 pub struct Mutex<T, Lock = Spinlock> {
     lock: Lock,
     data: UnsafeCell<T>,
@@ -74,12 +95,9 @@ impl<T, Lock: mutex_traits::ConstInit> Mutex<T, Lock> {
         /// Returns a new `Mutex` protecting the provided `data`, using the
         /// `Lock` type parameter as the raw mutex implementation.
         ///
-        /// This constructor is used to override the internal implementation of
-        /// mutex operations, with an implementation of the [`lock_api::RawMutex`]
-        /// trait. By default, the [`Mutex::new`] constructor uses a [`Spinlock`] as
-        /// the underlying raw mutex implementation, which will spin until the mutex
-        /// is unlocked, without using platform-specific or OS-specific blocking
-        /// mechanisms.
+        /// See the [module-level documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations) for
+        /// more details.
         ///
         /// The returned `Mutex` is in an unlocked state, ready for use.
         #[must_use]
@@ -104,8 +122,11 @@ impl<T, Lock: ScopedRawMutex> Mutex<T, Lock> {
     /// To return immediately rather than blocking, use [`Mutex::try_with_lock`]
     /// instead.
     ///
-    /// This method is available when the `Mutex`'s `Lock` type parameter
-    /// implements the [`ScopedRawMutex`] trait.
+    /// This method is available as long as the `Mutex`'s `Lock` type parameter
+    /// implements the [`ScopedRawMutex`] trait. See the [module-level
+    /// documentation on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations) for
+    /// more details.
     #[track_caller]
     pub fn with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
         self.lock.with_lock(|| {
@@ -127,8 +148,11 @@ impl<T, Lock: ScopedRawMutex> Mutex<T, Lock> {
     /// To block until the `Mutex` is unlocked instead of returning `None`, use
     /// [`Mutex::with_lock`] instead.
     ///
-    /// This method is available when the `Mutex`'s `Lock` type parameter
-    /// implements the [`ScopedRawMutex`] trait.
+    /// This method is available as long as the `Mutex`'s `Lock` type parameter
+    /// implements the [`ScopedRawMutex`] trait. See the [module-level
+    /// documentation on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations) for
+    /// more details.
     ///
     /// # Returns
     ///
@@ -158,13 +182,19 @@ where
         }
     }
 
-    /// Attempts to acquire this lock without spinning
+    /// Attempts to acquire this lock without blocking
     ///
     /// If the lock could not be acquired at this time, then [`None`] is returned.
     /// Otherwise, an RAII guard is returned. The lock will be unlocked when the
     /// guard is dropped.
     ///
-    /// This function will never spin.
+    /// This function will never block.
+    ///
+    /// This method is only availble if the `Mutex`'s `Lock` type parameter
+    /// implements the [`RawMutex`] trait. See the [module-level documentation
+    /// on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations) for
+    /// more details.
     #[must_use]
     #[cfg_attr(test, track_caller)]
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T, Lock>> {
@@ -175,12 +205,18 @@ where
         }
     }
 
-    /// Acquires a mutex, spinning until it is locked.
+    /// Acquires a mutex, blocking until it is locked.
     ///
-    /// This function will spin until the mutex is available to lock. Upon
+    /// This function will block until the mutex is available to lock. Upon
     /// returning, the thread is the only thread with the lock
     /// held. An RAII guard is returned to allow scoped unlock of the lock. When
     /// the guard goes out of scope, the mutex will be unlocked.
+    ///
+    /// This method is only availble if the `Mutex`'s `Lock` type parameter
+    /// implements the [`RawMutex`] trait. See the [module-level documentation
+    /// on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations) for
+    /// more details.
     #[cfg_attr(test, track_caller)]
     pub fn lock(&self) -> MutexGuard<'_, T, Lock> {
         self.lock.lock();
@@ -192,6 +228,12 @@ where
     /// If a lock is currently held, it will be released, regardless of who's
     /// holding it. Of course, this is **outrageously, disgustingly unsafe** and
     /// you should never do it.
+    ///
+    /// This method is only availble if the `Mutex`'s `Lock` type parameter
+    /// implements the [`RawMutex`] trait. See the [module-level documentation
+    /// on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations) for
+    /// more details.
     ///
     /// # Safety
     ///

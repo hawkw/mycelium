@@ -59,6 +59,19 @@ mod tests;
 /// in contrast to the Rust standard library's [`std::sync::RwLock`], where the
 /// priority policy is dependent on the operating system's implementation.
 ///
+/// # Overriding the blocking mutex
+///
+/// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
+/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
+/// use an alternative [`RawMutex`] implementation, use the
+/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// on overriding mutex
+/// implementations](crate::blocking#overriding-mutex-implementations) for more
+/// details.
+///
+/// Note that this type currently requires that the raw mutex implement
+/// [`RawMutex`] rather than [`mutex_traits::ScopedRawMutex`]!
+///
 /// # Examples
 ///
 /// ```
@@ -90,7 +103,8 @@ mod tests;
 /// [`write`]: Self::write
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 /// [_write-preferring_]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock#Priority_policies
-/// [`std::sync::RwLock`]: https://doc.rust-lang.org/stable/std/sync/struct.RwLock.html
+/// [`std::sync::RwLock`]:
+///     https://doc.rust-lang.org/stable/std/sync/struct.RwLock.html
 pub struct RwLock<T: ?Sized, Lock: RawMutex = Spinlock> {
     /// The semaphore used to control access to `data`.
     ///
@@ -169,6 +183,13 @@ impl<T> RwLock<T> {
         /// Returns a new `RwLock` protecting the provided `data`, in an
         /// unlocked state.
         ///
+        /// This constructor returns a `RwLock` that uses a [`Spinlock`] as the
+        /// underlying blocking mutex implementation. To use an alternative
+        /// [`RawMutex`] implementation, use the [`RwLock::with_raw_mutex`]
+        /// constructor instead. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
+        ///
         /// # Examples
         ///
         /// ```
@@ -192,6 +213,27 @@ impl<T> RwLock<T> {
                 sem: Semaphore::new(Self::MAX_READERS),
                 data: UnsafeCell::new(data),
             }
+        }
+    }
+}
+
+#[cfg(not(loom))]
+impl<T, Lock> RwLock<T, Lock>
+where
+    Lock: RawMutex + mutex_traits::ConstInit,
+{
+    /// Returns a new `RwLock` protecting the provided `data`, in an
+    /// unlocked state, using the provided [`RawMutex`] implementation.
+    ///
+    /// This constructor allows a [`RwLock`] to be constructed with any type that
+    /// implements [`RawMutex`] as the underlying raw blocking mutex
+    /// implementation. See [the documentation on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations)
+    /// for more details.
+    pub const fn with_raw_mutex(data: T) -> Self {
+        Self {
+            sem: Semaphore::with_raw_mutex(Self::MAX_READERS),
+            data: UnsafeCell::new(data),
         }
     }
 }

@@ -50,6 +50,16 @@ mod tests;
 /// synchronization primitive on its own: sometimes, you just need to have a
 /// bunch of tasks wait for something and then wake them all up.
 ///
+/// # Overriding the blocking mutex
+///
+/// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
+/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
+/// use an alternative [`ScopedRawMutex`] implementation, use the
+/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// on overriding mutex
+/// implementations](crate::blocking#overriding-mutex-implementations) for more
+/// details.
+///
 /// # Examples
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
@@ -358,6 +368,14 @@ enum Wakeup {
 impl WaitQueue {
     loom_const_fn! {
         /// Returns a new `WaitQueue`.
+        ///
+        /// This constructor returns a `WaitQueue` that uses a [`Spinlock`] as
+        /// the [`ScopedRawMutex`] implementation for wait list synchronization.
+        /// To use a different [`ScopedRawMutex`] implementation, use the
+        /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
+        /// [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
         #[must_use]
         pub fn new() -> Self {
             Self::make(State::Empty, Mutex::new(List::new()))
@@ -383,9 +401,29 @@ where
     Lock: ScopedRawMutex + mutex_traits::ConstInit,
 {
     loom_const_fn! {
+        /// Returns a new `WaitQueue`, using the provided [`ScopedRawMutex`]
+        /// implementation for wait-list synchronization.
+        ///
+        /// This constructor allows a `WaitQueue` to be constructed with any type that
+        /// implements [`ScopedRawMutex`] as the underlying raw blocking mutex
+        /// implementation. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
         #[must_use]
         pub fn with_raw_mutex() -> Self {
             Self::make(State::Empty, Mutex::with_raw_mutex(List::new()))
+        }
+    }
+
+    loom_const_fn! {
+        /// Returns a new `WaitQueue` with a single stored wakeup.
+        ///
+        /// The first call to [`wait`] on this queue will immediately succeed.
+        ///
+        /// [`wait`]: Self::wait
+        #[must_use]
+        pub(crate) fn new_woken_with_raw_mutex() -> Self {
+            Self::make(State::Woken, Mutex::with_raw_mutex(List::new()))
         }
     }
 }

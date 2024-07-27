@@ -59,6 +59,19 @@ mod tests;
 /// semaphore remains fair even when a call to `acquire` requests more than one
 /// permit at a time.
 ///
+/// # Overriding the blocking mutex
+///
+/// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
+/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
+/// use an alternative [`RawMutex`] implementation, use the
+/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// on overriding mutex
+/// implementations](crate::blocking#overriding-mutex-implementations) for more
+/// details.
+///
+/// Note that this type currently requires that the raw mutex implement
+/// [`RawMutex`] rather than [`mutex_traits::ScopedRawMutex`]!
+///
 /// # Examples
 ///
 /// Using a semaphore to limit concurrency:
@@ -310,6 +323,30 @@ impl Semaphore {
                 Mutex::new(SemQueue::new())
             )
         }
+    }
+}
+
+#[cfg(not(loom))]
+impl<Lock> Semaphore<Lock>
+where
+    Lock: RawMutex + mutex_traits::ConstInit,
+{
+    /// Returns a new `Semaphore` with `permits` permits available, using the
+    /// provided [`RawMutex`] implementation.
+    ///
+    /// This constructor allows a [`Semaphore`] to be constructed with any type that
+    /// implements [`RawMutex`] as the underlying raw blocking mutex
+    /// implementation. See [the documentation on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations)
+    /// for more details.
+    ///
+    /// # Panics
+    ///
+    /// If `permits` is less than [`MAX_PERMITS`] ([`usize::MAX`] - 1).
+    ///
+    /// [`MAX_PERMITS`]: Self::MAX_PERMITS
+    pub const fn with_raw_mutex(permits: usize) -> Self {
+        Self::make(permits, Mutex::with_raw_mutex(SemQueue::new()))
     }
 }
 
