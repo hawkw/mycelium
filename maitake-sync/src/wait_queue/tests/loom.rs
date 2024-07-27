@@ -43,6 +43,7 @@ fn wake_all_sequential() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn wake_all_concurrent() {
     use alloc::sync::Arc;
     // must be higher than the number of threads in a `WakeBatch`, but below
@@ -108,6 +109,7 @@ fn wake_all_reregistering() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn wake_close() {
     use alloc::sync::Arc;
 

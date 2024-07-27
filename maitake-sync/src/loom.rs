@@ -76,10 +76,12 @@ mod inner {
             use core::{
                 marker::PhantomData,
                 ops::{Deref, DerefMut},
-                panic::Location,
             };
 
-            use alloc::fmt;
+            #[cfg(feature = "tracing")]
+            use core::panic::Location;
+
+            use core::fmt;
 
             /// Mock version of mycelium's spinlock, but using
             /// `loom::sync::Mutex`. The API is slightly different, since the
@@ -91,6 +93,7 @@ mod inner {
 
             pub(crate) struct MutexGuard<'a, T, Lock = crate::spin::Spinlock> {
                 guard: loom::sync::MutexGuard<'a, T>,
+                #[cfg(feature = "tracing")]
                 location: &'static Location<'static>,
                 _p: PhantomData<Lock>,
             }
@@ -115,19 +118,25 @@ mod inner {
 
                 #[track_caller]
                 pub fn try_lock(&self) -> Option<MutexGuard<'_, T, Lock>> {
+                    #[cfg(feature = "tracing")]
                     let location = Location::caller();
+                    #[cfg(feature = "tracing")]
                     tracing::debug!(%location, "Mutex::try_lock");
 
                     match self.0.try_lock() {
                         Ok(guard) => {
+                            #[cfg(feature = "tracing")]
                             tracing::debug!(%location, "Mutex::try_lock -> locked!");
                             Some(MutexGuard {
                                 guard,
+
+                                #[cfg(feature = "tracing")]
                                 location,
                                 _p: PhantomData,
                             })
                         }
                         Err(_) => {
+                            #[cfg(feature = "tracing")]
                             tracing::debug!(%location, "Mutex::try_lock -> already locked");
                             None
                         }
@@ -136,7 +145,10 @@ mod inner {
 
                 #[track_caller]
                 pub fn lock(&self) -> MutexGuard<'_, T, Lock> {
+                    #[cfg(feature = "tracing")]
                     let location = Location::caller();
+
+                    #[cfg(feature = "tracing")]
                     tracing::debug!(%location, "Mutex::lock");
 
                     let guard = self
@@ -144,11 +156,14 @@ mod inner {
                         .lock()
                         .map(|guard| MutexGuard {
                             guard,
+
+                            #[cfg(feature = "tracing")]
                             location,
                             _p: PhantomData,
                         })
                         .expect("loom mutex will never poison");
 
+                    #[cfg(feature = "tracing")]
                     tracing::debug!(%location, "Mutex::lock -> locked");
                     guard
                 }
@@ -184,6 +199,7 @@ mod inner {
             impl<T, Lock> Drop for MutexGuard<'_, T, Lock> {
                 #[track_caller]
                 fn drop(&mut self) {
+                    #[cfg(feature = "tracing")]
                     tracing::debug!(
                         location.dropped = %Location::caller(),
                         location.locked = %self.location,

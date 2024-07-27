@@ -16,7 +16,6 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use mutex_traits::ConstInit;
 use pin_project::pin_project;
 #[cfg(test)]
 mod tests;
@@ -202,7 +201,7 @@ impl<T> Mutex<T> {
 #[cfg(not(loom))]
 impl<T, L> Mutex<T, L>
 where
-    L: ScopedRawMutex + ConstInit,
+    L: ScopedRawMutex + mutex_traits::ConstInit,
 {
     /// Returns a new `Mutex` protecting the provided `data`, using the provided
     /// [`ScopedRawMutex`] implementation as the raw mutex.
