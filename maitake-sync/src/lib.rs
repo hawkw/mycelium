@@ -5,7 +5,7 @@
 #![cfg_attr(feature = "core-error", feature(error_in_core))]
 #![warn(missing_docs, missing_debug_implementations)]
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "alloc", test))]
 extern crate alloc;
 
 pub(crate) mod loom;

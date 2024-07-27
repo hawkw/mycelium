@@ -415,16 +415,15 @@ where
         }
     }
 
-    loom_const_fn! {
-        /// Returns a new `WaitQueue` with a single stored wakeup.
-        ///
-        /// The first call to [`wait`] on this queue will immediately succeed.
-        ///
-        /// [`wait`]: Self::wait
-        #[must_use]
-        pub(crate) fn new_woken_with_raw_mutex() -> Self {
-            Self::make(State::Woken, Mutex::with_raw_mutex(List::new()))
-        }
+    /// Returns a new `WaitQueue` with a single stored wakeup.
+    ///
+    /// The first call to [`wait`] on this queue will immediately succeed.
+    ///
+    /// [`wait`]: Self::wait
+    #[must_use]
+    #[cfg(not(loom))]
+    pub(crate) const fn new_woken_with_raw_mutex() -> Self {
+        Self::make(State::Woken, Mutex::with_raw_mutex(List::new()))
     }
 }
 
