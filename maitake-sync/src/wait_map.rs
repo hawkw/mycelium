@@ -87,6 +87,16 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 /// be used to provide the task with the desired data, as well as wake
 /// the task for further processing.
 ///
+/// # Overriding the blocking mutex
+///
+/// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
+/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
+/// use an alternative [`ScopedRawMutex`] implementation, use the
+/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// on overriding mutex
+/// implementations](crate::blocking#overriding-mutex-implementations) for more
+/// details.
+///
 /// # Examples
 ///
 /// Waking a single task at a time by calling [`wake`][wake]:
@@ -443,6 +453,14 @@ enum Wakeup<V> {
 
 impl<K: PartialEq, V> WaitMap<K, V> {
     /// Returns a new `WaitMap`.
+    ///
+    /// This constructor returns a `WaitMap` that uses a [`Spinlock`] as
+    /// the [`ScopedRawMutex`] implementation for wait list synchronization.
+    /// To use a different [`ScopedRawMutex`] implementation, use the
+    /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
+    /// [the documentation on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations)
+    /// for more details.
     #[must_use]
     #[cfg(not(loom))]
     pub const fn new() -> Self {
@@ -453,6 +471,14 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 
     /// Returns a new `WaitMap`.
+    ///
+    /// This constructor returns a `WaitMap` that uses a [`Spinlock`] as
+    /// the [`ScopedRawMutex`] implementation for wait list synchronization.
+    /// To use a different [`ScopedRawMutex`] implementation, use the
+    /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
+    /// [the documentation on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations)
+    /// for more details.
     #[must_use]
     #[cfg(loom)]
     pub fn new() -> Self {
@@ -469,6 +495,15 @@ where
     Lock: ScopedRawMutex + mutex_traits::ConstInit,
 {
     loom_const_fn! {
+
+        /// Returns a new `WaitMap`, using the provided [`ScopedRawMutex`]
+        /// implementation for wait-list synchronization.
+        ///
+        /// This constructor allows a `WaitMap` to be constructed with any type that
+        /// implements [`ScopedRawMutex`] as the underlying raw blocking mutex
+        /// implementation. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
         #[must_use]
         pub fn with_raw_mutex() -> Self {
             Self {

@@ -75,15 +75,6 @@ pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
 /// Trait abstracting over blocking [`RwLock`] implementations (`maitake-sync`'s
 /// version).
 ///
-/// This trait is essentially a duplicate of the [`lock_api::RawRwLock`] trait.
-/// `maitake-sync` defines its own version of `RawRwLock` so that the `lock_api`
-/// dependency can be optional, and can be disabled when only using
-/// `maitake-sync`'s spinlocks. When the "lock_api" feature flag is enabled,
-/// this trait will be implemented for all types implementing
-/// [`lock_api::RawRwLock`]. Users who wish to provide their own `RawRwLock`
-/// implementations should implement the [`lock_api::RawRwLock`] trait, *not*
-/// this trait.
-///
 /// # Safety
 ///
 /// Implementations of this trait must ensure that the `RwLock` is actually
@@ -92,9 +83,6 @@ pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
 /// exists.
 pub unsafe trait RawRwLock {
     /// Marker type which determines whether a lock guard should be [`Send`].
-    ///
-    /// Implementations should use  one of the [`lock_api::GuardSend`] or
-    /// [`lock_api::GuardNoSend`] helper types here.
     type GuardMarker;
 
     /// Acquires a shared lock, blocking the current thread/CPU core until it is

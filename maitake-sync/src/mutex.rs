@@ -16,8 +16,8 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use mutex_traits::ConstInit;
 use pin_project::pin_project;
-
 #[cfg(test)]
 mod tests;
 
@@ -33,7 +33,7 @@ mod tests;
 /// [`lock`] method will wait by causing the current [task] to yield until the
 /// shared data is available. This is in contrast to *blocking* mutices, such as
 /// [`std::sync::Mutex`], which wait by blocking the current thread[^1], or
-/// *spinlock* based mutices, such as [`spin::Mutex`], which wait by spinning
+/// *spinlock* based mutices, such as [`blocking::Mutex`], which wait by spinning
 /// in a busy loop.
 ///
 /// The [`futures-util`] crate also provides an implementation of an asynchronous
@@ -52,11 +52,21 @@ mod tests;
 /// will not acquire the lock until every other task ahead of it in the queue
 /// has had a chance to lock the shared data. Again, this is in contrast to
 /// [`std::sync::Mutex`], where fairness depends on the underlying OS' locking
-/// primitives; and [`spin::Mutex`] and [`futures_util::lock::Mutex`], which
+/// primitives; and [`blocking::Mutex`] and [`futures_util::lock::Mutex`], which
 /// will never guarantee fairness.
 ///
 /// Finally, this mutex does not implement [poisoning][^3], unlike
 /// [`std::sync::Mutex`].
+///
+/// # Overriding the blocking mutex
+///
+/// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
+/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
+/// use an alternative [`ScopedRawMutex`] implementation, use the
+/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// on overriding mutex
+/// implementations](crate::blocking#overriding-mutex-implementations) for more
+/// details.
 ///
 /// [^1]: And therefore require an operating system to manage threading.
 ///
@@ -77,7 +87,7 @@ mod tests;
 /// [task]: core::task
 /// [fairly queued]: https://en.wikipedia.org/wiki/Unbounded_nondeterminism#Fairness
 /// [`std::sync::Mutex`]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
-/// [`spin::Mutex`]: crate::spin::Mutex
+/// [`blocking::Mutex`]: crate::blocking::Mutex
 /// [`futures-util`]: https://crates.io/crate/futures-util
 /// [`futures_util::lock::Mutex`]: https://docs.rs/futures-util/latest/futures_util/lock/struct.Mutex.html
 /// [intrusive linked list]: crate::WaitQueue#implementation-notes
@@ -155,6 +165,13 @@ impl<T> Mutex<T> {
         /// The returned `Mutex` will be in the unlocked state and is ready for
         /// use.
         ///
+        /// This constructor returns a [`Mutex`] that uses a [`Spinlock`] as the
+        /// underlying blocking mutex implementation. To use an alternative
+        /// [`ScopedRawMutex`] implementation, use the [`Mutex::with_raw_mutex`]
+        /// constructor instead. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
+        ///
         /// # Examples
         ///
         /// ```
@@ -172,12 +189,36 @@ impl<T> Mutex<T> {
         #[must_use]
         pub fn new(data: T) -> Self {
             Self {
-                // The queue must start with a single store d wakeup, so that the
+                // The queue must start with a single stored wakeup, so that the
                 // first task that tries to acquire the lock will succeed
                 // immediately.
                 wait: WaitQueue::new_woken(),
                 data: UnsafeCell::new(data),
             }
+        }
+    }
+}
+
+#[cfg(not(loom))]
+impl<T, L> Mutex<T, L>
+where
+    L: ScopedRawMutex + ConstInit,
+{
+    /// Returns a new `Mutex` protecting the provided `data`, using the provided
+    /// [`ScopedRawMutex`] implementation as the raw mutex.
+    ///
+    /// The returned `Mutex` will be in the unlocked state and is ready for
+    /// use.
+    ///
+    /// This constructor allows a [`Mutex`] to be constructed with any type that
+    /// implements [`ScopedRawMutex`] as the underlying raw blocking mutex
+    /// implementation. See [the documentation on overriding mutex
+    /// implementations](crate::blocking#overriding-mutex-implementations)
+    /// for more details.
+    pub const fn with_raw_mutex(data: T) -> Self {
+        Self {
+            wait: WaitQueue::new_woken_with_raw_mutex(),
+            data: UnsafeCell::new(data),
         }
     }
 }
