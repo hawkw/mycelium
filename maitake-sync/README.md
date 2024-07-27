@@ -178,7 +178,6 @@ The following features are available (this list is incomplete; you can help by [
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `tracing`      | `false` | Enables support for [`tracing`] diagnostics. Requires `liballoc`.|
 | `core-error`   | `false` | Enables implementations of the [`core::error::Error` trait][core-error] for `maitake-sync`'s error types. *Requires a nightly Rust toolchain*. |
-| `lock_api`     | `false` | Enables support for the [`lock_api`] crate, which can be used to provide custom blocking `Mutex` implementations. See [the section on `lock_api` support](#lock_api-support) for details. |
 
 [`liballoc`]: https://doc.rust-lang.org/alloc/
 [`CachePadded`]: https://docs.rs/maitake-sync/latest/maitake_sync/util/struct.CachePadded.html
