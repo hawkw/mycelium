@@ -76,6 +76,7 @@ mod inner {
             use core::{
                 marker::PhantomData,
                 ops::{Deref, DerefMut},
+                panic::Location,
             };
 
             use alloc::fmt;
@@ -88,10 +89,11 @@ mod inner {
                 PhantomData<Lock>,
             );
 
-            pub(crate) struct MutexGuard<'a, T, Lock = crate::spin::Spinlock>(
-                loom::sync::MutexGuard<'a, T>,
-                PhantomData<Lock>,
-            );
+            pub(crate) struct MutexGuard<'a, T, Lock = crate::spin::Spinlock> {
+                guard: loom::sync::MutexGuard<'a, T>,
+                location: &'static Location<'static>,
+                _p: PhantomData<Lock>,
+            }
 
             impl<T, Lock> Mutex<T, Lock> {
                 #[track_caller]
@@ -106,26 +108,49 @@ mod inner {
 
                 #[track_caller]
                 pub fn with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
-                    let location = core::panic::Location::caller();
-                    tracing::debug!(%location, "Mutex::with: locking...",);
                     let mut guard = self.lock();
-                    tracing::debug!(%location, "Mutex::with: -> locked!",);
                     let res = f(&mut *guard);
-                    tracing::debug!(%location, "Mutex::with: -> unlocking...",);
                     res
                 }
 
                 #[track_caller]
                 pub fn try_lock(&self) -> Option<MutexGuard<'_, T, Lock>> {
-                    self.0.try_lock().map(|x| MutexGuard(x, PhantomData)).ok()
+                    let location = Location::caller();
+                    tracing::debug!(%location, "Mutex::try_lock");
+
+                    match self.0.try_lock() {
+                        Ok(guard) => {
+                            tracing::debug!(%location, "Mutex::try_lock -> locked!");
+                            Some(MutexGuard {
+                                guard,
+                                location,
+                                _p: PhantomData,
+                            })
+                        }
+                        Err(_) => {
+                            tracing::debug!(%location, "Mutex::try_lock -> already locked");
+                            None
+                        }
+                    }
                 }
 
                 #[track_caller]
                 pub fn lock(&self) -> MutexGuard<'_, T, Lock> {
-                    self.0
+                    let location = Location::caller();
+                    tracing::debug!(%location, "Mutex::lock");
+
+                    let guard = self
+                        .0
                         .lock()
-                        .map(|x| MutexGuard(x, PhantomData))
-                        .expect("loom mutex will never poison")
+                        .map(|guard| MutexGuard {
+                            guard,
+                            location,
+                            _p: PhantomData,
+                        })
+                        .expect("loom mutex will never poison");
+
+                    tracing::debug!(%location, "Mutex::lock -> locked");
+                    guard
                 }
             }
 
@@ -139,20 +164,31 @@ mod inner {
                 type Target = T;
                 #[inline]
                 fn deref(&self) -> &Self::Target {
-                    self.0.deref()
+                    self.guard.deref()
                 }
             }
 
             impl<T, Lock> DerefMut for MutexGuard<'_, T, Lock> {
                 #[inline]
                 fn deref_mut(&mut self) -> &mut Self::Target {
-                    self.0.deref_mut()
+                    self.guard.deref_mut()
                 }
             }
 
             impl<T: fmt::Debug, Lock> fmt::Debug for MutexGuard<'_, T, Lock> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    self.0.fmt(f)
+                    self.guard.fmt(f)
+                }
+            }
+
+            impl<T, Lock> Drop for MutexGuard<'_, T, Lock> {
+                #[track_caller]
+                fn drop(&mut self) {
+                    tracing::debug!(
+                        location.dropped = %Location::caller(),
+                        location.locked = %self.location,
+                        "MutexGuard::drop: unlocking",
+                    );
                 }
             }
         }
