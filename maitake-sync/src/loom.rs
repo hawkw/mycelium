@@ -215,7 +215,7 @@ mod inner {
 mod inner {
     #![allow(dead_code, unused_imports)]
     pub(crate) mod sync {
-        #[cfg(feature = "alloc")]
+        #[cfg(any(feature = "alloc", test))]
         pub use alloc::sync::*;
         pub use core::sync::*;
 
