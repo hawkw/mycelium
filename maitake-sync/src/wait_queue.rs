@@ -5,15 +5,11 @@
 #[cfg(any(test, maitake_ultraverbose))]
 use crate::util::fmt;
 use crate::{
-    blocking::ScopedRawMutex,
+    blocking::{DefaultMutex, Mutex, ScopedRawMutex},
     loom::{
         cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicUsize, Ordering::*},
-            spin::Mutex,
-        },
+        sync::atomic::{AtomicUsize, Ordering::*},
     },
-    spin::Spinlock,
     util::{CachePadded, WakeBatch},
     WaitResult,
 };
@@ -53,7 +49,7 @@ mod tests;
 /// # Overriding the blocking mutex
 ///
 /// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
-/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
+/// synchronize access to its wait list. By default, this is a [`DefaultMutex`]. To
 /// use an alternative [`ScopedRawMutex`] implementation, use the
 /// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
 /// on overriding mutex
@@ -187,7 +183,7 @@ mod tests;
 /// [mutex]: crate::Mutex
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
-pub struct WaitQueue<Lock: ScopedRawMutex = Spinlock> {
+pub struct WaitQueue<Lock: ScopedRawMutex = DefaultMutex> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -231,7 +227,7 @@ pub struct WaitQueue<Lock: ScopedRawMutex = Spinlock> {
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a, Lock: ScopedRawMutex = Spinlock> {
+pub struct Wait<'a, Lock: ScopedRawMutex = DefaultMutex> {
     /// The [`WaitQueue`] being waited on.
     queue: &'a WaitQueue<Lock>,
 
@@ -369,7 +365,7 @@ impl WaitQueue {
     loom_const_fn! {
         /// Returns a new `WaitQueue`.
         ///
-        /// This constructor returns a `WaitQueue` that uses a [`Spinlock`] as
+        /// This constructor returns a `WaitQueue` that uses a [`DefaultMutex`] as
         /// the [`ScopedRawMutex`] implementation for wait list synchronization.
         /// To use a different [`ScopedRawMutex`] implementation, use the
         /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
@@ -378,27 +374,14 @@ impl WaitQueue {
         /// for more details.
         #[must_use]
         pub fn new() -> Self {
-            Self::make(State::Empty, Mutex::new(List::new()))
-        }
-    }
-
-    loom_const_fn! {
-        /// Returns a new `WaitQueue` with a single stored wakeup.
-        ///
-        /// The first call to [`wait`] on this queue will immediately succeed.
-        ///
-         /// [`wait`]: Self::wait
-        // TODO(eliza): should this be a public API?
-        #[must_use]
-        pub(crate) fn new_woken() -> Self {
-            Self::make(State::Woken, Mutex::new(List::new()))
+            Self::with_raw_mutex(DefaultMutex::new())
         }
     }
 }
 
 impl<Lock> WaitQueue<Lock>
 where
-    Lock: ScopedRawMutex + mutex_traits::ConstInit,
+    Lock: ScopedRawMutex,
 {
     loom_const_fn! {
         /// Returns a new `WaitQueue`, using the provided [`ScopedRawMutex`]
@@ -410,33 +393,30 @@ where
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
         #[must_use]
-        pub fn with_raw_mutex() -> Self {
-            Self::make(State::Empty, Mutex::with_raw_mutex(List::new()))
+        pub fn with_raw_mutex(lock: Lock) -> Self {
+            Self::make(State::Empty, lock)
         }
     }
 
-    /// Returns a new `WaitQueue` with a single stored wakeup.
-    ///
-    /// The first call to [`wait`] on this queue will immediately succeed.
-    ///
-    /// [`wait`]: Self::wait
-    #[must_use]
-    #[cfg(not(loom))]
-    pub(crate) const fn new_woken_with_raw_mutex() -> Self {
-        Self::make(State::Woken, Mutex::with_raw_mutex(List::new()))
+    loom_const_fn! {
+        /// Returns a new `WaitQueue` with a single stored wakeup.
+        ///
+        /// The first call to [`wait`] on this queue will immediately succeed.
+        ///
+        /// [`wait`]: Self::wait
+        // TODO(eliza): should this be a public API?
+        #[must_use]
+        pub(crate) fn new_woken(lock: Lock) -> Self {
+            Self::make(State::Woken, lock)
+        }
     }
-}
 
-impl<Lock> WaitQueue<Lock>
-where
-    Lock: ScopedRawMutex,
-{
     loom_const_fn! {
         #[must_use]
-        fn make(state: State, queue: Mutex<List<Waiter>, Lock>) -> Self {
+        fn make(state: State, lock: Lock) -> Self {
             Self {
                 state: CachePadded::new(AtomicUsize::new(state.into_usize())),
-                queue,
+                queue: Mutex::with_raw_mutex(List::new(), lock),
             }
         }
     }
@@ -1534,7 +1514,7 @@ feature! {
     /// ```
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned<Lock: ScopedRawMutex = Spinlock> {
+    pub struct WaitOwned<Lock: ScopedRawMutex = DefaultMutex> {
         /// The `WaitQueue` being waited on.
         queue: Arc<WaitQueue<Lock>>,
 

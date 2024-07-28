@@ -33,15 +33,37 @@
 pub mod once;
 
 pub use self::once::{InitOnce, Lazy};
-#[deprecated(
-    since = "0.1.3",
-    note = "moved to the `blocking` module, prefer importing from there"
-)]
-pub use crate::blocking::*;
+
 use crate::{
+    blocking::{self, RawMutex, RawRwLock},
     loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
     util::{fmt, Backoff},
 };
+
+/// A type alias for a [`blocking::Mutex`] which explicitly uses a [`Spinlock`]
+/// for synchronization. See the [`blocking::Mutex`] type's documentation for
+/// details.
+pub type Mutex<T> = blocking::Mutex<T, Spinlock>;
+
+/// A type alias for a [`blocking::MutexGuard`] returned by a
+/// [`spin::Mutex`](super::Mutex). See the [`blocking::MutexGuard`] type's
+/// documentation for details.
+pub type MutexGuard<'a, T> = blocking::MutexGuard<'a, T, Spinlock>;
+
+/// A type alias for a [`blocking::RwLock`] which explicitly uses a [`RwSpinlock`]
+/// for synchronization. See the [`blocking::RwLock`] type's documentation for
+/// details.
+pub type RwLock<T> = blocking::RwLock<T, RwSpinlock>;
+
+/// A type alias for a [`blocking::RwLockReadGuard`] returned by a
+/// [`spin::RwLock`](super::RwLock). See the [`blocking::RwLockReadGuard`] type's
+/// documentation for details.
+pub type RwLockReadGuard<'a, T> = blocking::RwLockReadGuard<'a, T, RwSpinlock>;
+
+/// A type alias for a [`blocking::RwLockWriteGuard`] returned by a
+/// [`spin::RwLock`](super::RwLock). See the [`blocking::RwLockWriteGuard`] type's
+/// documentation for details.
+pub type RwLockWriteGuard<'a, T> = blocking::RwLockWriteGuard<'a, T, RwSpinlock>;
 
 /// A spinlock-based [`RawMutex`] implementation.
 ///

@@ -24,12 +24,14 @@
 //!
 //! # overriding mutex implementations
 //!
-//! By default, the [`Mutex`] and [`RwLock`] types are implemented using simple
-//! _[spinlocks]_, which wait for the lock to become available by _spinning_:
-//! repeatedly checking an atomic value in a loop, executing [spin-loop hint
-//! instructions] until the lock value changes. These spinlock implementations
-//! are represented by the [`Spinlock`] and [`RwSpinlock`] types in the
-//! [`spin`](crate::spin)  module.
+//! By default, the [`Mutex`] type uses a [`DefaultMutex`] as the underlying
+//! blocking strategy. This type attempts to choose a suitable implementation
+//! for the blocking mutex based on the currently available [feature flags]. When
+//! the `std` feature is not enabled, this is typically a _[spinlock]_, which
+//! waits for the lock to become available by _spinning_: repeatedly checking an
+//! atomic value in a loop, executing [spin-loop hint instructions] until the
+//! lock value changes. These spinlock implementations are represented by the
+//! [`Spinlock`] and [`RwSpinlock`] types in the [`spin`](crate::spin) module.
 //!
 //! Spinlocks are simple to implement and, thanks to the Rust standard library
 //! abstracting over atomic operations, portable. The default spinlock will work
@@ -133,7 +135,7 @@
 //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
 //! [reader-writer lock]:
 //!     https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
-//! [spinlocks]: https://en.wikipedia.org/wiki/Spinlock
+//! [spinlock]: https://en.wikipedia.org/wiki/Spinlock
 //! [spin-loop hint instructions]: core::hint::spin_loop
 //! [`Spinlock`]: crate::spin::Spinlock
 //! [`RwSpinlock`]: crate::spin::RwSpinlock
@@ -149,11 +151,15 @@
 //! [`mutex` crate]: https://crates.io/crates/mutex
 //! [`lock_api`]: https://crates.io/crates/lock_api
 //! [`critical-section`]: https://crates.io/crates/critical-section
-//! [`std::sync::Mutex`]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
+//! [`std::sync::Mutex`]:
+//!     https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
+//! [feature flags]: crate#features
 mod default_mutex;
 pub(crate) mod mutex;
 pub(crate) mod rwlock;
 
 pub use self::{mutex::*, rwlock::*};
+
 pub use default_mutex::DefaultMutex;
+
 pub use mutex_traits::ConstInit;

@@ -4,9 +4,8 @@
 //!
 //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
 use crate::{
-    blocking::ScopedRawMutex,
+    blocking::{DefaultMutex, ScopedRawMutex},
     loom::cell::{MutPtr, UnsafeCell},
-    spin::Spinlock,
     util::fmt,
     wait_queue::{self, WaitQueue},
 };
@@ -60,8 +59,9 @@ mod tests;
 /// # Overriding the blocking mutex
 ///
 /// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
-/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
-/// use an alternative [`ScopedRawMutex`] implementation, use the
+/// synchronize access to its wait list. By default, the [`DefaultMutex`] type
+/// is used as the underlying mutex implementation. To use an alternative
+/// [`ScopedRawMutex`] implementation, use the
 /// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
 /// on overriding mutex
 /// implementations](crate::blocking#overriding-mutex-implementations) for more
@@ -95,7 +95,7 @@ mod tests;
 /// [storage]: https://mycelium.elizas.website/maitake/task/trait.Storage.html
 /// [no-unwinding]: https://mycelium.elizas.website/maitake/index.html#maitake-does-not-support-unwinding
 
-pub struct Mutex<T: ?Sized, L: ScopedRawMutex = Spinlock> {
+pub struct Mutex<T: ?Sized, L: ScopedRawMutex = DefaultMutex> {
     wait: WaitQueue<L>,
     data: UnsafeCell<T>,
 }
@@ -116,7 +116,7 @@ pub struct Mutex<T: ?Sized, L: ScopedRawMutex = Spinlock> {
 /// [`try_lock`]: Mutex::try_lock
 /// [RAII]: https://rust-unofficial.github.io/patterns/patterns/behavioural/RAII.html
 #[must_use = "if unused, the `Mutex` will immediately unlock"]
-pub struct MutexGuard<'a, T: ?Sized, L: ScopedRawMutex = Spinlock> {
+pub struct MutexGuard<'a, T: ?Sized, L: ScopedRawMutex = DefaultMutex> {
     /// /!\ WARNING: semi-load-bearing drop order /!\
     ///
     /// This struct's field ordering is important.
@@ -145,7 +145,7 @@ pub struct MutexGuard<'a, T: ?Sized, L: ScopedRawMutex = Spinlock> {
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[pin_project]
 #[derive(Debug)]
-pub struct Lock<'a, T: ?Sized, L: ScopedRawMutex = Spinlock> {
+pub struct Lock<'a, T: ?Sized, L: ScopedRawMutex = DefaultMutex> {
     #[pin]
     wait: wait_queue::Wait<'a, L>,
     mutex: &'a Mutex<T, L>,
@@ -164,7 +164,7 @@ impl<T> Mutex<T> {
         /// The returned `Mutex` will be in the unlocked state and is ready for
         /// use.
         ///
-        /// This constructor returns a [`Mutex`] that uses a [`Spinlock`] as the
+        /// This constructor returns a [`Mutex`] that uses a [`DefaultMutex`] as the
         /// underlying blocking mutex implementation. To use an alternative
         /// [`ScopedRawMutex`] implementation, use the [`Mutex::with_raw_mutex`]
         /// constructor instead. See [the documentation on overriding mutex
@@ -187,37 +187,32 @@ impl<T> Mutex<T> {
         /// ```
         #[must_use]
         pub fn new(data: T) -> Self {
-            Self {
-                // The queue must start with a single stored wakeup, so that the
-                // first task that tries to acquire the lock will succeed
-                // immediately.
-                wait: WaitQueue::new_woken(),
-                data: UnsafeCell::new(data),
-            }
+            Self::with_raw_mutex(data, DefaultMutex::new())
         }
     }
 }
 
-#[cfg(not(loom))]
-impl<T, L> Mutex<T, L>
-where
-    L: ScopedRawMutex + mutex_traits::ConstInit,
-{
-    /// Returns a new `Mutex` protecting the provided `data`, using the provided
-    /// [`ScopedRawMutex`] implementation as the raw mutex.
-    ///
-    /// The returned `Mutex` will be in the unlocked state and is ready for
-    /// use.
-    ///
-    /// This constructor allows a [`Mutex`] to be constructed with any type that
-    /// implements [`ScopedRawMutex`] as the underlying raw blocking mutex
-    /// implementation. See [the documentation on overriding mutex
-    /// implementations](crate::blocking#overriding-mutex-implementations)
-    /// for more details.
-    pub const fn with_raw_mutex(data: T) -> Self {
-        Self {
-            wait: WaitQueue::new_woken_with_raw_mutex(),
-            data: UnsafeCell::new(data),
+impl<T, L: ScopedRawMutex> Mutex<T, L> {
+    loom_const_fn! {
+        /// Returns a new `Mutex` protecting the provided `data`, using the provided
+        /// [`ScopedRawMutex`] implementation as the raw mutex.
+        ///
+        /// The returned `Mutex` will be in the unlocked state and is ready for
+        /// use.
+        ///
+        /// This constructor allows a [`Mutex`] to be constructed with any type that
+        /// implements [`ScopedRawMutex`] as the underlying raw blocking mutex
+        /// implementation. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
+        pub fn with_raw_mutex(data: T, lock: L) -> Self {
+            Self {
+                // The queue must start with a single stored wakeup, so that the
+                // first task that tries to acquire the lock will succeed
+                // immediately.
+                wait: WaitQueue::<L>::new_woken(lock),
+                data: UnsafeCell::new(data),
+            }
         }
     }
 }
@@ -297,14 +292,6 @@ impl<T: ?Sized, L: ScopedRawMutex> Mutex<T, L> {
     ///
     /// Since this call borrows the `Mutex` mutably, no actual locking needs to
     /// take place -- the mutable borrow statically guarantees no locks exist.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut lock = maitake_sync::spin::Mutex::new(0);
-    /// *lock.get_mut() = 10;
-    /// assert_eq!(*lock.try_lock().unwrap(), 10);
-    /// ```
     pub fn get_mut(&mut self) -> &mut T {
         unsafe {
             // Safety: since this call borrows the `Mutex` mutably, no actual
