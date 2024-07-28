@@ -83,7 +83,8 @@ pub struct RwSpinlock {
 
 impl Spinlock {
     loom_const_fn! {
-        pub(crate) fn new() -> Self {
+        /// Returns a new `Spinlock`, in the unlocked state.
+        pub fn new() -> Self {
             Self { locked: AtomicBool::new(false) }
         }
     }

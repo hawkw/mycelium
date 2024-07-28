@@ -14,7 +14,7 @@ use mycelium_util::intrusive::{list, Linked, List};
 use mycelium_util::math::Logarithm;
 use mycelium_util::sync::{
     atomic::{AtomicUsize, Ordering::*},
-    spin,
+    blocking::Mutex,
 };
 
 #[derive(Debug)]
@@ -41,7 +41,7 @@ pub struct Alloc<const FREE_LISTS: usize> {
     /// Array of free lists by "order". The order of an block is the number
     /// of times the minimum page size must be doubled to reach that block's
     /// size.
-    free_lists: [spin::Mutex<List<Free>>; FREE_LISTS],
+    free_lists: [Mutex<List<Free>>; FREE_LISTS],
 }
 
 type Result<T> = core::result::Result<T, AllocErr>;
@@ -65,7 +65,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
         //
         // see https://github.com/rust-lang/rust-clippy/issues/7665
         #[allow(clippy::declare_interior_mutable_const)]
-        const ONE_FREE_LIST: spin::Mutex<List<Free>> = spin::Mutex::new(List::new());
+        const ONE_FREE_LIST: Mutex<List<Free>> = Mutex::new(List::new());
 
         // ensure we don't split memory into regions too small to fit the free
         // block header in them.
@@ -190,16 +190,12 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
             let _span =
                 tracing::debug_span!("free_list", order, size = self.size_for_order(order),)
                     .entered();
-            match list.try_lock() {
-                Some(list) => {
-                    for entry in list.iter() {
-                        tracing::debug!("entry={entry:?}");
-                    }
+            list.try_with_lock(|list| {
+                for entry in list.iter() {
+                    tracing::debug!("entry={entry:?}");
                 }
-                None => {
-                    tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>");
-                }
-            }
+            })
+            .unwrap_or_else(|| tracing::debug!("<THIS IS THE ONE WHERE THE PANIC HAPPENED LOL>"))
         }
     }
 
@@ -283,29 +279,35 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
             tracing::trace!(curr_order = idx + order);
 
             // Is there an available block on this free list?
-            let mut free_list = free_list.lock();
-            if let Some(mut block) = free_list.pop_back() {
-                let block = unsafe { block.as_mut() };
-                tracing::trace!(?block, ?free_list, "found");
+            let allocated = free_list.with_lock(|free_list| {
+                if let Some(mut block) = free_list.pop_back() {
+                    let block = unsafe { block.as_mut() };
+                    tracing::trace!(?block, ?free_list, "found");
 
-                // Unless this is the free list on which we'd expect to find a
-                // block of the requested size (the first free list we checked),
-                // the block is larger than the requested allocation. In that
-                // case, we'll need to split it down and push the remainder onto
-                // the appropriate free lists.
-                if idx > 0 {
-                    let curr_order = idx + order;
-                    tracing::trace!(?curr_order, ?order, "split down");
-                    self.split_down(block, curr_order, order);
+                    // Unless this is the free list on which we'd expect to find a
+                    // block of the requested size (the first free list we checked),
+                    // the block is larger than the requested allocation. In that
+                    // case, we'll need to split it down and push the remainder onto
+                    // the appropriate free lists.
+                    if idx > 0 {
+                        let curr_order = idx + order;
+                        tracing::trace!(?curr_order, ?order, "split down");
+                        self.split_down(block, curr_order, order);
+                    }
+
+                    // Change the block's magic to indicate that it is allocated, so
+                    // that we can avoid checking the free list if we try to merge
+                    // it before the first word is written to.
+                    block.make_busy();
+                    tracing::trace!(?block, "made busy");
+                    self.allocated_size.fetch_add(block.size(), Release);
+                    Some(block.into())
+                } else {
+                    None
                 }
-
-                // Change the block's magic to indicate that it is allocated, so
-                // that we can avoid checking the free list if we try to merge
-                // it before the first word is written to.
-                block.make_busy();
-                tracing::trace!(?block, "made busy");
-                self.allocated_size.fetch_add(block.size(), Release);
-                return Some(block.into());
+            });
+            if let Some(block) = allocated {
+                return Some(block);
             }
         }
         None
@@ -334,25 +336,29 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
         // Starting at the minimum order on which the freed range will fit
         for (idx, free_list) in self.free_lists.as_ref()[min_order..].iter().enumerate() {
             let curr_order = idx + min_order;
-            let mut free_list = free_list.lock();
-
-            // Is there a free buddy block at this order?
-            if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, &mut free_list) } {
-                // Okay, merge the blocks, and try the next order!
-                if buddy < block {
-                    mem::swap(&mut block, &mut buddy);
+            let done = free_list.with_lock(|free_list| {
+                // Is there a free buddy block at this order?
+                if let Some(mut buddy) = unsafe { self.take_buddy(block, curr_order, free_list) } {
+                    // Okay, merge the blocks, and try the next order!
+                    if buddy < block {
+                        mem::swap(&mut block, &mut buddy);
+                    }
+                    unsafe {
+                        block.as_mut().merge(buddy.as_mut());
+                    }
+                    tracing::trace!(?buddy, ?block, "merged with buddy");
+                    // Keep merging!
+                    false
+                } else {
+                    // Okay, we can't keep merging, so push the block on the current
+                    // free list.
+                    free_list.push_front(block);
+                    tracing::trace!("deallocated block");
+                    self.allocated_size.fetch_sub(size, Release);
+                    true
                 }
-                unsafe {
-                    block.as_mut().merge(buddy.as_mut());
-                }
-                tracing::trace!(?buddy, ?block, "merged with buddy");
-                // Keep merging!
-            } else {
-                // Okay, we can't keep merging, so push the block on the current
-                // free list.
-                free_list.push_front(block);
-                tracing::trace!("deallocated block");
-                self.allocated_size.fetch_sub(size, Release);
+            });
+            if done {
                 return Ok(());
             }
         }
@@ -369,7 +375,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
         if order > free_lists.len() {
             todo!("(eliza): choppity chop chop down the block!");
         }
-        free_lists[order].lock().push_front(block);
+        free_lists[order].with_lock(|list| list.push_front(block));
         let mut sz = self.heap_size.load(Acquire);
         while let Err(actual) =
             // TODO(eliza): if this overflows that's bad news lol...
@@ -473,7 +479,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
                 .split_back(size, self.offset())
                 .expect("block too small to split!");
             tracing::trace!(?block, ?new_block);
-            free_lists[order].lock().push_front(new_block);
+            free_lists[order].with_lock(|list| list.push_front(new_block));
         }
     }
 }

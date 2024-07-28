@@ -1,5 +1,8 @@
 use maitake::sync::WaitQueue;
-use mycelium_util::{fmt, sync::spin::Mutex};
+use mycelium_util::{
+    fmt,
+    sync::spin::{self, Mutex},
+};
 use pc_keyboard::{layouts, Keyboard};
 pub use pc_keyboard::{DecodedKey, KeyCode};
 
@@ -19,10 +22,11 @@ pub struct Ps2Keyboard {
 
 static PS2_KEYBOARD: Ps2Keyboard = Ps2Keyboard {
     buf: thingbuf::StaticThingBuf::new(),
-    kbd: Mutex::new(
+    kbd: Mutex::with_raw_mutex(
         Keyboard::<layouts::Us104Key, pc_keyboard::ScancodeSet1>::new(
             pc_keyboard::HandleControl::MapLettersToUnicode,
         ),
+        spin::Spinlock::new(),
     ),
     waiters: WaitQueue::new(),
 };
