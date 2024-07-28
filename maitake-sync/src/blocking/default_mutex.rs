@@ -60,6 +60,7 @@ mod loom_impl {
     use core::panic::Location;
     use mutex_traits::ScopedRawMutex;
 
+    #[derive(Debug, Default)]
     pub struct DefaultMutex(loom::sync::Mutex<()>);
 
     unsafe impl ScopedRawMutex for DefaultMutex {
@@ -119,9 +120,31 @@ mod loom_impl {
 
 #[cfg(all(not(loom), feature = "std"))]
 mod std_impl {
-    use mutex_traits::ScopedRawMutex;
+    use mutex_traits::{ConstInit, ScopedRawMutex};
 
+    #[derive(Debug)]
+    #[must_use]
     pub struct DefaultMutex(std::sync::Mutex<()>);
+
+    impl DefaultMutex {
+        #[inline]
+        pub const fn new() -> Self {
+            Self(std::sync::Mutex::new(()))
+        }
+    }
+
+    impl ConstInit for DefaultMutex {
+        // As is traditional, clippy is wrong about this.
+        #[allow(clippy::declare_interior_mutable_const)]
+        const INIT: Self = Self::new();
+    }
+
+    impl Default for DefaultMutex {
+        #[inline]
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     unsafe impl ScopedRawMutex for DefaultMutex {
         #[track_caller]
@@ -147,21 +170,40 @@ mod std_impl {
 #[cfg(all(not(loom), not(feature = "std"), feature = "critical-section"))]
 mod cs_impl {
     use crate::spin::Spinlock;
-    use mutex_traits::ScopedRawMutex;
+    use mutex_traits::{ConstInit, ScopedRawMutex};
 
+    #[derive(Debug)]
     pub struct DefaultMutex(Spinlock);
+
+    impl DefaultMutex {
+        #[inline]
+        pub const fn new() -> Self {
+            Self(Spinlock::new())
+        }
+    }
+
+    impl ConstInit for DefaultMutex {
+        const INIT: Self = Self::new();
+    }
+
+    impl Default for DefaultMutex {
+        #[inline]
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     unsafe impl ScopedRawMutex for DefaultMutex {
         #[track_caller]
         #[inline]
         fn with_lock<R>(&self, f: impl FnOnce() -> R) -> R {
-            self.0.with_lock(|| critical_section::with(|| f()))
+            self.0.with_lock(|| critical_section::with(|_cs| f()))
         }
 
         #[track_caller]
         #[inline]
         fn try_with_lock<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
-            self.0.try_with_lock(|| critical_section::with(|| f()))
+            self.0.try_with_lock(|| critical_section::with(|_cs| f()))
         }
 
         #[inline]
@@ -174,26 +216,77 @@ mod cs_impl {
 #[cfg(all(not(loom), not(feature = "std"), not(feature = "critical-section")))]
 mod spin_impl {
     use crate::spin::Spinlock;
-    use mutex_traits::ScopedRawMutex;
+    use mutex_traits::{ConstInit, ScopedRawMutex};
 
+    #[derive(Debug)]
     pub struct DefaultMutex(Spinlock);
+
+    impl DefaultMutex {
+        #[inline]
+        pub const fn new() -> Self {
+            Self(Spinlock::new())
+        }
+    }
+
+    impl ConstInit for DefaultMutex {
+        const INIT: Self = Self::new();
+    }
+
+    impl Default for DefaultMutex {
+        #[inline]
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     unsafe impl ScopedRawMutex for DefaultMutex {
         #[track_caller]
         #[inline]
         fn with_lock<R>(&self, f: impl FnOnce() -> R) -> R {
-            self.0.with_lock(|| critical_section::with(|| f()))
+            self.0.with_lock(f)
         }
 
         #[track_caller]
         #[inline]
         fn try_with_lock<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
-            self.0.try_with_lock(|| critical_section::with(|| f()))
+            self.0.try_with_lock(f)
         }
 
         #[inline]
         fn is_locked(&self) -> bool {
             self.0.is_locked()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::DefaultMutex;
+
+    // Check that a `DefaultMutex` will always implement the traits we expect it
+    // to.
+    #[test]
+    fn default_mutex_trait_impls() {
+        fn assert_scoped_raw_mutex<T: mutex_traits::ScopedRawMutex>() {}
+        fn assert_send_and_sync<T: Send + Sync>() {}
+        fn assert_default<T: Default>() {}
+        fn assert_debug<T: core::fmt::Debug>() {}
+
+        assert_scoped_raw_mutex::<DefaultMutex>();
+        assert_send_and_sync::<DefaultMutex>();
+        assert_default::<DefaultMutex>();
+        assert_debug::<DefaultMutex>();
+    }
+
+    // Check that a non-`loom` `DefaultMutex` has a const-fn constructor, and
+    // implements `ConstInit`.
+    #[cfg(not(loom))]
+    #[test]
+    fn const_constructor() {
+        fn assert_const_init<T: mutex_traits::ConstInit>() {}
+
+        assert_const_init::<DefaultMutex>();
+
+        static _MY_COOL_MUTEX: DefaultMutex = DefaultMutex::new();
     }
 }
