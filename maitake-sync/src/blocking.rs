@@ -150,8 +150,10 @@
 //! [`lock_api`]: https://crates.io/crates/lock_api
 //! [`critical-section`]: https://crates.io/crates/critical-section
 //! [`std::sync::Mutex`]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
+mod default_mutex;
 pub(crate) mod mutex;
 pub(crate) mod rwlock;
 
 pub use self::{mutex::*, rwlock::*};
+pub use default_mutex::DefaultMutex;
 pub use mutex_traits::ConstInit;
