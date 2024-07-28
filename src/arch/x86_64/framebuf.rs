@@ -54,7 +54,8 @@ pub(super) fn init(bootinfo: &mut BootInfo) -> bool {
     }
 
     // Okay, try to initialize the framebuffer
-    let Optional::Some(framebuffer) = mem::replace(&mut bootinfo.framebuffer, Optional::None) else {
+    let Optional::Some(framebuffer) = mem::replace(&mut bootinfo.framebuffer, Optional::None)
+    else {
         // The boot info does not contain a framebuffer configuration. Nothing
         // for us to do!
         return false;
@@ -73,7 +74,10 @@ pub(super) fn init(bootinfo: &mut BootInfo) -> bool {
             x => unimplemented!("hahaha wtf, found a weird pixel format: {:?}", x),
         },
     };
-    FRAMEBUFFER.init((cfg, spin::Mutex::new(framebuffer)));
+    FRAMEBUFFER.init((
+        cfg,
+        spin::Mutex::with_raw_mutex(framebuffer, spin::Spinlock::new()),
+    ));
     true
 }
 

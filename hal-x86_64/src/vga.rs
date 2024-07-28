@@ -5,12 +5,15 @@ use mycelium_util::{
 };
 use volatile::Volatile;
 static BUFFER: Lazy<spin::Mutex<Buffer>> = Lazy::new(|| {
-    spin::Mutex::new(Buffer {
-        col: 0,
-        row: 0,
-        color: ColorSpec::new(Color::LightGray, Color::Black),
-        buf: Volatile::new(unsafe { &mut *(0xb8000u64 as *mut Buf) }),
-    })
+    spin::Mutex::with_raw_mutex(
+        Buffer {
+            col: 0,
+            row: 0,
+            color: ColorSpec::new(Color::LightGray, Color::Black),
+            buf: Volatile::new(unsafe { &mut *(0xb8000u64 as *mut Buf) }),
+        },
+        spin::Spinlock::new(),
+    )
 });
 
 pub fn writer() -> Writer {
