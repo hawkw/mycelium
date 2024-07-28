@@ -10,7 +10,7 @@ use crate::{
         cell::UnsafeCell,
         sync::{
             atomic::{AtomicUsize, Ordering::*},
-            spin::{Mutex, MutexGuard},
+            blocking::{Mutex, MutexGuard},
         },
     },
     spin::Spinlock,
@@ -318,35 +318,8 @@ impl Semaphore {
         /// [`MAX_PERMITS`]: Self::MAX_PERMITS
         #[must_use]
         pub fn new(permits: usize) -> Self {
-            Self::make(
-                permits,
-                Mutex::new(SemQueue::new())
-            )
+            Self::with_raw_mutex(permits, Spinlock::new())
         }
-    }
-}
-
-#[cfg(not(loom))]
-impl<Lock> Semaphore<Lock>
-where
-    Lock: RawMutex + mutex_traits::ConstInit,
-{
-    /// Returns a new `Semaphore` with `permits` permits available, using the
-    /// provided [`RawMutex`] implementation.
-    ///
-    /// This constructor allows a [`Semaphore`] to be constructed with any type that
-    /// implements [`RawMutex`] as the underlying raw blocking mutex
-    /// implementation. See [the documentation on overriding mutex
-    /// implementations](crate::blocking#overriding-mutex-implementations)
-    /// for more details.
-    ///
-    /// # Panics
-    ///
-    /// If `permits` is less than [`MAX_PERMITS`] ([`usize::MAX`] - 1).
-    ///
-    /// [`MAX_PERMITS`]: Self::MAX_PERMITS
-    pub const fn with_raw_mutex(permits: usize) -> Self {
-        Self::make(permits, Mutex::with_raw_mutex(SemQueue::new()))
     }
 }
 
@@ -362,17 +335,32 @@ impl<Lock: RawMutex> Semaphore<Lock> {
     const CLOSED: usize = usize::MAX;
 
     loom_const_fn! {
-        fn make(permits: usize, waiters: Mutex<SemQueue, Lock>) -> Self {
+            /// Returns a new `Semaphore` with `permits` permits available, using the
+        /// provided [`RawMutex`] implementation.
+        ///
+        /// This constructor allows a [`Semaphore`] to be constructed with any type that
+        /// implements [`RawMutex`] as the underlying raw blocking mutex
+        /// implementation. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
+        ///
+        /// # Panics
+        ///
+        /// If `permits` is less than [`MAX_PERMITS`] ([`usize::MAX`] - 1).
+        ///
+        /// [`MAX_PERMITS`]: Self::MAX_PERMITS
+        pub fn with_raw_mutex(permits: usize, lock: Lock) -> Self {
             assert!(
                 permits <= Self::MAX_PERMITS,
                 "a semaphore may not have more than Semaphore::MAX_PERMITS permits",
             );
             Self {
                 permits: CachePadded::new(AtomicUsize::new(permits)),
-                waiters,
+                waiters: Mutex::with_raw_mutex(SemQueue::new(), lock)
             }
         }
     }
+
     /// Returns the number of permits currently available in this semaphore, or
     /// 0 if the semaphore is [closed].
     ///

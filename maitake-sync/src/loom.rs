@@ -72,7 +72,7 @@ mod inner {
     pub(crate) mod sync {
         pub(crate) use loom::sync::*;
 
-        pub(crate) mod spin {
+        pub(crate) mod blocking {
             use core::{
                 marker::PhantomData,
                 ops::{Deref, DerefMut},
@@ -219,7 +219,7 @@ mod inner {
         pub use alloc::sync::*;
         pub use core::sync::*;
 
-        pub use crate::spin;
+        pub use crate::blocking;
     }
 
     pub(crate) mod atomic {

@@ -3,15 +3,11 @@
 //!
 //! See the documentation for the [`WaitMap`] type for details.
 use crate::{
-    blocking::ScopedRawMutex,
+    blocking::{DefaultMutex, Mutex, ScopedRawMutex},
     loom::{
         cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicUsize, Ordering::*},
-            spin::Mutex,
-        },
+        sync::atomic::{AtomicUsize, Ordering::*},
     },
-    spin::Spinlock,
     util::{fmt, CachePadded, WakeBatch},
 };
 use cordyceps::{
@@ -90,7 +86,7 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 /// # Overriding the blocking mutex
 ///
 /// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
-/// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
+/// synchronize access to its wait list. By default, this is a [`DefaultMutex`]. To
 /// use an alternative [`ScopedRawMutex`] implementation, use the
 /// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
 /// on overriding mutex
@@ -188,7 +184,7 @@ const fn notified<T>(data: T) -> Poll<WaitResult<T>> {
 /// [ilist]: cordyceps::List
 /// [intrusive]: https://fuchsia.dev/fuchsia-src/development/languages/c-cpp/fbl_containers_guide/introduction
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
-pub struct WaitMap<K: PartialEq, V, Lock: ScopedRawMutex = Spinlock> {
+pub struct WaitMap<K: PartialEq, V, Lock: ScopedRawMutex = DefaultMutex> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -246,7 +242,7 @@ where
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a, K: PartialEq, V, Lock: ScopedRawMutex = Spinlock> {
+pub struct Wait<'a, K: PartialEq, V, Lock: ScopedRawMutex = DefaultMutex> {
     /// The [`WaitMap`] being waited on from.
     queue: &'a WaitMap<K, V, Lock>,
 
@@ -452,39 +448,19 @@ enum Wakeup<V> {
 // === impl WaitMap ===
 
 impl<K: PartialEq, V> WaitMap<K, V> {
-    /// Returns a new `WaitMap`.
-    ///
-    /// This constructor returns a `WaitMap` that uses a [`Spinlock`] as
-    /// the [`ScopedRawMutex`] implementation for wait list synchronization.
-    /// To use a different [`ScopedRawMutex`] implementation, use the
-    /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
-    /// [the documentation on overriding mutex
-    /// implementations](crate::blocking#overriding-mutex-implementations)
-    /// for more details.
-    #[must_use]
-    #[cfg(not(loom))]
-    pub const fn new() -> Self {
-        Self {
-            state: Self::mk_state(),
-            queue: Mutex::new(List::new()),
-        }
-    }
-
-    /// Returns a new `WaitMap`.
-    ///
-    /// This constructor returns a `WaitMap` that uses a [`Spinlock`] as
-    /// the [`ScopedRawMutex`] implementation for wait list synchronization.
-    /// To use a different [`ScopedRawMutex`] implementation, use the
-    /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
-    /// [the documentation on overriding mutex
-    /// implementations](crate::blocking#overriding-mutex-implementations)
-    /// for more details.
-    #[must_use]
-    #[cfg(loom)]
-    pub fn new() -> Self {
-        Self {
-            state: Self::mk_state(),
-            queue: Mutex::new(List::new()),
+    loom_const_fn! {
+        /// Returns a new `WaitMap`.
+        ///
+        /// This constructor returns a `WaitMap` that uses a [`DefaultMutex`] as
+        /// the [`ScopedRawMutex`] implementation for wait list synchronization.
+        /// To use a different [`ScopedRawMutex`] implementation, use the
+        /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
+        /// [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
+        #[must_use]
+        pub fn new() -> Self {
+            Self::with_raw_mutex(DefaultMutex::new())
         }
     }
 }
@@ -492,10 +468,9 @@ impl<K: PartialEq, V> WaitMap<K, V> {
 impl<K, V, Lock> WaitMap<K, V, Lock>
 where
     K: PartialEq,
-    Lock: ScopedRawMutex + mutex_traits::ConstInit,
+    Lock: ScopedRawMutex,
 {
     loom_const_fn! {
-
         /// Returns a new `WaitMap`, using the provided [`ScopedRawMutex`]
         /// implementation for wait-list synchronization.
         ///
@@ -505,22 +480,16 @@ where
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
         #[must_use]
-        pub fn with_raw_mutex() -> Self {
+        pub fn with_raw_mutex(lock: Lock) -> Self {
             Self {
-                state: Self::mk_state(),
-                queue: Mutex::with_raw_mutex(List::new()),
+                state: CachePadded::new(AtomicUsize::new(State::Empty.into_usize())),
+                queue: Mutex::with_raw_mutex(List::new(), lock),
             }
         }
     }
 }
 
 impl<K: PartialEq, V, Lock: ScopedRawMutex> WaitMap<K, V, Lock> {
-    loom_const_fn! {
-        fn mk_state() -> CachePadded<AtomicUsize> {
-            CachePadded::new(AtomicUsize::new(State::Empty.into_usize()))
-        }
-    }
-
     /// Wake a certain task in the queue.
     ///
     /// If the queue is empty, a wakeup is stored in the `WaitMap`, and the
@@ -748,7 +717,7 @@ feature! {
 /// See [`Wait::subscribe`] for more information and usage example.
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
 #[derive(Debug)]
-pub struct Subscribe<'a, 'b, K, V, Lock = Spinlock>
+pub struct Subscribe<'a, 'b, K, V, Lock = DefaultMutex>
 where
     K: PartialEq,
     Lock: ScopedRawMutex,
@@ -1106,7 +1075,7 @@ feature! {
     /// assert_unpin::<WaitOwned<'_, usize, ()>>();
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned<K: PartialEq, V, Lock: ScopedRawMutex = Spinlock> {
+    pub struct WaitOwned<K: PartialEq, V, Lock: ScopedRawMutex = DefaultMutex> {
         /// The `WaitMap` being waited on.
         queue: Arc<WaitMap<K, V, Lock>>,
 

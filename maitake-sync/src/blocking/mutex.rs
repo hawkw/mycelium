@@ -1,6 +1,6 @@
 use crate::{
+    blocking::DefaultMutex,
     loom::cell::{MutPtr, UnsafeCell},
-    spin::Spinlock,
     util::fmt,
 };
 use core::ops::{Deref, DerefMut};
@@ -21,8 +21,8 @@ pub use mutex_traits::{RawMutex, ScopedRawMutex};
 /// # Overriding mutex implementations
 ///
 /// This type is generic over a `Lock` type parameter which represents a raw
-/// mutex implementation. By default, this is a [`Spinlock`]. To construct a new
-/// `Mutex` with an alternative raw mutex implementation, use the
+/// mutex implementation. By default, this is the [`DefaultMutex`]. To construct
+/// a new `Mutex` with an alternative raw mutex implementation, use the
 /// [`Mutex::with_raw_mutex`] cosntructor. See the [module-level documentation
 /// on overriding mutex
 /// implementations](crate::blocking#overriding-mutex-implementations) for
@@ -35,6 +35,10 @@ pub use mutex_traits::{RawMutex, ScopedRawMutex};
 /// [`ScopedRawMutex`], the [`Mutex`] type provides only the scoped
 /// [`with_lock`] and  [`try_with_lock`] methods.
 ///
+/// :warning: Note that [`DefaultMutex`] does *not* implement `RawMutex`, so
+/// using the [`lock`] and [`try_lock`] RAII API requires selecting an
+/// alternative [`RawMutex`] implementation.
+///
 /// # Loom-specific behavior
 ///
 /// When `cfg(loom)` is enabled, this mutex will use Loom's simulated atomics,
@@ -45,7 +49,7 @@ pub use mutex_traits::{RawMutex, ScopedRawMutex};
 /// [`with_lock`]: Mutex::with_lock
 /// [`try_with_lock`]: Mutex::try_with_lock
 /// [`std::sync::Mutex`]: https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
-pub struct Mutex<T, Lock = Spinlock> {
+pub struct Mutex<T, Lock = DefaultMutex> {
     lock: Lock,
     data: UnsafeCell<T>,
 }
@@ -62,7 +66,7 @@ pub struct Mutex<T, Lock = Spinlock> {
 /// [`lock`]: Mutex::lock
 /// [`try_lock`]: Mutex::try_lock
 #[must_use = "if unused, the `Mutex` will immediately unlock"]
-pub struct MutexGuard<'a, T, Lock: RawMutex = Spinlock> {
+pub struct MutexGuard<'a, T, Lock: RawMutex> {
     ptr: MutPtr<T>,
     lock: &'a Lock,
 }
@@ -73,27 +77,31 @@ impl<T> Mutex<T> {
         ///
         /// The returned `Mutex` is in an unlocked state, ready for use.
         ///
+        /// This constructor returns a mutex that uses the [`DefaultMutex`]
+        /// implementation. To use an alternative `RawMutex` type, use the
+        /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead.
+        ///
         /// # Examples
         ///
         /// ```
-        /// use maitake_sync::spin::Mutex;
+        /// use maitake_sync::blocking::Mutex;
         ///
         /// let mutex = Mutex::new(0);
         /// ```
         #[must_use]
         pub fn new(data: T) -> Self {
             Self {
-                lock: Spinlock::new(),
+                lock: DefaultMutex::new(),
                 data: UnsafeCell::new(data),
             }
         }
     }
 }
 
-impl<T, Lock: mutex_traits::ConstInit> Mutex<T, Lock> {
+impl<T, Lock> Mutex<T, Lock> {
     loom_const_fn! {
-        /// Returns a new `Mutex` protecting the provided `data`, using the
-        /// `Lock` type parameter as the raw mutex implementation.
+        /// Returns a new `Mutex` protecting the provided `data`, using
+        /// `lock` type parameter as the raw mutex implementation.
         ///
         /// See the [module-level documentation on overriding mutex
         /// implementations](crate::blocking#overriding-mutex-implementations) for
@@ -101,11 +109,39 @@ impl<T, Lock: mutex_traits::ConstInit> Mutex<T, Lock> {
         ///
         /// The returned `Mutex` is in an unlocked state, ready for use.
         #[must_use]
-        pub fn with_raw_mutex(data: T) -> Self {
+        pub fn with_raw_mutex(data: T, lock: Lock) -> Self {
             Self {
-                lock: Lock::INIT,
+                lock,
                 data: UnsafeCell::new(data),
             }
+        }
+    }
+
+    /// Consumes this `Mutex`, returning the guarded data.
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> T {
+        self.data.into_inner()
+    }
+
+    /// Returns a mutable reference to the underlying data.
+    ///
+    /// Since this call borrows the `Mutex` mutably, no actual locking needs to
+    /// take place -- the mutable borrow statically guarantees no locks exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut lock = maitake_sync::blocking::Mutex::new(0);
+    /// lock.with_lock(|data| *data = 10);
+    /// assert_eq!(*lock.get_mut(), 10);
+    /// ```
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe {
+            // Safety: since this call borrows the `Mutex` mutably, no actual
+            // locking needs to take place -- the mutable borrow statically
+            // guarantees no locks exist.
+            self.data.with_mut(|data| &mut *data)
         }
     }
 }
@@ -246,34 +282,6 @@ where
     pub unsafe fn force_unlock(&self) {
         self.lock.unlock()
     }
-
-    /// Consumes this `Mutex`, returning the guarded data.
-    #[inline]
-    #[must_use]
-    pub fn into_inner(self) -> T {
-        self.data.into_inner()
-    }
-
-    /// Returns a mutable reference to the underlying data.
-    ///
-    /// Since this call borrows the `Mutex` mutably, no actual locking needs to
-    /// take place -- the mutable borrow statically guarantees no locks exist.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut lock = maitake_sync::spin::Mutex::new(0);
-    /// *lock.get_mut() = 10;
-    /// assert_eq!(*lock.lock(), 10);
-    /// ```
-    pub fn get_mut(&mut self) -> &mut T {
-        unsafe {
-            // Safety: since this call borrows the `Mutex` mutably, no actual
-            // locking needs to take place -- the mutable borrow statically
-            // guarantees no locks exist.
-            self.data.with_mut(|data| &mut *data)
-        }
-    }
 }
 
 impl<T: Default, Lock: Default> Default for Mutex<T, Lock> {
@@ -405,6 +413,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::loom::{self, thread};
+    use crate::spin::Spinlock;
     use std::prelude::v1::*;
     use std::sync::Arc;
 
@@ -413,7 +422,7 @@ mod tests {
     #[test]
     fn multithreaded() {
         loom::model(|| {
-            let mutex = Arc::new(Mutex::new(String::new()));
+            let mutex = Arc::new(Mutex::with_raw_mutex(String::new(), Spinlock::new()));
             let mutex2 = mutex.clone();
 
             let t1 = thread::spawn(move || {
@@ -438,7 +447,7 @@ mod tests {
     #[test]
     fn try_lock() {
         loom::model(|| {
-            let mutex = Mutex::new(42);
+            let mutex = Mutex::with_raw_mutex(42, Spinlock::new());
             // First lock succeeds
             let a = mutex.try_lock();
             assert_eq!(a.as_ref().map(|r| **r), Some(42));

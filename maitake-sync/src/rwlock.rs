@@ -209,36 +209,30 @@ impl<T> RwLock<T> {
         /// ```
         #[must_use]
         pub fn new(data: T) -> Self {
-            Self {
-                sem: Semaphore::new(Self::MAX_READERS),
-                data: UnsafeCell::new(data),
-            }
-        }
-    }
-}
-
-#[cfg(not(loom))]
-impl<T, Lock> RwLock<T, Lock>
-where
-    Lock: RawMutex + mutex_traits::ConstInit,
-{
-    /// Returns a new `RwLock` protecting the provided `data`, in an
-    /// unlocked state, using the provided [`RawMutex`] implementation.
-    ///
-    /// This constructor allows a [`RwLock`] to be constructed with any type that
-    /// implements [`RawMutex`] as the underlying raw blocking mutex
-    /// implementation. See [the documentation on overriding mutex
-    /// implementations](crate::blocking#overriding-mutex-implementations)
-    /// for more details.
-    pub const fn with_raw_mutex(data: T) -> Self {
-        Self {
-            sem: Semaphore::with_raw_mutex(Self::MAX_READERS),
-            data: UnsafeCell::new(data),
+            Self::with_raw_mutex(data, Spinlock::new())
         }
     }
 }
 
 impl<T, Lock: RawMutex> RwLock<T, Lock> {
+    loom_const_fn! {
+        /// Returns a new `RwLock` protecting the provided `data`, in an
+        /// unlocked state, using the provided [`RawMutex`] implementation.
+        ///
+        /// This constructor allows a [`RwLock`] to be constructed with any type that
+        /// implements [`RawMutex`] as the underlying raw blocking mutex
+        /// implementation. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
+        #[must_use]
+        pub fn with_raw_mutex(data: T, lock: Lock) -> Self {
+            Self {
+                sem: Semaphore::with_raw_mutex(Self::MAX_READERS, lock),
+                data: UnsafeCell::new(data),
+            }
+        }
+    }
+
     /// Consumes this `RwLock`, returning the guarded data.
     #[inline]
     #[must_use]

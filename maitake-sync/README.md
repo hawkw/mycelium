@@ -163,11 +163,13 @@ In addition to async locks, `maitake-sync` also provides a [`blocking`] module,
 which contains blocking [`blocking::Mutex`] and [`blocking::RwLock`] types. Many of
 `maitake-sync`'s async synchronization primitives, including [`WaitQueue`],
 [`Mutex`], [`RwLock`], and [`Semaphore`], internally use the [`blocking::Mutex`]
-type for wait-list synchronization. By default, the [`blocking::Mutex`] type is
-implemented using an atomic [spinlock].
+type for wait-list synchronization. By default, this type uses a
+[`blocking::DefaultMutex`][`DefaultMutex`] as the underlying mutex
+implementation, which attempts to provide the best generic mutex implementation
+based on the currently enabled feature flags.
 
-However, for many applications, a generic spinlock is not the ideal blocking
-mechanism. Therefore, `maitake-sync`'s [`blocking::Mutex`] type, and the
+However, in some cases, it may be desirable to provide a custom mutex
+implementation.  Therefore, `maitake-sync`'s [`blocking::Mutex`] type, and the
 async synchronization primitives that depend on it, are generic over a `Lock`
 type parameter which may be overridden using the [`RawMutex`] and
 [`ScopedRawMutex`] traits from the [`mutex-traits`] crate, allowing alternative
@@ -177,7 +179,7 @@ also be used with raw mutex implementations that implement traits from the
 [`lock_api`] and [`critical-section`] crates.
 
 See [the documentation on overriding mutex implementations][overriding] for more
-details. 
+details.
 
 [`blocking`]:
     https://docs.rs/maitake-sync/latest/maitake_sync/blocking/index.html
@@ -185,6 +187,8 @@ details.
     https://docs.rs/maitake-sync/latest/maitake_sync/blocking/struct.Mutex.html
 [`blocking::RwLock`]:
     https://docs.rs/maitake-sync/latest/maitake_sync/blocking/struct.RwLock.html
+[`DefaultMutex`]:
+    https://docs.rs/maitake-sync/latest/maitake_sync/blocking/struct.DefaultMutex.html
 [spinlock]: https://en.wikipedia.org/wiki/Spinlock
 [`RawMutex`]:
     https://docs.rs/mutex-traitsc/latest/mutex_traits/trait.RawMutex.html
@@ -194,7 +198,7 @@ details.
 [`lock_api`]: https://crates.io/crates/lock_api
 [`critical-section`]: https://crates.io/crates/critical-section
 [overriding]:
-    https://docs.rs/maitake-sync/latest/maitake_sync/blocking/index.html#overriding-mutex-implementations 
+    https://docs.rs/maitake-sync/latest/maitake_sync/blocking/index.html#overriding-mutex-implementations
 
 ## features
 
@@ -205,6 +209,8 @@ The following features are available (this list is incomplete; you can help by [
 | Feature        | Default | Explanation |
 | :---           | :---    | :---        |
 | `alloc`        | `true`  | Enables [`liballoc`] dependency |
+| `std`          | `false`  | Enables the Rust standard library, disabling `#![no-std]`. This implies the `alloc` feature. |
+| `critical-section` | `false` | Enables a variant of the [`DefaultMutex`] type that uses the [`critical-section`] crate. |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `tracing`      | `false` | Enables support for [`tracing`] diagnostics. Requires `liballoc`.|
 | `core-error`   | `false` | Enables implementations of the [`core::error::Error` trait][core-error] for `maitake-sync`'s error types. *Requires a nightly Rust toolchain*. |
