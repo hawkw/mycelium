@@ -624,6 +624,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "critical-section"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7059fff8937831a9ae6f0fe4d658ffabf58f2ca96aa9dec1c889f936f705f216"
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1438,6 +1444,7 @@ name = "maitake-sync"
 version = "0.1.2"
 dependencies = [
  "cordyceps",
+ "critical-section",
  "futures",
  "futures-util",
  "loom",
