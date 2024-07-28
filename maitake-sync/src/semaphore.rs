@@ -335,7 +335,7 @@ impl<Lock: RawMutex> Semaphore<Lock> {
     const CLOSED: usize = usize::MAX;
 
     loom_const_fn! {
-            /// Returns a new `Semaphore` with `permits` permits available, using the
+        /// Returns a new `Semaphore` with `permits` permits available, using the
         /// provided [`RawMutex`] implementation.
         ///
         /// This constructor allows a [`Semaphore`] to be constructed with any type that
