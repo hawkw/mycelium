@@ -209,7 +209,7 @@ The following features are available (this list is incomplete; you can help by [
 | Feature        | Default | Explanation |
 | :---           | :---    | :---        |
 | `alloc`        | `true`  | Enables [`liballoc`] dependency |
-| `std`          | `false`  | Enables the Rust standard library, disabling `#![no-std]`. This implies the `alloc` feature. |
+| `std`          | `false`  | Enables the Rust standard library, disabling `#![no-std]`. When `std` is enabled, the [`DefaultMutex`] type will use [`std::sync::Mutex`]. This implies the `alloc` feature. |
 | `critical-section` | `false` | Enables a variant of the [`DefaultMutex`] type that uses the [`critical-section`] crate. |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `tracing`      | `false` | Enables support for [`tracing`] diagnostics. Requires `liballoc`.|
@@ -219,3 +219,5 @@ The following features are available (this list is incomplete; you can help by [
 [`CachePadded`]: https://docs.rs/maitake-sync/latest/maitake_sync/util/struct.CachePadded.html
 [`tracing`]: https://crates.io/crates/tracing
 [core-error]: https://doc.rust-lang.org/stable/core/error/index.html
+[`std::sync::Mutex`]:
+    https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html
