@@ -1,5 +1,5 @@
 use super::*;
-use mycelium_util::sync::{Lazy, spin::Mutex};
+use mycelium_util::sync::{spin::Mutex, Lazy};
 
 #[test]
 fn basically_works() {
@@ -100,7 +100,10 @@ fn steal_blocked() {
 
     assert!(SCHEDULER_1.current_task().is_some());
 
-    let stolen = SCHEDULER_1.try_steal().unwrap().spawn_n(&SCHEDULER_2.get(), 1);
+    let stolen = SCHEDULER_1
+        .try_steal()
+        .unwrap()
+        .spawn_n(&SCHEDULER_2.get(), 1);
     assert_eq!(stolen, 1);
 
     let tick = SCHEDULER_2.tick();

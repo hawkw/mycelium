@@ -62,7 +62,7 @@ mod tests;
 /// synchronize access to its wait list. By default, the [`DefaultMutex`] type
 /// is used as the underlying mutex implementation. To use an alternative
 /// [`ScopedRawMutex`] implementation, use the
-/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor. See [the documentation
 /// on overriding mutex
 /// implementations](crate::blocking#overriding-mutex-implementations) for more
 /// details.
@@ -166,7 +166,7 @@ impl<T> Mutex<T> {
         ///
         /// This constructor returns a [`Mutex`] that uses a [`DefaultMutex`] as the
         /// underlying blocking mutex implementation. To use an alternative
-        /// [`ScopedRawMutex`] implementation, use the [`Mutex::with_raw_mutex`]
+        /// [`ScopedRawMutex`] implementation, use the [`Mutex::new_with_raw_mutex`]
         /// constructor instead. See [the documentation on overriding mutex
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
@@ -187,7 +187,7 @@ impl<T> Mutex<T> {
         /// ```
         #[must_use]
         pub fn new(data: T) -> Self {
-            Self::with_raw_mutex(data, DefaultMutex::new())
+            Self::new_with_raw_mutex(data, DefaultMutex::new())
         }
     }
 }
@@ -205,7 +205,7 @@ impl<T, L: ScopedRawMutex> Mutex<T, L> {
         /// implementation. See [the documentation on overriding mutex
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
-        pub fn with_raw_mutex(data: T, lock: L) -> Self {
+        pub fn new_with_raw_mutex(data: T, lock: L) -> Self {
             Self {
                 // The queue must start with a single stored wakeup, so that the
                 // first task that tries to acquire the lock will succeed

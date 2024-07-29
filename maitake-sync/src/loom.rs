@@ -105,7 +105,7 @@ mod inner {
                 }
 
                 #[track_caller]
-                pub(crate) fn with_raw_mutex(t: T, _: Lock) -> Self {
+                pub(crate) fn new_with_raw_mutex(t: T, _: Lock) -> Self {
                     Self::new(t)
                 }
 

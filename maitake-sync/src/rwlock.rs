@@ -64,7 +64,7 @@ mod tests;
 /// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
 /// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
 /// use an alternative [`RawMutex`] implementation, use the
-/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor. See [the documentation
 /// on overriding mutex
 /// implementations](crate::blocking#overriding-mutex-implementations) for more
 /// details.
@@ -185,7 +185,7 @@ impl<T> RwLock<T> {
         ///
         /// This constructor returns a `RwLock` that uses a [`Spinlock`] as the
         /// underlying blocking mutex implementation. To use an alternative
-        /// [`RawMutex`] implementation, use the [`RwLock::with_raw_mutex`]
+        /// [`RawMutex`] implementation, use the [`RwLock::new_with_raw_mutex`]
         /// constructor instead. See [the documentation on overriding mutex
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
@@ -209,7 +209,7 @@ impl<T> RwLock<T> {
         /// ```
         #[must_use]
         pub fn new(data: T) -> Self {
-            Self::with_raw_mutex(data, Spinlock::new())
+            Self::new_with_raw_mutex(data, Spinlock::new())
         }
     }
 }
@@ -225,9 +225,9 @@ impl<T, Lock: RawMutex> RwLock<T, Lock> {
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
         #[must_use]
-        pub fn with_raw_mutex(data: T, lock: Lock) -> Self {
+        pub fn new_with_raw_mutex(data: T, lock: Lock) -> Self {
             Self {
-                sem: Semaphore::with_raw_mutex(Self::MAX_READERS, lock),
+                sem: Semaphore::new_with_raw_mutex(Self::MAX_READERS, lock),
                 data: UnsafeCell::new(data),
             }
         }

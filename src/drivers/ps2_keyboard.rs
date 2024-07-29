@@ -22,7 +22,7 @@ pub struct Ps2Keyboard {
 
 static PS2_KEYBOARD: Ps2Keyboard = Ps2Keyboard {
     buf: thingbuf::StaticThingBuf::new(),
-    kbd: Mutex::with_raw_mutex(
+    kbd: Mutex::new_with_raw_mutex(
         Keyboard::<layouts::Us104Key, pc_keyboard::ScancodeSet1>::new(
             pc_keyboard::HandleControl::MapLettersToUnicode,
         ),

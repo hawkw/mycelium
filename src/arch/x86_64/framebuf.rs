@@ -76,7 +76,7 @@ pub(super) fn init(bootinfo: &mut BootInfo) -> bool {
     };
     FRAMEBUFFER.init((
         cfg,
-        spin::Mutex::with_raw_mutex(framebuffer, spin::Spinlock::new()),
+        spin::Mutex::new_with_raw_mutex(framebuffer, spin::Spinlock::new()),
     ));
     true
 }

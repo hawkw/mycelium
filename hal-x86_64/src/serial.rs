@@ -110,7 +110,7 @@ impl Port {
         })?;
 
         Ok(Self {
-            inner: spin::Mutex::with_raw_mutex(registers, spin::Spinlock::new()),
+            inner: spin::Mutex::new_with_raw_mutex(registers, spin::Spinlock::new()),
         })
     }
 
