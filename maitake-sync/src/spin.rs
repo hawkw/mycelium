@@ -140,6 +140,14 @@ unsafe impl RawMutex for Spinlock {
     }
 }
 
+#[cfg(not(loom))]
+impl blocking::ConstInit for Spinlock {
+    // As usual, clippy is totally wrong about this --- the whole point of this
+    // constant is to create a *new* spinlock every time.
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = Spinlock::new();
+}
+
 const UNLOCKED: usize = 0;
 const WRITER: usize = 1 << 0;
 const READER: usize = 1 << 1;
@@ -247,6 +255,14 @@ unsafe impl RawRwLock for RwSpinlock {
     fn is_locked_exclusive(&self) -> bool {
         self.state.load(Relaxed) & WRITER == 1
     }
+}
+
+#[cfg(not(loom))]
+impl blocking::ConstInit for RwSpinlock {
+    // As usual, clippy is totally wrong about this --- the whole point of this
+    // constant is to create a *new* spinlock every time.
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = RwSpinlock::new();
 }
 
 impl fmt::Debug for RwSpinlock {
