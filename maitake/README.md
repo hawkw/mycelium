@@ -313,7 +313,8 @@ The following features are available (this list is incomplete; you can help by [
 | :---           | :---    | :---        |
 | `alloc`        | `true`  | Enables [`liballoc`] dependency |
 | `std`          | `false`  | Enables the Rust standard library, disabling `#![no-std]`. When `std` is enabled, the [`DefaultMutex`] type will use [`std::sync::Mutex`]. This implies the `alloc` feature. |
-| `critical-section` | `false` | Enables a variant of the [`DefaultMutex`] type that uses the [`critical-section`] crate. |
+
+| `critical-section` | `false` | Enables support for the [`critical-section`] crate. This includes a variant of the [`DefaultMutex`] type that uses a critical section, as well as the [`portable-atomic`] crate's `critical-section` feature (as [discussed above](#support-for-atomic-operations)) |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `tracing-01`   | `false` | Enables support for v0.1.x of [`tracing`] (the current release version). Requires `liballoc`.|
 | `tracing-02`   | `false` | Enables support for the upcoming v0.2 of [`tracing`] (via a Git dependency). |

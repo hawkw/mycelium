@@ -34,7 +34,7 @@ alloc = ["cordyceps/alloc", "maitake-sync/alloc"]
 std = ["alloc", "maitake-sync/std"]
 no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad", "maitake-sync/no-cache-pad"]
 core-error = ["maitake-sync/core-error"]
-critical-section = ["maitake-sync/critical-section"]
+critical-section = ["maitake-sync/critical-section", "portable-atomic/critical-section"]
 
 [dependencies]
 mycelium-bitfield = { path = "../bitfield" }
