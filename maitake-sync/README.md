@@ -191,9 +191,9 @@ details.
     https://docs.rs/maitake-sync/latest/maitake_sync/blocking/struct.DefaultMutex.html
 [spinlock]: https://en.wikipedia.org/wiki/Spinlock
 [`RawMutex`]:
-    https://docs.rs/mutex-traitsc/latest/mutex_traits/trait.RawMutex.html
+    https://docs.rs/mutex-traits/latest/mutex_traits/trait.RawMutex.html
 [`ScopedRawMutex`]:
-    https://docs.rs/mutex-traitsc/latest/mutex_traits/trait.ScopedRawMutex.html
+    https://docs.rs/mutex-traits/latest/mutex_traits/trait.ScopedRawMutex.html
 [`mutex-traits`]: https://crates.io/crates/mutex-traits
 [`lock_api`]: https://crates.io/crates/lock_api
 [`critical-section`]: https://crates.io/crates/critical-section
