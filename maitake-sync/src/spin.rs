@@ -20,8 +20,10 @@
 //!
 //! This module provides the following APIs:
 //!
-//! - [`Mutex`]: a synchronous [mutual exclusion] spinlock.
-//! - [`RwLock`]: a synchronous [reader-writer] spinlock.
+//! - [`Spinlock`]: a synchronous [mutual exclusion] spinlock, which implements
+//!       the [`blocking::RawMutex`] and [`blocking::RawScopedMutex`] traits.
+//! - [`RwSpinlock`]: a synchronous [reader-writer] spinlock, which implements
+//!       the [`blocking::RawRwLock`] trait.
 //! - [`InitOnce`]: a cell storing a [`MaybeUninit`](core::mem::MaybeUninit)
 //!       value which must be manually initialized prior to use.
 //! - [`Lazy`]: an [`InitOnce`] cell coupled with an initializer function. The
@@ -40,41 +42,24 @@ use crate::{
     util::{fmt, Backoff},
 };
 
-/// A type alias for a [`blocking::Mutex`] which explicitly uses a [`Spinlock`]
-/// for synchronization. See the [`blocking::Mutex`] type's documentation for
-/// details.
-pub type Mutex<T> = blocking::Mutex<T, Spinlock>;
-
-/// A type alias for a [`blocking::MutexGuard`] returned by a
-/// [`spin::Mutex`](super::Mutex). See the [`blocking::MutexGuard`] type's
-/// documentation for details.
-pub type MutexGuard<'a, T> = blocking::MutexGuard<'a, T, Spinlock>;
-
-/// A type alias for a [`blocking::RwLock`] which explicitly uses a [`RwSpinlock`]
-/// for synchronization. See the [`blocking::RwLock`] type's documentation for
-/// details.
-pub type RwLock<T> = blocking::RwLock<T, RwSpinlock>;
-
-/// A type alias for a [`blocking::RwLockReadGuard`] returned by a
-/// [`spin::RwLock`](super::RwLock). See the [`blocking::RwLockReadGuard`] type's
-/// documentation for details.
-pub type RwLockReadGuard<'a, T> = blocking::RwLockReadGuard<'a, T, RwSpinlock>;
-
-/// A type alias for a [`blocking::RwLockWriteGuard`] returned by a
-/// [`spin::RwLock`](super::RwLock). See the [`blocking::RwLockWriteGuard`] type's
-/// documentation for details.
-pub type RwLockWriteGuard<'a, T> = blocking::RwLockWriteGuard<'a, T, RwSpinlock>;
-
 /// A spinlock-based [`RawMutex`] implementation.
 ///
 /// This mutex will spin with an exponential backoff while waiting for the lock
 /// to become available.
+///
+/// This type implements the [`RawMutex`] and [`RawScopedMutex`] traits from the
+/// [`mutex-traits`] crate. This allows it to be used with the
+/// [`blocking::Mutex`] type when a spinlock-based mutex is needed.
 #[derive(Debug)]
 pub struct Spinlock {
     locked: AtomicBool,
 }
 
 /// A spinlock-based [`RawRwLock`] implementation.
+///
+/// This type implements the [`blocking::RawRwLock`] trait. This allows it to be
+/// used with the [`blocking::RwLock`] type when a spinlock-based reader-writer
+/// lock is needed.
 pub struct RwSpinlock {
     state: AtomicUsize,
 }
@@ -268,7 +253,7 @@ impl blocking::ConstInit for RwSpinlock {
 impl fmt::Debug for RwSpinlock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = &self.state.load(Relaxed);
-        f.debug_struct("RawSpinRwLock")
+        f.debug_struct("RwSpinlock")
             // N.B.: this does *not* use the `reader_count` and `has_writer`
             // methods *intentionally*, because those two methods perform
             // independent reads of the lock's state, and may race with other

@@ -8,6 +8,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tracing = { git = "https://github.com/tokio-rs/tracing",  default_features = false }
+tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false }
+maitake-sync = { path = "../maitake-sync", default-features = false }
 mycelium-util = { path = "../util" }
 embedded-graphics-core = { version = "0.3", optional = true }
