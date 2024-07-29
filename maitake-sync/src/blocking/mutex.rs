@@ -23,7 +23,7 @@ pub use mutex_traits::{RawMutex, ScopedRawMutex};
 /// This type is generic over a `Lock` type parameter which represents a raw
 /// mutex implementation. By default, this is the [`DefaultMutex`]. To construct
 /// a new `Mutex` with an alternative raw mutex implementation, use the
-/// [`Mutex::with_raw_mutex`] cosntructor. See the [module-level documentation
+/// [`Mutex::new_with_raw_mutex`] cosntructor. See the [module-level documentation
 /// on overriding mutex
 /// implementations](crate::blocking#overriding-mutex-implementations) for
 /// more details.
@@ -79,7 +79,7 @@ impl<T> Mutex<T> {
         ///
         /// This constructor returns a mutex that uses the [`DefaultMutex`]
         /// implementation. To use an alternative `RawMutex` type, use the
-        /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead.
+        /// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor, instead.
         ///
         /// # Examples
         ///
@@ -109,7 +109,7 @@ impl<T, Lock> Mutex<T, Lock> {
         ///
         /// The returned `Mutex` is in an unlocked state, ready for use.
         #[must_use]
-        pub fn with_raw_mutex(data: T, lock: Lock) -> Self {
+        pub fn new_with_raw_mutex(data: T, lock: Lock) -> Self {
             Self {
                 lock,
                 data: UnsafeCell::new(data),
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn multithreaded() {
         loom::model(|| {
-            let mutex = Arc::new(Mutex::with_raw_mutex(String::new(), Spinlock::new()));
+            let mutex = Arc::new(Mutex::new_with_raw_mutex(String::new(), Spinlock::new()));
             let mutex2 = mutex.clone();
 
             let t1 = thread::spawn(move || {
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn try_lock() {
         loom::model(|| {
-            let mutex = Mutex::with_raw_mutex(42, Spinlock::new());
+            let mutex = Mutex::new_with_raw_mutex(42, Spinlock::new());
             // First lock succeeds
             let a = mutex.try_lock();
             assert_eq!(a.as_ref().map(|r| **r), Some(42));

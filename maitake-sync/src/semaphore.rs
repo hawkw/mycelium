@@ -64,7 +64,7 @@ mod tests;
 /// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
 /// synchronize access to its wait list. By default, this is a [`Spinlock`]. To
 /// use an alternative [`RawMutex`] implementation, use the
-/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor. See [the documentation
 /// on overriding mutex
 /// implementations](crate::blocking#overriding-mutex-implementations) for more
 /// details.
@@ -318,7 +318,7 @@ impl Semaphore {
         /// [`MAX_PERMITS`]: Self::MAX_PERMITS
         #[must_use]
         pub fn new(permits: usize) -> Self {
-            Self::with_raw_mutex(permits, Spinlock::new())
+            Self::new_with_raw_mutex(permits, Spinlock::new())
         }
     }
 }
@@ -349,14 +349,14 @@ impl<Lock: RawMutex> Semaphore<Lock> {
         /// If `permits` is less than [`MAX_PERMITS`] ([`usize::MAX`] - 1).
         ///
         /// [`MAX_PERMITS`]: Self::MAX_PERMITS
-        pub fn with_raw_mutex(permits: usize, lock: Lock) -> Self {
+        pub fn new_with_raw_mutex(permits: usize, lock: Lock) -> Self {
             assert!(
                 permits <= Self::MAX_PERMITS,
                 "a semaphore may not have more than Semaphore::MAX_PERMITS permits",
             );
             Self {
                 permits: CachePadded::new(AtomicUsize::new(permits)),
-                waiters: Mutex::with_raw_mutex(SemQueue::new(), lock)
+                waiters: Mutex::new_with_raw_mutex(SemQueue::new(), lock)
             }
         }
     }

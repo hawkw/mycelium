@@ -213,7 +213,7 @@ impl<T> RwLock<T> {
 #[cfg(feature = "lock_api")]
 impl<T, Lock: lock_api::RawRwLock> RwLock<T, Lock> {
     /// Creates a new instance of an `RwLock<T>` which is unlocked.
-    pub const fn with_raw_mutex(data: T) -> Self {
+    pub const fn new_with_raw_mutex(data: T) -> Self {
         RwLock {
             data: UnsafeCell::new(data),
             lock: Lock::INIT,

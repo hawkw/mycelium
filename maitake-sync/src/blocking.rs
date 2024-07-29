@@ -106,14 +106,14 @@
 //! the interface provided by [`std::sync::Mutex`]. The [`Mutex::new`] function
 //! returns a [`Mutex`] using the default spinlock. To instead construct a
 //! [`Mutex`] with a custom [`RawMutex`] implementation, use the
-//! [`Mutex::with_raw_mutex`] function.
+//! [`Mutex::new_with_raw_mutex`] function.
 //!
 //! Furthermore, many *async* synchronization primitives provided by this crate,
 //! such as the [async `Mutex`](crate::Mutex), [async `RwLock`], [`WaitQueue`],
 //! [`WaitMap`], and [`Semaphore`], internally depend on the blocking `Mutex`
 //! for wait list synchronization. These types are *also* generic over a `Lock`
-//! type parameter, and also provide `with_raw_mutex` constructors, such as
-//! [`WaitQueue::with_raw_mutex`](crate::WaitQueue::with_raw_mutex). This allows
+//! type parameter, and also provide `new_with_raw_mutex` constructors, such as
+//! [`WaitQueue::new_with_raw_mutex`](crate::WaitQueue::new_with_raw_mutex). This allows
 //! the blocking mutex used by these types to be overridden. The majority
 //! `maitake-sync`'s async synchronization types only require the `Lock` type to
 //! implement [`ScopedRawMutex`]. However, the [`Semaphore`] and [async

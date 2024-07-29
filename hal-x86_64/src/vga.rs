@@ -5,7 +5,7 @@ use mycelium_util::{
 };
 use volatile::Volatile;
 static BUFFER: Lazy<spin::Mutex<Buffer>> = Lazy::new(|| {
-    spin::Mutex::with_raw_mutex(
+    spin::Mutex::new_with_raw_mutex(
         Buffer {
             col: 0,
             row: 0,

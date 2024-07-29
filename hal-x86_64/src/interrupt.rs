@@ -128,7 +128,7 @@ pub struct Registers {
 }
 
 static IDT: spin::Mutex<idt::Idt> =
-    spin::Mutex::with_raw_mutex(idt::Idt::new(), spin::Spinlock::new());
+    spin::Mutex::new_with_raw_mutex(idt::Idt::new(), spin::Spinlock::new());
 static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 
 impl Controller {
@@ -208,7 +208,7 @@ impl Controller {
 
                 InterruptModel::Apic {
                     local,
-                    io: spin::Mutex::with_raw_mutex(io, spin::Spinlock::new()),
+                    io: spin::Mutex::new_with_raw_mutex(io, spin::Spinlock::new()),
                 }
             }
             model => {
@@ -226,7 +226,7 @@ impl Controller {
                     // clear for you, the reader, that at this point they are definitely intentionally enabled.
                     pics.enable();
                 }
-                InterruptModel::Pic(spin::Mutex::with_raw_mutex(pics, spin::Spinlock::new()))
+                InterruptModel::Pic(spin::Mutex::new_with_raw_mutex(pics, spin::Spinlock::new()))
             }
         };
         tracing::trace!(interrupt_model = ?model);

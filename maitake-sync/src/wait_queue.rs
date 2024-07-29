@@ -51,7 +51,7 @@ mod tests;
 /// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
 /// synchronize access to its wait list. By default, this is a [`DefaultMutex`]. To
 /// use an alternative [`ScopedRawMutex`] implementation, use the
-/// [`with_raw_mutex`](Self::with_raw_mutex) constructor. See [the documentation
+/// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor. See [the documentation
 /// on overriding mutex
 /// implementations](crate::blocking#overriding-mutex-implementations) for more
 /// details.
@@ -368,13 +368,13 @@ impl WaitQueue {
         /// This constructor returns a `WaitQueue` that uses a [`DefaultMutex`] as
         /// the [`ScopedRawMutex`] implementation for wait list synchronization.
         /// To use a different [`ScopedRawMutex`] implementation, use the
-        /// [`with_raw_mutex`](Self::with_raw_mutex) constructor, instead. See
+        /// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor, instead. See
         /// [the documentation on overriding mutex
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
         #[must_use]
         pub fn new() -> Self {
-            Self::with_raw_mutex(DefaultMutex::new())
+            Self::new_with_raw_mutex(DefaultMutex::new())
         }
     }
 }
@@ -393,7 +393,7 @@ where
         /// implementations](crate::blocking#overriding-mutex-implementations)
         /// for more details.
         #[must_use]
-        pub fn with_raw_mutex(lock: Lock) -> Self {
+        pub fn new_with_raw_mutex(lock: Lock) -> Self {
             Self::make(State::Empty, lock)
         }
     }
@@ -416,7 +416,7 @@ where
         fn make(state: State, lock: Lock) -> Self {
             Self {
                 state: CachePadded::new(AtomicUsize::new(state.into_usize())),
-                queue: Mutex::with_raw_mutex(List::new(), lock),
+                queue: Mutex::new_with_raw_mutex(List::new(), lock),
             }
         }
     }

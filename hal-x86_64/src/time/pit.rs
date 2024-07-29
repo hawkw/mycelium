@@ -210,7 +210,7 @@ enum_from_bits! {
 /// publicly and is represented as a singleton. It's stored in a [`Mutex`] in
 /// order to ensure that multiple CPU cores don't try to write conflicting
 /// configurations to the PIT's configuration ports.
-pub static PIT: Mutex<Pit> = Mutex::with_raw_mutex(Pit::new(), Spinlock::new());
+pub static PIT: Mutex<Pit> = Mutex::new_with_raw_mutex(Pit::new(), Spinlock::new());
 
 /// Are we currently sleeping on an interrupt?
 static SLEEPING: AtomicBool = AtomicBool::new(false);
