@@ -1,4 +1,5 @@
 use core::ops::{Deref, DerefMut};
+use maitake_sync::blocking;
 
 #[cfg(feature = "embedded-graphics-core")]
 #[doc(cfg(feature = "embedded-graphics-core"))]
@@ -6,6 +7,7 @@ mod embedded_graphics;
 #[cfg(feature = "embedded-graphics-core")]
 #[doc(cfg(feature = "embedded-graphics-core"))]
 pub use self::embedded_graphics::*;
+
 pub trait Draw {
     /// Return the width of the framebuffer in pixels.
     fn width(&self) -> usize;
@@ -185,9 +187,10 @@ macro_rules! deref_draw_body {
     };
 }
 
-impl<'lock, D> Draw for mycelium_util::sync::spin::MutexGuard<'lock, D>
+impl<'lock, D, L> Draw for blocking::MutexGuard<'lock, D, L>
 where
     D: Draw,
+    L: blocking::RawMutex,
 {
     deref_draw_body! {}
 }

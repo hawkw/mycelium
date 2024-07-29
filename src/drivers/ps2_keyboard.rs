@@ -1,8 +1,5 @@
 use maitake::sync::WaitQueue;
-use mycelium_util::{
-    fmt,
-    sync::spin::{self, Mutex},
-};
+use mycelium_util::{fmt, sync::blocking::Mutex};
 use pc_keyboard::{layouts, Keyboard};
 pub use pc_keyboard::{DecodedKey, KeyCode};
 
@@ -22,11 +19,10 @@ pub struct Ps2Keyboard {
 
 static PS2_KEYBOARD: Ps2Keyboard = Ps2Keyboard {
     buf: thingbuf::StaticThingBuf::new(),
-    kbd: Mutex::new_with_raw_mutex(
+    kbd: Mutex::new(
         Keyboard::<layouts::Us104Key, pc_keyboard::ScancodeSet1>::new(
             pc_keyboard::HandleControl::MapLettersToUnicode,
         ),
-        spin::Spinlock::new(),
     ),
     waiters: WaitQueue::new(),
 };
@@ -49,29 +45,33 @@ pub async fn next_key() -> DecodedKey {
 }
 
 pub(crate) fn handle_scancode(scancode: u8) {
-    let mut kbd = PS2_KEYBOARD
+    PS2_KEYBOARD
         .kbd
-        .try_lock()
-        .expect("handle_scancode should only be called in an ISR!");
-    match kbd.add_byte(scancode) {
-        Err(error) => {
-            tracing::warn!(
-                ?error,
-                scancode = fmt::hex(&scancode),
-                "error decoding scancode, ignoring it!"
-            );
-        }
-        // state advanced, no character decoded yet
-        Ok(None) => {}
-        // got a key event
-        Ok(Some(event)) => {
-            if let Some(decoded_key) = kbd.process_keyevent(event) {
-                // got something!
-                if let Err(decoded_key) = PS2_KEYBOARD.buf.push(Some(decoded_key)) {
-                    tracing::warn!(?decoded_key, "keyboard buffer full, dropping key event!")
+        .try_with_lock(|kbd| {
+            match kbd.add_byte(scancode) {
+                Err(error) => {
+                    tracing::warn!(
+                        ?error,
+                        scancode = fmt::hex(&scancode),
+                        "error decoding scancode, ignoring it!"
+                    );
                 }
-                PS2_KEYBOARD.waiters.wake_all();
-            }
-        }
-    };
+                // state advanced, no character decoded yet
+                Ok(None) => {}
+                // got a key event
+                Ok(Some(event)) => {
+                    if let Some(decoded_key) = kbd.process_keyevent(event) {
+                        // got something!
+                        if let Err(decoded_key) = PS2_KEYBOARD.buf.push(Some(decoded_key)) {
+                            tracing::warn!(
+                                ?decoded_key,
+                                "keyboard buffer full, dropping key event!"
+                            )
+                        }
+                        PS2_KEYBOARD.waiters.wake_all();
+                    }
+                }
+            };
+        })
+        .expect("handle_scancode should only be called in an ISR!");
 }

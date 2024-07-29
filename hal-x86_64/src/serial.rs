@@ -3,7 +3,11 @@ use crate::cpu;
 use core::{fmt, marker::PhantomData};
 use mycelium_util::{
     io,
-    sync::{spin, Lazy},
+    sync::{
+        blocking::{Mutex, MutexGuard},
+        spin::Spinlock,
+        Lazy,
+    },
 };
 
 static COM1: Lazy<Option<Port>> = Lazy::new(|| Port::new(0x3F8).ok());
@@ -29,7 +33,7 @@ pub fn com4() -> Option<&'static Port> {
 
 // #[derive(Debug)]
 pub struct Port {
-    inner: spin::Mutex<Registers>,
+    inner: Mutex<Registers, Spinlock>,
 }
 
 // #[derive(Debug)]
@@ -40,7 +44,7 @@ pub struct Lock<'a, B = Blocking> {
 }
 
 struct LockInner<'a> {
-    inner: spin::MutexGuard<'a, Registers>,
+    inner: MutexGuard<'a, Registers, Spinlock>,
     prev_divisor: Option<u16>,
 }
 
@@ -110,7 +114,7 @@ impl Port {
         })?;
 
         Ok(Self {
-            inner: spin::Mutex::new_with_raw_mutex(registers, spin::Spinlock::new()),
+            inner: Mutex::new_with_raw_mutex(registers, Spinlock::new()),
         })
     }
 
