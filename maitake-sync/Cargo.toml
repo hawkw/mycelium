@@ -26,6 +26,7 @@ alloc = ["cordyceps/alloc"]
 std = ["alloc"]
 no-cache-pad = ["cordyceps/no-cache-pad"]
 core-error = []
+critical-section = ["dep:critical-section", "portable-atomic/critical-section"]
 
 [dependencies]
 mycelium-bitfield = { version = "0.1.3", path = "../bitfield" }
