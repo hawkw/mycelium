@@ -269,6 +269,7 @@ struct Schedulable<S> {
 /// completed.
 ///
 /// [`Output`]: Future::Output
+#[repr(C)]
 enum Cell<F: Future> {
     /// The future is still pending.
     Pending(F),
