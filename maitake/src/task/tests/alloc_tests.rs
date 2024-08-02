@@ -264,3 +264,53 @@ fn drop_join_handle() {
 
     assert!(COMPLETED.load(Ordering::Relaxed))
 }
+
+// Test for potential UB in `Cell::poll` due to niche optimization.
+// See https://github.com/rust-lang/miri/issues/3780 for details.
+//
+// This is based on the test for analogous types in Tokio added in
+// https://github.com/tokio-rs/tokio/pull/6744
+#[test]
+fn cell_miri() {
+    use super::Cell;
+    use alloc::{string::String, sync::Arc, task::Wake};
+    use core::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    struct DummyWaker;
+
+    impl Wake for DummyWaker {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    struct ThingAdder<'a> {
+        thing: &'a mut String,
+    }
+
+    impl Future for ThingAdder<'_> {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            unsafe {
+                *self.get_unchecked_mut().thing += ", world";
+            }
+            Poll::Pending
+        }
+    }
+
+    let mut thing = "hello".to_owned();
+
+    // The async block is necessary to trigger the miri failure.
+    #[allow(clippy::redundant_async_block)]
+    let fut = async move { ThingAdder { thing: &mut thing }.await };
+
+    let mut fut = Cell::Pending(fut);
+
+    let waker = Arc::new(DummyWaker).into();
+    let mut ctx = Context::from_waker(&waker);
+    assert_eq!(fut.poll(&mut ctx), Poll::Pending);
+    assert_eq!(fut.poll(&mut ctx), Poll::Pending);
+}

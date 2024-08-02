@@ -734,21 +734,7 @@ where
         #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
         let _span = self.span().enter();
 
-        self.inner.with_mut(|cell| {
-            let cell = unsafe { &mut *cell };
-            let poll = match cell {
-                Cell::Pending(future) => unsafe { Pin::new_unchecked(future).poll(&mut cx) },
-                _ => unreachable!("tried to poll a completed future!"),
-            };
-
-            match poll {
-                Poll::Ready(ready) => {
-                    *cell = Cell::Ready(ready);
-                    Poll::Ready(())
-                }
-                Poll::Pending => Poll::Pending,
-            }
-        })
+        self.inner.with_mut(|cell| unsafe { (*cell).poll(&mut cx) })
     }
 
     /// Wakes the task's [`JoinHandle`], if it has one.
@@ -1423,6 +1409,23 @@ impl<F: Future> fmt::Debug for Cell<F> {
             Cell::Pending(_) => write!(f, "Cell::Pending({})", type_name::<F>()),
             Cell::Ready(_) => write!(f, "Cell::Ready({})", type_name::<F::Output>()),
             Cell::Joined => f.pad("Cell::Joined"),
+        }
+    }
+}
+
+impl<F: Future> Cell<F> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let poll = match self {
+            Cell::Pending(future) => unsafe { Pin::new_unchecked(future).poll(cx) },
+            _ => unreachable!("tried to poll a completed future!"),
+        };
+
+        match poll {
+            Poll::Ready(ready) => {
+                *self = Cell::Ready(ready);
+                Poll::Ready(())
+            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
