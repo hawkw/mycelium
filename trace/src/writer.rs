@@ -2,10 +2,11 @@
 //!
 //! [`fmt::Write`]: mycelium_util::fmt::Write
 use crate::color::{Color, SetColor};
-use mycelium_util::{
-    fmt::{self, Debug},
-    sync::spin::{Mutex, MutexGuard},
+use maitake::sync::{
+    blocking::{Mutex, MutexGuard, RawMutex},
+    spin::Spinlock,
 };
+use mycelium_util::fmt::{self, Debug};
 use tracing_core::Metadata;
 
 /// A type that can create [`fmt::Write`] instances.
@@ -202,11 +203,11 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
 /// a newtype that forwards the trait implementation.
 ///
 /// [`fmt::Write`]: mycelium_util::fmt::Write
-/// [`MutexGuard`]: mycelium_util::sync::spin::MutexGuard
-/// [`Mutex`]: mycelium_util::sync::spin::Mutex
+/// [`MutexGuard`]: maitake_sync::blocking:::MutexGuard
+/// [`Mutex`]: mycelium_util::blocking::Mutex
 /// [`MakeWriter`]: trait.MakeWriter.html
 #[derive(Debug)]
-pub struct MutexGuardWriter<'a, W>(MutexGuard<'a, W>);
+pub struct MutexGuardWriter<'a, W, Lock: RawMutex = Spinlock>(MutexGuard<'a, W, Lock>);
 
 // TODO(eliza): put this back if needed
 /*
@@ -382,20 +383,22 @@ where
 
 // === impl Mutex/MutexGuardWriter ===
 
-impl<'a, W> MakeWriter<'a> for Mutex<W>
+impl<'a, W, Lock> MakeWriter<'a> for Mutex<W, Lock>
 where
     W: fmt::Write + 'a,
+    Lock: RawMutex + 'a,
 {
-    type Writer = MutexGuardWriter<'a, W>;
+    type Writer = MutexGuardWriter<'a, W, Lock>;
 
     fn make_writer(&'a self) -> Self::Writer {
         MutexGuardWriter(self.lock())
     }
 }
 
-impl<'a, W> fmt::Write for MutexGuardWriter<'a, W>
+impl<'a, W, Lock> fmt::Write for MutexGuardWriter<'a, W, Lock>
 where
     W: fmt::Write,
+    Lock: RawMutex,
 {
     #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {

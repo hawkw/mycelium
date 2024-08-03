@@ -1,5 +1,5 @@
 use super::*;
-use crate::Semaphore;
+use crate::semaphore;
 use alloc::sync::Arc;
 
 /// Owned [RAII] structure used to release the shared read access of a
@@ -83,7 +83,7 @@ pub struct OwnedRwLockWriteGuard<T: ?Sized> {
     /// `Drop` impl, but Loom considers us to be "accessing" it as long as the
     /// `MutPtr` exists.
     data: cell::MutPtr<T>,
-    _lock: AddPermits<{ Semaphore::MAX_PERMITS }, T>,
+    _lock: AddPermits<{ semaphore::MAX_PERMITS }, T>,
 }
 
 /// A wrapper around an `RwLock` `Arc` clone that releases a fixed number of

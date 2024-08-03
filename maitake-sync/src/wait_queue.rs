@@ -5,12 +5,10 @@
 #[cfg(any(test, maitake_ultraverbose))]
 use crate::util::fmt;
 use crate::{
+    blocking::{DefaultMutex, Mutex, ScopedRawMutex},
     loom::{
         cell::UnsafeCell,
-        sync::{
-            atomic::{AtomicUsize, Ordering::*},
-            spin::{Mutex, MutexGuard},
-        },
+        sync::atomic::{AtomicUsize, Ordering::*},
     },
     util::{CachePadded, WakeBatch},
     WaitResult,
@@ -47,6 +45,16 @@ mod tests;
 /// asynchronous mutex][mutex]. Finally, a `WaitQueue` can be a useful
 /// synchronization primitive on its own: sometimes, you just need to have a
 /// bunch of tasks wait for something and then wake them all up.
+///
+/// # Overriding the blocking mutex
+///
+/// This type uses a [blocking `Mutex`](crate::blocking::Mutex) internally to
+/// synchronize access to its wait list. By default, this is a [`DefaultMutex`]. To
+/// use an alternative [`ScopedRawMutex`] implementation, use the
+/// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor. See [the documentation
+/// on overriding mutex
+/// implementations](crate::blocking#overriding-mutex-implementations) for more
+/// details.
 ///
 /// # Examples
 ///
@@ -175,7 +183,7 @@ mod tests;
 /// [mutex]: crate::Mutex
 /// [2]: https://www.1024cores.net/home/lock-free-algorithms/queues/intrusive-mpsc-node-based-queue
 #[derive(Debug)]
-pub struct WaitQueue {
+pub struct WaitQueue<Lock: ScopedRawMutex = DefaultMutex> {
     /// The wait queue's state variable.
     state: CachePadded<AtomicUsize>,
 
@@ -191,11 +199,10 @@ pub struct WaitQueue {
     /// lock must be held when modifying the
     /// node.
     ///
-    /// A spinlock (from `mycelium_util`) is used here, in order to support
-    /// `no_std` platforms; when running `loom` tests, a `loom` mutex is used
-    /// instead to simulate the spinlock, because loom doesn't play nice with
-    /// real spinlocks.
-    queue: Mutex<List<Waiter>>,
+    /// A spinlock is used here, in order to support `no_std` platforms; when
+    /// running `loom` tests, a `loom` mutex is used instead to simulate the
+    /// spinlock, because loom doesn't play nice with  real spinlocks.
+    queue: Mutex<List<Waiter>, Lock>,
 }
 
 /// Future returned from [`WaitQueue::wait()`].
@@ -220,9 +227,9 @@ pub struct WaitQueue {
 #[derive(Debug)]
 #[pin_project(PinnedDrop)]
 #[must_use = "futures do nothing unless `.await`ed or `poll`ed"]
-pub struct Wait<'a> {
+pub struct Wait<'a, Lock: ScopedRawMutex = DefaultMutex> {
     /// The [`WaitQueue`] being waited on.
-    queue: &'a WaitQueue,
+    queue: &'a WaitQueue<Lock>,
 
     /// Entry in the wait queue linked list.
     #[pin]
@@ -357,9 +364,37 @@ enum Wakeup {
 impl WaitQueue {
     loom_const_fn! {
         /// Returns a new `WaitQueue`.
+        ///
+        /// This constructor returns a `WaitQueue` that uses a [`DefaultMutex`] as
+        /// the [`ScopedRawMutex`] implementation for wait list synchronization.
+        /// To use a different [`ScopedRawMutex`] implementation, use the
+        /// [`new_with_raw_mutex`](Self::new_with_raw_mutex) constructor, instead. See
+        /// [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
         #[must_use]
         pub fn new() -> Self {
-            Self::new_with_state(State::Empty)
+            Self::new_with_raw_mutex(DefaultMutex::new())
+        }
+    }
+}
+
+impl<Lock> WaitQueue<Lock>
+where
+    Lock: ScopedRawMutex,
+{
+    loom_const_fn! {
+        /// Returns a new `WaitQueue`, using the provided [`ScopedRawMutex`]
+        /// implementation for wait-list synchronization.
+        ///
+        /// This constructor allows a `WaitQueue` to be constructed with any type that
+        /// implements [`ScopedRawMutex`] as the underlying raw blocking mutex
+        /// implementation. See [the documentation on overriding mutex
+        /// implementations](crate::blocking#overriding-mutex-implementations)
+        /// for more details.
+        #[must_use]
+        pub fn new_with_raw_mutex(lock: Lock) -> Self {
+            Self::make(State::Empty, lock)
         }
     }
 
@@ -368,20 +403,20 @@ impl WaitQueue {
         ///
         /// The first call to [`wait`] on this queue will immediately succeed.
         ///
-         /// [`wait`]: Self::wait
+        /// [`wait`]: Self::wait
         // TODO(eliza): should this be a public API?
         #[must_use]
-        pub(crate) fn new_woken() -> Self {
-            Self::new_with_state(State::Woken)
+        pub(crate) fn new_woken(lock: Lock) -> Self {
+            Self::make(State::Woken, lock)
         }
     }
 
     loom_const_fn! {
         #[must_use]
-        fn new_with_state(state: State) -> Self {
+        fn make(state: State, lock: Lock) -> Self {
             Self {
                 state: CachePadded::new(AtomicUsize::new(state.into_usize())),
-                queue: Mutex::new(List::new()),
+                queue: Mutex::new_with_raw_mutex(List::new(), lock),
             }
         }
     }
@@ -455,15 +490,19 @@ impl WaitQueue {
 
         // okay, there are tasks waiting on the queue; we must acquire the lock
         // on the linked list and wake the next task from the queue.
-        let mut queue = self.queue.lock();
-        test_debug!("wake: -> locked");
+        let waker = self.queue.with_lock(|queue| {
+            test_debug!("wake: -> locked");
 
-        // the queue's state may have changed while we were waiting to acquire
-        // the lock, so we need to acquire a new snapshot.
-        state = self.load();
+            // the queue's state may have changed while we were waiting to acquire
+            // the lock, so we need to acquire a new snapshot before we take the
+            // waker.
+            state = self.load();
+            self.wake_locked(queue, state)
+        });
 
-        if let Some(waker) = self.wake_locked(&mut queue, state) {
-            drop(queue);
+        //now that we've released the lock, wake the waiting task (if we
+        //actually deuqueued one).
+        if let Some(waker) = waker {
             waker.wake();
         }
     }
@@ -529,36 +568,58 @@ impl WaitQueue {
     /// [`wake()`]: Self::wake
     /// [`wait()`]: Self::wait
     pub fn wake_all(&self) {
-        let mut queue = self.queue.lock();
-        let state = self.load();
+        let mut batch = WakeBatch::new();
+        let mut waiters_remaining = true;
 
-        match state.get(QueueState::STATE) {
-            // if the queue is closed, bail.
-            State::Closed => return,
+        // This is a little bit contorted: we must load the state inside the
+        // lock, but for all states except for `Waiting`, we just need to bail
+        // out...but we can't `return` from the outer function inside the lock
+        // closure. Therefore, we just return a `bool` and, if it's `true`,
+        // return instead of doing more work.
+        let done = self.queue.with_lock(|queue| {
+            let state = self.load();
 
-            // if there are no waiters in the queue, increment the number of
-            // `wake_all` calls and return.
-            State::Woken | State::Empty => {
-                self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
-                return;
+            match test_dbg!(state.get(QueueState::STATE)) {
+                // If there are no waiters in the queue, increment the number of
+                // `wake_all` calls and return. incrementing the `wake_all` count
+                // must be performed inside the lock, so we do it here.
+                State::Woken | State::Empty => {
+                    self.state.fetch_add(QueueState::ONE_WAKE_ALL, SeqCst);
+                    true
+                }
+                // If the queue is already closed, this is a no-op. Just bail.
+                State::Closed => true,
+                // Okay, there are waiters in the queue. Transition to the empty
+                // state inside the lock and start draining the queue.
+                State::Waiting => {
+                    let next_state = QueueState::new()
+                        .with_state(State::Empty)
+                        .with(QueueState::WAKE_ALLS, state.get(QueueState::WAKE_ALLS) + 1);
+                    self.compare_exchange(state, next_state)
+                        .expect("state should not have transitioned while locked");
+
+                    // Drain the first batch of waiters from the queue.
+                    waiters_remaining =
+                        test_dbg!(Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All));
+
+                    false
+                }
             }
-            State::Waiting => {}
+        });
+
+        if done {
+            return;
         }
 
-        let mut batch = WakeBatch::new();
-        queue = self.drain_to_wake_batch(&mut batch, queue, Wakeup::All);
-
-        // now that the queue has been drained, transition to the empty state,
-        // and increment the wake_all count.
-        let next_state = QueueState::new()
-            .with_state(State::Empty)
-            .with(QueueState::WAKE_ALLS, state.get(QueueState::WAKE_ALLS) + 1);
-        self.compare_exchange(state, next_state)
-            .expect("state should not have transitioned while locked");
-
-        // wake any tasks that were woken in the last iteration of the batch loop.
-        drop(queue);
         batch.wake_all();
+        // As long as there are waiters remaining to wake, lock the queue, drain
+        // another batch, release the lock, and wake them.
+        while waiters_remaining {
+            self.queue.with_lock(|queue| {
+                waiters_remaining = Self::drain_to_wake_batch(&mut batch, queue, Wakeup::All);
+            });
+            batch.wake_all();
+        }
     }
 
     /// Close the queue, indicating that it may no longer be used.
@@ -579,10 +640,13 @@ impl WaitQueue {
         }
 
         let mut batch = WakeBatch::new();
-        let _ = self.drain_to_wake_batch(&mut batch, self.queue.lock(), Wakeup::Closed);
-
-        // wake any tasks that were woken in the last iteration of the batch loop.
-        batch.wake_all();
+        let mut waking = true;
+        while waking {
+            waking = self
+                .queue
+                .with_lock(|queue| Self::drain_to_wake_batch(&mut batch, queue, Wakeup::Closed));
+            batch.wake_all();
+        }
     }
 
     /// Wait to be woken up by this queue.
@@ -659,7 +723,7 @@ impl WaitQueue {
     /// [`wake()`]: Self::wake
     /// [`wake_all()`]: Self::wake_all
     /// [`Closed`]: crate::Closed
-    pub fn wait(&self) -> Wait<'_> {
+    pub fn wait(&self) -> Wait<'_, Lock> {
         Wait {
             queue: self,
             waiter: self.waiter(),
@@ -964,24 +1028,16 @@ impl WaitQueue {
         waker
     }
 
-    /// Drain the queue of all waiters, and push them to `batch`.
-    ///
-    /// When the [`WakeBatch`] is full, this function drops the lock, wakes the
-    /// current contents of the [`WakeBatch`] before reacquiring the lock and
-    /// continuing.
-    ///
-    /// Note that this will *not* wake the final batch of waiters added to the
-    /// batch. Instead, it returns the [`MutexGuard`], in case additional
-    /// operations must be performed with the lock held before waking the final
-    /// batch of waiters.
-    fn drain_to_wake_batch<'q>(
-        &'q self,
+    /// Drain waiters from `queue` and add them to `batch`. Returns `true` if
+    /// the batch was filled while more waiters remain in the queue, indicating
+    /// that this function must be called again to wake all waiters.
+    fn drain_to_wake_batch(
         batch: &mut WakeBatch,
-        mut queue: MutexGuard<'q, List<Waiter>>,
+        queue: &mut List<Waiter>,
         wakeup: Wakeup,
-    ) -> MutexGuard<'q, List<Waiter>> {
+    ) -> bool {
         while let Some(node) = queue.pop_back() {
-            let Some(waker) = Waiter::wake(node, &mut queue, wakeup.clone()) else {
+            let Some(waker) = Waiter::wake(node, queue, wakeup.clone()) else {
                 // this waiter was enqueued by `Wait::register` and doesn't have
                 // a waker, just keep going.
                 continue;
@@ -993,14 +1049,10 @@ impl WaitQueue {
             }
 
             // wake set is full, drop the lock and wake everyone!
-            drop(queue);
-            batch.wake_all();
-
-            // reacquire the lock and continue waking
-            queue = self.queue.lock();
+            break;
         }
 
-        queue
+        !queue.is_empty()
     }
 }
 
@@ -1058,17 +1110,21 @@ impl Waiter {
         }
     }
 
-    fn poll_wait(
+    fn poll_wait<Lock>(
         mut self: Pin<&mut Self>,
-        queue: &WaitQueue,
+        queue: &WaitQueue<Lock>,
         waker: Option<&Waker>,
-    ) -> Poll<WaitResult<()>> {
+    ) -> Poll<WaitResult<()>>
+    where
+        Lock: ScopedRawMutex,
+    {
         test_debug!(ptr = ?fmt::ptr(self.as_mut()), "Waiter::poll_wait");
+        let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self.as_mut())) };
         let mut this = self.as_mut().project();
 
         match test_dbg!(this.state.get(WaitStateBits::STATE)) {
             WaitState::Start => {
-                let mut queue_state = queue.load();
+                let queue_state = queue.load();
 
                 // can we consume a pending wakeup?
                 if queue
@@ -1083,101 +1139,104 @@ impl Waiter {
                 }
 
                 // okay, no pending wakeups. try to wait...
+
                 test_debug!("poll_wait: locking...");
-                let mut waiters = queue.queue.lock();
-                test_debug!("poll_wait: -> locked");
-                queue_state = queue.load();
+                queue.queue.with_lock(move |waiters| {
+                    test_debug!("poll_wait: -> locked");
+                    let mut queue_state = queue.load();
 
-                // the whole queue was woken while we were trying to acquire
-                // the lock!
-                if queue_state.get(QueueState::WAKE_ALLS)
-                    != this.state.get(WaitStateBits::WAKE_ALLS)
-                {
-                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                    return Poll::Ready(Ok(()));
-                }
-
-                // transition the queue to the waiting state
-                'to_waiting: loop {
-                    match test_dbg!(queue_state.get(QueueState::STATE)) {
-                        // the queue is `Empty`, transition to `Waiting`
-                        State::Empty => {
-                            match queue.compare_exchange(
-                                queue_state,
-                                queue_state.with_state(State::Waiting),
-                            ) {
-                                Ok(_) => break 'to_waiting,
-                                Err(actual) => queue_state = actual,
-                            }
-                        }
-                        // the queue is already `Waiting`
-                        State::Waiting => break 'to_waiting,
-                        // the queue was woken, consume the wakeup.
-                        State::Woken => {
-                            match queue
-                                .compare_exchange(queue_state, queue_state.with_state(State::Empty))
-                            {
-                                Ok(_) => {
-                                    this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                                    return Poll::Ready(Ok(()));
-                                }
-                                Err(actual) => queue_state = actual,
-                            }
-                        }
-                        State::Closed => return crate::closed(),
+                    // the whole queue was woken while we were trying to acquire
+                    // the lock!
+                    if queue_state.get(QueueState::WAKE_ALLS)
+                        != this.state.get(WaitStateBits::WAKE_ALLS)
+                    {
+                        this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                        return Poll::Ready(Ok(()));
                     }
-                }
 
-                // enqueue the node
-                this.state.set(WaitStateBits::STATE, WaitState::Waiting);
-                if let Some(waker) = waker {
-                    this.node.as_mut().with_mut(|node| {
-                        unsafe {
-                            // safety: we may mutate the node because we are
-                            // holding the lock.
-                            debug_assert!(matches!((*node).waker, Wakeup::Empty));
-                            (*node).waker = Wakeup::Waiting(waker.clone());
+                    // transition the queue to the waiting state
+                    'to_waiting: loop {
+                        match test_dbg!(queue_state.get(QueueState::STATE)) {
+                            // the queue is `Empty`, transition to `Waiting`
+                            State::Empty => {
+                                match queue.compare_exchange(
+                                    queue_state,
+                                    queue_state.with_state(State::Waiting),
+                                ) {
+                                    Ok(_) => break 'to_waiting,
+                                    Err(actual) => queue_state = actual,
+                                }
+                            }
+                            // the queue is already `Waiting`
+                            State::Waiting => break 'to_waiting,
+                            // the queue was woken, consume the wakeup.
+                            State::Woken => {
+                                match queue.compare_exchange(
+                                    queue_state,
+                                    queue_state.with_state(State::Empty),
+                                ) {
+                                    Ok(_) => {
+                                        this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                                        return Poll::Ready(Ok(()));
+                                    }
+                                    Err(actual) => queue_state = actual,
+                                }
+                            }
+                            State::Closed => return crate::closed(),
                         }
-                    });
-                }
+                    }
 
-                let ptr = unsafe { NonNull::from(Pin::into_inner_unchecked(self)) };
-                waiters.push_front(ptr);
+                    // enqueue the node
+                    this.state.set(WaitStateBits::STATE, WaitState::Waiting);
+                    if let Some(waker) = waker {
+                        this.node.as_mut().with_mut(|node| {
+                            unsafe {
+                                // safety: we may mutate the node because we are
+                                // holding the lock.
+                                debug_assert!(matches!((*node).waker, Wakeup::Empty));
+                                (*node).waker = Wakeup::Waiting(waker.clone());
+                            }
+                        });
+                    }
 
-                Poll::Pending
+                    waiters.push_front(ptr);
+
+                    Poll::Pending
+                })
             }
             WaitState::Waiting => {
-                let mut _waiters = queue.queue.lock();
-                this.node.with_mut(|node| unsafe {
-                    // safety: we may mutate the node because we are
-                    // holding the lock.
-                    let node = &mut *node;
-                    match node.waker {
-                        Wakeup::Waiting(ref mut curr_waker) => {
-                            match waker {
-                                Some(waker) if !curr_waker.will_wake(waker) => {
-                                    *curr_waker = waker.clone()
+                queue.queue.with_lock(|_waiters| {
+                    this.node.with_mut(|node| unsafe {
+                        // safety: we may mutate the node because we are
+                        // holding the lock.
+                        let node = &mut *node;
+                        match node.waker {
+                            Wakeup::Waiting(ref mut curr_waker) => {
+                                match waker {
+                                    Some(waker) if !curr_waker.will_wake(waker) => {
+                                        *curr_waker = waker.clone()
+                                    }
+                                    _ => {}
                                 }
-                                _ => {}
+                                Poll::Pending
                             }
-                            Poll::Pending
-                        }
-                        Wakeup::All | Wakeup::One => {
-                            this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                            Poll::Ready(Ok(()))
-                        }
-                        Wakeup::Closed => {
-                            this.state.set(WaitStateBits::STATE, WaitState::Woken);
-                            crate::closed()
-                        }
-                        Wakeup::Empty => {
-                            if let Some(waker) = waker {
-                                node.waker = Wakeup::Waiting(waker.clone());
+                            Wakeup::All | Wakeup::One => {
+                                this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                                Poll::Ready(Ok(()))
                             }
+                            Wakeup::Closed => {
+                                this.state.set(WaitStateBits::STATE, WaitState::Woken);
+                                crate::closed()
+                            }
+                            Wakeup::Empty => {
+                                if let Some(waker) = waker {
+                                    node.waker = Wakeup::Waiting(waker.clone());
+                                }
 
-                            Poll::Pending
+                                Poll::Pending
+                            }
                         }
-                    }
+                    })
                 })
             }
             WaitState::Woken => Poll::Ready(Ok(())),
@@ -1188,38 +1247,44 @@ impl Waiter {
     ///
     /// This is called from the `drop` implementation for the [`Wait`] and
     /// [`WaitOwned`] futures.
-    fn release(mut self: Pin<&mut Self>, queue: &WaitQueue) {
+    fn release<Lock>(mut self: Pin<&mut Self>, queue: &WaitQueue<Lock>)
+    where
+        Lock: ScopedRawMutex,
+    {
         let state = *(self.as_mut().project().state);
         let ptr = NonNull::from(unsafe { Pin::into_inner_unchecked(self) });
-        test_debug!(self = ?fmt::ptr(ptr), ?state, ?queue, "Waiter::release");
+        test_debug!(self = ?fmt::ptr(ptr), ?state, ?queue.state, "Waiter::release");
 
         // if we're not enqueued, we don't have to do anything else.
         if state.get(WaitStateBits::STATE) != WaitState::Waiting {
             return;
         }
 
-        let mut waiters = queue.queue.lock();
-        let state = queue.load();
+        let next_waiter = queue.queue.with_lock(|waiters| {
+            let state = queue.load();
+            // remove the node
+            unsafe {
+                // safety: we have the lock on the queue, so this is safe.
+                waiters.remove(ptr);
+            };
 
-        // remove the node
-        unsafe {
-            // safety: we have the lock on the queue, so this is safe.
-            waiters.remove(ptr);
-        };
-
-        // if we removed the last waiter from the queue, transition the state to
-        // `Empty`.
-        if test_dbg!(waiters.is_empty()) && state.get(QueueState::STATE) == State::Waiting {
-            queue.store(state.with_state(State::Empty));
-        }
-
-        // if the node has an unconsumed wakeup, it must be assigned to the next
-        // node in the queue.
-        if Waiter::with_node(ptr, &mut waiters, |node| matches!(&node.waker, Wakeup::One)) {
-            if let Some(waker) = queue.wake_locked(&mut waiters, state) {
-                drop(waiters);
-                waker.wake()
+            // if we removed the last waiter from the queue, transition the state to
+            // `Empty`.
+            if test_dbg!(waiters.is_empty()) && state.get(QueueState::STATE) == State::Waiting {
+                queue.store(state.with_state(State::Empty));
             }
+
+            // if the node has an unconsumed wakeup, it must be assigned to the next
+            // node in the queue.
+            if Waiter::with_node(ptr, waiters, |node| matches!(&node.waker, Wakeup::One)) {
+                queue.wake_locked(waiters, state)
+            } else {
+                None
+            }
+        });
+
+        if let Some(next) = next_waiter {
+            next.wake();
         }
     }
 }
@@ -1251,7 +1316,7 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
 
 // === impl Wait ===
 
-impl Wait<'_> {
+impl<Lock: ScopedRawMutex> Wait<'_, Lock> {
     /// Returns `true` if this `Wait` future is waiting for a notification from
     /// the provided [`WaitQueue`].
     ///
@@ -1269,7 +1334,7 @@ impl Wait<'_> {
     /// ```
     #[inline]
     #[must_use]
-    pub fn waits_on(&self, queue: &WaitQueue) -> bool {
+    pub fn waits_on(&self, queue: &WaitQueue<Lock>) -> bool {
         ptr::eq(self.queue, queue)
     }
 
@@ -1306,7 +1371,7 @@ impl Wait<'_> {
     /// ```
     #[inline]
     #[must_use]
-    pub fn same_queue(&self, other: &Wait<'_>) -> bool {
+    pub fn same_queue(&self, other: &Wait<'_, Lock>) -> bool {
         ptr::eq(self.queue, other.queue)
     }
 
@@ -1363,7 +1428,7 @@ impl Wait<'_> {
     }
 }
 
-impl Future for Wait<'_> {
+impl<Lock: ScopedRawMutex> Future for Wait<'_, Lock> {
     type Output = WaitResult<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1373,7 +1438,7 @@ impl Future for Wait<'_> {
 }
 
 #[pinned_drop]
-impl PinnedDrop for Wait<'_> {
+impl<Lock: ScopedRawMutex> PinnedDrop for Wait<'_, Lock> {
     fn drop(mut self: Pin<&mut Self>) {
         let this = self.project();
         this.waiter.release(this.queue);
@@ -1449,16 +1514,16 @@ feature! {
     /// ```
     #[derive(Debug)]
     #[pin_project(PinnedDrop)]
-    pub struct WaitOwned {
+    pub struct WaitOwned<Lock: ScopedRawMutex = DefaultMutex> {
         /// The `WaitQueue` being waited on.
-        queue: Arc<WaitQueue>,
+        queue: Arc<WaitQueue<Lock>>,
 
         /// Entry in the wait queue.
         #[pin]
         waiter: Waiter,
     }
 
-    impl WaitQueue {
+    impl<Lock: ScopedRawMutex> WaitQueue<Lock> {
         /// Wait to be woken up by this queue, returning a future that's valid
         /// for the `'static` lifetime.
         ///
@@ -1493,7 +1558,7 @@ feature! {
         /// [`wait()`]: Self::wait
         /// [closed]: Self::close
         /// [`Closed`]: crate::Closed
-        pub fn wait_owned(self: &Arc<Self>) -> WaitOwned {
+        pub fn wait_owned(self: &Arc<Self>) -> WaitOwned<Lock> {
             let waiter = self.waiter();
             let queue = self.clone();
             WaitOwned { queue, waiter }
@@ -1502,7 +1567,7 @@ feature! {
 
     // === impl WaitOwned ===
 
-    impl WaitOwned {
+    impl<Lock: ScopedRawMutex> WaitOwned<Lock> {
         /// Returns `true` if this `WaitOwned` future is waiting for a
         /// notification from the provided [`WaitQueue`].
         ///
@@ -1521,7 +1586,7 @@ feature! {
         /// ```
         #[inline]
         #[must_use]
-        pub fn waits_on(&self, queue: &WaitQueue) -> bool {
+        pub fn waits_on(&self, queue: &WaitQueue<Lock>) -> bool {
             ptr::eq(&*self.queue, queue)
         }
 
@@ -1562,7 +1627,7 @@ feature! {
         /// ```
         #[inline]
         #[must_use]
-        pub fn same_queue(&self, other: &WaitOwned) -> bool {
+        pub fn same_queue(&self, other: &WaitOwned<Lock>) -> bool {
             Arc::ptr_eq(&self.queue, &other.queue)
         }
 
@@ -1621,7 +1686,7 @@ feature! {
         }
     }
 
-    impl Future for WaitOwned {
+    impl<Lock: ScopedRawMutex> Future for WaitOwned<Lock> {
         type Output = WaitResult<()>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -1631,7 +1696,7 @@ feature! {
     }
 
     #[pinned_drop]
-    impl PinnedDrop for WaitOwned {
+    impl<Lock: ScopedRawMutex> PinnedDrop for WaitOwned<Lock> {
         fn drop(mut self: Pin<&mut Self>) {
             let this = self.project();
             this.waiter.release(&*this.queue);

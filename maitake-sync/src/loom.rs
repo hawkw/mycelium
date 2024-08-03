@@ -72,29 +72,139 @@ mod inner {
     pub(crate) mod sync {
         pub(crate) use loom::sync::*;
 
-        pub(crate) mod spin {
-            pub(crate) use loom::sync::MutexGuard;
+        pub(crate) mod blocking {
+            use core::{
+                marker::PhantomData,
+                ops::{Deref, DerefMut},
+            };
+
+            #[cfg(feature = "tracing")]
+            use core::panic::Location;
+
+            use core::fmt;
 
             /// Mock version of mycelium's spinlock, but using
             /// `loom::sync::Mutex`. The API is slightly different, since the
             /// mycelium mutex does not support poisoning.
-            #[derive(Debug)]
-            pub(crate) struct Mutex<T>(loom::sync::Mutex<T>);
+            pub(crate) struct Mutex<T, Lock = crate::spin::Spinlock>(
+                loom::sync::Mutex<T>,
+                PhantomData<Lock>,
+            );
 
-            impl<T> Mutex<T> {
+            pub(crate) struct MutexGuard<'a, T, Lock = crate::spin::Spinlock> {
+                guard: loom::sync::MutexGuard<'a, T>,
+                #[cfg(feature = "tracing")]
+                location: &'static Location<'static>,
+                _p: PhantomData<Lock>,
+            }
+
+            impl<T, Lock> Mutex<T, Lock> {
                 #[track_caller]
                 pub(crate) fn new(t: T) -> Self {
-                    Self(loom::sync::Mutex::new(t))
+                    Self(loom::sync::Mutex::new(t), PhantomData)
                 }
 
                 #[track_caller]
-                pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-                    self.0.try_lock().ok()
+                pub(crate) fn new_with_raw_mutex(t: T, _: Lock) -> Self {
+                    Self::new(t)
                 }
 
                 #[track_caller]
-                pub fn lock(&self) -> MutexGuard<'_, T> {
-                    self.0.lock().expect("loom mutex will never poison")
+                pub fn with_lock<U>(&self, f: impl FnOnce(&mut T) -> U) -> U {
+                    let mut guard = self.lock();
+                    let res = f(&mut *guard);
+                    res
+                }
+
+                #[track_caller]
+                pub fn try_lock(&self) -> Option<MutexGuard<'_, T, Lock>> {
+                    #[cfg(feature = "tracing")]
+                    let location = Location::caller();
+                    #[cfg(feature = "tracing")]
+                    tracing::debug!(%location, "Mutex::try_lock");
+
+                    match self.0.try_lock() {
+                        Ok(guard) => {
+                            #[cfg(feature = "tracing")]
+                            tracing::debug!(%location, "Mutex::try_lock -> locked!");
+                            Some(MutexGuard {
+                                guard,
+
+                                #[cfg(feature = "tracing")]
+                                location,
+                                _p: PhantomData,
+                            })
+                        }
+                        Err(_) => {
+                            #[cfg(feature = "tracing")]
+                            tracing::debug!(%location, "Mutex::try_lock -> already locked");
+                            None
+                        }
+                    }
+                }
+
+                #[track_caller]
+                pub fn lock(&self) -> MutexGuard<'_, T, Lock> {
+                    #[cfg(feature = "tracing")]
+                    let location = Location::caller();
+
+                    #[cfg(feature = "tracing")]
+                    tracing::debug!(%location, "Mutex::lock");
+
+                    let guard = self
+                        .0
+                        .lock()
+                        .map(|guard| MutexGuard {
+                            guard,
+
+                            #[cfg(feature = "tracing")]
+                            location,
+                            _p: PhantomData,
+                        })
+                        .expect("loom mutex will never poison");
+
+                    #[cfg(feature = "tracing")]
+                    tracing::debug!(%location, "Mutex::lock -> locked");
+                    guard
+                }
+            }
+
+            impl<T: fmt::Debug, Lock> fmt::Debug for Mutex<T, Lock> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.0.fmt(f)
+                }
+            }
+
+            impl<T, Lock> Deref for MutexGuard<'_, T, Lock> {
+                type Target = T;
+                #[inline]
+                fn deref(&self) -> &Self::Target {
+                    self.guard.deref()
+                }
+            }
+
+            impl<T, Lock> DerefMut for MutexGuard<'_, T, Lock> {
+                #[inline]
+                fn deref_mut(&mut self) -> &mut Self::Target {
+                    self.guard.deref_mut()
+                }
+            }
+
+            impl<T: fmt::Debug, Lock> fmt::Debug for MutexGuard<'_, T, Lock> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.guard.fmt(f)
+                }
+            }
+
+            impl<T, Lock> Drop for MutexGuard<'_, T, Lock> {
+                #[track_caller]
+                fn drop(&mut self) {
+                    #[cfg(feature = "tracing")]
+                    tracing::debug!(
+                        location.dropped = %Location::caller(),
+                        location.locked = %self.location,
+                        "MutexGuard::drop: unlocking",
+                    );
                 }
             }
         }
@@ -105,11 +215,11 @@ mod inner {
 mod inner {
     #![allow(dead_code, unused_imports)]
     pub(crate) mod sync {
-        #[cfg(feature = "alloc")]
+        #[cfg(any(feature = "alloc", test))]
         pub use alloc::sync::*;
         pub use core::sync::*;
 
-        pub use crate::spin;
+        pub use crate::blocking;
     }
 
     pub(crate) mod atomic {

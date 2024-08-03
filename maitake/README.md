@@ -253,7 +253,55 @@ critical section, are described [here][interrupt-cfgs].
 [`portable-atomic`]: https://crates.io/crates/portable-atomic
 [`RUSTFLAGS`]: https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags
 [single-core]: https://docs.rs/portable-atomic/latest/portable_atomic/#optional-cfg
-[interrupt-cfgs]: https://github.com/taiki-e/portable-atomic/blob/HEAD/src/imp/interrupt/README.md
+[interrupt-cfgs]:
+    https://github.com/taiki-e/portable-atomic/blob/HEAD/src/imp/interrupt/README.md
+
+### overriding blocking mutex implementations
+
+In addition to async locks, [`maitake::sync`][sync] also provides a [`blocking`]
+module, which contains blocking [`blocking::Mutex`] and [`blocking::RwLock`]
+types. Many of `maitake::sync`'s async synchronization primitives, including
+[`WaitQueue`], [`Mutex`], [`RwLock`], and [`Semaphore`], internally use the
+[`blocking::Mutex`] type for wait-list synchronization. By default, this type
+uses a [`blocking::DefaultMutex`][`DefaultMutex`] as the underlying mutex
+implementation, which attempts to provide the best generic mutex implementation
+based on the currently enabled feature flags.
+
+However, in some cases, it may be desirable to provide a custom mutex
+implementation. Therefore, `maitake::sync`'s [`blocking::Mutex`] type, and the
+async synchronization primitives that depend on it, are generic over a `Lock`
+type parameter which may be overridden using the [`RawMutex`] and
+[`ScopedRawMutex`] traits from the [`mutex-traits`] crate, allowing alternative
+blocking mutex implementations to be used with `maitake::sync`. Using the
+[`mutex-traits`] adapters in the [`mutex`] crate, `maitake::sync`'s types may
+also be used with raw mutex implementations that implement traits from the
+[`lock_api`] and [`critical-section`] crates.
+
+See [the documentation on overriding mutex implementations][overriding] for more
+details.
+
+[`blocking`]:
+    https://mycelium.elizas.website/maitake/sync/blocking/index.html
+[`blocking::Mutex`]:
+    https://mycelium.elizas.website/maitake/sync/blocking/struct.Mutex.html
+[`blocking::RwLock`]:
+    https://mycelium.elizas.website/maitake/sync/blocking/struct.RwLock.html
+[`DefaultMutex`]:
+    https://mycelium.elizas.website/maitake/sync/blocking/struct.DefaultMutex.html
+[`WaitQueue`]:
+    https://mycelium.elizas.website/maitake/sync/struct.WaitQueue.html
+[`WaitMap`]:
+    https://mycelium.elizas.website/maitake/sync/struct.WaitMap.html
+[spinlock]: https://en.wikipedia.org/wiki/Spinlock
+[`RawMutex`]:
+    https://docs.rs/mutex-traits/latest/mutex_traits/trait.RawMutex.html
+[`ScopedRawMutex`]:
+    https://docs.rs/mutex-traits/latest/mutex_traits/trait.ScopedRawMutex.html
+[`mutex-traits`]: https://crates.io/crates/mutex-traits
+[`lock_api`]: https://crates.io/crates/lock_api
+[`critical-section`]: https://crates.io/crates/critical-section
+[overriding]:
+    https://mycelium.elizas.website/maitake/sync/blocking/index.html#overriding-mutex-implementations
 
 ## features
 
@@ -264,6 +312,9 @@ The following features are available (this list is incomplete; you can help by [
 | Feature        | Default | Explanation |
 | :---           | :---    | :---        |
 | `alloc`        | `true`  | Enables [`liballoc`] dependency |
+| `std`          | `false`  | Enables the Rust standard library, disabling `#![no-std]`. When `std` is enabled, the [`DefaultMutex`] type will use [`std::sync::Mutex`]. This implies the `alloc` feature. |
+
+| `critical-section` | `false` | Enables support for the [`critical-section`] crate. This includes a variant of the [`DefaultMutex`] type that uses a critical section, as well as the [`portable-atomic`] crate's `critical-section` feature (as [discussed above](#support-for-atomic-operations)) |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `tracing-01`   | `false` | Enables support for v0.1.x of [`tracing`] (the current release version). Requires `liballoc`.|
 | `tracing-02`   | `false` | Enables support for the upcoming v0.2 of [`tracing`] (via a Git dependency). |
@@ -273,3 +324,5 @@ The following features are available (this list is incomplete; you can help by [
 [`CachePadded`]: https://mycelium.elizas.website/mycelium_util/sync/struct.cachepadded
 [`tracing`]: https://crates.io/crates/tracing
 [core-error]: https://doc.rust-lang.org/stable/core/error/index.html
+[`std::sync::Mutex`]:
+    https://doc.rust-lang.org/stable/std/sync/struct.Mutex.html

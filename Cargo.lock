@@ -624,6 +624,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "critical-section"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7059fff8937831a9ae6f0fe4d658ffabf58f2ca96aa9dec1c889f936f705f216"
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1050,6 +1056,7 @@ name = "hal-core"
 version = "0.1.0"
 dependencies = [
  "embedded-graphics-core",
+ "maitake-sync",
  "mycelium-util",
  "tracing 0.2.0",
 ]
@@ -1438,9 +1445,11 @@ name = "maitake-sync"
 version = "0.1.2"
 dependencies = [
  "cordyceps",
+ "critical-section",
  "futures",
  "futures-util",
  "loom",
+ "mutex-traits",
  "mycelium-bitfield",
  "pin-project",
  "portable-atomic",
@@ -1528,6 +1537,11 @@ dependencies = [
  "wasi",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "mutex-traits"
+version = "0.999.0"
+source = "git+https://github.com/tosc-rs/scoped-mutex#67dedfa152e553ccee1ae78342eae7f6bb67cb96"
 
 [[package]]
 name = "mycelium-alloc"
@@ -1884,6 +1898,9 @@ name = "portable-atomic"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7170ef9988bc169ba16dd36a7fa041e5c4cbeb6a35b76d4c03daded371eae7c0"
+dependencies = [
+ "critical-section",
+]
 
 [[package]]
 name = "powerfmt"

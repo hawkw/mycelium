@@ -113,22 +113,26 @@ impl Future for Sleep<'_> {
                 let ptr =
                     unsafe { ptr::NonNull::from(Pin::into_inner_unchecked(this.entry.as_mut())) };
                 // Acquire the wheel lock to insert the sleep.
-                let mut core = this.timer.core();
+                let done = this.timer.core.with_lock(|core| {
+                    // While we are holding the wheel lock, go ahead and advance the
+                    // timer, too. This way, the timer wheel gets advanced more
+                    // frequently than just when a scheduler tick completes or a
+                    // timer IRQ fires, helping to increase timer accuracy.
+                    this.timer.advance_locked(core);
 
-                // While we are holding the wheel lock, go ahead and advance the
-                // timer, too. This way, the timer wheel gets advanced more
-                // frequently than just when a scheduler tick completes or a
-                // timer IRQ fires, helping to increase timer accuracy.
-                this.timer.advance_locked(&mut core);
-
-                match test_dbg!(core.register_sleep(ptr)) {
-                    Poll::Ready(()) => {
-                        *this.state = State::Completed;
-                        return Poll::Ready(());
+                    match test_dbg!(core.register_sleep(ptr)) {
+                        Poll::Ready(()) => {
+                            *this.state = State::Completed;
+                            true
+                        }
+                        Poll::Pending => {
+                            *this.state = State::Registered;
+                            false
+                        }
                     }
-                    Poll::Pending => {
-                        *this.state = State::Registered;
-                    }
+                });
+                if done {
+                    return Poll::Ready(());
                 }
             }
             State::Registered => {}
@@ -154,7 +158,9 @@ impl PinnedDrop for Sleep<'_> {
         // yet, or it has already completed, we don't need to lock the timer to
         // remove it.
         if test_dbg!(this.entry.linked.load(Acquire)) {
-            this.timer.core().cancel_sleep(this.entry);
+            this.timer
+                .core
+                .with_lock(|core| core.cancel_sleep(this.entry));
         }
     }
 }
