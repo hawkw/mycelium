@@ -17,7 +17,7 @@ categories = [
     "async",
 ]
 edition = "2021"
-rust-version = "1.61.0"
+rust-version = "1.76.0"
 
 # NOTE! As a workaround for https://github.com/rust-lang/rust/issues/97708,
 # maitake uses some `no_mangle` functions. This will cause linker errors if
