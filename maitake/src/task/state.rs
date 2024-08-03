@@ -585,11 +585,15 @@ mod tests {
     use super::*;
 
     #[test]
+    // No sense spending time running these trivial tests under Miri...
+    #[cfg_attr(miri, ignore)]
     fn packing_specs_valid() {
         State::assert_valid()
     }
-
+    
     #[test]
+    // No sense spending time running these trivial tests under Miri...
+    #[cfg_attr(miri, ignore)]
     fn debug_alt() {
         let state = StateCell::new();
         println!("{state:#?}");

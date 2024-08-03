@@ -1,5 +1,5 @@
 use super::*;
-use mycelium_util::sync::{Lazy, spin::Mutex};
+use mycelium_util::sync::{spin::Mutex, Lazy};
 
 #[test]
 fn basically_works() {
@@ -21,12 +21,14 @@ fn basically_works() {
     assert_eq!(tick.polled, 2)
 }
 
+// Don't spawn as many tasks under Miri so that the test can run in a
+// reasonable-ish amount of time.
+const TASKS: usize = if cfg!(miri) { 2 } else { 10 };
+
 #[test]
 fn schedule_many() {
     static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
-
-    const TASKS: usize = 10;
 
     util::trace_init();
     for _ in 0..TASKS {
@@ -48,8 +50,6 @@ fn schedule_many() {
 fn many_yields() {
     static SCHEDULER: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
-
-    const TASKS: usize = 10;
 
     util::trace_init();
 
@@ -100,7 +100,10 @@ fn steal_blocked() {
 
     assert!(SCHEDULER_1.current_task().is_some());
 
-    let stolen = SCHEDULER_1.try_steal().unwrap().spawn_n(&SCHEDULER_2.get(), 1);
+    let stolen = SCHEDULER_1
+        .try_steal()
+        .unwrap()
+        .spawn_n(&SCHEDULER_2.get(), 1);
     assert_eq!(stolen, 1);
 
     let tick = SCHEDULER_2.tick();

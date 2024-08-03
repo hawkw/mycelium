@@ -230,7 +230,7 @@ jobs:
     needs: changed_paths
     if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).cordyceps.should_skip
     runs-on: ubuntu-latest
-    name: Miri tests (codyceps)
+    name: Miri tests (cordyceps)
     steps:
     - name: install rust toolchain
       run: rustup show
@@ -282,6 +282,25 @@ jobs:
     - name: run loom tests (maitake-sync)
       run: just loom maitake-sync
 
+  # run miri tests
+  maitake_miri:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).maitake.should_skip
+    runs-on: ubuntu-latest
+    name: Miri tests (maitake)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v4
+    - name: install Just
+      uses: extractions/setup-just@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: install nextest
+      uses: taiki-e/install-action@nextest
+    - name: run Miri tests
+      run: just miri maitake
+
   ### mycelium-util ###
 
   # run loom tests
@@ -302,3 +321,23 @@ jobs:
       uses: taiki-e/install-action@nextest
     - name: run loom tests
       run: just loom mycelium-util
+
+  # dummy job that depends on all required checks
+  all_systems_go:
+    needs:
+    - check-host
+    - rustfmt
+    - clippy
+    - test-host
+    - build-x64
+    - test-x64
+    - docs
+    - cordyceps_loom
+    - cordyceps_miri
+    - maitake_no_default_features
+    - maitake_loom
+    - maitake_miri
+    - util_loom
+    runs-on: ubuntu-latest
+    steps:
+    - run: exit 0

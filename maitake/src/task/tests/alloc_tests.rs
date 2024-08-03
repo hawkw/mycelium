@@ -39,6 +39,8 @@ fn task_is_valid_for_casts() {
 
 /// This test just prints the size (in bytes) of an empty task struct.
 #[test]
+// No sense spending time running these trivial tests under Miri...
+#[cfg_attr(miri, ignore)]
 fn empty_task_size() {
     use core::{
         any::type_name,

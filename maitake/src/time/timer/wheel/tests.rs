@@ -2,6 +2,9 @@ use super::*;
 use proptest::{prop_assert_eq, proptest};
 
 #[test]
+// This test doesn't exercise anything that's potentially memory-unsafe, so
+// don't spend time running it under miri.
+#[cfg_attr(miri, ignore)]
 fn wheel_indices() {
     let core = Core::new();
     for ticks in 0..64 {
@@ -43,11 +46,17 @@ fn wheel_indices() {
 }
 
 #[test]
+// This test doesn't exercise anything that's potentially memory-unsafe, so
+// don't spend time running it under miri.
+#[cfg_attr(miri, ignore)]
 fn bitshift_is_correct() {
     assert_eq!(1 << Wheel::BITS, Wheel::SLOTS);
 }
 
 #[test]
+// This test doesn't exercise anything that's potentially memory-unsafe, so
+// don't spend time running it under miri.
+#[cfg_attr(miri, ignore)]
 fn slot_indices() {
     let wheel = Wheel::new(0);
     for i in 0..64 {
@@ -66,6 +75,9 @@ fn slot_indices() {
 }
 
 #[test]
+// This test doesn't exercise anything that's potentially memory-unsafe, so
+// don't spend time running it under miri.
+#[cfg_attr(miri, ignore)]
 fn test_next_set_bit() {
     assert_eq!(dbg!(next_set_bit(0b0000_1001, 2)), Some(3));
     assert_eq!(dbg!(next_set_bit(0b0000_1001, 3)), Some(3));
@@ -79,6 +91,9 @@ fn test_next_set_bit() {
 
 proptest! {
     #[test]
+    // This test doesn't exercise anything that's potentially memory-unsafe, so
+    // don't spend time running it under miri.
+    #[cfg_attr(miri, ignore)]
     fn next_set_bit_works(bitmap: u64, offset in 0..64u32) {
         println!("   bitmap: {bitmap:064b}");
         println!("   offset: {offset}");
