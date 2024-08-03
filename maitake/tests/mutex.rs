@@ -22,10 +22,10 @@ mod alloc {
     use maitake::scheduler::Scheduler;
     use std::{future::Future, sync::Arc};
 
+    const TASKS: usize = if cfg!(miri) { 2 } else { 10 };
+
     #[test]
     fn basically_works() {
-        const TASKS: usize = 10;
-
         let scheduler = Scheduler::new();
         let lock = Arc::new(Mutex::new(0));
 
@@ -53,8 +53,6 @@ mod alloc {
     #[test]
     #[cfg(feature = "alloc")]
     fn lock_owned() {
-        const TASKS: usize = 10;
-
         let scheduler = Scheduler::new();
         let lock = Arc::new(Mutex::new(0));
 

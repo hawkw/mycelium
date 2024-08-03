@@ -29,6 +29,9 @@ fn taskref_deallocates() {
 
 #[test]
 #[should_panic]
+// Miri (correctly) detects a memory leak in this test and fails, which is
+// good...but Miri doesn't understand "should panic".
+#[cfg_attr(miri, ignore)]
 fn do_leaks_work() {
     loom::model(|| {
         let track = Track::new(());
@@ -80,6 +83,11 @@ fn joinhandle_deallocates() {
 }
 
 #[test]
+// The non-loom version of ths test uses a Tokio API that calls into
+// `epoll_wait`, which Miri doesn't simulate currently. Thus, ignore it. The
+// version in `alloc_tests` should simulate the same behavior under Miri anyway,
+// so we don't need to run this.
+#[cfg_attr(miri, ignore)]
 fn join_handle_wakes() {
     loom::model(|| {
         let scheduler = Scheduler::new();

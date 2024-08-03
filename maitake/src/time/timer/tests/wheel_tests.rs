@@ -424,6 +424,10 @@ fn fuzz_action_strategy() -> impl Strategy<Value = FuzzAction> {
 
 proptest! {
     #[test]
+    // This test intentionally leaks the timer into a static, which is detected
+    // by Miri's leak checking. Eventually we should figure out a way to make it
+    // work without Miri getting mad...
+    #[cfg_attr(miri, ignore)]
     fn fuzz_timer(actions in vec(fuzz_action_strategy(), 0..MAX_FUZZ_ACTIONS)) {
         static FUZZ_RUNS: AtomicUsize = AtomicUsize::new(1);
         static TIMER: Timer = Timer::new(TestClock::clock());

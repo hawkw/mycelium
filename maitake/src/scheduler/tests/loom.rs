@@ -89,7 +89,8 @@ fn notify_future() {
 
 #[test]
 fn schedule_many() {
-    const TASKS: usize = 10;
+    // don't spawn as many tasks under miri, so that this test doesn't take forever...
+    const TASKS: usize = if cfg!(miri) { 2 } else { 10 };
 
     // for some reason this branches slightly too many times for the default max
     // branches, IDK why...
@@ -156,7 +157,8 @@ fn current_task() {
 // this hits what i *believe* is a loom bug: https://github.com/tokio-rs/loom/issues/260
 #[cfg_attr(loom, ignore)]
 fn cross_thread_spawn() {
-    const TASKS: usize = 10;
+    // don't spawn as many tasks under miri, so that this test doesn't take forever...
+    const TASKS: usize = if cfg!(miri) { 2 } else { 10 };
     loom::model(|| {
         let scheduler = Scheduler::new();
         let completed = Arc::new(AtomicUsize::new(0));
@@ -198,10 +200,10 @@ fn cross_thread_spawn() {
 // much tracing data across a huge number of iterations. skip it for now.
 #[cfg_attr(loom, ignore)]
 fn injector() {
-    // when running in loom, don't spawn all ten tasks, because that makes this
+    // when running in loom/miri, don't spawn all ten tasks, because that makes this
     // test run F O R E V E R
-    const TASKS: usize = if cfg!(loom) { 2 } else { 10 };
-    const THREADS: usize = if cfg!(loom) { 2 } else { 5 };
+    const TASKS: usize = if cfg!(loom) || cfg!(miri) { 2 } else { 10 };
+    const THREADS: usize = if cfg!(loom) || cfg!(miri) { 2 } else { 5 };
     let _trace = crate::util::trace_init();
 
     // for some reason this branches slightly too many times for the default max

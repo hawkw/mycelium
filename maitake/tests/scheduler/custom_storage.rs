@@ -75,13 +75,15 @@ fn static_scheduler_macro() {
     assert_eq!(tick.polled, 2)
 }
 
+// Don't spawn as many tasks under Miri so that the test can run in a
+// reasonable-ish amount of time.
+const TASKS: usize = if cfg!(miri) { 2 } else { 10 };
+
 #[test]
 fn schedule_many() {
     static STUB: TaskStub = TaskStub::new();
     static SCHEDULER: StaticScheduler = unsafe { StaticScheduler::new_with_static_stub(&STUB) };
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
-
-    const TASKS: usize = 10;
 
     util::trace_init();
 
@@ -107,7 +109,6 @@ fn many_yields() {
     static COMPLETED: AtomicUsize = AtomicUsize::new(0);
 
     util::trace_init();
-    const TASKS: usize = 10;
 
     for i in 0..TASKS {
         MyBoxTask::spawn(&SCHEDULER, async move {

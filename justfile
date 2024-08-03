@@ -101,7 +101,7 @@ miri crate='' *args='': _get-nextest
         PROPTEST_CASES="{{ env_var_or_default("PROPTEST_CASES", "10") }}" \
         {{ _cargo }} miri {{ _testcmd }} \
         {{ if crate == '' { miri-crates } else { '-p' } }} {{ crate }} \
-        {{ _test-profile }} \
+        {{ _loom-profile }} \
         --lib \
         {{ args }}
 
