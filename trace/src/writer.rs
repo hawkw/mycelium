@@ -204,8 +204,8 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
 /// a newtype that forwards the trait implementation.
 ///
 /// [`fmt::Write`]: mycelium_util::fmt::Write
-/// [`MutexGuard`]: maitake_sync::blocking:::MutexGuard
-/// [`Mutex`]: mycelium_util::blocking::Mutex
+/// [`MutexGuard`]: maitake::sync::blocking:::MutexGuard
+/// [`Mutex`]: maitake::sync::blocking::Mutex
 /// [`MakeWriter`]: trait.MakeWriter.html
 #[derive(Debug)]
 pub struct MutexGuardWriter<'a, W, Lock: RawMutex = Spinlock>(MutexGuard<'a, W, Lock>);
