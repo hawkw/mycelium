@@ -1540,8 +1540,9 @@ dependencies = [
 
 [[package]]
 name = "mutex-traits"
-version = "0.999.0"
-source = "git+https://github.com/tosc-rs/scoped-mutex#67dedfa152e553ccee1ae78342eae7f6bb67cb96"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd54cb762feb1788c74f5d3387983864d2365ca1819043d2addb76db80169102"
 
 [[package]]
 name = "mycelium-alloc"
