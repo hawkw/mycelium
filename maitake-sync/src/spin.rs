@@ -37,10 +37,17 @@ pub mod once;
 pub use self::once::{InitOnce, Lazy};
 
 use crate::{
-    blocking::{RawMutex, RawRwLock},
+    blocking,
     loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
     util::{fmt, Backoff},
 };
+// This import is pulled out because we want to reference it in docs, and
+// importing `use crate::blocking; use blocking::{RawMutex, RawRwLock};` makes
+// `blocking` appear used even if it's not referenced directly, while
+// `use crate::blocking::{self, RawMutex, RawRwLock};` causes the `self` to
+// appear "unused" to rustc. Yes, this is stupid, but this workaround felt
+// better than `allow(unused_imports)`.
+use blocking::{RawMutex, RawRwLock};
 
 /// A spinlock-based [`RawMutex`] implementation.
 ///
@@ -126,7 +133,7 @@ unsafe impl RawMutex for Spinlock {
 }
 
 #[cfg(not(loom))]
-impl crate::blocking::ConstInit for Spinlock {
+impl blocking::ConstInit for Spinlock {
     // As usual, clippy is totally wrong about this --- the whole point of this
     // constant is to create a *new* spinlock every time.
     #[allow(clippy::declare_interior_mutable_const)]
@@ -243,7 +250,7 @@ unsafe impl RawRwLock for RwSpinlock {
 }
 
 #[cfg(not(loom))]
-impl crate::blocking::ConstInit for RwSpinlock {
+impl blocking::ConstInit for RwSpinlock {
     // As usual, clippy is totally wrong about this --- the whole point of this
     // constant is to create a *new* spinlock every time.
     #[allow(clippy::declare_interior_mutable_const)]
