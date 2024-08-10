@@ -320,7 +320,18 @@ where
 }
 
 unsafe impl<T: Send, Lock: Send> Send for Mutex<T, Lock> {}
-unsafe impl<T: Sync, Lock: Sync> Sync for Mutex<T, Lock> {}
+/// A `Mutex` is [`Sync`] if `T` is [`Send`] and `Lock` is [`Sync`].
+///
+/// `T` must be [`Send`] because shared references to the `Mutex` allow mutable
+/// access to `T` (via a [`MutexGuard`] or [`Mutex::with_lock`]), which can be
+/// used to move `T` between threads using [`core::mem::replace`] or similar.
+/// `T` does **not** need to be [`Sync`], and, in fact, a `Mutex` is often used
+/// to protect `!Sync` data.
+///
+/// The `Lock` type must be `Sync` because sharing references to a mutex
+/// implicitly share references to the `Lock` type as well --- locking the mutex
+/// references it.
+unsafe impl<T: Send, Lock: Sync> Sync for Mutex<T, Lock> {}
 
 // === impl MutexGuard ===
 
