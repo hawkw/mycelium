@@ -17,7 +17,7 @@ use core::ops::{Deref, DerefMut};
 /// of the underlying data (exclusive access) and the read portion of this lock
 /// typically allows for read-only access (shared access).
 ///
-/// In comparison, a [`spin::Mutex`] does not distinguish between readers or writers
+/// In comparison, a [`blocking::Mutex`] does not distinguish between readers or writers
 /// that acquire the lock, therefore blocking any threads waiting for the lock to
 /// become available. An `RwLock` will allow any number of readers to acquire the
 /// lock as long as a writer is not holding the lock.
@@ -31,7 +31,7 @@ use core::ops::{Deref, DerefMut};
 /// When `cfg(loom)` is enabled, this mutex will use Loom's simulated atomics,
 /// checked `UnsafeCell`, and simulated spin loop hints.
 ///
-/// [`spin::Mutex`]: crate::spin::Mutex
+/// [`blocking::Mutex`]: crate::blocking::Mutex
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 pub struct RwLock<T: ?Sized, Lock = RwSpinlock> {
     lock: Lock,

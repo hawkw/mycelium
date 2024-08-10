@@ -13,8 +13,9 @@ use tracing_core::Metadata;
 ///
 /// This trait is already implemented for function pointers and
 /// immutably-borrowing closures that return an instance of [`fmt::Write`],
-/// Additionally, it is implemented for [`mycelium_util::sync::spin::Mutex`]
-/// when the type inside the mutex implements [`fmt::Write`].
+/// Additionally, it is implemented for [`maitake::sync::blocking::Mutex`]
+/// when the type inside the mutex implements [`fmt::Write`] and the `Lock` type
+/// implements [`RawMutex`].
 ///
 /// The [`MakeWriter::make_writer_for`] method takes [`Metadata`] describing a
 /// span or event and returns a writer. `MakeWriter`s can optionally provide

@@ -1,5 +1,5 @@
 use super::*;
-use mycelium_util::sync::{spin::Mutex, Lazy};
+use mycelium_util::sync::{blocking::Mutex, spin::Spinlock, Lazy};
 
 #[test]
 fn basically_works() {
@@ -71,7 +71,7 @@ fn many_yields() {
 fn steal_blocked() {
     static SCHEDULER_1: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
     static SCHEDULER_2: Lazy<StaticScheduler> = Lazy::new(StaticScheduler::new);
-    static MUTEX: Mutex<()> = Mutex::new(());
+    static MUTEX: Mutex<(), Spinlock> = Mutex::new_with_raw_mutex((), Spinlock::new());
     static READY: AtomicBool = AtomicBool::new(false);
     static IT_WORKED: AtomicBool = AtomicBool::new(false);
 
