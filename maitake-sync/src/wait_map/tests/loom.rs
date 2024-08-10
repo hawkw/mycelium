@@ -50,6 +50,7 @@ fn wake_two_sequential() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn wake_close() {
     use ::alloc::sync::Arc;
 

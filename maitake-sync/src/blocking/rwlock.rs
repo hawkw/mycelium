@@ -4,13 +4,14 @@
 ///
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
 use crate::{
-    loom::{
-        cell::{ConstPtr, MutPtr, UnsafeCell},
-        sync::atomic::{AtomicUsize, Ordering::*},
-    },
-    util::{fmt, Backoff},
+    loom::cell::{ConstPtr, MutPtr, UnsafeCell},
+    spin::RwSpinlock,
+    util::fmt,
 };
-use core::ops::{Deref, DerefMut};
+use core::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 /// A spinlock-based [readers-writer lock].
 ///
@@ -19,7 +20,7 @@ use core::ops::{Deref, DerefMut};
 /// of the underlying data (exclusive access) and the read portion of this lock
 /// typically allows for read-only access (shared access).
 ///
-/// In comparison, a [`spin::Mutex`] does not distinguish between readers or writers
+/// In comparison, a [`blocking::Mutex`] does not distinguish between readers or writers
 /// that acquire the lock, therefore blocking any threads waiting for the lock to
 /// become available. An `RwLock` will allow any number of readers to acquire the
 /// lock as long as a writer is not holding the lock.
@@ -33,10 +34,10 @@ use core::ops::{Deref, DerefMut};
 /// When `cfg(loom)` is enabled, this mutex will use Loom's simulated atomics,
 /// checked `UnsafeCell`, and simulated spin loop hints.
 ///
-/// [`spin::Mutex`]: crate::spin::Mutex
+/// [`blocking::Mutex`]: crate::blocking::Mutex
 /// [readers-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock
-pub struct RwLock<T: ?Sized> {
-    state: AtomicUsize,
+pub struct RwLock<T: ?Sized, Lock = RwSpinlock> {
+    lock: Lock,
     data: UnsafeCell<T>,
 }
 
@@ -52,9 +53,10 @@ pub struct RwLock<T: ?Sized> {
 /// [`read`]: RwLock::read
 /// [`try_read`]: RwLock::try_read
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
-pub struct RwLockReadGuard<'lock, T: ?Sized> {
+pub struct RwLockReadGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
     ptr: ConstPtr<T>,
-    state: &'lock AtomicUsize,
+    lock: &'lock Lock,
+    _marker: PhantomData<Lock::GuardMarker>,
 }
 
 /// An RAII implementation of a "scoped write lock" of a [`RwLock`]. When this
@@ -69,14 +71,113 @@ pub struct RwLockReadGuard<'lock, T: ?Sized> {
 /// [`write`]: RwLock::write
 /// [`try_write`]: RwLock::try_write
 #[must_use = "if unused, the `RwLock` will immediately unlock"]
-pub struct RwLockWriteGuard<'lock, T: ?Sized> {
+pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
     ptr: MutPtr<T>,
-    state: &'lock AtomicUsize,
+    lock: &'lock Lock,
+    _marker: PhantomData<Lock::GuardMarker>,
 }
 
-const UNLOCKED: usize = 0;
-const WRITER: usize = 1 << 0;
-const READER: usize = 1 << 1;
+/// Trait abstracting over blocking [`RwLock`] implementations (`maitake-sync`'s
+/// version).
+///
+/// # Safety
+///
+/// Implementations of this trait must ensure that the `RwLock` is actually
+/// exclusive: an exclusive lock can't be acquired while an exclusive or shared
+/// lock exists, and a shared lock can't be acquire while an exclusive lock
+/// exists.
+pub unsafe trait RawRwLock {
+    /// Marker type which determines whether a lock guard should be [`Send`].
+    type GuardMarker;
+
+    /// Acquires a shared lock, blocking the current thread/CPU core until it is
+    /// able to do so.
+    fn lock_shared(&self);
+
+    /// Attempts to acquire a shared lock without blocking.
+    fn try_lock_shared(&self) -> bool;
+
+    /// Releases a shared lock.
+    ///
+    /// # Safety
+    ///
+    /// This method may only be called if a shared lock is held in the current context.
+    unsafe fn unlock_shared(&self);
+
+    /// Acquires an exclusive lock, blocking the current thread/CPU core until
+    /// it is able to do so.
+    fn lock_exclusive(&self);
+
+    /// Attempts to acquire an exclusive lock without blocking.
+    fn try_lock_exclusive(&self) -> bool;
+
+    /// Releases an exclusive lock.
+    ///
+    /// # Safety
+    ///
+    /// This method may only be called if an exclusive lock is held in the
+    /// current context.
+    unsafe fn unlock_exclusive(&self);
+
+    /// Returns `true` if this `RwLock` is currently locked in any way.
+    fn is_locked(&self) -> bool;
+
+    /// Returns `true` if this `RwLock` is currently locked exclusively.
+    fn is_locked_exclusive(&self) -> bool;
+}
+
+#[cfg(feature = "lock_api")]
+unsafe impl<T: lock_api::RawRwLock> RawRwLock for T {
+    type GuardMarker = <T as lock_api::RawRwLock>::GuardMarker;
+
+    #[inline]
+    #[track_caller]
+    fn lock_shared(&self) {
+        lock_api::RawRwLock::lock_shared(self)
+    }
+
+    #[inline]
+    #[track_caller]
+    fn try_lock_shared(&self) -> bool {
+        lock_api::RawRwLock::try_lock_shared(self)
+    }
+
+    #[inline]
+    #[track_caller]
+    unsafe fn unlock_shared(&self) {
+        lock_api::RawRwLock::unlock_shared(self)
+    }
+
+    #[inline]
+    #[track_caller]
+    fn lock_exclusive(&self) {
+        lock_api::RawRwLock::lock_exclusive(self)
+    }
+
+    #[inline]
+    #[track_caller]
+    fn try_lock_exclusive(&self) -> bool {
+        lock_api::RawRwLock::try_lock_exclusive(self)
+    }
+
+    #[inline]
+    #[track_caller]
+    unsafe fn unlock_exclusive(&self) {
+        lock_api::RawRwLock::unlock_exclusive(self)
+    }
+
+    #[inline]
+    #[track_caller]
+    fn is_locked(&self) -> bool {
+        lock_api::RawRwLock::is_locked(self)
+    }
+
+    #[inline]
+    #[track_caller]
+    fn is_locked_exclusive(&self) -> bool {
+        lock_api::RawRwLock::is_locked_exclusive(self)
+    }
+}
 
 impl<T> RwLock<T> {
     loom_const_fn! {
@@ -93,96 +194,9 @@ impl<T> RwLock<T> {
         #[must_use]
         pub fn new(data: T) -> Self {
             Self {
-                state: AtomicUsize::new(0),
+                lock: RwSpinlock::new(),
                 data: UnsafeCell::new(data),
             }
-        }
-    }
-}
-
-impl<T: ?Sized> RwLock<T> {
-    /// Locks this `RwLock` for shared read access, spinning until it can be
-    /// acquired.
-    ///
-    /// The calling CPU core will spin (with an exponential backoff) until there
-    /// are no more writers which hold the lock. There may be other readers
-    /// currently inside the lock when this method returns. This method does not
-    /// provide any guarantees with respect to the ordering of whether
-    /// contentious readers or writers will acquire the lock first.
-    ///
-    /// Returns an RAII guard which will release this thread's shared access
-    /// once it is dropped.
-    pub fn read(&self) -> RwLockReadGuard<'_, T> {
-        let mut backoff = Backoff::new();
-        loop {
-            if let Some(guard) = self.try_read() {
-                return guard;
-            }
-            backoff.spin();
-        }
-    }
-
-    /// Attempts to acquire this `RwLock` for shared read access.
-    ///
-    /// If the access could not be granted at this time, this method returns
-    /// [`None`]. Otherwise, [`Some`]`(`[`RwLockReadGuard`]`)` containing a RAII
-    /// guard is returned. The shared access is released when it is dropped.
-    ///
-    /// This function does not spin.
-    #[cfg_attr(test, track_caller)]
-    pub fn try_read(&self) -> Option<RwLockReadGuard<'_, T>> {
-        // Add a reader.
-        let state = test_dbg!(self.state.fetch_add(READER, Acquire));
-
-        // Ensure we don't overflow the reader count and clobber the lock's
-        // state.
-        assert!(
-            state < usize::MAX - (READER * 2),
-            "read lock counter overflow! this is very bad"
-        );
-
-        // Is the write lock held? If so, undo the increment and bail.
-        if state & WRITER == 1 {
-            test_dbg!(self.state.fetch_sub(READER, Release));
-            return None;
-        }
-
-        Some(RwLockReadGuard {
-            ptr: self.data.get(),
-            state: &self.state,
-        })
-    }
-
-    /// Locks this `RwLock` for exclusive write access, spinning until write
-    /// access can be acquired.
-    ///
-    /// This function will not return while other writers or other readers
-    /// currently have access to the lock.
-    ///
-    /// Returns an RAII guard which will drop the write access of this `RwLock`
-    /// when dropped.
-    pub fn write(&self) -> RwLockWriteGuard<'_, T> {
-        let mut backoff = Backoff::new();
-
-        // Wait for the lock to become available and set the `WRITER` bit.
-        //
-        // Note that, unlike the `read` method, we don't use the `try_write`
-        // method here, as we would like to use `compare_exchange_weak` to allow
-        // spurious failures for improved performance. The `try_write` method
-        // cannot use `compare_exchange_weak`, because it will never retry, and
-        // a spurious failure means we would incorrectly fail to lock the RwLock
-        // when we should have successfully locked it.
-        while test_dbg!(self
-            .state
-            .compare_exchange_weak(UNLOCKED, WRITER, Acquire, Relaxed))
-        .is_err()
-        {
-            test_dbg!(backoff.spin());
-        }
-
-        RwLockWriteGuard {
-            ptr: self.data.get_mut(),
-            state: &self.state,
         }
     }
 
@@ -197,7 +211,83 @@ impl<T: ?Sized> RwLock<T> {
     #[inline]
     #[must_use]
     pub fn reader_count(&self) -> usize {
-        self.state.load(Relaxed) >> 1
+        self.lock.reader_count()
+    }
+}
+
+#[cfg(feature = "lock_api")]
+impl<T, Lock: lock_api::RawRwLock> RwLock<T, Lock> {
+    /// Creates a new instance of an `RwLock<T>` which is unlocked.
+    pub const fn new_with_raw_mutex(data: T) -> Self {
+        RwLock {
+            data: UnsafeCell::new(data),
+            lock: Lock::INIT,
+        }
+    }
+}
+
+impl<T: ?Sized, Lock: RawRwLock> RwLock<T, Lock> {
+    fn read_guard(&self) -> RwLockReadGuard<'_, T, Lock> {
+        RwLockReadGuard {
+            ptr: self.data.get(),
+            lock: &self.lock,
+            _marker: PhantomData,
+        }
+    }
+
+    fn write_guard(&self) -> RwLockWriteGuard<'_, T, Lock> {
+        RwLockWriteGuard {
+            ptr: self.data.get_mut(),
+            lock: &self.lock,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Locks this `RwLock` for shared read access, spinning until it can be
+    /// acquired.
+    ///
+    /// The calling CPU core will spin (with an exponential backoff) until there
+    /// are no more writers which hold the lock. There may be other readers
+    /// currently inside the lock when this method returns. This method does not
+    /// provide any guarantees with respect to the ordering of whether
+    /// contentious readers or writers will acquire the lock first.
+    ///
+    /// Returns an RAII guard which will release this thread's shared access
+    /// once it is dropped.
+    #[cfg_attr(test, track_caller)]
+    pub fn read(&self) -> RwLockReadGuard<'_, T, Lock> {
+        self.lock.lock_shared();
+        self.read_guard()
+    }
+
+    /// Attempts to acquire this `RwLock` for shared read access.
+    ///
+    /// If the access could not be granted at this time, this method returns
+    /// [`None`]. Otherwise, [`Some`]`(`[`RwLockReadGuard`]`)` containing a RAII
+    /// guard is returned. The shared access is released when it is dropped.
+    ///
+    /// This function does not spin.
+    #[cfg_attr(test, track_caller)]
+    pub fn try_read(&self) -> Option<RwLockReadGuard<'_, T, Lock>> {
+        if self.lock.try_lock_shared() {
+            Some(self.read_guard())
+        } else {
+            None
+        }
+    }
+
+    /// Locks this `RwLock` for exclusive write access, spinning until write
+    /// access can be acquired.
+    ///
+    /// This function will not return while other writers or other readers
+    /// currently have access to the lock.
+    ///
+    /// Returns an RAII guard which will drop the write access of this `RwLock`
+    /// when dropped.
+    #[cfg_attr(test, track_caller)]
+    pub fn write(&self) -> RwLockWriteGuard<'_, T, Lock> {
+        self.lock.lock_exclusive();
+        self.write_guard()
     }
 
     /// Returns `true` if there is currently a writer holding a write lock.
@@ -211,7 +301,7 @@ impl<T: ?Sized> RwLock<T> {
     #[inline]
     #[must_use]
     pub fn has_writer(&self) -> bool {
-        self.state.load(Relaxed) & WRITER == 1
+        self.lock.is_locked_exclusive()
     }
 
     /// Attempts to acquire this `RwLock` for exclusive write access.
@@ -221,19 +311,12 @@ impl<T: ?Sized> RwLock<T> {
     /// RAII guard is returned. The write access is released when it is dropped.
     ///
     /// This function does not spin.
-    pub fn try_write(&self) -> Option<RwLockWriteGuard<'_, T>> {
-        if test_dbg!(self
-            .state
-            .compare_exchange(UNLOCKED, WRITER, Acquire, Relaxed))
-        .is_ok()
-        {
-            return Some(RwLockWriteGuard {
-                ptr: self.data.get_mut(),
-                state: &self.state,
-            });
+    pub fn try_write(&self) -> Option<RwLockWriteGuard<'_, T, Lock>> {
+        if self.lock.try_lock_exclusive() {
+            Some(self.write_guard())
+        } else {
+            None
         }
-
-        None
     }
 
     /// Returns a mutable reference to the underlying data.
@@ -258,7 +341,7 @@ impl<T: ?Sized> RwLock<T> {
     }
 }
 
-impl<T> RwLock<T> {
+impl<T, Lock: RawRwLock> RwLock<T, Lock> {
     /// Consumes this `RwLock`, returning the guarded data.
     #[inline]
     #[must_use]
@@ -267,37 +350,13 @@ impl<T> RwLock<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for RwLock<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = &self.state.load(Relaxed);
-        f.debug_struct("RwLock")
-            // N.B.: this does *not* use the `reader_count` and `has_writer`
-            // methods *intentionally*, because those two methods perform
-            // independent reads of the lock's state, and may race with other
-            // lock operations that occur concurrently. If, for example, we read
-            // a non-zero reader count, and then read the state again to check
-            // for a writer, the reader may have been released and a write lock
-            // acquired between the two reads, resulting in the `Debug` impl
-            // displaying an invalid state when the lock was not actually *in*
-            // such a state!
-            //
-            // Therefore, we instead perform a single load to snapshot the state
-            // and unpack both the reader count and the writer count from the
-            // lock.
-            .field("readers", &(state >> 1))
-            .field("writer", &(state & WRITER))
-            .field(
-                "data",
-                &fmt::opt(&self.try_read()).or_else("<write locked>"),
-            )
-            .finish()
-    }
-}
-
-impl<T: Default> Default for RwLock<T> {
+impl<T: Default, Lock: Default> Default for RwLock<T, Lock> {
     /// Creates a new `RwLock<T>`, with the `Default` value for T.
-    fn default() -> RwLock<T> {
-        RwLock::new(Default::default())
+    fn default() -> RwLock<T, Lock> {
+        RwLock {
+            data: UnsafeCell::new(Default::default()),
+            lock: Default::default(),
+        }
     }
 }
 
@@ -309,12 +368,28 @@ impl<T> From<T> for RwLock<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Send> Send for RwLock<T> {}
-unsafe impl<T: ?Sized + Send + Sync> Sync for RwLock<T> {}
+impl<T, Lock> fmt::Debug for RwLock<T, Lock>
+where
+    T: fmt::Debug,
+    Lock: fmt::Debug + RawRwLock,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RwLock")
+            .field(
+                "data",
+                &fmt::opt(&self.try_read()).or_else("<write locked>"),
+            )
+            .field("lock", &self.lock)
+            .finish()
+    }
+}
+
+unsafe impl<T: ?Sized + Send, Lock: Send> Send for RwLock<T, Lock> {}
+unsafe impl<T: ?Sized + Send + Sync, Lock: Sync> Sync for RwLock<T, Lock> {}
 
 // === impl RwLockReadGuard ===
 
-impl<T: ?Sized> Deref for RwLockReadGuard<'_, T> {
+impl<T: ?Sized, Lock: RawRwLock> Deref for RwLockReadGuard<'_, T, Lock> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -326,9 +401,10 @@ impl<T: ?Sized> Deref for RwLockReadGuard<'_, T> {
     }
 }
 
-impl<T: ?Sized, R: ?Sized> AsRef<R> for RwLockReadGuard<'_, T>
+impl<T: ?Sized, R: ?Sized, Lock> AsRef<R> for RwLockReadGuard<'_, T, Lock>
 where
     T: AsRef<R>,
+    Lock: RawRwLock,
 {
     #[inline]
     fn as_ref(&self) -> &R {
@@ -336,41 +412,59 @@ where
     }
 }
 
-impl<T: ?Sized> Drop for RwLockReadGuard<'_, T> {
+impl<T: ?Sized, Lock: RawRwLock> Drop for RwLockReadGuard<'_, T, Lock> {
+    #[inline]
+    #[cfg_attr(test, track_caller)]
     fn drop(&mut self) {
-        let _val = test_dbg!(self.state.fetch_sub(READER, Release));
-        debug_assert_eq!(
-            _val & WRITER,
-            0,
-            "tried to drop a read guard while write locked, something is Very Wrong!"
-        )
+        unsafe { self.lock.unlock_shared() }
     }
 }
 
-impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLockReadGuard<'_, T> {
+impl<T, Lock> fmt::Debug for RwLockReadGuard<'_, T, Lock>
+where
+    T: ?Sized + fmt::Debug,
+    Lock: RawRwLock,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.deref().fmt(f)
     }
 }
 
-impl<T: ?Sized + fmt::Display> fmt::Display for RwLockReadGuard<'_, T> {
+impl<T, Lock> fmt::Display for RwLockReadGuard<'_, T, Lock>
+where
+    T: ?Sized + fmt::Display,
+    Lock: RawRwLock,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.deref().fmt(f)
     }
 }
 
-/// A [`RwLockReadGuard`] only allows immutable (`&T`) access to a `T`.
-/// Therefore, it is [`Send`] and [`Sync`] as long as `T` is [`Sync`], because
-/// it can be used to *share* references to a `T` across multiple threads
-/// (requiring `T: Sync`), but it *cannot* be used to move ownership of a `T`
-/// across thread boundaries, as the `T` cannot be taken out of the lock through
-/// a `RwLockReadGuard`.
-unsafe impl<T: ?Sized + Sync> Send for RwLockReadGuard<'_, T> {}
-unsafe impl<T: ?Sized + Sync> Sync for RwLockReadGuard<'_, T> {}
+/// A [`RwLockReadGuard`] is [`Sync`] if both `T` and the `Lock` type parameter
+/// are [`Sync`].
+unsafe impl<T, Lock> Sync for RwLockReadGuard<'_, T, Lock>
+where
+    T: ?Sized + Sync,
+    Lock: RawRwLock + Sync,
+{
+}
+/// A [`RwLockReadGuard`] is [`Send`] if both `T` and the `Lock` type parameter
+/// are [`Sync`], because sending a `RwLockReadGuard` is equivalent to sending a
+/// `&(T, Lock)`.
+///
+/// Additionally, the `Lock` type's [`RawRwLock::GuardMarker`] must indicate
+/// that the guard is [`Send`].
+unsafe impl<T, Lock> Send for RwLockReadGuard<'_, T, Lock>
+where
+    T: ?Sized + Sync,
+    Lock: RawRwLock + Sync,
+    Lock::GuardMarker: Send,
+{
+}
 
 // === impl RwLockWriteGuard ===
 
-impl<T: ?Sized> Deref for RwLockWriteGuard<'_, T> {
+impl<T: ?Sized, Lock: RawRwLock> Deref for RwLockWriteGuard<'_, T, Lock> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -382,7 +476,7 @@ impl<T: ?Sized> Deref for RwLockWriteGuard<'_, T> {
     }
 }
 
-impl<T: ?Sized> DerefMut for RwLockWriteGuard<'_, T> {
+impl<T: ?Sized, Lock: RawRwLock> DerefMut for RwLockWriteGuard<'_, T, Lock> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
@@ -393,9 +487,10 @@ impl<T: ?Sized> DerefMut for RwLockWriteGuard<'_, T> {
     }
 }
 
-impl<T: ?Sized, R: ?Sized> AsRef<R> for RwLockWriteGuard<'_, T>
+impl<T: ?Sized, R: ?Sized, Lock> AsRef<R> for RwLockWriteGuard<'_, T, Lock>
 where
     T: AsRef<R>,
+    Lock: RawRwLock,
 {
     #[inline]
     fn as_ref(&self) -> &R {
@@ -403,19 +498,29 @@ where
     }
 }
 
-impl<T: ?Sized> Drop for RwLockWriteGuard<'_, T> {
+impl<T: ?Sized, Lock: RawRwLock> Drop for RwLockWriteGuard<'_, T, Lock> {
+    #[inline]
+    #[cfg_attr(test, track_caller)]
     fn drop(&mut self) {
-        let _val = test_dbg!(self.state.swap(UNLOCKED, Release));
+        unsafe { self.lock.unlock_exclusive() }
     }
 }
 
-impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLockWriteGuard<'_, T> {
+impl<T, Lock> fmt::Debug for RwLockWriteGuard<'_, T, Lock>
+where
+    T: ?Sized + fmt::Debug,
+    Lock: RawRwLock,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.deref().fmt(f)
     }
 }
 
-impl<T: ?Sized + fmt::Display> fmt::Display for RwLockWriteGuard<'_, T> {
+impl<T, Lock> fmt::Display for RwLockWriteGuard<'_, T, Lock>
+where
+    T: ?Sized + fmt::Display,
+    Lock: RawRwLock,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.deref().fmt(f)
     }
@@ -425,13 +530,24 @@ impl<T: ?Sized + fmt::Display> fmt::Display for RwLockWriteGuard<'_, T> {
 /// because it can be used to *move* a `T` across thread boundaries, as it
 /// allows mutable access to the `T` that can be used with
 /// [`core::mem::replace`] or [`core::mem::swap`].
-unsafe impl<T: ?Sized + Send + Sync> Send for RwLockWriteGuard<'_, T> {}
+unsafe impl<T, Lock> Send for RwLockWriteGuard<'_, T, Lock>
+where
+    T: ?Sized + Send + Sync,
+    Lock: RawRwLock,
+    Lock::GuardMarker: Send,
+{
+}
 
 /// A [`RwLockWriteGuard`] is only [`Sync`] if `T` is [`Send`] and [`Sync`],
 /// because it can be used to *move* a `T` across thread boundaries, as it
 /// allows mutable access to the `T` that can be used with
 /// [`core::mem::replace`] or [`core::mem::swap`].
-unsafe impl<T: ?Sized + Send + Sync> Sync for RwLockWriteGuard<'_, T> {}
+unsafe impl<T, Lock> Sync for RwLockWriteGuard<'_, T, Lock>
+where
+    T: ?Sized + Send + Sync,
+    Lock: RawRwLock,
+{
+}
 
 #[cfg(test)]
 mod tests {

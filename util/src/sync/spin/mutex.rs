@@ -58,7 +58,7 @@ impl<T> Mutex<T> {
         /// # Examples
         ///
         /// ```
-        /// use mycelium_util::sync::spin::Mutex;
+        /// use mycelium_util::sync::blocking::Mutex;
         ///
         /// let mutex = Mutex::new(0);
         /// ```

@@ -36,7 +36,9 @@ impl Chan {
         let this = Arc::downgrade(&self);
         drop(self);
         futures_util::future::poll_fn(move |cx| {
-            let Some(this) = this.upgrade() else {return Poll::Ready(()) };
+            let Some(this) = this.upgrade() else {
+                return Poll::Ready(());
+            };
 
             let res = this.task.wait();
             futures_util::pin_mut!(res);

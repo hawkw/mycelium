@@ -1,7 +1,9 @@
 use super::Task;
-use mycelium_util::{intrusive::list, sync::spin};
+use maitake_sync::blocking;
+use mycelium_util::intrusive::list;
+
 pub(crate) struct TaskList {
-    inner: spin::Mutex<Inner>,
+    inner: blocking::Mutex<Inner>,
 }
 
 struct Inner {

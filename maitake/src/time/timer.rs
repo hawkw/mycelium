@@ -8,13 +8,11 @@
 //! [future]: core::future::Future
 use super::clock::{self, Clock, Instant, Ticks};
 use crate::{
-    loom::sync::{
-        atomic::{AtomicUsize, Ordering::*},
-        spin::{Mutex, MutexGuard},
-    },
+    loom::sync::atomic::{AtomicUsize, Ordering::*},
     util::expect_display,
 };
 use core::time::Duration;
+use maitake_sync::blocking::Mutex;
 use mycelium_util::fmt;
 
 #[cfg(test)]
@@ -393,12 +391,7 @@ impl Timer {
         // instead, if the timer wheel is busy (e.g. the timer ISR was called on
         // another core, or if a `Sleep` future is currently canceling itself),
         // we just add to a counter of pending ticks, and bail.
-        if let Some(mut core) = self.core.try_lock() {
-            Some(self.advance_locked(&mut core))
-        } else {
-            trace!("could not lock timer wheel");
-            None
-        }
+        self.core.try_with_lock(|core| self.advance_locked(core))
     }
 
     /// Advance the timer to the current time, ensuring any [`Sleep`] futures that
@@ -426,7 +419,7 @@ impl Timer {
     /// ensure that pending ticks are drained frequently.
     #[inline]
     pub fn turn(&self) -> Turn {
-        self.advance_locked(&mut self.core.lock())
+        self.core.with_lock(|core| self.advance_locked(core))
     }
 
     pub(in crate::time) fn ticks_to_dur(&self, ticks: Ticks) -> Duration {
@@ -470,15 +463,12 @@ impl Timer {
         }
     }
 
-    fn core(&self) -> MutexGuard<'_, wheel::Core> {
-        self.core.lock()
-    }
-
     #[cfg(all(test, not(loom)))]
     fn reset(&self) {
-        let mut core = self.core();
-        *core = wheel::Core::new();
-        self.pending_ticks.store(0, Release);
+        self.core.with_lock(|core| {
+            *core = wheel::Core::new();
+            self.pending_ticks.store(0, Release);
+        });
     }
 }
 
@@ -489,12 +479,12 @@ impl fmt::Debug for Timer {
             pending_ticks,
             core,
         } = self;
-        f.debug_struct("Timer")
-            .field("clock", &clock)
+        let mut s = f.debug_struct("Timer");
+        s.field("clock", &clock)
             .field("tick_duration", &clock.tick_duration())
-            .field("pending_ticks", &pending_ticks.load(Acquire))
-            .field("core", &fmt::opt(&core.try_lock()).or_else("<locked>"))
-            .finish()
+            .field("pending_ticks", &pending_ticks.load(Acquire));
+        core.try_with_lock(|core| s.field("core", &core).finish())
+            .unwrap_or_else(|| s.field("core", &"<locked>").finish())
     }
 }
 

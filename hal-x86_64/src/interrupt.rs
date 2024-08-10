@@ -4,7 +4,11 @@ use hal_core::interrupt::Control;
 use hal_core::interrupt::{ctx, Handlers};
 use mycelium_util::{
     bits, fmt,
-    sync::{spin, InitOnce},
+    sync::{
+        blocking::{Mutex, MutexGuard},
+        spin::Spinlock,
+        InitOnce,
+    },
 };
 
 pub mod apic;
@@ -56,7 +60,7 @@ pub struct Interrupt<T = ()> {
 enum InterruptModel {
     /// Interrupts are handled by the [8259 Programmable Interrupt Controller
     /// (PIC)](pic).
-    Pic(spin::Mutex<pic::CascadedPic>),
+    Pic(Mutex<pic::CascadedPic, Spinlock>),
     /// Interrupts are handled by the [local] and [I/O] [Advanced Programmable
     /// Interrupt Controller (APIC)s][apics].
     ///
@@ -68,7 +72,7 @@ enum InterruptModel {
         // TODO(eliza): allow further configuration of the I/O APIC (e.g.
         // masking/unmasking stuff...)
         #[allow(dead_code)]
-        io: spin::Mutex<apic::IoApic>,
+        io: Mutex<apic::IoApic, Spinlock>,
     },
 }
 
@@ -127,13 +131,13 @@ pub struct Registers {
     _pad2: [u16; 3],
 }
 
-static IDT: spin::Mutex<idt::Idt> = spin::Mutex::new(idt::Idt::new());
+static IDT: Mutex<idt::Idt, Spinlock> = Mutex::new_with_raw_mutex(idt::Idt::new(), Spinlock::new());
 static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 
 impl Controller {
     // const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
 
-    pub fn idt() -> spin::MutexGuard<'static, idt::Idt> {
+    pub fn idt() -> MutexGuard<'static, idt::Idt, Spinlock> {
         IDT.lock()
     }
 
@@ -207,7 +211,7 @@ impl Controller {
 
                 InterruptModel::Apic {
                     local,
-                    io: spin::Mutex::new(io),
+                    io: Mutex::new_with_raw_mutex(io, Spinlock::new()),
                 }
             }
             model => {
@@ -225,7 +229,7 @@ impl Controller {
                     // clear for you, the reader, that at this point they are definitely intentionally enabled.
                     pics.enable();
                 }
-                InterruptModel::Pic(spin::Mutex::new(pics))
+                InterruptModel::Pic(Mutex::new_with_raw_mutex(pics, Spinlock::new()))
             }
         };
         tracing::trace!(interrupt_model = ?model);
