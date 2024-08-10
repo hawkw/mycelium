@@ -158,8 +158,8 @@ use spin_impl::SpinDefaultMutex as Inner;
 #[cfg(loom)]
 mod loom_impl {
     use super::ScopedRawMutex;
-    #[cfg(any(feature = "tracing", test))]
     use core::panic::Location;
+    use tracing::{debug, debug_span};
 
     #[derive(Debug)]
     pub(super) struct LoomDefaultMutex(loom::sync::Mutex<()>);
@@ -178,24 +178,21 @@ mod loom_impl {
         #[track_caller]
         #[inline]
         fn with_lock<R>(&self, f: impl FnOnce() -> R) -> R {
-            #[cfg(any(feature = "tracing", test))]
             let location = Location::caller();
-            #[cfg(any(feature = "tracing", test))]
-            tracing::trace!(
+            trace!(
                 target: "maitake_sync::blocking",
                 %location,
                 "DefaultMutex::with_lock()",
             );
 
             let guard = self.0.lock();
-            let _span = tracing::debug_span!(
+            let _span = debug_span!(
                 target: "maitake_sync::blocking",
                 "locked",
                 %location,
             )
             .entered();
-            #[cfg(any(feature = "tracing", test))]
-            tracing::debug!(
+            debug!(
                 target: "maitake_sync::blocking",
                 "DefaultMutex::with_lock() -> locked",
             );
@@ -203,8 +200,7 @@ mod loom_impl {
             let result = f();
             drop(guard);
 
-            #[cfg(any(feature = "tracing", test))]
-            tracing::debug!(
+            debug!(
                 target: "maitake_sync::blocking",
                 "DefaultMutex::with_lock() -> unlocked",
             );
@@ -215,10 +211,8 @@ mod loom_impl {
         #[track_caller]
         #[inline]
         fn try_with_lock<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
-            #[cfg(any(feature = "tracing", test))]
             let location = Location::caller();
-            #[cfg(any(feature = "tracing", test))]
-            tracing::trace!(
+            trace!(
                 target: "maitake_sync::blocking",
                 %location,
                 "DefaultMutex::try_with_lock()",
@@ -226,11 +220,9 @@ mod loom_impl {
 
             match self.0.try_lock() {
                 Ok(guard) => {
-                    let _span =
-                        tracing::debug_span!(target: "maitake_sync::blocking", "locked", %location)
-                            .entered();
-                    #[cfg(any(feature = "tracing", test))]
-                    tracing::debug!(
+                    let _span = debug_span!(target: "maitake_sync::blocking", "locked", %location)
+                        .entered();
+                    debug!(
                         target: "maitake_sync::blocking",
                         "DefaultMutex::try_with_lock() -> locked",
                     );
@@ -238,8 +230,7 @@ mod loom_impl {
                     let result = f();
                     drop(guard);
 
-                    #[cfg(any(feature = "tracing", test))]
-                    tracing::debug!(
+                    debug!(
                         target: "maitake_sync::blocking",
                         "DefaultMutex::try_with_lock() -> unlocked",
                     );
@@ -247,8 +238,7 @@ mod loom_impl {
                     Some(result)
                 }
                 Err(_) => {
-                    #[cfg(any(feature = "tracing", test))]
-                    tracing::debug!(
+                    debug!(
                         target: "maitake_sync::blocking",
                         %location,
                         "DefaultMutex::try_with_lock() -> already locked",

@@ -37,7 +37,7 @@ pub mod once;
 pub use self::once::{InitOnce, Lazy};
 
 use crate::{
-    blocking::{self, RawMutex, RawRwLock},
+    blocking::{RawMutex, RawRwLock},
     loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
     util::{fmt, Backoff},
 };

@@ -51,7 +51,9 @@ impl Backoff {
     #[inline(always)]
     pub fn spin(&mut self) {
         // Issue 2^exp pause instructions.
+        #[cfg_attr(loom, allow(unused_variables))]
         let spins = 1 << self.exp;
+
         #[cfg(not(loom))]
         for _ in 0..spins {
             crate::loom::hint::spin_loop();

@@ -10,12 +10,12 @@
 //! - [`Backoff`]: exponential backoff for spin loops
 //! - [`CachePadded`]: pads and aligns a value to the size of a cache line
 
-#[cfg(any(test, feature = "tracing"))]
+#[cfg(any(test, feature = "tracing", loom))]
 macro_rules! trace {
     ($($t:tt)*) => { tracing::trace!($($t)*) }
 }
 
-#[cfg(not(any(test, feature = "tracing")))]
+#[cfg(not(any(test, feature = "tracing", loom)))]
 macro_rules! trace {
     ($($t:tt)*) => {};
 }

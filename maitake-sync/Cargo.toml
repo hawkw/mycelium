@@ -42,6 +42,7 @@ tracing = { version = "0.1", default_features = false, optional = true }
 # the cfg is enabled).
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.7", default_features = false }
+tracing = { version = "0.1", default_features = false }
 
 [dev-dependencies]
 futures-util = "0.3"

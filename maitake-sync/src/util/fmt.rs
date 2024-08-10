@@ -19,7 +19,7 @@ pub(crate) struct FmtOption<'a, T> {
 
 // === impl FormatWith ===
 
-#[cfg(any(test, feature = "tracing"))]
+#[cfg(any(test, feature = "tracing", loom))]
 #[inline]
 #[must_use]
 pub(crate) fn ptr<T: Pointer>(value: T) -> FormatWith<T> {
