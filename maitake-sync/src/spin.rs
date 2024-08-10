@@ -126,7 +126,7 @@ unsafe impl RawMutex for Spinlock {
 }
 
 #[cfg(not(loom))]
-impl blocking::ConstInit for Spinlock {
+impl crate::blocking::ConstInit for Spinlock {
     // As usual, clippy is totally wrong about this --- the whole point of this
     // constant is to create a *new* spinlock every time.
     #[allow(clippy::declare_interior_mutable_const)]
@@ -243,7 +243,7 @@ unsafe impl RawRwLock for RwSpinlock {
 }
 
 #[cfg(not(loom))]
-impl blocking::ConstInit for RwSpinlock {
+impl crate::blocking::ConstInit for RwSpinlock {
     // As usual, clippy is totally wrong about this --- the whole point of this
     // constant is to create a *new* spinlock every time.
     #[allow(clippy::declare_interior_mutable_const)]
