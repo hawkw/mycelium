@@ -3,7 +3,10 @@ use crate::{
     loom::cell::{MutPtr, UnsafeCell},
     util::fmt,
 };
-use core::ops::{Deref, DerefMut};
+use core::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 pub use mutex_traits::{RawMutex, ScopedRawMutex};
 
@@ -69,6 +72,7 @@ pub struct Mutex<T, Lock = DefaultMutex> {
 pub struct MutexGuard<'a, T, Lock: RawMutex> {
     ptr: MutPtr<T>,
     lock: &'a Lock,
+    _marker: PhantomData<Lock::GuardMarker>,
 }
 
 impl<T> Mutex<T> {
@@ -215,6 +219,7 @@ where
         MutexGuard {
             ptr: self.data.get_mut(),
             lock: &self.lock,
+            _marker: PhantomData,
         }
     }
 
@@ -314,8 +319,8 @@ where
     }
 }
 
-unsafe impl<T: Send, Lock> Send for Mutex<T, Lock> {}
-unsafe impl<T: Send, Lock> Sync for Mutex<T, Lock> {}
+unsafe impl<T: Send, Lock: Send> Send for Mutex<T, Lock> {}
+unsafe impl<T: Sync, Lock: Sync> Sync for Mutex<T, Lock> {}
 
 // === impl MutexGuard ===
 
@@ -395,17 +400,21 @@ where
     }
 }
 
+/// A [`MutexGuard`] is only [`Send`] if:
+///
+/// 1. the protected data (`T`) is `Send`, because the guard may be used to
+///    mutably access the protected data, and can therefore be used to move it
+///    using [`core::mem::replace`] or similar.
+/// 2. the `Lock` type parameter is [`Sync`], because the guard contains a
+///    reference to the `Lock` type, and therefore, sending the guard is sharing
+///    a reference to the `Lock`.
+/// 3. the `Lock` type's [`RawMutex::GuardMarker`] associated type is [`Send`],
+///    because this indicates that the `Lock` type agrees that guards may be
+///    [`Send`].
 unsafe impl<T, Lock> Send for MutexGuard<'_, T, Lock>
 where
     T: Send,
-    Lock: RawMutex,
-    Lock::GuardMarker: Send,
-{
-}
-unsafe impl<T, Lock> Sync for MutexGuard<'_, T, Lock>
-where
-    T: Send,
-    Lock: RawMutex,
+    Lock: RawMutex + Sync,
     Lock::GuardMarker: Send,
 {
 }

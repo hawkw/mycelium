@@ -8,7 +8,10 @@ use crate::{
     spin::RwSpinlock,
     util::fmt,
 };
-use core::ops::{Deref, DerefMut};
+use core::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 /// A spinlock-based [readers-writer lock].
 ///
@@ -53,6 +56,7 @@ pub struct RwLock<T: ?Sized, Lock = RwSpinlock> {
 pub struct RwLockReadGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
     ptr: ConstPtr<T>,
     lock: &'lock Lock,
+    _marker: PhantomData<Lock::GuardMarker>,
 }
 
 /// An RAII implementation of a "scoped write lock" of a [`RwLock`]. When this
@@ -70,6 +74,7 @@ pub struct RwLockReadGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
 pub struct RwLockWriteGuard<'lock, T: ?Sized, Lock: RawRwLock = RwSpinlock> {
     ptr: MutPtr<T>,
     lock: &'lock Lock,
+    _marker: PhantomData<Lock::GuardMarker>,
 }
 
 /// Trait abstracting over blocking [`RwLock`] implementations (`maitake-sync`'s
@@ -226,6 +231,7 @@ impl<T: ?Sized, Lock: RawRwLock> RwLock<T, Lock> {
         RwLockReadGuard {
             ptr: self.data.get(),
             lock: &self.lock,
+            _marker: PhantomData,
         }
     }
 
@@ -233,6 +239,7 @@ impl<T: ?Sized, Lock: RawRwLock> RwLock<T, Lock> {
         RwLockWriteGuard {
             ptr: self.data.get_mut(),
             lock: &self.lock,
+            _marker: PhantomData,
         }
     }
 
@@ -433,23 +440,25 @@ where
     }
 }
 
-/// A [`RwLockReadGuard`] only allows immutable (`&T`) access to a `T`.
-/// Therefore, it is [`Send`] and [`Sync`] as long as `T` is [`Sync`], because
-/// it can be used to *share* references to a `T` across multiple threads
-/// (requiring `T: Sync`), but it *cannot* be used to move ownership of a `T`
-/// across thread boundaries, as the `T` cannot be taken out of the lock through
-/// a `RwLockReadGuard`.
-unsafe impl<T, Lock> Send for RwLockReadGuard<'_, T, Lock>
-where
-    T: ?Sized + Sync,
-    Lock: RawRwLock,
-    Lock::GuardMarker: Send,
-{
-}
+/// A [`RwLockReadGuard`] is [`Sync`] if both `T` and the `Lock` type parameter
+/// are [`Sync`].
 unsafe impl<T, Lock> Sync for RwLockReadGuard<'_, T, Lock>
 where
     T: ?Sized + Sync,
-    Lock: RawRwLock,
+    Lock: RawRwLock + Sync,
+{
+}
+/// A [`RwLockReadGuard`] is [`Send`] if both `T` and the `Lock` type parameter
+/// are [`Sync`], because sending a `RwLockReadGuard` is equivalent to sending a
+/// `&(T, Lock)`.
+///
+/// Additionally, the `Lock` type's [`RawRwLock::GuardMarker`] must indicate
+/// that the guard is [`Send`].
+unsafe impl<T, Lock> Send for RwLockReadGuard<'_, T, Lock>
+where
+    T: ?Sized + Sync,
+    Lock: RawRwLock + Sync,
+    Lock::GuardMarker: Send,
 {
 }
 
