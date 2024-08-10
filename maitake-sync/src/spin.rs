@@ -21,7 +21,7 @@
 //! This module provides the following APIs:
 //!
 //! - [`Spinlock`]: a synchronous [mutual exclusion] spinlock, which implements
-//!       the [`blocking::RawMutex`] and [`blocking::RawScopedMutex`] traits.
+//!       the [`blocking::RawMutex`] and [`blocking::ScopedRawMutex`] traits.
 //! - [`RwSpinlock`]: a synchronous [reader-writer] spinlock, which implements
 //!       the [`blocking::RawRwLock`] trait.
 //! - [`InitOnce`]: a cell storing a [`MaybeUninit`](core::mem::MaybeUninit)
@@ -54,7 +54,8 @@ use blocking::{RawMutex, RawRwLock};
 /// This mutex will spin with an exponential backoff while waiting for the lock
 /// to become available.
 ///
-/// This type implements the [`RawMutex`] and [`RawScopedMutex`] traits from the
+/// This type implements the [`RawMutex`] and
+/// [`ScopedRawMutex`](mutex_traits::ScopedRawMutex) traits from the
 /// [`mutex-traits`] crate. This allows it to be used with the
 /// [`blocking::Mutex`] type when a spinlock-based mutex is needed.
 #[derive(Debug)]
