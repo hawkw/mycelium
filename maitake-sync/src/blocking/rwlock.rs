@@ -186,7 +186,7 @@ impl<T> RwLock<T> {
         /// # Examples
         ///
         /// ```
-        /// use maitake_sync::spin::RwLock;
+        /// use maitake_sync::blocking::RwLock;
         ///
         /// let lock = RwLock::new(5);
         /// # drop(lock);
@@ -327,7 +327,7 @@ impl<T: ?Sized, Lock: RawRwLock> RwLock<T, Lock> {
     /// # Examples
     ///
     /// ```
-    /// let mut lock = maitake_sync::spin::RwLock::new(0);
+    /// let mut lock = maitake_sync::blocking::RwLock::new(0);
     /// *lock.get_mut() = 10;
     /// assert_eq!(*lock.read(), 10);
     /// ```
