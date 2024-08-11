@@ -8,6 +8,8 @@ in pkgs.mkShell {
     ++ env.buildInputs
     ++ env.nativeBuildInputs;
 
+  buildInputs = [ (import ./default.nix { inherit pkgs; }) ];
+
   LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
   LC_ALL = "en_US.UTF-8";
   OPENSSL_DIR = "${pkgs.openssl.dev}";
@@ -17,5 +19,7 @@ in pkgs.mkShell {
   CURL_CA_BUNDLE = "${pkgs.cacert}/etc/ca-bundle.crt";
   CARGO_TERM_COLOR = "always";
   RUST_BACKTRACE = "1";
-  buildInputs = [ (import ./default.nix { inherit pkgs; }) ];
+  # Somehow this is necessary to make cargo builds not die when running the
+  # buildscript for `libz-sys`. I don't know why this fixes it.
+  CARGO_PROFILE_DEV_BUILD_OVERRIDE_DEBUG = "true";
 }

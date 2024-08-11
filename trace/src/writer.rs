@@ -204,7 +204,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
 /// a newtype that forwards the trait implementation.
 ///
 /// [`fmt::Write`]: mycelium_util::fmt::Write
-/// [`MutexGuard`]: maitake::sync::blocking:::MutexGuard
+/// [`MutexGuard`]: maitake::sync::blocking::MutexGuard
 /// [`Mutex`]: maitake::sync::blocking::Mutex
 /// [`MakeWriter`]: trait.MakeWriter.html
 #[derive(Debug)]
