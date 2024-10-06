@@ -102,7 +102,7 @@ impl bits::FromBits<u8> for GateKind {
 // === impl Idt ===
 
 impl Idt {
-    pub(super) const NUM_VECTORS: usize = 256;
+    pub const NUM_VECTORS: usize = 256;
 
     /// Divide-by-zero interrupt (#D0)
     pub const DIVIDE_BY_ZERO: usize = 0;
@@ -155,18 +155,87 @@ impl Idt {
     /// Chosen by fair die roll, guaranteed to be random.
     pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
 
+    /// PIC Programmable Interval Timer (PIT) interrupt vector mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the PICs may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
     pub const PIC_PIT_TIMER: usize = Self::PIC_BIG_START;
+
+    /// PIC PS/2 interrupt vector mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the PICs may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
     pub const PIC_PS2_KEYBOARD: usize = Self::PIC_BIG_START + 1;
 
-    pub(super) const LOCAL_APIC_TIMER: usize = (Self::NUM_VECTORS - 2);
-    pub(super) const LOCAL_APIC_SPURIOUS: usize = (Self::NUM_VECTORS - 1);
-    pub(super) const PIC_BIG_START: usize = 0x20;
-    pub(super) const PIC_LITTLE_START: usize = 0x28;
+    /// Local APIC timer interrupt vector mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the local APIC may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
+    pub const LOCAL_APIC_TIMER: usize = (Self::NUM_VECTORS - 2);
+
+    /// Local APIC spurious interrupt vector mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the local APIC may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
+    pub const LOCAL_APIC_SPURIOUS: usize = (Self::NUM_VECTORS - 1);
+
+    /// Base of the primary PIC's interrupt vector region mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the PICs may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
+    pub const PIC_BIG_START: usize = 0x20;
+
+    /// Base of the secondary PIC's interrupt vector region mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the PICs may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
+    pub const PIC_LITTLE_START: usize = 0x28;
     // put the IOAPIC right after the PICs
-    pub(super) const IOAPIC_START: usize = 0x30;
-    pub(super) const IOAPIC_PIT_TIMER: usize = Self::IOAPIC_START + IoApic::PIT_TIMER_IRQ as usize;
-    pub(super) const IOAPIC_PS2_KEYBOARD: usize =
-        Self::IOAPIC_START + IoApic::PS2_KEYBOARD_IRQ as usize;
+
+    /// Base of the IOAPIC's interrupt vector region mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the IOAPIC may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
+    pub const IOAPIC_START: usize = 0x30;
+
+    /// IOAPIC Programmable Interval Timer (PIT) interrupt vector region mapped
+    /// by [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the IOAPIC may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
+    pub const IOAPIC_PIT_TIMER: usize = Self::IOAPIC_START + IoApic::PIT_TIMER_IRQ as usize;
+
+    /// IOAPIC PS/2 keyboard interrupt vector mapped by
+    /// [`Controller::enable_hardware_interrupts`].
+    ///
+    /// Systems which do not use that function to initialize the IOAPIC may
+    /// map this interrupt to a different IDT vector.
+    ///
+    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
+    pub const IOAPIC_PS2_KEYBOARD: usize = Self::IOAPIC_START + IoApic::PS2_KEYBOARD_IRQ as usize;
 
     pub const fn new() -> Self {
         Self {
@@ -174,7 +243,7 @@ impl Idt {
         }
     }
 
-    pub(super) fn set_isr(&mut self, vector: usize, isr: *const ()) {
+    pub fn register_isr(&mut self, vector: usize, isr: *const ()) {
         let descr = self.descriptors[vector].set_handler(isr);
         if vector == Self::DOUBLE_FAULT {
             descr.set_ist_offset(Self::DOUBLE_FAULT_IST_OFFSET as u8);

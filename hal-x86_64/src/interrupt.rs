@@ -349,7 +349,7 @@ impl hal_core::interrupt::Control for Idt {
             ($self:ident, $h:ty, $($vector:path => fn $name:ident($($rest:tt)+),)+) => {
                 $(
                     gen_code_faults! {@ $name($($rest)+); }
-                    $self.set_isr($vector, $name::<$h> as *const ());
+                    $self.register_isr($vector, $name::<$h> as *const ());
                 )+
             };
             (@ $name:ident($kind:literal);) => {
@@ -575,32 +575,32 @@ impl hal_core::interrupt::Control for Idt {
         }
 
         // other exceptions, not mapped to the "code fault" handler
-        self.set_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
-        self.set_isr(Self::INVALID_TSS, invalid_tss_isr::<H> as *const ());
-        self.set_isr(
+        self.register_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
+        self.register_isr(Self::INVALID_TSS, invalid_tss_isr::<H> as *const ());
+        self.register_isr(
             Self::SEGMENT_NOT_PRESENT,
             segment_not_present_isr::<H> as *const (),
         );
-        self.set_isr(
+        self.register_isr(
             Self::STACK_SEGMENT_FAULT,
             stack_segment_isr::<H> as *const (),
         );
-        self.set_isr(Self::GENERAL_PROTECTION_FAULT, gpf_isr::<H> as *const ());
-        self.set_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
+        self.register_isr(Self::GENERAL_PROTECTION_FAULT, gpf_isr::<H> as *const ());
+        self.register_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
 
         // === hardware interrupts ===
         // ISA standard hardware interrupts mapped on both the PICs and IO APIC
         // interrupt models.
-        self.set_isr(Self::PIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
-        self.set_isr(Self::IOAPIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
-        self.set_isr(Self::PIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
-        self.set_isr(Self::IOAPIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
+        self.register_isr(Self::PIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.register_isr(Self::IOAPIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
+        self.register_isr(Self::PIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
+        self.register_isr(Self::IOAPIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
         // local APIC specific hardware itnerrupts
-        self.set_isr(Self::LOCAL_APIC_SPURIOUS, spurious_isr as *const ());
-        self.set_isr(Self::LOCAL_APIC_TIMER, apic_timer_isr::<H> as *const ());
+        self.register_isr(Self::LOCAL_APIC_SPURIOUS, spurious_isr as *const ());
+        self.register_isr(Self::LOCAL_APIC_TIMER, apic_timer_isr::<H> as *const ());
 
         // vector 69 (nice) is reserved by the HAL for testing the IDT.
-        self.set_isr(69, test_isr::<H> as *const ());
+        self.register_isr(69, test_isr::<H> as *const ());
 
         Ok(())
     }
