@@ -1754,9 +1754,9 @@ checksum = "bb813b8af86854136c6922af0598d719255ecb2179515e6e7730d468f05c9cae"
 
 [[package]]
 name = "pc-keyboard"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0ad9805165d0672a3efa682cac952870d8b05d98e02e08063ca7db597005338"
+checksum = "ed089a1fbffe3337a1a345501c981f1eb1e47e69de5a40e852433e12953c3174"
 
 [[package]]
 name = "pci-ids"
