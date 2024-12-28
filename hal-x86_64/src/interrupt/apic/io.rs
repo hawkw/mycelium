@@ -220,7 +220,7 @@ impl IoApicSet {
                         that's bigger than the entire IDT...",
                 );
             }
-            // Now, scan to find which I/OAPIC this IRQ corresponds to. if the
+            // Now, scan to find which I/O APIC this IRQ corresponds to. if the
             // system only has one I/O APIC, this will always be 0, but we gotta
             // handle systems with more than one. So, we'll this by traversing
             // the list of I/O APICs, seeing if the GSI number is less than the
