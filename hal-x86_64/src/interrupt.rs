@@ -297,11 +297,29 @@ impl Controller {
             }
         };
 
-        tracing::trace!("sti");
         unsafe {
             crate::cpu::intrinsics::sti();
         }
 
+        // There's a weird behavior in QEMU where, apparently, when we unmask
+        // the PIT interrupt, it might fire spuriously *as soon as its
+        // unmasked*, even if we haven't actually done an `sti`. I don't get
+        // this and it seems wrong, but it seems to happen occasionally with the
+        // default QEMU acceleration, and pretty consistently with `-machine
+        // accel=kvm`, so *maybe* it can also happen on a real computer?
+        //
+        // Anyway, because of this, we can't unmask the PIT interrupt until
+        // after we've actually initialized the interrupt controller static.
+        // Otherwise, if we unmask it before initializing the static (like we
+        // used to), the interrupt gets raised immediately, and when the ISR
+        // tries to actually send an EOI to ack it, it dereferences
+        // uninitialized memory and the kernel just hangs. So, we wait to do it
+        // until here.
+        //
+        // The fact that this behavior exists at all makes me really, profoundly
+        // uncomfortable: shouldn't `cli` like, actually do what it's supposed
+        // to? But, we can just choose to unmask the PIT later and it's fine, I
+        // guess...
         controller.unmask_isa_irq(IsaInterrupt::PitTimer);
         controller.unmask_isa_irq(IsaInterrupt::Ps2Keyboard);
         controller

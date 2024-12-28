@@ -160,7 +160,28 @@ impl IoApicSet {
         //   routed to,
         // - the polarity and trigger mode of the interrupt pin, if these are
         //   different from the default bus trigger mode.
-        // We can walk this
+        //
+        // For each of the 16 ISA interrupt vectors, we'll configure the
+        // redirection entry in the appropriate I/O APIC and record which I/O
+        // APIC (and which pin on that I/O APIC) the interrupt is routed to. We
+        // do this by first checking if the MADT contains an override matching
+        // that ISA interrupt, using that if so, and if not, falling back to the
+        // ISA interrupt number.
+        //
+        // Yes, this is a big pile of nested loops. But, consider the following:
+        //
+        // - the MADT override entries can probably come in any order, if the
+        //   motherboard firmware chooses to be maximally perverse, so we have
+        //   to scan the whole list of them to find out if each ISA interrupt is
+        //   overridden.
+        // - there are only ever 16 ISA interrupts, so the outer loop iterates
+        //   exactly 16 times; and there can't be *more* overrides than there
+        //   are ISA interrupts (and there's generally substantially fewer).
+        //   similarly, if there's more than 1-8 I/O APICs, you probably have
+        //   some kind of really weird computer and should tell me about it
+        //   because i bet it's awesome.
+        //   so, neither inner loop actually loops that many times.
+        // - finally, we only do this once on boot, so who cares?
         for irq in IsaInterrupt::ALL {
             // Assume the IRQ is mapped to the I/O APIC pin corresponding to
             // that ISA IRQ number, and is active-high and edge-triggered.
