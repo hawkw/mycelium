@@ -32,7 +32,7 @@ impl Pic {
         debug_assert!(num < 8);
         // read the current value of the Interrupt Mask Register (IMR).
         let imr = self.data.readb();
-        // clear the bit corresponding to the interrupt number to 1.
+        // clear the bit corresponding to the interrupt number.
         self.data.writeb(imr & !(1 << num));
     }
 }
