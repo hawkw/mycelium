@@ -150,7 +150,7 @@ impl IoApicSet {
         // Fortunately, ACPI is here to help (statements dreamed up by the
         // utterly deranged).
         //
-        // The MADT includes a list of "interrupt source  overrides" that
+        // The MADT includes a list of "interrupt source overrides" that
         // describe any ISA interrupts that are not mapped to I/O APIC pins in
         // numeric order. Each entry in the interrupt source overrides list will
         // contain:
