@@ -169,7 +169,7 @@ impl Controller {
             pics.set_irq_address(Idt::PIC_BIG_START as u8, Idt::PIC_LITTLE_START as u8);
         }
 
-        let model = match acpi {
+        let controller = match acpi {
             Some(acpi::InterruptModel::Apic(apic_info)) => {
                 tracing::info!("detected APIC interrupt model");
 
@@ -198,21 +198,31 @@ impl Controller {
                 // redirection entries.
                 io.map_isa_irqs(Idt::IOAPIC_START as u8);
 
+                // enable the local APIC
+                let local = LocalApic::new(&mut pagectrl, frame_alloc);
+                local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
+
+                let model = InterruptModel::Apic {
+                    local,
+                    io: Mutex::new_with_raw_mutex(io, Spinlock::new()),
+                };
+
+                tracing::trace!(interrupt_model = ?model);
+                let controller = INTERRUPT_CONTROLLER.init(Self { model });
+
+                // GOD THIS SUCKS SO BAD
+                let InterruptModel::Apic { ref io, .. } = controller.model else {
+                    unreachable!("lol")
+                };
+                let mut io = io.lock();
+
                 // unmask the PIT timer vector --- we'll need this for calibrating
                 // the local APIC timer...
                 io.set_masked(IoApic::PIT_TIMER_IRQ, false);
 
                 // unmask the PS/2 keyboard interrupt as well.
                 io.set_masked(IoApic::PS2_KEYBOARD_IRQ, false);
-
-                // enable the local APIC
-                let local = LocalApic::new(&mut pagectrl, frame_alloc);
-                local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
-
-                InterruptModel::Apic {
-                    local,
-                    io: Mutex::new_with_raw_mutex(io, Spinlock::new()),
-                }
+                controller
             }
             model => {
                 if model.is_none() {
@@ -229,17 +239,13 @@ impl Controller {
                     // clear for you, the reader, that at this point they are definitely intentionally enabled.
                     pics.enable();
                 }
-                InterruptModel::Pic(Mutex::new_with_raw_mutex(pics, Spinlock::new()))
+                INTERRUPT_CONTROLLER.init(Self {
+                    model: InterruptModel::Pic(Mutex::new_with_raw_mutex(pics, Spinlock::new())),
+                })
             }
         };
-        tracing::trace!(interrupt_model = ?model);
 
-        let controller = INTERRUPT_CONTROLLER.init(Self { model });
-
-        // `sti` may not be called until the interrupt controller static is
-        // fully initialized, as an interrupt that occurs before it is
-        // initialized may attempt to access the static to finish the interrupt!
-        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+        tracing::trace!("sti");
         unsafe {
             crate::cpu::intrinsics::sti();
         }
