@@ -1,3 +1,4 @@
+use super::IsaInterrupt;
 use crate::cpu;
 use hal_core::interrupt::{Handlers, RegistrationError};
 
@@ -15,6 +16,24 @@ impl Pic {
             command: cpu::Port::at(command),
             data: cpu::Port::at(data),
         }
+    }
+
+    /// Mask the provided interrupt number.
+    unsafe fn mask(&mut self, num: u8) {
+        debug_assert!(num < 8);
+        // read the current value of the Interrupt Mask Register (IMR).
+        let imr = self.data.readb();
+        // set the bit corresponding to the interrupt number to 1.
+        self.data.writeb(imr | (1 << num));
+    }
+
+    /// Unmask the provided interrupt number.
+    unsafe fn unmask(&mut self, num: u8) {
+        debug_assert!(num < 8);
+        // read the current value of the Interrupt Mask Register (IMR).
+        let imr = self.data.readb();
+        // clear the bit corresponding to the interrupt number to 1.
+        self.data.writeb(imr & !(1 << num));
     }
 }
 
@@ -50,9 +69,33 @@ impl CascadedPic {
         }
     }
 
-    pub(crate) fn end_interrupt(&mut self, num: u8) {
+    pub(crate) fn mask(&mut self, irq: IsaInterrupt) {
+        let (pic, num) = self.pic_for_irq(irq);
+        unsafe {
+            pic.mask(num);
+        }
+    }
+
+    pub(crate) fn unmask(&mut self, irq: IsaInterrupt) {
+        let (pic, num) = self.pic_for_irq(irq);
+        unsafe {
+            pic.unmask(num);
+        }
+    }
+
+    fn pic_for_irq(&mut self, irq: IsaInterrupt) -> (&mut Pic, u8) {
+        let num = irq as u8;
+        if num >= 8 {
+            (&mut self.sisters.little, num - 8)
+        } else {
+            (&mut self.sisters.big, num)
+        }
+    }
+
+    pub(crate) fn end_interrupt(&mut self, irq: IsaInterrupt) {
         const END_INTERRUPT: u8 = 0x20; // from osdev wiki
-        if num >= self.sisters.little.address && num < self.sisters.little.address + 8 {
+        let num = irq as u8;
+        if num >= 8 {
             unsafe {
                 self.sisters.little.command.writeb(END_INTERRUPT);
             }

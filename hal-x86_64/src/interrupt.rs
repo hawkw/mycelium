@@ -1,4 +1,4 @@
-use crate::{cpu, mm, segment, time, PAddr, VAddr};
+use crate::{cpu, mm, segment, time, VAddr};
 use core::{arch::asm, marker::PhantomData, time::Duration};
 use hal_core::interrupt::Control;
 use hal_core::interrupt::{ctx, Handlers};
@@ -15,7 +15,7 @@ pub mod apic;
 pub mod idt;
 pub mod pic;
 
-use self::apic::{IoApic, LocalApic};
+use self::apic::{IoApicSet, LocalApic};
 pub use idt::Idt;
 pub use pic::CascadedPic;
 
@@ -69,10 +69,7 @@ enum InterruptModel {
     /// [apics]: apic
     Apic {
         local: apic::LocalApic,
-        // TODO(eliza): allow further configuration of the I/O APIC (e.g.
-        // masking/unmasking stuff...)
-        #[allow(dead_code)]
-        io: Mutex<apic::IoApic, Spinlock>,
+        io: apic::IoApicSet,
     },
 }
 
@@ -134,6 +131,67 @@ pub struct Registers {
 static IDT: Mutex<idt::Idt, Spinlock> = Mutex::new_with_raw_mutex(idt::Idt::new(), Spinlock::new());
 static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
 
+pub enum MaskError {
+    NotHwIrq,
+}
+
+/// ISA interrupt vectors
+///
+/// See: https://wiki.osdev.org/Interrupts#General_IBM-PC_Compatible_Interrupt_Information
+#[derive(Copy, Clone, Debug)]
+#[repr(u8)]
+pub enum IsaInterrupt {
+    /// Programmable Interval Timer (PIT) timer interrupt.
+    PitTimer = 0,
+    /// PS/2 keyboard controller interrupt.
+    Ps2Keyboard = 1,
+    // IRQ 2 is reserved for the PIC cascade interrupt and isn't user accessible!
+    /// COM2 / COM4 serial port interrupt.
+    Com2 = 3,
+    /// COM1 / COM3 serial port interrupt.
+    Com1 = 4,
+    /// LPT2 parallel port interrupt.
+    Lpt2 = 5,
+    /// Floppy disk
+    Floppy = 6,
+    /// LPT1 parallel port interrupt, or spurious.
+    Lpt1 = 7,
+    /// CMOS real-time clock.
+    CmosRtc = 8,
+    /// Free for peripherals/SCSI/NIC
+    Periph1 = 9,
+    Periph2 = 10,
+    Periph3 = 11,
+    /// PS/2 Mouse
+    Ps2Mouse = 12,
+    /// FPU
+    Fpu = 13,
+    /// Primary ATA hard disk
+    AtaPrimary = 14,
+    /// Secondary ATA hard disk
+    AtaSecondary = 15,
+}
+
+impl IsaInterrupt {
+    pub const ALL: [IsaInterrupt; 15] = [
+        IsaInterrupt::PitTimer,
+        IsaInterrupt::Ps2Keyboard,
+        IsaInterrupt::Com2,
+        IsaInterrupt::Com1,
+        IsaInterrupt::Lpt2,
+        IsaInterrupt::Floppy,
+        IsaInterrupt::Lpt1,
+        IsaInterrupt::CmosRtc,
+        IsaInterrupt::Periph1,
+        IsaInterrupt::Periph2,
+        IsaInterrupt::Periph3,
+        IsaInterrupt::Ps2Mouse,
+        IsaInterrupt::Fpu,
+        IsaInterrupt::AtaPrimary,
+        IsaInterrupt::AtaSecondary,
+    ];
+}
+
 impl Controller {
     // const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
 
@@ -149,6 +207,31 @@ impl Controller {
         idt.register_handlers::<H>().unwrap();
         unsafe {
             idt.load_raw();
+        }
+    }
+
+    pub fn mask_isa_irq(&self, irq: IsaInterrupt) {
+        match self.model {
+            InterruptModel::Pic(ref pics) => pics.lock().mask(irq),
+            InterruptModel::Apic { ref io, .. } => io.set_isa_masked(irq, true),
+        }
+    }
+
+    pub fn unmask_isa_irq(&self, irq: IsaInterrupt) {
+        match self.model {
+            InterruptModel::Pic(ref pics) => pics.lock().unmask(irq),
+            InterruptModel::Apic { ref io, .. } => io.set_isa_masked(irq, false),
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Calling this when there isn't actually an ISA interrupt pending can do
+    /// arbitrary bad things (which I think is basically just faulting the CPU).
+    pub unsafe fn end_isa_irq(&self, irq: IsaInterrupt) {
+        match self.model {
+            InterruptModel::Pic(ref pics) => pics.lock().end_interrupt(irq),
+            InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
         }
     }
 
@@ -181,48 +264,17 @@ impl Controller {
                 }
                 tracing::info!("disabled 8259 PICs");
 
-                // configure the I/O APIC
-                let mut io = {
-                    // TODO(eliza): consider actually using other I/O APICs? do
-                    // we need them for anything??
-                    tracing::trace!(?apic_info.io_apics, "found {} IO APICs", apic_info.io_apics.len());
-
-                    let io_apic = &apic_info.io_apics[0];
-                    let addr = PAddr::from_u64(io_apic.address as u64);
-
-                    tracing::debug!(ioapic.paddr = ?addr, "IOAPIC");
-                    IoApic::new(addr, &mut pagectrl, frame_alloc)
-                };
-
-                // map the standard ISA hardware interrupts to I/O APIC
-                // redirection entries.
-                io.map_isa_irqs(Idt::IOAPIC_START as u8);
+                // configure the I/O APIC(s)
+                let io = IoApicSet::new(apic_info, frame_alloc, &mut pagectrl, Idt::ISA_BASE as u8);
 
                 // enable the local APIC
                 let local = LocalApic::new(&mut pagectrl, frame_alloc);
                 local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
 
-                let model = InterruptModel::Apic {
-                    local,
-                    io: Mutex::new_with_raw_mutex(io, Spinlock::new()),
-                };
+                let model = InterruptModel::Apic { local, io };
 
                 tracing::trace!(interrupt_model = ?model);
-                let controller = INTERRUPT_CONTROLLER.init(Self { model });
-
-                // GOD THIS SUCKS SO BAD
-                let InterruptModel::Apic { ref io, .. } = controller.model else {
-                    unreachable!("lol")
-                };
-                let mut io = io.lock();
-
-                // unmask the PIT timer vector --- we'll need this for calibrating
-                // the local APIC timer...
-                io.set_masked(IoApic::PIT_TIMER_IRQ, false);
-
-                // unmask the PS/2 keyboard interrupt as well.
-                io.set_masked(IoApic::PS2_KEYBOARD_IRQ, false);
-                controller
+                INTERRUPT_CONTROLLER.init(Self { model })
             }
             model => {
                 if model.is_none() {
@@ -250,6 +302,8 @@ impl Controller {
             crate::cpu::intrinsics::sti();
         }
 
+        controller.unmask_isa_irq(IsaInterrupt::PitTimer);
+        controller.unmask_isa_irq(IsaInterrupt::Ps2Keyboard);
         controller
     }
 
@@ -411,12 +465,9 @@ impl hal_core::interrupt::Control for Idt {
                 tracing::trace!("PIT sleep completed");
             }
             unsafe {
-                match INTERRUPT_CONTROLLER.get_unchecked().model {
-                    InterruptModel::Pic(ref pics) => {
-                        pics.lock().end_interrupt(Idt::PIC_PIT_TIMER as u8)
-                    }
-                    InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
-                }
+                INTERRUPT_CONTROLLER
+                    .get_unchecked()
+                    .end_isa_irq(IsaInterrupt::PitTimer);
             }
         }
 
@@ -438,12 +489,9 @@ impl hal_core::interrupt::Control for Idt {
             let scancode = unsafe { PORT.readb() };
             H::ps2_keyboard(scancode);
             unsafe {
-                match INTERRUPT_CONTROLLER.get_unchecked().model {
-                    InterruptModel::Pic(ref pics) => {
-                        pics.lock().end_interrupt(Idt::PIC_PS2_KEYBOARD as u8)
-                    }
-                    InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
-                }
+                INTERRUPT_CONTROLLER
+                    .get_unchecked()
+                    .end_isa_irq(IsaInterrupt::Ps2Keyboard);
             }
         }
 
@@ -597,11 +645,10 @@ impl hal_core::interrupt::Control for Idt {
         // === hardware interrupts ===
         // ISA standard hardware interrupts mapped on both the PICs and IO APIC
         // interrupt models.
-        self.register_isr(Self::PIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
-        self.register_isr(Self::IOAPIC_PIT_TIMER, pit_timer_isr::<H> as *const ());
-        self.register_isr(Self::PIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
-        self.register_isr(Self::IOAPIC_PS2_KEYBOARD, keyboard_isr::<H> as *const ());
-        // local APIC specific hardware itnerrupts
+        self.register_isa_isr(IsaInterrupt::PitTimer, pit_timer_isr::<H> as *const ());
+        self.register_isa_isr(IsaInterrupt::Ps2Keyboard, keyboard_isr::<H> as *const ());
+
+        // local APIC specific hardware interrupts
         self.register_isr(Self::LOCAL_APIC_SPURIOUS, spurious_isr as *const ());
         self.register_isr(Self::LOCAL_APIC_TIMER, apic_timer_isr::<H> as *const ());
 

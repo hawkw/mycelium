@@ -1,7 +1,7 @@
 //! Advanced Programmable Interrupt Controller (APIC).
 pub mod io;
 pub mod local;
-pub use io::IoApic;
+pub use io::{IoApic, IoApicSet};
 pub use local::LocalApic;
 
 use mycelium_util::bits::enum_from_bits;
