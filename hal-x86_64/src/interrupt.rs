@@ -479,8 +479,6 @@ impl hal_core::interrupt::Control for Idt {
         extern "x86-interrupt" fn pit_timer_isr<H: Handlers<Registers>>(_regs: Registers) {
             if crate::time::Pit::handle_interrupt() {
                 H::timer_tick()
-            } else {
-                tracing::trace!("PIT sleep completed");
             }
             unsafe {
                 INTERRUPT_CONTROLLER
