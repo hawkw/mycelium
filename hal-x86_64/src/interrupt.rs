@@ -137,7 +137,7 @@ pub enum MaskError {
 
 /// ISA interrupt vectors
 ///
-/// See: https://wiki.osdev.org/Interrupts#General_IBM-PC_Compatible_Interrupt_Information
+/// See: [the other wiki](https://wiki.osdev.org/Interrupts#General_IBM-PC_Compatible_Interrupt_Information)
 #[derive(Copy, Clone, Debug)]
 #[repr(u8)]
 pub enum IsaInterrupt {
