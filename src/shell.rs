@@ -2,6 +2,7 @@
 //! purposes.
 //!
 use crate::rt;
+use core::str::FromStr;
 use mycelium_util::fmt::{self, Write};
 
 /// Defines a shell command, including its name, help text, and how the command
@@ -21,10 +22,10 @@ pub struct Error<'a> {
     kind: ErrorKind<'a>,
 }
 
-pub type Result<'a> = core::result::Result<(), Error<'a>>;
+pub type CmdResult<'a> = core::result::Result<(), Error<'a>>;
 
 pub trait Run: Send + Sync {
-    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx>;
+    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> CmdResult<'ctx>;
 }
 
 #[derive(Debug)]
@@ -32,12 +33,19 @@ enum ErrorKind<'a> {
     UnknownCommand(&'a [Command<'a>]),
 
     SubcommandRequired(&'a [Command<'a>]),
-    InvalidArguments { help: &'a str, arg: &'a str },
+    InvalidArguments {
+        help: &'a str,
+        arg: &'a str,
+        flag: Option<&'a str>,
+    },
+    FlagRequired {
+        flags: &'a [&'a str],
+    },
     Other(&'static str),
 }
 
 enum RunKind<'a> {
-    Fn(fn(Context<'_>) -> Result<'_>),
+    Fn(fn(Context<'_>) -> CmdResult<'_>),
     Runnable(&'a dyn Run),
 }
 
@@ -75,7 +83,7 @@ pub struct Context<'cmd> {
     current: &'cmd str,
 }
 
-pub fn handle_command<'cmd>(ctx: Context<'cmd>, commands: &'cmd [Command]) -> Result<'cmd> {
+pub fn handle_command<'cmd>(ctx: Context<'cmd>, commands: &'cmd [Command]) -> CmdResult<'cmd> {
     let chunk = ctx.current.trim();
     for cmd in commands {
         if let Some(current) = chunk.strip_prefix(cmd.name) {
@@ -310,7 +318,7 @@ impl<'cmd> Command<'cmd> {
     /// If [`Command::with_fn`] or [`Command::with_runnable`] was previously
     /// called, this overwrites the previously set value.
     #[must_use]
-    pub const fn with_fn(self, func: fn(Context<'_>) -> Result<'_>) -> Self {
+    pub const fn with_fn(self, func: fn(Context<'_>) -> CmdResult<'_>) -> Self {
         Self {
             run: Some(RunKind::Fn(func)),
             ..self
@@ -332,7 +340,7 @@ impl<'cmd> Command<'cmd> {
     }
 
     /// Run this command in the provided [`Context`].
-    pub fn run<'ctx>(&'cmd self, ctx: Context<'ctx>) -> Result<'ctx>
+    pub fn run<'ctx>(&'cmd self, ctx: Context<'ctx>) -> CmdResult<'ctx>
     where
         'cmd: 'ctx,
     {
@@ -414,6 +422,17 @@ impl fmt::Display for Error<'_> {
                 .chain(core::iter::once("help"))
         }
 
+        fn fmt_flag_names(f: &mut fmt::Formatter<'_>, flags: &[&str]) -> fmt::Result {
+            let mut names = flags.iter();
+            if let Some(name) = names.next() {
+                f.write_str(name)?;
+                for name in names {
+                    write!(f, "|{name}")?;
+                }
+            }
+            Ok(())
+        }
+
         let Self { line, kind } = self;
         match kind {
             ErrorKind::UnknownCommand(commands) => {
@@ -421,8 +440,12 @@ impl fmt::Display for Error<'_> {
                 fmt::comma_delimited(&mut f, command_names(commands))?;
                 f.write_char(']')?;
             }
-            ErrorKind::InvalidArguments { arg, help } => {
-                write!(f, "invalid argument {arg:?}: {help}")?
+            ErrorKind::InvalidArguments { arg, help, flag } => {
+                f.write_str("invalid argument")?;
+                if let Some(flag) = flag {
+                    write!(f, " {flag}")?;
+                }
+                write!(f, " {arg:?}: {help}")?;
             }
             ErrorKind::SubcommandRequired(subcommands) => {
                 writeln!(
@@ -431,6 +454,11 @@ impl fmt::Display for Error<'_> {
                 )?;
                 fmt::comma_delimited(&mut f, command_names(subcommands))?;
                 f.write_char(']')?;
+            }
+            ErrorKind::FlagRequired { flags } => {
+                write!(f, "the '{line}' command requires the ")?;
+                fmt_flag_names(f, flags)?;
+                write!(f, " flag")?;
             }
             ErrorKind::Other(msg) => write!(f, "could not execute {line:?}: {msg}")?,
         }
@@ -472,6 +500,18 @@ impl<'cmd> Context<'cmd> {
             line: self.line,
             kind: ErrorKind::InvalidArguments {
                 arg: self.current,
+                flag: None,
+                help,
+            },
+        }
+    }
+
+    pub fn invalid_argument_named(&self, name: &'static str, help: &'static str) -> Error<'cmd> {
+        Error {
+            line: self.line,
+            kind: ErrorKind::InvalidArguments {
+                arg: self.current,
+                flag: Some(name),
                 help,
             },
         }
@@ -483,13 +523,130 @@ impl<'cmd> Context<'cmd> {
             kind: ErrorKind::Other(msg),
         }
     }
+
+    pub fn parse_bool_flag(&mut self, flag: &str) -> bool {
+        if let Some(rest) = self.command().trim().strip_prefix(flag) {
+            self.current = rest.trim();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn parse_optional_u32_hex_or_dec(
+        &mut self,
+        name: &'static str,
+    ) -> Result<Option<u32>, Error<'cmd>> {
+        let (chunk, rest) = match self.command().split_once(" ") {
+            Some((chunk, rest)) => (chunk.trim(), rest),
+            None => (self.command(), ""),
+        };
+
+        if chunk.is_empty() {
+            return Ok(None);
+        }
+
+        let val = if let Some(hex_num) = chunk.strip_prefix("0x") {
+            u32::from_str_radix(hex_num.trim(), 16).map_err(|_| Error {
+                line: self.line,
+                kind: ErrorKind::InvalidArguments {
+                    arg: chunk,
+                    flag: Some(name),
+                    help: "expected a 32-bit hex number",
+                },
+            })?
+        } else {
+            u32::from_str(chunk).map_err(|_| Error {
+                line: self.line,
+                kind: ErrorKind::InvalidArguments {
+                    arg: chunk,
+                    flag: Some(name),
+                    help: "expected a 32-bit decimal number",
+                },
+            })?
+        };
+
+        self.current = rest;
+        Ok(Some(val))
+    }
+
+    pub fn parse_u32_hex_or_dec(&mut self, name: &'static str) -> Result<u32, Error<'cmd>> {
+        self.parse_optional_u32_hex_or_dec(name).and_then(|val| {
+            val.ok_or_else(|| self.invalid_argument_named(name, "expected a number"))
+        })
+    }
+
+    pub fn parse_optional_flag<T>(
+        &mut self,
+        names: &'static [&'static str],
+    ) -> Result<Option<T>, Error<'cmd>>
+    where
+        T: FromStr,
+        T::Err: core::fmt::Display,
+    {
+        for name in names {
+            if let Some(rest) = self.command().strip_prefix(name) {
+                let (chunk, rest) = match rest.trim().split_once(" ") {
+                    Some((chunk, rest)) => (chunk.trim(), rest),
+                    None => (rest, ""),
+                };
+
+                if chunk.is_empty() {
+                    return Err(Error {
+                        line: self.line,
+                        kind: ErrorKind::InvalidArguments {
+                            arg: chunk,
+                            flag: Some(name),
+                            help: "expected a value",
+                        },
+                    });
+                }
+
+                match chunk.parse() {
+                    Ok(val) => {
+                        self.current = rest;
+                        return Ok(Some(val));
+                    }
+                    Err(e) => {
+                        tracing::warn!(target: "shell", "invalid value {chunk:?} for flag {name}: {e}");
+                        return Err(Error {
+                            line: self.line,
+                            kind: ErrorKind::InvalidArguments {
+                                arg: chunk,
+                                flag: Some(name),
+                                help: "invalid value",
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn parse_required_flag<T>(
+        &mut self,
+        names: &'static [&'static str],
+    ) -> Result<T, Error<'cmd>>
+    where
+        T: FromStr,
+        T::Err: core::fmt::Display,
+    {
+        self.parse_optional_flag(names).and_then(|val| {
+            val.ok_or_else(|| Error {
+                line: self.line,
+                kind: ErrorKind::FlagRequired { flags: names },
+            })
+        })
+    }
 }
 
 // === impl RunKind ===
 
 impl RunKind<'_> {
     #[inline]
-    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx> {
+    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> CmdResult<'ctx> {
         match self {
             Self::Fn(func) => func(ctx),
             Self::Runnable(runnable) => runnable.run(ctx),
@@ -513,9 +670,9 @@ impl fmt::Debug for RunKind<'_> {
 
 impl<F> Run for F
 where
-    F: Fn(Context<'_>) -> Result<'_> + Send + Sync,
+    F: Fn(Context<'_>) -> CmdResult<'_> + Send + Sync,
 {
-    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> Result<'ctx> {
+    fn run<'ctx>(&'ctx self, ctx: Context<'ctx>) -> CmdResult<'ctx> {
         self(ctx)
     }
 }
@@ -526,4 +683,23 @@ fn print_help(parent_cmd: &str, commands: &[Command]) {
         tracing::info!(target: "shell", "  {parent_cmd}{parent_cmd_pad}{command}");
     }
     tracing::info!(target: "shell", "  {parent_cmd}{parent_cmd_pad}help --- prints this help message");
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum NumberFormat {
+    Binary,
+    Hex,
+    Decimal,
+}
+
+impl FromStr for NumberFormat {
+    type Err = &'static str;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "b" | "bin" | "binary" => Ok(Self::Binary),
+            "h" | "hex" => Ok(Self::Hex),
+            "d" | "dec" | "decimal" => Ok(Self::Decimal),
+            _ => Err("expected one of: [b, bin, binary, h, hex, d, decimal]"),
+        }
+    }
 }
