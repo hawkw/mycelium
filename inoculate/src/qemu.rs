@@ -60,6 +60,14 @@ pub struct Settings {
     #[clap(long, default_value = "1234")]
     gdb_port: u16,
 
+    /// Add default QEMU settings for running on the host CPU using KVM,
+    /// rather than a generic emulated x86 CPU.
+    ///
+    /// Note that this flag changes the development VM from one that is
+    /// consistent across all development environments and CI to one that is
+    /// specific to the current host system. Also, this requires Linux.
+    #[clap(long, short, conflicts_with = "qemu_args")]
+    kvm: bool,
     /// Extra arguments passed to QEMU
     #[clap(raw = true)]
     qemu_args: Vec<String>,
@@ -268,7 +276,19 @@ impl Settings {
         // this is so tests are run with the same machine regardless of whether
         // KVM or other accelerators are available, unless a specific QEMU
         // configuration is requested.
-        const DEFAULT_QEMU_ARGS: &[&str] = &["-cpu", "qemu64", "-smp", "cores=4"];
+        const DEFAULT_QEMU_ARGS: &[&str] = &["-cpu", "qemu64", "-smp", "-cores=4"];
+        // tell QEMU to run with KVM acceleration, and to appear to the guest as
+        // "whatever the host CPU is", enabling pass through of the InvariantTsc
+        // CPUID bit and disabling live migration.
+        //
+        // this closely mimics running Mycelium directly on the host system, and
+        // is therefore not consistent across diverse development environments.
+        const KVM_QEMU_ARGS: &[&str] = &[
+            "-machine",
+            "accel=kvm",
+            "-cpu",
+            "host,migratable=no,+invtsc",
+        ];
         if self.gdb {
             tracing::debug!(gdb_port = self.gdb_port, "configuring QEMU to wait for GDB");
             cmd.arg("-S")
@@ -279,6 +299,9 @@ impl Settings {
         if !self.qemu_args.is_empty() {
             tracing::info!(qemu.args = ?self.qemu_args, "configuring qemu");
             cmd.args(&self.qemu_args[..]);
+        } else if self.kvm {
+            tracing::info!(qemu.args = ?KVM_QEMU_ARGS, "using default qemu args for KVM");
+            cmd.args(KVM_QEMU_ARGS);
         } else {
             tracing::info!(qemu.args = ?DEFAULT_QEMU_ARGS, "using default qemu args");
             cmd.args(DEFAULT_QEMU_ARGS);
