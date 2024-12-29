@@ -1,4 +1,4 @@
-use super::apic::IoApic;
+use super::IsaInterrupt;
 use crate::{cpu, segment};
 use mycelium_util::{bits, fmt};
 
@@ -155,23 +155,10 @@ impl Idt {
     /// Chosen by fair die roll, guaranteed to be random.
     pub const DOUBLE_FAULT_IST_OFFSET: usize = 4;
 
-    /// PIC Programmable Interval Timer (PIT) interrupt vector mapped by
-    /// [`Controller::enable_hardware_interrupts`].
-    ///
-    /// Systems which do not use that function to initialize the PICs may
-    /// map this interrupt to a different IDT vector.
-    ///
-    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
-    pub const PIC_PIT_TIMER: usize = Self::PIC_BIG_START;
+    pub const MAX_CPU_EXCEPTION: usize = Self::SECURITY_EXCEPTION;
 
-    /// PIC PS/2 interrupt vector mapped by
-    /// [`Controller::enable_hardware_interrupts`].
-    ///
-    /// Systems which do not use that function to initialize the PICs may
-    /// map this interrupt to a different IDT vector.
-    ///
-    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
-    pub const PIC_PS2_KEYBOARD: usize = Self::PIC_BIG_START + 1;
+    /// Base offset for ISA hardware interrupts.
+    pub const ISA_BASE: usize = 0x20;
 
     /// Local APIC timer interrupt vector mapped by
     /// [`Controller::enable_hardware_interrupts`].
@@ -198,7 +185,7 @@ impl Idt {
     /// map this interrupt to a different IDT vector.
     ///
     /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
-    pub const PIC_BIG_START: usize = 0x20;
+    pub const PIC_BIG_START: usize = Self::ISA_BASE;
 
     /// Base of the secondary PIC's interrupt vector region mapped by
     /// [`Controller::enable_hardware_interrupts`].
@@ -207,35 +194,8 @@ impl Idt {
     /// map this interrupt to a different IDT vector.
     ///
     /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
-    pub const PIC_LITTLE_START: usize = 0x28;
+    pub const PIC_LITTLE_START: usize = Self::ISA_BASE + 8;
     // put the IOAPIC right after the PICs
-
-    /// Base of the IOAPIC's interrupt vector region mapped by
-    /// [`Controller::enable_hardware_interrupts`].
-    ///
-    /// Systems which do not use that function to initialize the IOAPIC may
-    /// map this interrupt to a different IDT vector.
-    ///
-    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
-    pub const IOAPIC_START: usize = 0x30;
-
-    /// IOAPIC Programmable Interval Timer (PIT) interrupt vector region mapped
-    /// by [`Controller::enable_hardware_interrupts`].
-    ///
-    /// Systems which do not use that function to initialize the IOAPIC may
-    /// map this interrupt to a different IDT vector.
-    ///
-    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
-    pub const IOAPIC_PIT_TIMER: usize = Self::IOAPIC_START + IoApic::PIT_TIMER_IRQ as usize;
-
-    /// IOAPIC PS/2 keyboard interrupt vector mapped by
-    /// [`Controller::enable_hardware_interrupts`].
-    ///
-    /// Systems which do not use that function to initialize the IOAPIC may
-    /// map this interrupt to a different IDT vector.
-    ///
-    /// [`Controller::enable_hardware_interrupts`]: super::Controller::enable_hardware_interrupts
-    pub const IOAPIC_PS2_KEYBOARD: usize = Self::IOAPIC_START + IoApic::PS2_KEYBOARD_IRQ as usize;
 
     pub const fn new() -> Self {
         Self {
@@ -243,12 +203,19 @@ impl Idt {
         }
     }
 
+    /// Register an interrupt service routine (ISR) for the given ISA standard
+    /// PC interrupt.
+    pub fn register_isa_isr(&mut self, irq: IsaInterrupt, isr: *const ()) {
+        let vector = irq as usize + Self::ISA_BASE;
+        self.register_isr(vector, isr);
+    }
+
     pub fn register_isr(&mut self, vector: usize, isr: *const ()) {
         let descr = self.descriptors[vector].set_handler(isr);
         if vector == Self::DOUBLE_FAULT {
             descr.set_ist_offset(Self::DOUBLE_FAULT_IST_OFFSET as u8);
         }
-        tracing::debug!(vector, ?isr, ?descr, "set isr");
+        tracing::debug!(vector, ?isr, ?descr, "set ISR");
     }
 
     pub fn load(&'static self) {

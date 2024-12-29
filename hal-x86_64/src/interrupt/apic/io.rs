@@ -1,11 +1,21 @@
 use super::{PinPolarity, TriggerMode};
 use crate::{
     cpu::FeatureNotSupported,
+    interrupt::IsaInterrupt,
     mm::{self, page, size::Size4Kb, PhysPage, VirtPage},
 };
 use hal_core::PAddr;
-use mycelium_util::bits::{bitfield, enum_from_bits};
+use mycelium_util::{
+    bits::{bitfield, enum_from_bits},
+    sync::blocking::Mutex,
+};
 use volatile::Volatile;
+
+#[derive(Debug)]
+pub struct IoApicSet {
+    ioapics: alloc::vec::Vec<Mutex<IoApic>>,
+    isa_map: [IsaOverride; 16],
+}
 
 #[derive(Debug)]
 #[must_use]
@@ -81,11 +91,219 @@ struct MmioRegisters {
     data: u32,
 }
 
+#[derive(Copy, Clone, Debug)]
+struct IsaOverride {
+    apic: u8,
+    vec: u8,
+}
+
+// === impl IoApicSet ===
+
+impl IoApicSet {
+    pub fn new(
+        madt: &acpi::platform::interrupt::Apic,
+        frame_alloc: &impl hal_core::mem::page::Alloc<mm::size::Size4Kb>,
+        pagectrl: &mut crate::mm::PageCtrl,
+        isa_base: u8,
+    ) -> Self {
+        // The ACPI Multiple APIC Descriptor Table (MADT) tells us where to find
+        // the I/O APICs, as well as information about how the ISA standard
+        // interrupts are routed to I/O APIC inputs on this system.
+        //
+        // See: https://wiki.osdev.org/MADT
+
+        // There may be multiple I/O APICs in the system, so we'll collect them
+        // all into a `Vec`. We're also going to build a table of how the ISA
+        // standard interrupts are mapped across those I/O APICs, so we can look
+        // up which one a particular interrupt lives on.
+        let n_ioapics = madt.io_apics.len();
+        tracing::trace!(?madt.io_apics, "found {n_ioapics} IO APICs", );
+        assert_ne!(
+            n_ioapics, 0,
+            "why would a computer have the APIC interrupt model but not \
+             have any IO APICs???"
+        );
+        let mut this = IoApicSet {
+            ioapics: alloc::vec::Vec::with_capacity(n_ioapics),
+            isa_map: [IsaOverride { apic: 0, vec: 0 }; 16],
+        };
+
+        for (n, ioapic) in madt.io_apics.iter().enumerate() {
+            let addr = PAddr::from_u64(ioapic.address as u64);
+            tracing::debug!(ioapic.paddr = ?addr, "IOAPIC {n}");
+            this.ioapics
+                .push(Mutex::new(IoApic::new(addr, pagectrl, frame_alloc)));
+        }
+
+        // Okay, so here's where it gets ~*weird*~.
+        //
+        // On the Platonic Ideal Normal Computer, the ISA PC interrupts would be
+        // mapped to I/O APIC input pins by number, so ISA IRQ 0 would go to pin
+        // 0 on I/O APIC 0, and so on.
+        //
+        // However, motherboard manufacturers can do whatever they like when
+        // routing these interrupts, so they could go to different pins,
+        // potentially on different I/O APICs (if the system has more than one).
+        // Also, some of these interrupts might have different pin polarity or
+        // edge/level-triggered-iness than what we might expect.
+        //
+        // Fortunately, ACPI is here to help (statements dreamed up by the
+        // utterly deranged).
+        //
+        // The MADT includes a list of "interrupt source overrides" that
+        // describe any ISA interrupts that are not mapped to I/O APIC pins in
+        // numeric order. Each entry in the interrupt source overrides list will
+        // contain:
+        // - an ISA IRQ number (naturally),
+        // - the "global system interrupt", which is NOT the IDT vector for that
+        //   interrupt but instead the I/O APIC input pin number that the IRQ is
+        //   routed to,
+        // - the polarity and trigger mode of the interrupt pin, if these are
+        //   different from the default bus trigger mode.
+        //
+        // For each of the 16 ISA interrupt vectors, we'll configure the
+        // redirection entry in the appropriate I/O APIC and record which I/O
+        // APIC (and which pin on that I/O APIC) the interrupt is routed to. We
+        // do this by first checking if the MADT contains an override matching
+        // that ISA interrupt, using that if so, and if not, falling back to the
+        // ISA interrupt number.
+        //
+        // Yes, this is a big pile of nested loops. But, consider the following:
+        //
+        // - the MADT override entries can probably come in any order, if the
+        //   motherboard firmware chooses to be maximally perverse, so we have
+        //   to scan the whole list of them to find out if each ISA interrupt is
+        //   overridden.
+        // - there are only ever 16 ISA interrupts, so the outer loop iterates
+        //   exactly 16 times; and there can't be *more* overrides than there
+        //   are ISA interrupts (and there's generally substantially fewer).
+        //   similarly, if there's more than 1-8 I/O APICs, you probably have
+        //   some kind of really weird computer and should tell me about it
+        //   because i bet it's awesome.
+        //   so, neither inner loop actually loops that many times.
+        // - finally, we only do this once on boot, so who cares?
+
+        let base_entry = RedirectionEntry::new()
+            .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
+            .with(RedirectionEntry::REMOTE_IRR, false)
+            .with(RedirectionEntry::MASKED, true)
+            .with(RedirectionEntry::DESTINATION, 0xff);
+        for irq in IsaInterrupt::ALL {
+            // Assume the IRQ is mapped to the I/O APIC pin corresponding to
+            // that ISA IRQ number, and is active-high and edge-triggered.
+            let mut global_system_interrupt = irq as u8;
+            let mut polarity = PinPolarity::High;
+            let mut trigger = TriggerMode::Edge;
+            // Is there an override for this IRQ? If there is, clobber the
+            // assumed defaults with "whatever the override says".
+            if let Some(src_override) = madt
+                .interrupt_source_overrides
+                .iter()
+                .find(|o| o.isa_source == irq as u8)
+            {
+                // put the defaults through an extruder that maybe messes with
+                // them.
+                use acpi::platform::interrupt::{
+                    Polarity as AcpiPolarity, TriggerMode as AcpiTriggerMode,
+                };
+                tracing::debug!(
+                    ?irq,
+                    ?src_override.global_system_interrupt,
+                    ?src_override.polarity,
+                    ?src_override.trigger_mode,
+                    "ISA interrupt {irq:?} is overridden by MADT"
+                );
+                match src_override.polarity {
+                    AcpiPolarity::ActiveHigh => polarity = PinPolarity::High,
+                    AcpiPolarity::ActiveLow => polarity = PinPolarity::Low,
+                    // TODO(eliza): if the MADT override entry says that the pin
+                    // polarity is "same as bus", we should probably actually
+                    // make it be the same as the bus, instead of just assuming
+                    // that it's active high. But...just assuming that "same as
+                    // bus" means active high seems to basically work so far...
+                    AcpiPolarity::SameAsBus => {}
+                }
+                match src_override.trigger_mode {
+                    AcpiTriggerMode::Edge => trigger = TriggerMode::Edge,
+                    AcpiTriggerMode::Level => trigger = TriggerMode::Level,
+                    // TODO(eliza): As above, when the MADT says this is "same
+                    // as bus", we should make it be the same as the bus instead
+                    // of going "ITS EDGE TRIGGERED LOL LMAO" which is what
+                    // we're currently doing. But, just like above, this Seems
+                    // To Work?
+                    AcpiTriggerMode::SameAsBus => {}
+                }
+                global_system_interrupt = src_override.global_system_interrupt.try_into().expect(
+                    "if this exceeds u8::MAX, what the fuck! \
+                        that's bigger than the entire IDT...",
+                );
+            }
+            // Now, scan to find which I/O APIC this IRQ corresponds to. if the
+            // system only has one I/O APIC, this will always be 0, but we gotta
+            // handle systems with more than one. So, we'll this by traversing
+            // the list of I/O APICs, seeing if the GSI number is less than the
+            // max number of IRQs handled by that I/O APIC, and if it is, we'll
+            // stick it in there. If not, keep searching for the next one,
+            // subtracting the max number of interrupts handled by the I/O APIC
+            // we just looked at.
+            let mut entry_idx = global_system_interrupt;
+            let mut got_him = false;
+            'apic_scan: for (apic_idx, apic) in this.ioapics.iter_mut().enumerate() {
+                let apic = apic.get_mut();
+                let max_entries = apic.max_entries();
+                if entry_idx > max_entries {
+                    entry_idx -= max_entries;
+                    continue;
+                }
+
+                // Ladies and gentlemen...we got him!
+                got_him = true;
+                tracing::debug!(
+                    ?irq,
+                    ?global_system_interrupt,
+                    ?apic_idx,
+                    ?entry_idx,
+                    "found IOAPIC for ISA interrupt"
+                );
+                let entry = base_entry
+                    .with(RedirectionEntry::POLARITY, polarity)
+                    .with(RedirectionEntry::TRIGGER, trigger)
+                    .with(RedirectionEntry::VECTOR, isa_base + irq as u8);
+                apic.set_entry(entry_idx, entry);
+                this.isa_map[irq as usize] = IsaOverride {
+                    apic: apic_idx as u8,
+                    vec: entry_idx,
+                };
+                break 'apic_scan;
+            }
+
+            assert!(
+                got_him,
+                "somehow, we didn't find an I/O APIC for MADT global system \
+                 interrupt {global_system_interrupt} (ISA IRQ {irq:?})!\n \
+                 this probably means the MADT is corrupted somehow, or maybe \
+                 your motherboard is just super weird? i have no idea what to \
+                 do in this situation, so i guess i'll die."
+            );
+        }
+
+        this
+    }
+
+    fn for_isa_irq(&self, irq: IsaInterrupt) -> (&Mutex<IoApic>, u8) {
+        let isa_override = self.isa_map[irq as usize];
+        (&self.ioapics[isa_override.apic as usize], isa_override.vec)
+    }
+
+    pub fn set_isa_masked(&self, irq: IsaInterrupt, masked: bool) {
+        let (ioapic, vec) = self.for_isa_irq(irq);
+        ioapic.with_lock(|ioapic| ioapic.set_masked(vec, masked));
+    }
+}
+
 // === impl IoApic ===
 
 impl IoApic {
-    pub(crate) const PS2_KEYBOARD_IRQ: u8 = 0x1;
-    pub(crate) const PIT_TIMER_IRQ: u8 = 0x2;
     const REDIRECTION_ENTRY_BASE: u32 = 0x10;
 
     /// Try to construct an `IoApic`.
@@ -148,22 +366,6 @@ impl IoApic {
         A: page::Alloc<Size4Kb>,
     {
         Self::try_new(addr, pagectrl, frame_alloc).unwrap()
-    }
-
-    /// Map all ISA interrupts starting at `base`.
-    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self))]
-    pub fn map_isa_irqs(&mut self, base: u8) {
-        let flags = RedirectionEntry::new()
-            .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
-            .with(RedirectionEntry::POLARITY, PinPolarity::High)
-            .with(RedirectionEntry::REMOTE_IRR, false)
-            .with(RedirectionEntry::TRIGGER, TriggerMode::Edge)
-            .with(RedirectionEntry::MASKED, true)
-            .with(RedirectionEntry::DESTINATION, 0xff);
-        for irq in 0..16 {
-            let entry = flags.with(RedirectionEntry::VECTOR, base + irq);
-            self.set_entry(irq, entry);
-        }
     }
 
     /// Returns the IO APIC's ID.
