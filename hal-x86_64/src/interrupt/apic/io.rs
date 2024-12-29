@@ -208,12 +208,22 @@ impl IoApicSet {
                 match src_override.polarity {
                     AcpiPolarity::ActiveHigh => polarity = PinPolarity::High,
                     AcpiPolarity::ActiveLow => polarity = PinPolarity::Low,
+                    // TODO(eliza): if the MADT override entry says that the pin
+                    // polarity is "same as bus", we should probably actually
+                    // make it be the same as the bus, instead of just assuming
+                    // that it's active high. But...just assuming that "same as
+                    // bus" means active high seems to basically work so far...
                     AcpiPolarity::SameAsBus => {}
                 }
                 match src_override.trigger_mode {
                     AcpiTriggerMode::Edge => trigger = TriggerMode::Edge,
                     AcpiTriggerMode::Level => trigger = TriggerMode::Level,
-                    _ => {}
+                    // TODO(eliza): As above, when the MADT says this is "same
+                    // as bus", we should make it be the same as the bus instead
+                    // of going "ITS EDGE TRIGGERED LOL LMAO" which is what
+                    // we're currently doing. But, just like above, this Seems
+                    // To Work?
+                    AcpiTriggerMode::SameAsBus => {}
                 }
                 global_system_interrupt = src_override.global_system_interrupt.try_into().expect(
                     "if this exceeds u8::MAX, what the fuck! \
