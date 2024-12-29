@@ -201,6 +201,8 @@ impl IoApicSet {
                 .iter()
                 .find(|o| o.isa_source == irq as u8)
             {
+                // put the defaults through an extruder that maybe messes with
+                // them.
                 use acpi::platform::interrupt::{
                     Polarity as AcpiPolarity, TriggerMode as AcpiTriggerMode,
                 };
