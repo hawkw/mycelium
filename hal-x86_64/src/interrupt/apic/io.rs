@@ -182,6 +182,12 @@ impl IoApicSet {
         //   because i bet it's awesome.
         //   so, neither inner loop actually loops that many times.
         // - finally, we only do this once on boot, so who cares?
+
+        let base_entry = RedirectionEntry::new()
+            .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
+            .with(RedirectionEntry::REMOTE_IRR, false)
+            .with(RedirectionEntry::MASKED, true)
+            .with(RedirectionEntry::DESTINATION, 0xff);
         for irq in IsaInterrupt::ALL {
             // Assume the IRQ is mapped to the I/O APIC pin corresponding to
             // that ISA IRQ number, and is active-high and edge-triggered.
@@ -257,13 +263,9 @@ impl IoApicSet {
                     ?entry_idx,
                     "found IOAPIC for ISA interrupt"
                 );
-                let entry = RedirectionEntry::new()
-                    .with(RedirectionEntry::DELIVERY, DeliveryMode::Normal)
+                let entry = base_entry
                     .with(RedirectionEntry::POLARITY, polarity)
-                    .with(RedirectionEntry::REMOTE_IRR, false)
                     .with(RedirectionEntry::TRIGGER, trigger)
-                    .with(RedirectionEntry::MASKED, true)
-                    .with(RedirectionEntry::DESTINATION, 0xff)
                     .with(RedirectionEntry::VECTOR, isa_base + irq as u8);
                 apic.set_entry(entry_idx, entry);
                 this.isa_map[irq as usize] = IsaOverride {
