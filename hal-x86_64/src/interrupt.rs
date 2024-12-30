@@ -423,255 +423,54 @@ impl hal_core::interrupt::Control for Idt {
     where
         H: Handlers<Registers>,
     {
-        macro_rules! gen_code_faults {
-            ($self:ident, $h:ty, $($vector:path => fn $name:ident($($rest:tt)+),)+) => {
-                $(
-                    gen_code_faults! {@ $name($($rest)+); }
-                    $self.register_isr($vector, $name::<$h> as *const ());
-                )+
-            };
-            (@ $name:ident($kind:literal);) => {
-                extern "x86-interrupt" fn $name<H: Handlers<Registers>>(mut registers: Registers) {
-                    let code = CodeFault {
-                        error_code: None,
-                        kind: $kind,
-                    };
-                    H::code_fault(Context { registers: &mut registers, code });
-                }
-            };
-            (@ $name:ident($kind:literal, code);) => {
-                extern "x86-interrupt" fn $name<H: Handlers<Registers>>(
-                    mut registers: Registers,
-                    code: u64,
-                ) {
-                    let code = CodeFault {
-                        error_code: Some(&code),
-                        kind: $kind,
-                    };
-                    H::code_fault(Context {  registers: &mut registers, code });
-                }
-            };
-        }
-
         let span = tracing::debug_span!("Idt::register_handlers");
         let _enter = span.enter();
-
-        extern "x86-interrupt" fn page_fault_isr<H: Handlers<Registers>>(
-            mut registers: Registers,
-            code: PageFaultCode,
-        ) {
-            H::page_fault(Context {
-                registers: &mut registers,
-                code,
-            });
-        }
-
-        extern "x86-interrupt" fn double_fault_isr<H: Handlers<Registers>>(
-            mut registers: Registers,
-            code: u64,
-        ) {
-            H::double_fault(Context {
-                registers: &mut registers,
-                code,
-            });
-        }
-
-        extern "x86-interrupt" fn pit_timer_isr<H: Handlers<Registers>>(_regs: Registers) {
-            if crate::time::Pit::handle_interrupt() {
-                H::timer_tick()
-            }
-            unsafe {
-                INTERRUPT_CONTROLLER
-                    .get_unchecked()
-                    .end_isa_irq(IsaInterrupt::PitTimer);
-            }
-        }
-
-        extern "x86-interrupt" fn apic_timer_isr<H: Handlers<Registers>>(_regs: Registers) {
-            H::timer_tick();
-            unsafe {
-                match INTERRUPT_CONTROLLER.get_unchecked().model {
-                    InterruptModel::Pic(_) => unreachable!(),
-                    InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
-                }
-            }
-        }
-
-        extern "x86-interrupt" fn keyboard_isr<H: Handlers<Registers>>(_regs: Registers) {
-            // 0x60 is a magic PC/AT number.
-            static PORT: cpu::Port = cpu::Port::at(0x60);
-            // load-bearing read - if we don't read from the keyboard controller it won't
-            // send another interrupt on later keystrokes.
-            let scancode = unsafe { PORT.readb() };
-            H::ps2_keyboard(scancode);
-            unsafe {
-                INTERRUPT_CONTROLLER
-                    .get_unchecked()
-                    .end_isa_irq(IsaInterrupt::Ps2Keyboard);
-            }
-        }
-
-        extern "x86-interrupt" fn test_isr<H: Handlers<Registers>>(mut registers: Registers) {
-            H::test_interrupt(Context {
-                registers: &mut registers,
-                code: (),
-            });
-        }
-
-        extern "x86-interrupt" fn invalid_tss_isr<H: Handlers<Registers>>(
-            mut registers: Registers,
-            code: u64,
-        ) {
-            unsafe {
-                // Safety: An invalid TSS exception is always an oops. Since we're
-                // not coming back from this, it's okay to forcefully unlock the
-                // tracing outputs.
-                force_unlock_tracing();
-            }
-            let selector = SelectorErrorCode(code as u16);
-            tracing::error!(?selector, "invalid task-state segment!");
-
-            let msg = selector.named("task-state segment (TSS)");
-            let code = CodeFault {
-                error_code: Some(&msg),
-                kind: "Invalid TSS (0xA)",
-            };
-            H::code_fault(Context {
-                registers: &mut registers,
-                code,
-            });
-        }
-
-        extern "x86-interrupt" fn segment_not_present_isr<H: Handlers<Registers>>(
-            mut registers: Registers,
-            code: u64,
-        ) {
-            unsafe {
-                // Safety: An segment not present exception is always an oops.
-                // Since we're not coming back from this, it's okay to
-                // forcefully unlock the tracing outputs.
-                force_unlock_tracing();
-            }
-            let selector = SelectorErrorCode(code as u16);
-            tracing::error!(?selector, "a segment was not present!");
-
-            let msg = selector.named("stack segment");
-            let code = CodeFault {
-                error_code: Some(&msg),
-                kind: "Segment Not Present (0xB)",
-            };
-            H::code_fault(Context {
-                registers: &mut registers,
-                code,
-            });
-        }
-
-        extern "x86-interrupt" fn stack_segment_isr<H: Handlers<Registers>>(
-            mut registers: Registers,
-            code: u64,
-        ) {
-            unsafe {
-                // Safety: An stack-segment fault exeption is always an oops.
-                // Since we're not coming back from this, it's okay to
-                // forcefully unlock the tracing outputs.
-                force_unlock_tracing();
-            }
-            let selector = SelectorErrorCode(code as u16);
-            tracing::error!(?selector, "a stack-segment fault is happening");
-
-            let msg = selector.named("stack segment");
-            let code = CodeFault {
-                error_code: Some(&msg),
-                kind: "Stack-Segment Fault (0xC)",
-            };
-            H::code_fault(Context {
-                registers: &mut registers,
-                code,
-            });
-        }
-
-        extern "x86-interrupt" fn gpf_isr<H: Handlers<Registers>>(
-            mut registers: Registers,
-            code: u64,
-        ) {
-            unsafe {
-                // Safety: A general protection fault is (currently) always an
-                // oops. Since we're not coming back from this, it's okay to
-                // forcefully unlock the tracing outputs.
-                //
-                // TODO(eliza): in the future, if we allow the kernel to
-                // recover from general protection faults in user mode programs,
-                // rather than treating them as invariably fatal, we should
-                // probably not always do this. Instead, we should just handle
-                // the user-mode GPF non-fatally, and only unlock the tracing
-                // stuff if we know we're going to do a kernel oops...
-                force_unlock_tracing();
-            }
-
-            let segment = if code > 0 {
-                Some(SelectorErrorCode(code as u16))
-            } else {
-                None
-            };
-
-            tracing::error!(?segment, "lmao, a general protection fault is happening");
-            let error_code = segment.map(|seg| seg.named("selector"));
-            let code = CodeFault {
-                error_code: error_code.as_ref().map(|code| code as &dyn fmt::Display),
-                kind: "General Protection Fault (0xD)",
-            };
-            H::code_fault(Context {
-                registers: &mut registers,
-                code,
-            });
-        }
-
-        extern "x86-interrupt" fn spurious_isr() {
-            // TODO(eliza): do we need to actually do something here?
-        }
 
         // === exceptions ===
         // these exceptions are mapped to the HAL `Handlers` trait's "code
         // fault" handler, and indicate that the code that was executing did a
         // Bad Thing
-        gen_code_faults! {
-            self, H,
-            Self::DIVIDE_BY_ZERO => fn div_0_isr("Divide-By-Zero (0x0)"),
-            Self::OVERFLOW => fn overflow_isr("Overflow (0x4)"),
-            Self::BOUND_RANGE_EXCEEDED => fn br_isr("Bound Range Exceeded (0x5)"),
-            Self::INVALID_OPCODE => fn ud_isr("Invalid Opcode (0x6)"),
-            Self::DEVICE_NOT_AVAILABLE => fn no_fpu_isr("Device (FPU) Not Available (0x7)"),
-            Self::ALIGNMENT_CHECK => fn alignment_check_isr("Alignment Check (0x11)", code),
-            Self::SIMD_FLOATING_POINT => fn simd_fp_exn_isr("SIMD Floating-Point Exception (0x13)"),
-            Self::X87_FPU_EXCEPTION => fn x87_exn_isr("x87 Floating-Point Exception (0x10)"),
-        }
+        self.register_isr(Self::DIVIDE_BY_ZERO, isr::div_0::<H> as *const ());
+        self.register_isr(Self::OVERFLOW, isr::overflow::<H> as *const ());
+        self.register_isr(Self::BOUND_RANGE_EXCEEDED, isr::br::<H> as *const ());
+        self.register_isr(Self::INVALID_OPCODE, isr::ud::<H> as *const ());
+        self.register_isr(Self::DEVICE_NOT_AVAILABLE, isr::no_fpu::<H> as *const ());
+        self.register_isr(
+            Self::ALIGNMENT_CHECK,
+            isr::alignment_check::<H> as *const (),
+        );
+        self.register_isr(
+            Self::SIMD_FLOATING_POINT,
+            isr::simd_fp_exn::<H> as *const (),
+        );
+        self.register_isr(Self::X87_FPU_EXCEPTION, isr::x87_exn::<H> as *const ());
 
         // other exceptions, not mapped to the "code fault" handler
-        self.register_isr(Self::PAGE_FAULT, page_fault_isr::<H> as *const ());
-        self.register_isr(Self::INVALID_TSS, invalid_tss_isr::<H> as *const ());
+        self.register_isr(Self::PAGE_FAULT, isr::page_fault::<H> as *const ());
+        self.register_isr(Self::INVALID_TSS, isr::invalid_tss::<H> as *const ());
         self.register_isr(
             Self::SEGMENT_NOT_PRESENT,
-            segment_not_present_isr::<H> as *const (),
+            isr::segment_not_present::<H> as *const (),
         );
         self.register_isr(
             Self::STACK_SEGMENT_FAULT,
-            stack_segment_isr::<H> as *const (),
+            isr::stack_segment::<H> as *const (),
         );
-        self.register_isr(Self::GENERAL_PROTECTION_FAULT, gpf_isr::<H> as *const ());
-        self.register_isr(Self::DOUBLE_FAULT, double_fault_isr::<H> as *const ());
+        self.register_isr(Self::GENERAL_PROTECTION_FAULT, isr::gpf::<H> as *const ());
+        self.register_isr(Self::DOUBLE_FAULT, isr::double_fault::<H> as *const ());
 
         // === hardware interrupts ===
         // ISA standard hardware interrupts mapped on both the PICs and IO APIC
         // interrupt models.
-        self.register_isa_isr(IsaInterrupt::PitTimer, pit_timer_isr::<H> as *const ());
-        self.register_isa_isr(IsaInterrupt::Ps2Keyboard, keyboard_isr::<H> as *const ());
+        self.register_isa_isr(IsaInterrupt::PitTimer, isr::pit_timer::<H> as *const ());
+        self.register_isa_isr(IsaInterrupt::Ps2Keyboard, isr::keyboard::<H> as *const ());
 
         // local APIC specific hardware interrupts
-        self.register_isr(Self::LOCAL_APIC_SPURIOUS, spurious_isr as *const ());
-        self.register_isr(Self::LOCAL_APIC_TIMER, apic_timer_isr::<H> as *const ());
+        self.register_isr(Self::LOCAL_APIC_SPURIOUS, isr::spurious as *const ());
+        self.register_isr(Self::LOCAL_APIC_TIMER, isr::apic_timer::<H> as *const ());
 
         // vector 69 (nice) is reserved by the HAL for testing the IDT.
-        self.register_isr(69, test_isr::<H> as *const ());
+        self.register_isr(69, isr::test::<H> as *const ());
 
         Ok(())
     }
@@ -769,6 +568,224 @@ impl fmt::Display for NamedSelectorErrorCode {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} at {}", self.segment_kind, self.code.display())
+    }
+}
+
+mod isr {
+    use super::*;
+
+    macro_rules! gen_code_faults {
+        ($(fn $name:ident($($rest:tt)+),)+) => {
+            $(
+                gen_code_faults! {@ $name($($rest)+); }
+            )+
+        };
+        (@ $name:ident($kind:literal);) => {
+            pub(super) extern "x86-interrupt" fn $name<H: Handlers<Registers>>(mut registers: Registers) {
+                let code = CodeFault {
+                    error_code: None,
+                    kind: $kind,
+                };
+                H::code_fault(Context { registers: &mut registers, code });
+            }
+        };
+        (@ $name:ident($kind:literal, code);) => {
+            pub(super) extern "x86-interrupt" fn $name<H: Handlers<Registers>>(
+                mut registers: Registers,
+                code: u64,
+            ) {
+                let code = CodeFault {
+                    error_code: Some(&code),
+                    kind: $kind,
+                };
+                H::code_fault(Context {  registers: &mut registers, code });
+            }
+        };
+    }
+
+    gen_code_faults! {
+        fn div_0("Divide-By-Zero (0x0)"),
+        fn overflow("Overflow (0x4)"),
+        fn br("Bound Range Exceeded (0x5)"),
+        fn ud("Invalid Opcode (0x6)"),
+        fn no_fpu("Device (FPU) Not Available (0x7)"),
+        fn alignment_check("Alignment Check (0x11)", code),
+        fn simd_fp_exn("SIMD Floating-Point Exception (0x13)"),
+        fn x87_exn("x87 Floating-Point Exception (0x10)"),
+    }
+
+    pub(super) extern "x86-interrupt" fn page_fault<H: Handlers<Registers>>(
+        mut registers: Registers,
+        code: PageFaultCode,
+    ) {
+        H::page_fault(Context {
+            registers: &mut registers,
+            code,
+        });
+    }
+
+    pub(super) extern "x86-interrupt" fn double_fault<H: Handlers<Registers>>(
+        mut registers: Registers,
+        code: u64,
+    ) {
+        H::double_fault(Context {
+            registers: &mut registers,
+            code,
+        });
+    }
+
+    pub(super) extern "x86-interrupt" fn pit_timer<H: Handlers<Registers>>(_regs: Registers) {
+        if crate::time::Pit::handle_interrupt() {
+            H::timer_tick()
+        }
+        unsafe {
+            INTERRUPT_CONTROLLER
+                .get_unchecked()
+                .end_isa_irq(IsaInterrupt::PitTimer);
+        }
+    }
+
+    pub(super) extern "x86-interrupt" fn apic_timer<H: Handlers<Registers>>(_regs: Registers) {
+        H::timer_tick();
+        unsafe {
+            match INTERRUPT_CONTROLLER.get_unchecked().model {
+                InterruptModel::Pic(_) => unreachable!(),
+                InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
+            }
+        }
+    }
+
+    pub(super) extern "x86-interrupt" fn keyboard<H: Handlers<Registers>>(_regs: Registers) {
+        // 0x60 is a magic PC/AT number.
+        static PORT: cpu::Port = cpu::Port::at(0x60);
+        // load-bearing read - if we don't read from the keyboard controller it won't
+        // send another interrupt on later keystrokes.
+        let scancode = unsafe { PORT.readb() };
+        H::ps2_keyboard(scancode);
+        unsafe {
+            INTERRUPT_CONTROLLER
+                .get_unchecked()
+                .end_isa_irq(IsaInterrupt::Ps2Keyboard);
+        }
+    }
+
+    pub(super) extern "x86-interrupt" fn test<H: Handlers<Registers>>(mut registers: Registers) {
+        H::test_interrupt(Context {
+            registers: &mut registers,
+            code: (),
+        });
+    }
+
+    pub(super) extern "x86-interrupt" fn invalid_tss<H: Handlers<Registers>>(
+        mut registers: Registers,
+        code: u64,
+    ) {
+        unsafe {
+            // Safety: An invalid TSS exception is always an oops. Since we're
+            // not coming back from this, it's okay to forcefully unlock the
+            // tracing outputs.
+            force_unlock_tracing();
+        }
+        let selector = SelectorErrorCode(code as u16);
+        tracing::error!(?selector, "invalid task-state segment!");
+
+        let msg = selector.named("task-state segment (TSS)");
+        let code = CodeFault {
+            error_code: Some(&msg),
+            kind: "Invalid TSS (0xA)",
+        };
+        H::code_fault(Context {
+            registers: &mut registers,
+            code,
+        });
+    }
+
+    pub(super) extern "x86-interrupt" fn segment_not_present<H: Handlers<Registers>>(
+        mut registers: Registers,
+        code: u64,
+    ) {
+        unsafe {
+            // Safety: An segment not present exception is always an oops.
+            // Since we're not coming back from this, it's okay to
+            // forcefully unlock the tracing outputs.
+            force_unlock_tracing();
+        }
+        let selector = SelectorErrorCode(code as u16);
+        tracing::error!(?selector, "a segment was not present!");
+
+        let msg = selector.named("stack segment");
+        let code = CodeFault {
+            error_code: Some(&msg),
+            kind: "Segment Not Present (0xB)",
+        };
+        H::code_fault(Context {
+            registers: &mut registers,
+            code,
+        });
+    }
+
+    pub(super) extern "x86-interrupt" fn stack_segment<H: Handlers<Registers>>(
+        mut registers: Registers,
+        code: u64,
+    ) {
+        unsafe {
+            // Safety: An stack-segment fault exeption is always an oops.
+            // Since we're not coming back from this, it's okay to
+            // forcefully unlock the tracing outputs.
+            force_unlock_tracing();
+        }
+        let selector = SelectorErrorCode(code as u16);
+        tracing::error!(?selector, "a stack-segment fault is happening");
+
+        let msg = selector.named("stack segment");
+        let code = CodeFault {
+            error_code: Some(&msg),
+            kind: "Stack-Segment Fault (0xC)",
+        };
+        H::code_fault(Context {
+            registers: &mut registers,
+            code,
+        });
+    }
+
+    pub(super) extern "x86-interrupt" fn gpf<H: Handlers<Registers>>(
+        mut registers: Registers,
+        code: u64,
+    ) {
+        unsafe {
+            // Safety: A general protection fault is (currently) always an
+            // oops. Since we're not coming back from this, it's okay to
+            // forcefully unlock the tracing outputs.
+            //
+            // TODO(eliza): in the future, if we allow the kernel to
+            // recover from general protection faults in user mode programs,
+            // rather than treating them as invariably fatal, we should
+            // probably not always do this. Instead, we should just handle
+            // the user-mode GPF non-fatally, and only unlock the tracing
+            // stuff if we know we're going to do a kernel oops...
+            force_unlock_tracing();
+        }
+
+        let segment = if code > 0 {
+            Some(SelectorErrorCode(code as u16))
+        } else {
+            None
+        };
+
+        tracing::error!(?segment, "lmao, a general protection fault is happening");
+        let error_code = segment.map(|seg| seg.named("selector"));
+        let code = CodeFault {
+            error_code: error_code.as_ref().map(|code| code as &dyn fmt::Display),
+            kind: "General Protection Fault (0xD)",
+        };
+        H::code_fault(Context {
+            registers: &mut registers,
+            code,
+        });
+    }
+
+    pub(super) extern "x86-interrupt" fn spurious() {
+        // TODO(eliza): do we need to actually do something here?
     }
 }
 
