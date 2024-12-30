@@ -523,11 +523,10 @@ impl hal_core::interrupt::Control for Idt {
             code: u64,
         ) {
             unsafe {
-                // Safety: who cares!
-                crate::vga::writer().force_unlock();
-                if let Some(com1) = crate::serial::com1() {
-                    com1.force_unlock();
-                }
+                // Safety: An invalid TSS exception is always an oops. Since we're
+                // not coming back from this, it's okay to forcefully unlock the
+                // tracing outputs.
+                force_unlock_tracing();
             }
             let selector = SelectorErrorCode(code as u16);
             tracing::error!(?selector, "invalid task-state segment!");
@@ -548,11 +547,10 @@ impl hal_core::interrupt::Control for Idt {
             code: u64,
         ) {
             unsafe {
-                // Safety: who cares!
-                crate::vga::writer().force_unlock();
-                if let Some(com1) = crate::serial::com1() {
-                    com1.force_unlock();
-                }
+                // Safety: An segment not present exception is always an oops.
+                // Since we're not coming back from this, it's okay to
+                // forcefully unlock the tracing outputs.
+                force_unlock_tracing();
             }
             let selector = SelectorErrorCode(code as u16);
             tracing::error!(?selector, "a segment was not present!");
@@ -573,11 +571,10 @@ impl hal_core::interrupt::Control for Idt {
             code: u64,
         ) {
             unsafe {
-                // Safety: who cares!
-                crate::vga::writer().force_unlock();
-                if let Some(com1) = crate::serial::com1() {
-                    com1.force_unlock();
-                }
+                // Safety: An stack-segment fault exeption is always an oops.
+                // Since we're not coming back from this, it's okay to
+                // forcefully unlock the tracing outputs.
+                force_unlock_tracing();
             }
             let selector = SelectorErrorCode(code as u16);
             tracing::error!(?selector, "a stack-segment fault is happening");
@@ -598,12 +595,17 @@ impl hal_core::interrupt::Control for Idt {
             code: u64,
         ) {
             unsafe {
-                // Safety: who cares!
-
-                crate::vga::writer().force_unlock();
-                if let Some(com1) = crate::serial::com1() {
-                    com1.force_unlock();
-                }
+                // Safety: A general protection fault is (currently) always an
+                // oops. Since we're not coming back from this, it's okay to
+                // forcefully unlock the tracing outputs.
+                //
+                // TODO(eliza): in the future, if we allow the kernel to
+                // recover from general protection faults in user mode programs,
+                // rather than treating them as invariably fatal, we should
+                // probably not always do this. Instead, we should just handle
+                // the user-mode GPF non-fatally, and only unlock the tracing
+                // stuff if we know we're going to do a kernel oops...
+                force_unlock_tracing();
             }
 
             let segment = if code > 0 {
@@ -625,7 +627,7 @@ impl hal_core::interrupt::Control for Idt {
         }
 
         extern "x86-interrupt" fn spurious_isr() {
-            tracing::trace!("spurious");
+            // TODO(eliza): do we need to actually do something here?
         }
 
         // === exceptions ===
@@ -672,6 +674,21 @@ impl hal_core::interrupt::Control for Idt {
         self.register_isr(69, test_isr::<H> as *const ());
 
         Ok(())
+    }
+}
+
+/// Forcefully unlock the VGA port and COM1 serial port (used by tracing), so
+/// that an ISR can log stuff without deadlocking.
+///
+/// # Safety
+///
+/// This forcefully unlocks a mutex, which is probably bad to do. Only do this
+/// in ISRs that definitely represent real actual faults, and not just because
+/// "you wanted to log something".
+unsafe fn force_unlock_tracing() {
+    crate::vga::writer().force_unlock();
+    if let Some(com1) = crate::serial::com1() {
+        com1.force_unlock();
     }
 }
 
