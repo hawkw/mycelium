@@ -9,6 +9,8 @@ extern crate alloc;
 #[macro_use]
 mod macros;
 
+pub use deferred::defer;
+pub mod deferred;
 pub mod error;
 pub mod fmt;
 pub mod io;
