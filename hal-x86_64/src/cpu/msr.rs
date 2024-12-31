@@ -281,9 +281,7 @@ impl<V> Msr<V> {
                 options(nomem, nostack, preserves_flags)
             );
         }
-        let result = (hi as u64) << 32 | (lo as u64);
-        tracing::trace!(rdmsr = %self, value = fmt::hex(result));
-        result
+        (hi as u64) << 32 | (lo as u64)
     }
 
     /// Writes the given raw `u64` value to this MSR.
