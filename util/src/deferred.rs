@@ -4,7 +4,9 @@
 
 /// Defers execution of a closure until a scope is exited.
 ///
-/// As seen in "The Go Programming Language"..
+/// As seen in "The Go Programming Language".
+#[must_use = "dropping a `Deferred` guard immediately executes \
+    the deferred function"]
 pub struct Deferred<F: FnOnce()>(Option<F>);
 
 impl<F: FnOnce()> Deferred<F> {

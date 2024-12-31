@@ -1,10 +1,10 @@
 use super::{PinPolarity, TriggerMode};
 use crate::{
-    cpu::{FeatureNotSupported, Msr},
+    cpu::{local, FeatureNotSupported, Msr},
     mm::{self, page, size::Size4Kb, PhysPage, VirtPage},
     time::{Duration, InvalidDuration},
 };
-use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32};
+use core::{cell::RefCell, convert::TryInto, marker::PhantomData, num::NonZeroU32};
 use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
 use raw_cpuid::CpuId;
@@ -24,12 +24,25 @@ pub struct LocalApicRegister<T = u32, A = access::ReadWrite> {
     _ty: PhantomData<fn(T, A)>,
 }
 
+#[derive(Debug)]
+pub(in crate::interrupt) struct Handle(local::LocalKey<RefCell<Option<LocalApic>>>);
+
 pub trait RegisterAccess {
     type Access;
     type Target;
     fn volatile(
         ptr: &'static mut Self::Target,
     ) -> Volatile<&'static mut Self::Target, Self::Access>;
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum LocalApicError {
+    /// The system is configured to use the PIC interrupt model rather than the
+    /// APIC interrupt model.
+    NoApic,
+
+    /// The local APIC is uninitialized.
+    Uninitialized,
 }
 
 impl LocalApic {
@@ -290,6 +303,44 @@ impl LocalApic {
         );
         let reference = &mut *addr.as_ptr::<T>();
         LocalApicRegister::<T, A>::volatile(reference)
+    }
+}
+
+impl Handle {
+    pub(in crate::interrupt) const fn new() -> Self {
+        Self(local::LocalKey::new(|| RefCell::new(None)))
+    }
+
+    pub(in crate::interrupt) fn with<T>(
+        &self,
+        f: impl FnOnce(&LocalApic) -> T,
+    ) -> Result<T, LocalApicError> {
+        self.0.with(|apic| {
+            Ok(f(apic
+                .borrow()
+                .as_ref()
+                .ok_or(LocalApicError::Uninitialized)?))
+        })
+    }
+
+    pub(in crate::interrupt) unsafe fn initialize<A>(
+        &self,
+        frame_alloc: &A,
+        pagectrl: &mut impl page::Map<Size4Kb, A>,
+        spurious_vector: u8,
+    ) where
+        A: page::Alloc<Size4Kb>,
+    {
+        self.0.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_some() {
+                // already initialized, bail.
+                return;
+            }
+            let apic = LocalApic::new(pagectrl, frame_alloc);
+            apic.enable(spurious_vector);
+            *slot = Some(apic);
+        })
     }
 }
 
