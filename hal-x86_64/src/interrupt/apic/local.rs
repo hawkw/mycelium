@@ -127,11 +127,64 @@ impl LocalApic {
         tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
     }
 
-    fn timer_frequency_hz(&self) -> u32 {
+    /// Calibrate the timer frequency using the PIT.
+    #[inline(always)]
+    fn calibrate_frequency_hz_pit(&self) -> u32 {
         use register::*;
+        tracing::debug!("calibrating APIC timer frequency using PIT...");
 
+        // lock the PIT now, before actually starting the timer IRQ, so that we
+        // don't include any time spent waiting for the PIT lock.
+        //
+        // since we only run this code on startup, before any other cores have
+        // been started, this probably never actually waits for a lock. but...we
+        // should do it the right way, anyway.
+        let mut pit = crate::time::PIT.lock();
+
+        unsafe {
+            // start the timer
+
+            // set timer divisor to 16
+            self.write_register(TIMER_DIVISOR, 0b11);
+            self.write_register(
+                LVT_TIMER,
+                LvtTimer::new()
+                    .with(LvtTimer::MODE, TimerMode::OneShot)
+                    .with(LvtTimer::MASKED, false),
+            );
+            // set initial count to -1
+            self.write_register(TIMER_INITIAL_COUNT, -1i32 as u32);
+        }
+
+        // use the PIT to sleep for 10ms
+        pit.sleep_blocking(Duration::from_millis(10))
+            .expect("the PIT should be able to send a 10ms interrupt...");
+
+        unsafe {
+            // stop the timer
+            self.write_register(
+                LVT_TIMER,
+                LvtTimer::new()
+                    .with(LvtTimer::MODE, TimerMode::OneShot)
+                    .with(LvtTimer::MASKED, true),
+            );
+        }
+
+        let elapsed_ticks = unsafe { self.register(TIMER_CURRENT_COUNT).read() };
+        // since we slept for ten milliseconds, each tick is 10 kHz. we don't
+        // need to account for the divisor since we ran the timer at that
+        // divisor already.
+        let ticks_per_10ms = (-1i32 as u32).wrapping_sub(elapsed_ticks);
+        tracing::debug!(?ticks_per_10ms);
+        // convert the frequency to Hz.
+        let frequency_hz = ticks_per_10ms * 100;
+        tracing::debug!(frequency_hz, "calibrated local APIC timer using PIT");
+        frequency_hz
+    }
+
+    #[inline(always)]
+    fn calibrate_frequency_hz_cpuid() -> Option<u32> {
         let cpuid = CpuId::new();
-
         if let Some(freq_khz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
             tracing::trace!("CPUID contains hypervisor info");
             let freq = hypervisor.apic_frequency();
@@ -143,9 +196,9 @@ impl LocalApic {
             let frequency_hz = (freq_khz.get() * 1000) / Self::TIMER_DIVISOR;
             tracing::debug!(
                 frequency_hz,
-                "determined APIC frequency from CPUID hypervisor info"
+                "determined APIC timer frequency from CPUID hypervisor info"
             );
-            return frequency_hz;
+            return Some(frequency_hz);
         }
 
         // XXX ELIZA THIS IS TSC FREQUENCY, SO IDK IF THAT'S RIGHT?
@@ -167,51 +220,46 @@ impl LocalApic {
 
         // CPUID didn't help, so fall back to calibrating the APIC frequency
         // using the PIT.
-        tracing::debug!("calibrating APIC timer frequency using PIT...");
+        None
+    }
 
-        // lock the PIT now, before actually starting the timer IRQ, so that we
-        // don't include any time spent waiting for the PIT lock.
-        //
-        // since we only run this code on startup, before any other cores have
-        // been started, this probably never actually waits for a lock. but...we
-        // should do it the right way, anyway.
-        let mut pit = crate::time::PIT.lock();
+    fn timer_frequency_hz(&self) -> u32 {
+        // How sloppy do we expect the PIT frequency calibration to be?
+        // If the delta between the CPUID frequency and the frequency we
+        // determined using PIT calibration is > this value, we'll yell about
+        // it.
+        const PIT_SLOPPINESS: u32 = 1000;
 
-        unsafe {
-            // set timer divisor to 16
-            self.write_register(TIMER_DIVISOR, 0b11);
-            // set initial count to -1
-            self.write_register(TIMER_INITIAL_COUNT, -1i32 as u32);
+        // Start out by calibrating the APIC frequency using the PIT.
+        let pit_frequency_hz = self.calibrate_frequency_hz_pit();
 
-            // start the timer
-            self.write_register(
-                LVT_TIMER,
-                LvtTimer::new().with(LvtTimer::MODE, TimerMode::OneShot),
+        // See if we can get something from CPUID.
+        let Some(cpuid_frequency_hz) = Self::calibrate_frequency_hz_cpuid() else {
+            tracing::info!(
+                pit.frequency_hz = pit_frequency_hz,
+                "CPUID does not indicate APIC timer frequency; using PIT \
+                 calibration only"
+            );
+            return pit_frequency_hz;
+        };
+
+        // Cross-check the PIT calibration result and CPUID value.
+        let distance = if pit_frequency_hz > cpuid_frequency_hz {
+            pit_frequency_hz - cpuid_frequency_hz
+        } else {
+            cpuid_frequency_hz - pit_frequency_hz
+        };
+        if distance > PIT_SLOPPINESS {
+            tracing::warn!(
+                pit.frequency_hz = pit_frequency_hz,
+                cpuid.frequency_hz = cpuid_frequency_hz,
+                distance,
+                "APIC timer frequency from PIT calibration differs substantially \
+                 from CPUID!"
             );
         }
 
-        // use the PIT to sleep for 10ms
-        pit.sleep_blocking(Duration::from_millis(10))
-            .expect("the PIT should be able to send a 10ms interrupt...");
-
-        unsafe {
-            // stop the timer
-            self.write_register(
-                LVT_TIMER,
-                LvtTimer::new().with(LvtTimer::MODE, TimerMode::Periodic),
-            );
-        }
-
-        let elapsed_ticks = unsafe { self.register(TIMER_CURRENT_COUNT).read() };
-        // since we slept for ten milliseconds, each tick is 10 kHz. we don't
-        // need to account for the divisor since we ran the timer at that
-        // divisor already.
-        let ticks_per_10ms = (-1i32 as u32).wrapping_sub(elapsed_ticks);
-        tracing::debug!(?ticks_per_10ms);
-        // convert the frequency to Hz.
-        let frequency_hz = ticks_per_10ms * 100;
-        tracing::debug!(frequency_hz, "calibrated local APIC timer using PIT");
-        frequency_hz
+        cpuid_frequency_hz
     }
 
     #[tracing::instrument(
