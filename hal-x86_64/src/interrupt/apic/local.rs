@@ -132,15 +132,15 @@ impl LocalApic {
 
         let cpuid = CpuId::new();
 
-        if let Some(undivided_freq_khz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
+        if let Some(freq_khz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
             tracing::trace!("CPUID contains hypervisor info");
             let freq = hypervisor.apic_frequency();
-            tracing::trace!(hypervisor.apic_frequency = ?freq);
+            tracing::trace!(hypervisor.apic_frequency_khz = ?freq);
             NonZeroU32::new(freq?)
         }) {
             // the hypervisor info CPUID leaf expresses the frequency in kHz,
             // and the frequency is not divided by the target timer divisor.
-            let frequency_hz = undivided_freq_khz.get() / 1000 / Self::TIMER_DIVISOR;
+            let frequency_hz = (freq_khz.get() * 1000) / Self::TIMER_DIVISOR;
             tracing::debug!(
                 frequency_hz,
                 "determined APIC frequency from CPUID hypervisor info"
@@ -148,6 +148,8 @@ impl LocalApic {
             return frequency_hz;
         }
 
+        // XXX ELIZA THIS IS TSC FREQUENCY, SO IDK IF THAT'S RIGHT?
+        /*
         if let Some(undivided_freq_hz) = cpuid.get_tsc_info().and_then(|tsc| {
             tracing::trace!("CPUID contains TSC info");
             let freq = tsc.nominal_frequency();
@@ -161,6 +163,7 @@ impl LocalApic {
             );
             return frequency_hz;
         }
+        */
 
         // CPUID didn't help, so fall back to calibrating the APIC frequency
         // using the PIT.
