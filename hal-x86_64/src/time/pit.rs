@@ -271,19 +271,14 @@ impl Pit {
     ///
     /// [`Controller::init`]: crate::interrupt::Controller::init
     /// [`interrupt`]: crate::interrupt
-    #[tracing::instrument(
-        name = "Pit::sleep_blocking"
-        level = tracing::Level::DEBUG,
-        skip(self),
-        fields(?duration),
-        err,
-    )]
     pub fn sleep_blocking(&mut self, duration: Duration) -> Result<(), PitError> {
         SLEEPING
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| PitError::SleepInProgress)?;
         self.interrupt_in(duration)
             .map_err(PitError::InvalidDuration)?;
+
+        // Tracing here is fine, because we are already sleeping...
         tracing::debug!("started PIT sleep");
 
         // spin until the sleep interrupt fires.
@@ -291,11 +286,8 @@ impl Pit {
             cpu::wait_for_interrupt();
         }
 
-        tracing::info!(?duration, "slept using PIT channel 0");
-
         // if we were previously in periodic mode, re-enable it.
         if let Some(interval) = self.channel0_interval {
-            tracing::debug!("restarting PIT periodic timer");
             self.start_periodic_timer(interval)?;
         }
 
@@ -366,13 +358,6 @@ impl Pit {
     /// This configures the PIT in mode 0 (oneshot mode). Once the interrupt has
     /// fired, in order to use the periodic timer, the pit must be put back into
     /// periodic mode by calling [`Pit::start_periodic_timer`].
-    #[tracing::instrument(
-        name = "Pit::interrupt_in"
-        level = tracing::Level::DEBUG,
-        skip(self),
-        fields(?duration),
-        err,
-    )]
     pub fn interrupt_in(&mut self, duration: Duration) -> Result<(), InvalidDuration> {
         let duration_ms = usize::try_from(duration.as_millis()).map_err(|_| {
             InvalidDuration::new(
@@ -387,8 +372,6 @@ impl Pit {
                 "PIT interrupt target tick count would exceed a `u16`",
             )
         })?;
-
-        tracing::trace!(?duration, duration_ms, target_time, "Pit::interrupt_in");
 
         let command = Command::new()
             // use the binary counter
@@ -410,19 +393,16 @@ impl Pit {
     }
 
     fn set_divisor(&mut self, divisor: u16) {
-        tracing::trace!(divisor = &fmt::hex(divisor), "Pit::set_divisor");
         let low = divisor as u8;
         let high = (divisor >> 8) as u8;
         unsafe {
             self.channel0.writeb(low); // write the low byte
-            tracing::trace!(lo = &fmt::hex(low), "pit.channel0.writeb(lo)");
             self.channel0.writeb(high); // write the high byte
-            tracing::trace!(hi = &fmt::hex(high), "pit.channel0.writeb(hi)");
         }
     }
 
     fn send_command(&self, command: Command) {
-        tracing::debug!(?command, "Pit::send_command");
+        // tracing::debug!(?command, "Pit::send_command");
         unsafe {
             self.command.writeb(command.bits());
         }
