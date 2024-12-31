@@ -2,6 +2,7 @@ use crate::{cpu, mm, segment, time, VAddr};
 use core::{arch::asm, marker::PhantomData, time::Duration};
 use hal_core::interrupt::Control;
 use hal_core::interrupt::{ctx, Handlers};
+use hal_core::mem::page;
 use mycelium_util::{
     bits, fmt,
     sync::{
@@ -44,7 +45,8 @@ pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 #[derive(Debug)]
 pub enum PeriodicTimerError {
     Pit(time::PitError),
-    Apic(time::InvalidDuration),
+    InvalidDuration(time::InvalidDuration),
+    Apic(apic::local::LocalApicError),
 }
 
 #[derive(Debug)]
@@ -68,8 +70,8 @@ enum InterruptModel {
     /// [I/O]: apic::IoApic
     /// [apics]: apic
     Apic {
-        local: apic::LocalApic,
         io: apic::IoApicSet,
+        local: apic::local::Handle,
     },
 }
 
@@ -192,6 +194,16 @@ impl IsaInterrupt {
     ];
 }
 
+#[must_use]
+fn disable_scoped() -> impl Drop + Send + Sync {
+    unsafe {
+        crate::cpu::intrinsics::cli();
+    }
+    mycelium_util::defer(|| unsafe {
+        crate::cpu::intrinsics::sti();
+    })
+}
+
 impl Controller {
     // const DEFAULT_IOAPIC_BASE_PADDR: u64 = 0xFEC00000;
 
@@ -224,6 +236,36 @@ impl Controller {
         }
     }
 
+    fn local_apic_handle(&self) -> Result<&apic::local::Handle, apic::local::LocalApicError> {
+        match self.model {
+            InterruptModel::Pic(_) => Err(apic::local::LocalApicError::NoApic),
+            InterruptModel::Apic { ref local, .. } => Ok(local),
+        }
+    }
+
+    pub fn with_local_apic<T>(
+        &self,
+        f: impl FnOnce(&LocalApic) -> T,
+    ) -> Result<T, apic::local::LocalApicError> {
+        self.local_apic_handle()?.with(f)
+    }
+
+    /// This should *not* be called by the boot processor
+    pub fn initialize_local_apic<A>(
+        &self,
+        frame_alloc: &A,
+        pagectrl: &mut impl page::Map<mm::size::Size4Kb, A>,
+    ) -> Result<(), apic::local::LocalApicError>
+    where
+        A: page::Alloc<mm::size::Size4Kb>,
+    {
+        let _deferred = disable_scoped();
+        let hdl = self.local_apic_handle()?;
+        unsafe {
+            hdl.initialize(frame_alloc, pagectrl, Idt::LOCAL_APIC_SPURIOUS as u8);
+        }
+        Ok(())
+    }
     /// # Safety
     ///
     /// Calling this when there isn't actually an ISA interrupt pending can do
@@ -231,13 +273,14 @@ impl Controller {
     pub unsafe fn end_isa_irq(&self, irq: IsaInterrupt) {
         match self.model {
             InterruptModel::Pic(ref pics) => pics.lock().end_interrupt(irq),
-            InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
+            InterruptModel::Apic { ref local, .. } => local.with(|apic| unsafe { apic.end_interrupt() })
+                .expect("interrupts should not be handled on this core until the local APIC is initialized")
         }
     }
 
     pub fn enable_hardware_interrupts(
         acpi: Option<&acpi::InterruptModel>,
-        frame_alloc: &impl hal_core::mem::page::Alloc<mm::size::Size4Kb>,
+        frame_alloc: &impl page::Alloc<mm::size::Size4Kb>,
     ) -> &'static Self {
         let mut pics = pic::CascadedPic::new();
         // regardless of whether APIC or PIC interrupt handling will be used,
@@ -267,13 +310,16 @@ impl Controller {
                 // configure the I/O APIC(s)
                 let io = IoApicSet::new(apic_info, frame_alloc, &mut pagectrl, Idt::ISA_BASE as u8);
 
-                // enable the local APIC
-                let local = LocalApic::new(&mut pagectrl, frame_alloc);
-                local.enable(Idt::LOCAL_APIC_SPURIOUS as u8);
+                // configure and initialize the local APIC on the boot processor
+                let local = apic::local::Handle::new();
+                unsafe {
+                    local.initialize(frame_alloc, &mut pagectrl, Idt::LOCAL_APIC_SPURIOUS as u8);
+                }
 
                 let model = InterruptModel::Apic { local, io };
 
                 tracing::trace!(interrupt_model = ?model);
+
                 INTERRUPT_CONTROLLER.init(Self { model })
             }
             model => {
@@ -334,8 +380,11 @@ impl Controller {
                 .start_periodic_timer(interval)
                 .map_err(PeriodicTimerError::Pit),
             InterruptModel::Apic { ref local, .. } => local
-                .start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
-                .map_err(PeriodicTimerError::Apic),
+                .with(|apic| {
+                    apic.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
+                        .map_err(PeriodicTimerError::InvalidDuration)
+                })
+                .map_err(PeriodicTimerError::Apic)?,
         }
     }
 }
@@ -650,7 +699,15 @@ mod isr {
         unsafe {
             match INTERRUPT_CONTROLLER.get_unchecked().model {
                 InterruptModel::Pic(_) => unreachable!(),
-                InterruptModel::Apic { ref local, .. } => local.end_interrupt(),
+                InterruptModel::Apic { ref local, .. } => {
+                    match local.with(|apic| apic.end_interrupt()) {
+                        Ok(_) => {}
+                        Err(e) => unreachable!(
+                            "the local APIC timer will not have fired if the \
+                             local APIC is uninitialized on this core! {e:?}",
+                        ),
+                    }
+                }
             }
         }
     }
