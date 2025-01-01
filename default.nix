@@ -28,6 +28,6 @@ pkgs.buildEnv {
     CURL_CA_BUNDLE = "${cacert}/etc/ca-bundle.crt";
     CARGO_TERM_COLOR = "always";
     RUST_BACKTRACE = "full";
-    LD_LIBRARY_PATH = "${lib.makeLibraryPath [ zlib ]}";
+    # LD_LIBRARY_PATH = "${lib.makeLibraryPath [ zlib ]}";
   };
 }

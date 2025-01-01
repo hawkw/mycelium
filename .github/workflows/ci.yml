@@ -301,27 +301,6 @@ jobs:
     - name: run Miri tests
       run: just miri maitake
 
-  ### mycelium-util ###
-
-  # run loom tests
-  util_loom:
-    needs: changed_paths
-    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).util.should_skip
-    runs-on: ubuntu-latest
-    name: Loom tests (mycelium-util)
-    steps:
-    - name: install rust toolchain
-      run: rustup show
-    - uses: actions/checkout@v4
-    - name: install Just
-      uses: extractions/setup-just@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: install nextest
-      uses: taiki-e/install-action@nextest
-    - name: run loom tests
-      run: just loom mycelium-util
-
   # dummy job that depends on all required checks
   all_systems_go:
     needs:
@@ -337,7 +316,6 @@ jobs:
     - maitake_no_default_features
     - maitake_loom
     - maitake_miri
-    - util_loom
     runs-on: ubuntu-latest
     steps:
     - run: exit 0

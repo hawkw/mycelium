@@ -4,6 +4,7 @@
 primitives from [`maitake`]
 
 [![crates.io][crates-badge]][crates-url]
+[![Changelog][changelog-badge]][changelog-url]
 [![Documentation][docs-badge]][docs-url]
 [![Documentation (HEAD)][docs-main-badge]][docs-main-url]
 [![MIT licensed][mit-badge]][mit-url]
@@ -11,7 +12,10 @@ primitives from [`maitake`]
 [![Sponsor @hawkw on GitHub Sponsors][sponsor-badge]][sponsor-url]
 
 [crates-badge]: https://img.shields.io/crates/v/maitake-sync.svg
-[crates-url]: https://crates.io/crates/maitake-sync-sync
+[crates-url]: https://crates.io/crates/maitake-sync
+[changelog-badge]:
+    https://img.shields.io/crates/v/maitake-sync?label=changelog&color=blue
+[changelog-url]: https://github.com/hawkw/mycelium/blob/main/maitake-sync/CHANGELOG.md
 [docs-badge]: https://docs.rs/maitake-sync/badge.svg
 [docs-url]: https://docs.rs/maitake-sync
 [docs-main-badge]: https://img.shields.io/netlify/3ec00bb5-251a-4f83-ac7f-3799d95db0e6?label=docs%20%28main%20branch%29

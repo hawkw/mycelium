@@ -3,6 +3,7 @@
 🍄 the [Mycelium] intrusive data structures library.
 
 [![crates.io][crates-badge]][crates-url]
+[![Changelog][changelog-badge]][changelog-url]
 [![Documentation][docs-badge]][docs-url]
 [![Documentation (HEAD)][docs-main-badge]][docs-main-url]
 [![MIT licensed][mit-badge]][mit-url]
@@ -11,6 +12,9 @@
 
 [crates-badge]: https://img.shields.io/crates/v/cordyceps.svg
 [crates-url]: https://crates.io/crates/cordyceps
+[changelog-badge]:
+    https://img.shields.io/crates/v/cordyceps?label=changelog&color=blue
+[changelog-url]: https://github.com/hawkw/mycelium/blob/main/cordyceps/CHANGELOG.md
 [docs-badge]: https://docs.rs/cordyceps/badge.svg
 [docs-url]: https://docs.rs/cordyceps
 [docs-main-badge]: https://img.shields.io/netlify/3ec00bb5-251a-4f83-ac7f-3799d95db0e6?label=docs%20%28main%20branch%29

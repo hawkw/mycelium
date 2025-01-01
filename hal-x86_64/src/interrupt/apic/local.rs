@@ -1,10 +1,10 @@
 use super::{PinPolarity, TriggerMode};
 use crate::{
-    cpu::{FeatureNotSupported, Msr},
+    cpu::{local, FeatureNotSupported, Msr},
     mm::{self, page, size::Size4Kb, PhysPage, VirtPage},
     time::{Duration, InvalidDuration},
 };
-use core::{convert::TryInto, marker::PhantomData, num::NonZeroU32};
+use core::{cell::RefCell, convert::TryInto, marker::PhantomData, num::NonZeroU32};
 use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
 use raw_cpuid::CpuId;
@@ -24,12 +24,25 @@ pub struct LocalApicRegister<T = u32, A = access::ReadWrite> {
     _ty: PhantomData<fn(T, A)>,
 }
 
+#[derive(Debug)]
+pub(in crate::interrupt) struct Handle(local::LocalKey<RefCell<Option<LocalApic>>>);
+
 pub trait RegisterAccess {
     type Access;
     type Target;
     fn volatile(
         ptr: &'static mut Self::Target,
     ) -> Volatile<&'static mut Self::Target, Self::Access>;
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum LocalApicError {
+    /// The system is configured to use the PIC interrupt model rather than the
+    /// APIC interrupt model.
+    NoApic,
+
+    /// The local APIC is uninitialized.
+    Uninitialized,
 }
 
 impl LocalApic {
@@ -114,43 +127,10 @@ impl LocalApic {
         tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
     }
 
-    fn timer_frequency_hz(&self) -> u32 {
+    /// Calibrate the timer frequency using the PIT.
+    #[inline(always)]
+    fn calibrate_frequency_hz_pit(&self) -> u32 {
         use register::*;
-
-        let cpuid = CpuId::new();
-
-        if let Some(undivided_freq_khz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
-            tracing::trace!("CPUID contains hypervisor info");
-            let freq = hypervisor.apic_frequency();
-            tracing::trace!(hypervisor.apic_frequency = ?freq);
-            NonZeroU32::new(freq?)
-        }) {
-            // the hypervisor info CPUID leaf expresses the frequency in kHz,
-            // and the frequency is not divided by the target timer divisor.
-            let frequency_hz = undivided_freq_khz.get() / 1000 / Self::TIMER_DIVISOR;
-            tracing::debug!(
-                frequency_hz,
-                "determined APIC frequency from CPUID hypervisor info"
-            );
-            return frequency_hz;
-        }
-
-        if let Some(undivided_freq_hz) = cpuid.get_tsc_info().and_then(|tsc| {
-            tracing::trace!("CPUID contains TSC info");
-            let freq = tsc.nominal_frequency();
-            NonZeroU32::new(freq)
-        }) {
-            // divide by the target timer divisor.
-            let frequency_hz = undivided_freq_hz.get() / Self::TIMER_DIVISOR;
-            tracing::debug!(
-                frequency_hz,
-                "determined APIC frequency from CPUID TSC info"
-            );
-            return frequency_hz;
-        }
-
-        // CPUID didn't help, so fall back to calibrating the APIC frequency
-        // using the PIT.
         tracing::debug!("calibrating APIC timer frequency using PIT...");
 
         // lock the PIT now, before actually starting the timer IRQ, so that we
@@ -162,16 +142,18 @@ impl LocalApic {
         let mut pit = crate::time::PIT.lock();
 
         unsafe {
+            // start the timer
+
             // set timer divisor to 16
             self.write_register(TIMER_DIVISOR, 0b11);
-            // set initial count to -1
-            self.write_register(TIMER_INITIAL_COUNT, -1i32 as u32);
-
-            // start the timer
             self.write_register(
                 LVT_TIMER,
-                LvtTimer::new().with(LvtTimer::MODE, TimerMode::OneShot),
+                LvtTimer::new()
+                    .with(LvtTimer::MODE, TimerMode::OneShot)
+                    .with(LvtTimer::MASKED, false),
             );
+            // set initial count to -1
+            self.write_register(TIMER_INITIAL_COUNT, -1i32 as u32);
         }
 
         // use the PIT to sleep for 10ms
@@ -182,7 +164,9 @@ impl LocalApic {
             // stop the timer
             self.write_register(
                 LVT_TIMER,
-                LvtTimer::new().with(LvtTimer::MODE, TimerMode::Periodic),
+                LvtTimer::new()
+                    .with(LvtTimer::MODE, TimerMode::OneShot)
+                    .with(LvtTimer::MASKED, true),
             );
         }
 
@@ -196,6 +180,86 @@ impl LocalApic {
         let frequency_hz = ticks_per_10ms * 100;
         tracing::debug!(frequency_hz, "calibrated local APIC timer using PIT");
         frequency_hz
+    }
+
+    #[inline(always)]
+    fn calibrate_frequency_hz_cpuid() -> Option<u32> {
+        let cpuid = CpuId::new();
+        if let Some(freq_khz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
+            tracing::trace!("CPUID contains hypervisor info");
+            let freq = hypervisor.apic_frequency();
+            tracing::trace!(hypervisor.apic_frequency_khz = ?freq);
+            NonZeroU32::new(freq?)
+        }) {
+            // the hypervisor info CPUID leaf expresses the frequency in kHz,
+            // and the frequency is not divided by the target timer divisor.
+            let frequency_hz = (freq_khz.get() * 1000) / Self::TIMER_DIVISOR;
+            tracing::debug!(
+                frequency_hz,
+                "determined APIC timer frequency from CPUID hypervisor info"
+            );
+            return Some(frequency_hz);
+        }
+
+        // XXX ELIZA THIS IS TSC FREQUENCY, SO IDK IF THAT'S RIGHT?
+        /*
+        if let Some(undivided_freq_hz) = cpuid.get_tsc_info().and_then(|tsc| {
+            tracing::trace!("CPUID contains TSC info");
+            let freq = tsc.nominal_frequency();
+            NonZeroU32::new(freq)
+        }) {
+            // divide by the target timer divisor.
+            let frequency_hz = undivided_freq_hz.get() / Self::TIMER_DIVISOR;
+            tracing::debug!(
+                frequency_hz,
+                "determined APIC frequency from CPUID TSC info"
+            );
+            return frequency_hz;
+        }
+        */
+
+        // CPUID didn't help, so fall back to calibrating the APIC frequency
+        // using the PIT.
+        None
+    }
+
+    fn timer_frequency_hz(&self) -> u32 {
+        // How sloppy do we expect the PIT frequency calibration to be?
+        // If the delta between the CPUID frequency and the frequency we
+        // determined using PIT calibration is > this value, we'll yell about
+        // it.
+        const PIT_SLOPPINESS: u32 = 1000;
+
+        // Start out by calibrating the APIC frequency using the PIT.
+        let pit_frequency_hz = self.calibrate_frequency_hz_pit();
+
+        // See if we can get something from CPUID.
+        let Some(cpuid_frequency_hz) = Self::calibrate_frequency_hz_cpuid() else {
+            tracing::info!(
+                pit.frequency_hz = pit_frequency_hz,
+                "CPUID does not indicate APIC timer frequency; using PIT \
+                 calibration only"
+            );
+            return pit_frequency_hz;
+        };
+
+        // Cross-check the PIT calibration result and CPUID value.
+        let distance = if pit_frequency_hz > cpuid_frequency_hz {
+            pit_frequency_hz - cpuid_frequency_hz
+        } else {
+            cpuid_frequency_hz - pit_frequency_hz
+        };
+        if distance > PIT_SLOPPINESS {
+            tracing::warn!(
+                pit.frequency_hz = pit_frequency_hz,
+                cpuid.frequency_hz = cpuid_frequency_hz,
+                distance,
+                "APIC timer frequency from PIT calibration differs substantially \
+                 from CPUID!"
+            );
+        }
+
+        cpuid_frequency_hz
     }
 
     #[tracing::instrument(
@@ -290,6 +354,44 @@ impl LocalApic {
         );
         let reference = &mut *addr.as_ptr::<T>();
         LocalApicRegister::<T, A>::volatile(reference)
+    }
+}
+
+impl Handle {
+    pub(in crate::interrupt) const fn new() -> Self {
+        Self(local::LocalKey::new(|| RefCell::new(None)))
+    }
+
+    pub(in crate::interrupt) fn with<T>(
+        &self,
+        f: impl FnOnce(&LocalApic) -> T,
+    ) -> Result<T, LocalApicError> {
+        self.0.with(|apic| {
+            Ok(f(apic
+                .borrow()
+                .as_ref()
+                .ok_or(LocalApicError::Uninitialized)?))
+        })
+    }
+
+    pub(in crate::interrupt) unsafe fn initialize<A>(
+        &self,
+        frame_alloc: &A,
+        pagectrl: &mut impl page::Map<Size4Kb, A>,
+        spurious_vector: u8,
+    ) where
+        A: page::Alloc<Size4Kb>,
+    {
+        self.0.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_some() {
+                // already initialized, bail.
+                return;
+            }
+            let apic = LocalApic::new(pagectrl, frame_alloc);
+            apic.enable(spurious_vector);
+            *slot = Some(apic);
+        })
     }
 }
 
