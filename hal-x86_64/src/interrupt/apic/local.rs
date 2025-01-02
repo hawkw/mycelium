@@ -1,3 +1,4 @@
+pub use self::register::ErrorStatus;
 use super::{PinPolarity, TriggerMode};
 use crate::{
     cpu::{local, FeatureNotSupported, Msr},
@@ -331,6 +332,46 @@ impl LocalApic {
         self.register(register::END_OF_INTERRUPT).write(0);
     }
 
+    /// Reads the error stauts register (`ESR`) of the local APIC.
+    ///
+    /// Calling this method resets the value of the error status register. Any
+    /// currently set error bits are cleared. If the same error bits are present
+    /// in a subsequent call to `LocalApic::check_error`, they represent *new*
+    /// instances of the same error.
+    ///
+    /// # Returns
+    ///
+    /// If any error bits are set, this method returns
+    /// [`Err`]`(`[`ErrorStatus`]`)`. Otherwise, if no error bits are present,
+    /// this method returns [`Ok`]`()`.
+    pub fn check_error(&self) -> Result<(), register::ErrorStatus> {
+        let esr = unsafe {
+            let mut reg = self.register(register::ERROR_STATUS);
+
+            // Per the Intel SDM, Vol 3A, Ch 7, Section 12.5.3, "Error
+            // Handling":
+            //
+            // > The ESR is a write/read register. Before attempt to read from
+            // > the ESR, software should first write to it. (The value written
+            // > does not affect the values read subsequently; only zero may be
+            // > written in x2APIC mode.) This write clears  any previously
+            // > logged errors and updates the ESR with any errors detected
+            // > since the last write to the ESR. This write also rearms the
+            // > APIC error interrupt triggering mechanism.
+            //
+            // So, first write a zero.
+            reg.write(register::ErrorStatus::default());
+            reg.read()
+        };
+
+        // Return the ESR value if error bits are set.
+        if esr.is_error() {
+            Err(esr)
+        } else {
+            Ok(())
+        }
+    }
+
     unsafe fn write_register<T, A>(&self, register: LocalApicRegister<T, A>, value: T)
     where
         LocalApicRegister<T, A>: RegisterAccess<Target = T, Access = A>,
@@ -517,8 +558,8 @@ pub mod register {
 
         /// Error Status Register (ESR)
         ///
-        /// **Access**: read-only
-        ERROR_STATUS = 0x280, ReadOnly;
+        /// **Access**: read/write
+        ERROR_STATUS<ErrorStatus> = 0x280, ReadWrite;
 
         /// LVT Corrected Machine Check Interrupt (CMCI) Register
         ///
@@ -573,6 +614,91 @@ pub mod register {
             Periodic = 0b01,
             /// TSC-Deadline mode, program target value in IA32_TSC_DEADLINE MSR.
             TscDeadline = 0b10,
+        }
+    }
+
+    bitfield! {
+        /// Value of the Error Status Register (ESR).
+        ///
+        /// See Intel SDM Vol. 3A, Ch. 7, Section 12.5.3, "Error Handling".
+        #[derive(Default)]
+        pub struct ErrorStatus<u32> {
+            /// Set when the local APIC detects a checksum error for a message
+            /// that it sent on the APIC bus.
+            ///
+            /// Used only on P6 family and Pentium processors.
+            pub const SEND_CHECKSUM_ERROR: bool;
+
+            /// Set when the local APIC detects a checksum error for a message
+            /// that it received on the APIC bus.
+            ///
+            /// Used only on P6 family and Pentium processors.
+            pub const RECV_CHECKSUM_ERROR: bool;
+
+            /// Set when the local APIC detects that a message it sent was not
+            /// accepted by any APIC on the APIC bus
+            ///
+            /// Used only on P6 family and Pentium processors.
+            pub const SEND_ACCEPT_ERROR: bool;
+
+            /// Set when the local APIC detects that a message it received was
+            /// not accepted by any APIC on the APIC bus.
+            ///
+            /// Used only on P6 family and Pentium processors.
+            pub const RECV_ACCEPT_ERROR: bool;
+
+            /// Set when the local APIC detects an attempt to send an IPI with
+            /// the lowest-priority delivery mode and the local APIC does not
+            /// support the sending of such IPIs. This bit is used on some Intel
+            /// Core and Intel Xeon processors.
+            pub const REDIRECTABLE_IPI: bool;
+
+            /// Set when the local APIC detects an illegal vector (one in the
+            /// range 0 to 15) in the message that it is sending. This occurs as
+            /// the result of a write to the ICR (in both xAPIC and x2APIC
+            /// modes) or to SELF IPI register (x2APIC mode only) with an
+            /// illegal vector.
+            ///
+            /// If the local APIC does not support the sending of
+            /// lowest-priority IPIs and software writes the ICR to send a
+            /// lowest-priority IPI with an illegal vector, the local APIC sets
+            /// only the “redirectable IPI” error bit. The interrupt is not
+            /// processed and hence the “Send Illegal Vector” bit is not set in
+            /// the ESR.
+            pub const SEND_ILLEGAL_VECTOR: bool;
+
+            /// Set when the local APIC detects an illegal vector (one in the
+            /// range 0 to 15) in an interrupt message it receives or in an
+            /// interrupt generated locally from the local vector table or via a
+            /// self IPI. Such interrupts are not delivered to the processor;
+            /// the local APIC will never set an IRR bit in the range 0 to 15.
+            pub const RECV_ILLEGAL_VECTOR: bool;
+
+            /// Set when the local APIC is in xAPIC mode and software attempts
+            /// to access a register that is reserved in the processor's
+            /// local-APIC register-address space; see Table 10-1. (The
+            /// local-APIC register-address spacemprises the 4 KBytes at the
+            /// physical address specified in the `IA32_APIC_BASE` MSR.) Used only
+            /// on Intel Core, Intel Atom, Pentium 4, Intel Xeon, and P6 family
+            /// processors.
+            ///
+            /// In x2APIC mode, software accesses the APIC registers using the
+            /// `RDMSR` and `WRMSR` instructions. Use of one of these
+            /// instructions to access a reserved register cause a
+            /// general-protection exception (see Section 10.12.1.3). They do
+            /// not set the “Illegal Register Access” bit in the ESR.
+            pub const ILLEGAL_REGISTER_ACCESS: bool;
+        }
+
+    }
+
+    impl ErrorStatus {
+        /// Returns `true` if an error is present, or `false` if no error
+        /// bits are set.
+        pub fn is_error(&self) -> bool {
+            // Mask out the reserved bits, just in case they have values in the,
+            // (they shouldn't, per the SDM, but...who knows!)
+            self.bits() & 0b1111_1111 != 0
         }
     }
 }
