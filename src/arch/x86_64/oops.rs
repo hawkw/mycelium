@@ -111,10 +111,7 @@ pub fn oops(oops: Oops<'_>) -> ! {
         } => writeln!(mk_writer.make_writer(), "a {kind} occurred!\n").unwrap(),
         OopsSituation::Panic(panic) => {
             let mut writer = mk_writer.make_writer();
-            match panic.message() {
-                Some(msg) => writeln!(writer, "mycelium panicked: {msg}").unwrap(),
-                None => writeln!(writer, "mycelium panicked!").unwrap(),
-            }
+            write!(writer, "mycelium panicked: {}", panic.message()).unwrap();
             if let Some(loc) = panic.location() {
                 writeln!(writer, "at {}:{}:{}", loc.file(), loc.line(), loc.column()).unwrap();
             }
