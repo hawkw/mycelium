@@ -1,7 +1,7 @@
 use hal_x86_64::mm;
 
 mycotest::decl_test! {
-    fn alloc_some_4k_pages() -> Result<(), hal_core::mem::page::AllocErr> {
+    fn alloc_some_4k_pages() -> Result<(), hal_core::mem::page::AllocError> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {
             let res = crate::ALLOC.alloc(mm::size::Size4Kb);
@@ -50,7 +50,7 @@ mycotest::decl_test! {
 }
 
 mycotest::decl_test! {
-    fn alloc_4k_pages_and_ranges() -> Result<(), hal_core::mem::page::AllocErr> {
+    fn alloc_4k_pages_and_ranges() -> Result<(), hal_core::mem::page::AllocError> {
         use hal_core::mem::page::Alloc;
         let range1 = tracing::info_span!("alloc range 1").in_scope(|| {
             let res = crate::ALLOC.alloc_range(mm::size::Size4Kb, 16);
@@ -96,7 +96,7 @@ mycotest::decl_test! {
 }
 
 mycotest::decl_test! {
-    fn alloc_some_pages() -> Result<(), hal_core::mem::page::AllocErr> {
+    fn alloc_some_pages() -> Result<(), hal_core::mem::page::AllocError> {
         use hal_core::mem::page::Alloc;
         let page1 = tracing::info_span!("alloc page 1").in_scope(|| {
             let res = crate::ALLOC.alloc(mm::size::Size4Kb);

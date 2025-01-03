@@ -1,5 +1,4 @@
 use core::{fmt, ops};
-use mycelium_util::error::Error;
 
 pub trait Address:
     Copy
@@ -142,7 +141,8 @@ pub struct PAddr(usize);
 #[repr(transparent)]
 pub struct VAddr(usize);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("invalid address {addr:#x} for target architecture: {msg}")]
 pub struct InvalidAddress {
     msg: &'static str,
     addr: usize,
@@ -408,18 +408,6 @@ impl InvalidAddress {
         Self { msg, addr }
     }
 }
-impl fmt::Display for InvalidAddress {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "address {:#x} not valid for target architecture: {}",
-            self.addr, self.msg
-        )
-    }
-}
-
-impl Error for InvalidAddress {}
 
 #[cfg(test)]
 mod tests {

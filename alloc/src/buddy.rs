@@ -4,7 +4,7 @@ use core::{
 };
 use hal_core::{
     mem::{
-        page::{self, AllocErr, PageRange, Size},
+        page::{self, AllocError, PageRange, Size},
         Region, RegionKind,
     },
     Address, PAddr, VAddr,
@@ -44,7 +44,7 @@ pub struct Alloc<const FREE_LISTS: usize> {
     free_lists: [Mutex<List<Free>>; FREE_LISTS],
 }
 
-type Result<T> = core::result::Result<T, AllocErr>;
+type Result<T> = core::result::Result<T, AllocError>;
 
 pub struct Free {
     magic: usize,
@@ -317,7 +317,7 @@ impl<const FREE_LISTS: usize> Alloc<FREE_LISTS> {
         // Find the order of the free list on which the freed range belongs.
         let min_order = self.order_for(layout);
         tracing::trace!(?min_order);
-        let min_order = min_order.ok_or_else(AllocErr::oom)?;
+        let min_order = min_order.ok_or_else(AllocError::oom)?;
 
         let Some(size) = self.size_for(layout) else {
             // XXX(eliza): is it better to just leak it?
@@ -523,7 +523,7 @@ where
             // If the size of the page range would overflow, we *definitely*
             // can't allocate that lol.
             .checked_mul(actual_len)
-            .ok_or_else(AllocErr::oom)?;
+            .ok_or_else(AllocError::oom)?;
 
         debug_assert!(
             total_size.is_power_of_two(),
@@ -540,7 +540,7 @@ where
         };
 
         // Try to allocate the page range
-        let block = unsafe { self.alloc_inner(layout) }.ok_or_else(AllocErr::oom)?;
+        let block = unsafe { self.alloc_inner(layout) }.ok_or_else(AllocError::oom)?;
 
         // Return the allocation!
         let range = unsafe { block.as_ref() }.region().page_range(size);

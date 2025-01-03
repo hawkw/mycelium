@@ -8,7 +8,6 @@ use core::{
 };
 use mycelium_util::{
     bits::{bitfield, enum_from_bits},
-    fmt,
     sync::{blocking::Mutex, spin::Spinlock},
 };
 
@@ -87,14 +86,17 @@ pub struct Pit {
 }
 
 /// Errors returned by [`Pit::start_periodic_timer`] and [`Pit::sleep_blocking`].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PitError {
     /// The periodic timer is already running.
+    #[error("PIT periodic timer is already running")]
     AlreadyRunning,
     /// A [`Pit::sleep_blocking`] call is in progress.
+    #[error("a PIT sleep is already in progress")]
     SleepInProgress,
     /// The provided duration was invalid.
-    InvalidDuration(InvalidDuration),
+    #[error(transparent)]
+    InvalidDuration(#[from] InvalidDuration),
 }
 
 bitfield! {
@@ -414,15 +416,5 @@ impl Pit {
 impl PitError {
     fn invalid_duration(duration: Duration, msg: &'static str) -> Self {
         Self::InvalidDuration(InvalidDuration::new(duration, msg))
-    }
-}
-
-impl fmt::Display for PitError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::AlreadyRunning => write!(f, "PIT periodic timer is already running"),
-            Self::SleepInProgress => write!(f, "a PIT sleep is currently in progress"),
-            Self::InvalidDuration(e) => write!(f, "invalid PIT duration: {e}"),
-        }
     }
 }

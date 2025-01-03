@@ -32,7 +32,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(Page)` if a page was successfully allocated.
     /// - `Err` if no more pages can be allocated by this allocator.
-    fn alloc(&self, size: S) -> Result<Page<PAddr, S>, AllocErr> {
+    fn alloc(&self, size: S) -> Result<Page<PAddr, S>, AllocError> {
         self.alloc_range(size, 1).map(|r| r.start())
     }
 
@@ -41,7 +41,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
+    fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocError>;
 
     /// Deallocate a single page.
     ///
@@ -51,7 +51,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(())` if the page was successfully deallocated.
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc(&self, page: Page<PAddr, S>) -> Result<(), AllocErr> {
+    fn dealloc(&self, page: Page<PAddr, S>) -> Result<(), AllocError> {
         self.dealloc_range(page.range_inclusive(page))
     }
 
@@ -60,7 +60,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(())` if a range of pages was successfully deallocated
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
+    fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocError>;
 }
 
 pub trait Map<S, A>
@@ -391,21 +391,28 @@ pub struct PageRange<A: Address, S: Size> {
 pub struct EmptyAlloc {
     _p: (),
 }
-pub struct NotAligned<S> {
+
+#[derive(thiserror::Error)]
+#[error("not aligned on a {size} boundary")]
+pub struct NotAligned<S: Size> {
     size: S,
 }
 
-#[derive(Debug)]
-pub struct AllocErr {
+#[derive(Debug, thiserror::Error)]
+#[error("allocator error")]
+pub struct AllocError {
     // TODO: eliza
     _p: (),
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TranslateError<S: Size> {
+    #[error("cannot translate an unmapped page/address")]
     NotMapped,
+    #[error("mapped page is a different size ({0})")]
     WrongSize(S),
+    #[error("error translating page/address: {0}")]
     Other(&'static str),
 }
 
@@ -646,12 +653,12 @@ where
 }
 
 unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
-    fn alloc_range(&self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
-        Err(AllocErr { _p: () })
+    fn alloc_range(&self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocError> {
+        Err(AllocError { _p: () })
     }
 
-    fn dealloc_range(&self, _range: PageRange<PAddr, S>) -> Result<(), AllocErr> {
-        Err(AllocErr { _p: () })
+    fn dealloc_range(&self, _range: PageRange<PAddr, S>) -> Result<(), AllocError> {
+        Err(AllocError { _p: () })
     }
 }
 
@@ -689,35 +696,19 @@ impl<S: Size + fmt::Display> fmt::Debug for TranslateError<S> {
     }
 }
 
-impl<S: Size> fmt::Display for TranslateError<S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            TranslateError::Other(msg) => write!(f, "error translating page/address: {msg}"),
-            TranslateError::NotMapped => f.pad("error translating page/address: not mapped"),
-            TranslateError::WrongSize(_) => write!(
-                f,
-                "error translating page: mapped page is a different size ({})",
-                core::any::type_name::<S>()
-            ),
-        }
-    }
-}
-
 // === impl AllocErr ===
 
-impl AllocErr {
+impl AllocError {
     pub fn oom() -> Self {
         Self { _p: () }
     }
 }
 
-impl<S: Size> From<NotAligned<S>> for AllocErr {
+impl<S: Size> From<NotAligned<S>> for AllocError {
     fn from(_na: NotAligned<S>) -> Self {
         Self { _p: () } // TODO(eliza)
     }
 }
-
-impl<S: Size> mycelium_util::error::Error for TranslateError<S> {}
 
 impl<S> Size for S
 where
