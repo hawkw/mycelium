@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Eliza Weisman <eliza@elizas.website>", "iximeow <git@iximeow.net>"]
 edition = "2021"
 license = "MIT"
-rust_version = "1.81.0"
+rust-version = "1.81.0"
 
 [features]
 default = ["alloc"]
