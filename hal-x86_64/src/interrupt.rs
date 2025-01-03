@@ -42,11 +42,14 @@ pub struct CodeFault<'a> {
 /// An interrupt service routine.
 pub type Isr<T> = extern "x86-interrupt" fn(&mut Context<T>);
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PeriodicTimerError {
-    Pit(time::PitError),
-    InvalidDuration(time::InvalidDuration),
-    Apic(apic::local::LocalApicError),
+    #[error("could not start PIT periodic timer: {0}")]
+    Pit(#[from] time::PitError),
+    #[error(transparent)]
+    InvalidDuration(#[from] time::InvalidDuration),
+    #[error("could not start local APIC periodic timer: {0}")]
+    Apic(#[from] apic::local::LocalApicError),
 }
 
 #[derive(Debug)]
@@ -132,10 +135,6 @@ pub struct Registers {
 
 static IDT: Mutex<idt::Idt, Spinlock> = Mutex::new_with_raw_mutex(idt::Idt::new(), Spinlock::new());
 static INTERRUPT_CONTROLLER: InitOnce<Controller> = InitOnce::uninitialized();
-
-pub enum MaskError {
-    NotHwIrq,
-}
 
 /// ISA interrupt vectors
 ///
@@ -378,13 +377,11 @@ impl Controller {
             InterruptModel::Pic(_) => crate::time::PIT
                 .lock()
                 .start_periodic_timer(interval)
-                .map_err(PeriodicTimerError::Pit),
-            InterruptModel::Apic { ref local, .. } => local
-                .with(|apic| {
-                    apic.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
-                        .map_err(PeriodicTimerError::InvalidDuration)
-                })
-                .map_err(PeriodicTimerError::Apic)?,
+                .map_err(Into::into),
+            InterruptModel::Apic { ref local, .. } => local.with(|apic| {
+                apic.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
+                    .map_err(PeriodicTimerError::from)
+            })?,
         }
     }
 }

@@ -1,5 +1,4 @@
 use core::fmt;
-use mycelium_util::error::Error;
 
 pub(crate) fn unexpected<T>(value: T) -> UnexpectedValue<T>
 where
@@ -39,4 +38,4 @@ where
     }
 }
 
-impl<T> Error for UnexpectedValue<T> where T: fmt::LowerHex + fmt::Debug {}
+impl<T> core::error::Error for UnexpectedValue<T> where T: fmt::LowerHex + fmt::Debug {}
