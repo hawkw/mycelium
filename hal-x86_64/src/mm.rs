@@ -138,18 +138,103 @@ impl PageTable<level::Pml4> {
     }
 }
 
-impl<A> Map<Size4Kb, A> for PageCtrl
+impl<'mapper, A> Map<'mapper, AnySize, A> for PageCtrl
 where
     A: page::Alloc<Size4Kb>,
 {
-    type Entry = Entry<level::Pt>;
+    type Entry = &'mapper dyn page::PageFlags<AnySize>;
 
     unsafe fn map_page(
-        &mut self,
+        &'mapper mut self,
+        virt: Page<VAddr, AnySize>,
+        phys: Page<PAddr, AnySize>,
+        frame_alloc: &A,
+    ) -> page::Handle<AnySize, Self::Entry> {
+        // XXX(eliza): most of this fn is *internally* safe and should be
+        // factored out into a safe function...
+        let span = tracing::debug_span!("map_page", ?virt, ?phys);
+        let _e = span.enter();
+        let pml4 = self.pml4.as_mut();
+
+        let vaddr = virt.base_addr();
+        tracing::trace!(?vaddr);
+
+        let pdpt = pml4
+            .create_next_table(virt, frame_alloc)
+            .expect("PML4 shouldn't point directly to a hugepage lol");
+        let pd = match pdpt.create_next_table(virt, alloc) {
+            Ok(pd) => pd,
+            Err(entry) => {
+                tracing::debug!(?entry, "found 1GB hugepage");
+                assert!(
+                    !entry.is_present(),
+                    "mapped page table entry already in use"
+                );
+                let phys = Page::starting_at(phys.base_addr(), AnySize::Size1Gb).unwrap();
+                entry.set_phys_page(phys).set_present(true);
+                tracing::trace!(?entry, "flags set");
+                let virt = Page::starting_at(virt.base_addr(), AnySize::Size1Gb).unwrap();
+                return page::Handle::new(virt, entry);
+            }
+        };
+        let page_table = match create_next_table(virt, frame_alloc) {
+            Ok(pt) => pt,
+            Err(entry) => {
+                tracing::debug!(?entry, "found 2MB hugepage");
+                assert!(
+                    !entry.is_present(),
+                    "mapped page table entry already in use"
+                );
+                let phys = Page::starting_at(phys.base_addr(), AnySize::Size2Mb).unwrap();
+                entry.set_phys_page(phys).set_present(true);
+                tracing::trace!(?entry, "flags set");
+                let virt = Page::starting_at(virt.base_addr(), AnySize::Size2Mb).unwrap();
+                return page::Handle::new(virt, entry);
+            }
+        };
+        tracing::debug!(?page_table);
+
+        let entry = &mut page_table[virt];
+        tracing::trace!(?entry);
+        assert!(
+            !entry.is_present(),
+            "mapped page table entry already in use"
+        );
+        assert!(!entry.is_huge(), "huge bit should not be set for 4KB entry");
+        let phys = Page::starting_at(phys.base_addr(), AnySize::Size4Kb).unwrap();
+        let entry = entry.set_phys_page(phys).set_present(true);
+        tracing::trace!(?entry, "flags set");
+        let virt = Page::starting_at(virt.base_addr(), AnySize::Size4Kb).unwrap();
+        page::Handle::new(virt, entry)
+    }
+
+    fn flags_mut(
+        &'mapper mut self,
+        _virt: Page<VAddr, AnySize>,
+    ) -> page::Handle<AnySize, Self::Entry> {
+        unimplemented!()
+    }
+
+    /// # Safety
+    ///
+    /// Unmapping a page can break pretty much everything.
+    unsafe fn unmap(&mut self, _virt: Page<VAddr, AnySize>) -> Page<PAddr, AnySize> {
+        unimplemented!()
+    }
+}
+
+impl<'mapper, A> Map<'mapper, Size4Kb, A> for PageCtrl
+where
+    A: page::Alloc<Size4Kb>,
+{
+    type Entry = &'mapper mut Entry<level::Pt>;
+
+    unsafe fn map_page(
+        &'mapper mut self,
         virt: Page<VAddr, Size4Kb>,
         phys: Page<PAddr, Size4Kb>,
         frame_alloc: &A,
-    ) -> page::Handle<'_, Size4Kb, Self::Entry> {
+    ) -> page::Handle<Size4Kb, Self::Entry> {
         // XXX(eliza): most of this fn is *internally* safe and should be
         // factored out into a safe function...
         let span = tracing::debug_span!("map_page", ?virt, ?phys);
@@ -177,14 +262,17 @@ where
         page::Handle::new(virt, entry)
     }
 
-    fn flags_mut(&mut self, _virt: Page<VAddr, Size4Kb>) -> page::Handle<'_, Size4Kb, Self::Entry> {
+    fn flags_mut(
+        &'mapper mut self,
+        _virt: Page<VAddr, Size4Kb>,
+    ) -> page::Handle<Size4Kb, Self::Entry> {
         unimplemented!()
     }
 
     /// # Safety
     ///
     /// Unmapping a page can break pretty much everything.
-    unsafe fn unmap(&mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
+    unsafe fn unmap(&'mapper mut self, _virt: Page<VAddr, Size4Kb>) -> Page<PAddr, Size4Kb> {
         unimplemented!()
     }
 }
@@ -356,26 +444,22 @@ impl<R: level::Recursive> PageTable<R> {
         &mut self,
         idx: VirtPage<S>,
         alloc: &impl page::Alloc<Size4Kb>,
-    ) -> &mut PageTable<R::Next> {
+    ) -> Result<&mut PageTable<R::Next>, &mut Entry<L>> {
         let span = tracing::trace_span!("create_next_table", ?idx, self.level = %R::NAME, next.level = %<R::Next>::NAME);
         let _e = span.enter();
 
         if self.next_table(idx).is_some() {
             tracing::trace!("next table already exists");
-            return self
+            return Ok(self
                 .next_table_mut(idx)
-                .expect("if next_table().is_some(), the next table exists!");
+                .expect("if next_table().is_some(), the next table exists!"));
         }
 
         tracing::trace!("no next table exists");
         let entry = &mut self[idx];
         if entry.is_huge() {
-            panic!(
-                "cannot create {} table for {:?}: the corresponding entry is huge!\n{:#?}",
-                <R::Next>::NAME,
-                idx,
-                entry
-            );
+            tracing::trace!("page is hudge");
+            return Err(entry);
         }
 
         tracing::trace!("trying to allocate page table frame...");
@@ -395,9 +479,10 @@ impl<R: level::Recursive> PageTable<R> {
             .set_phys_addr(frame.base_addr());
         tracing::trace!(?entry, ?frame, "set page table entry to point to frame");
 
-        self.next_table_mut(idx)
+        Ok(self
+            .next_table_mut(idx)
             .expect("we should have just created this table!")
-            .zero()
+            .zero())
     }
 }
 
@@ -559,7 +644,7 @@ impl<L: level::PointsToPage> Entry<L> {
     }
 }
 
-impl<L: level::PointsToPage> page::PageFlags<L::Size> for Entry<L> {
+impl<L: level::PointsToPage> page::PageFlags<AnySize> for Entry<L> {
     #[inline]
     fn is_writable(&self) -> bool {
         self.is_writable()
@@ -590,7 +675,7 @@ impl<L: level::PointsToPage> page::PageFlags<L::Size> for Entry<L> {
         self.set_present(present);
     }
 
-    fn commit(&mut self, page: Page<VAddr, L::Size>) {
+    fn commit(&mut self, page: Page<VAddr, AnySize>) {
         unsafe {
             tlb::flush_page(page.base_addr());
         }
