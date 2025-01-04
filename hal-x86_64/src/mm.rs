@@ -298,13 +298,7 @@ impl<R: level::Recursive> PageTable<R> {
             tracing::debug!("entry not present!");
             return None;
         }
-        // XXX(eliza): should we have a different return type to distinguish
-        // between "the entry is huge, so you stop the page table walk" and "the entry is not
-        // present"? we definitely should...
-        if entry.is_huge() {
-            tracing::debug!("page is hudge!");
-            return None;
-        }
+
         let vaddr = R::Next::table_addr(idx.base_addr());
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
@@ -326,13 +320,6 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(?entry);
         if !entry.is_present() {
             tracing::debug!("entry not present!");
-            return None;
-        }
-        // XXX(eliza): should we have a different return type to distinguish
-        // between "the entry is huge, so you stop the page table walk" and "the entry is not
-        // present"? we definitely should...
-        if entry.is_huge() {
-            tracing::debug!("page is hudge!");
             return None;
         }
 
