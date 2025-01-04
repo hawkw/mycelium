@@ -267,7 +267,7 @@ macro_rules! impl_addrs {
                 ///
                 /// * If debug assertions are enabled and the address is not
                 ///   valid for the target architecture.
-                #[cfg(target_pointer_width = "u32")]
+                #[cfg(target_pointer_width = "32")]
                 pub fn from_u32(u: u32) -> Self {
                     Self::from_usize(u as usize)
                 }
