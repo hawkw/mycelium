@@ -126,59 +126,6 @@ pub unsafe trait RawRwLock {
     fn is_locked_exclusive(&self) -> bool;
 }
 
-#[cfg(feature = "lock_api")]
-unsafe impl<T: lock_api::RawRwLock> RawRwLock for T {
-    type GuardMarker = <T as lock_api::RawRwLock>::GuardMarker;
-
-    #[inline]
-    #[track_caller]
-    fn lock_shared(&self) {
-        lock_api::RawRwLock::lock_shared(self)
-    }
-
-    #[inline]
-    #[track_caller]
-    fn try_lock_shared(&self) -> bool {
-        lock_api::RawRwLock::try_lock_shared(self)
-    }
-
-    #[inline]
-    #[track_caller]
-    unsafe fn unlock_shared(&self) {
-        lock_api::RawRwLock::unlock_shared(self)
-    }
-
-    #[inline]
-    #[track_caller]
-    fn lock_exclusive(&self) {
-        lock_api::RawRwLock::lock_exclusive(self)
-    }
-
-    #[inline]
-    #[track_caller]
-    fn try_lock_exclusive(&self) -> bool {
-        lock_api::RawRwLock::try_lock_exclusive(self)
-    }
-
-    #[inline]
-    #[track_caller]
-    unsafe fn unlock_exclusive(&self) {
-        lock_api::RawRwLock::unlock_exclusive(self)
-    }
-
-    #[inline]
-    #[track_caller]
-    fn is_locked(&self) -> bool {
-        lock_api::RawRwLock::is_locked(self)
-    }
-
-    #[inline]
-    #[track_caller]
-    fn is_locked_exclusive(&self) -> bool {
-        lock_api::RawRwLock::is_locked_exclusive(self)
-    }
-}
-
 impl<T> RwLock<T> {
     loom_const_fn! {
         /// Creates a new, unlocked `RwLock<T>` protecting the provided `data`.
@@ -212,17 +159,6 @@ impl<T> RwLock<T> {
     #[must_use]
     pub fn reader_count(&self) -> usize {
         self.lock.reader_count()
-    }
-}
-
-#[cfg(feature = "lock_api")]
-impl<T, Lock: lock_api::RawRwLock> RwLock<T, Lock> {
-    /// Creates a new instance of an `RwLock<T>` which is unlocked.
-    pub const fn new_with_raw_mutex(data: T) -> Self {
-        RwLock {
-            data: UnsafeCell::new(data),
-            lock: Lock::INIT,
-        }
     }
 }
 
