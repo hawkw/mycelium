@@ -494,7 +494,10 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         let tail_links = unsafe { T::links(tail) };
         let head_links = unsafe { head_links.as_ref() };
         let tail_links = unsafe { tail_links.as_ref() };
-        if head == tail {
+        // Cast to untyped pointers to ignore wide pointer metadata.
+        // This is equivalent to `core::ptr::addr_eq` but without having to bump
+        // MSRV.
+        if head.cast::<()>() == tail.cast::<()>() {
             assert_eq!(
                 head_links, tail_links,
                 "{name}if the head and tail nodes are the same, their links must be the same"
@@ -924,7 +927,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// - `prev` and `next` are not the same node.
     /// - `splice_start` and `splice_end` are part of the same list, which is
     ///   *not* the same list that `prev` and `next` are part of.
-    /// -`prev` is `next`'s `prev` node, and `next` is `prev`'s `prev` node.
+    /// - `prev` is `next`'s `prev` node, and `next` is `prev`'s `prev` node.
     /// - `splice_start` is ahead of `splice_end` in the list that they came from.
     #[inline]
     unsafe fn insert_nodes_between(
@@ -963,7 +966,8 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         let start_links = T::links(splice_start).as_mut();
         let end_links = T::links(splice_end).as_mut();
         debug_assert!(
-            splice_start == splice_end
+            // cast to untyped ptrs to ignore wide ptr metadata
+            splice_start.cast::<()>() == splice_end.cast::<()>()
                 || (start_links.next().is_some() && end_links.prev().is_some()),
             "splice_start must be ahead of splice_end!\n   \
             splice_start: {splice_start:?}\n    \
@@ -1277,14 +1281,14 @@ impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'list, T> {
     }
 }
 
-impl<'list, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for Iter<'list, T> {
+impl<T: Linked<Links<T>> + ?Sized> ExactSizeIterator for Iter<'_, T> {
     #[inline]
     fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'list, T> {
+impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'_, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -1303,7 +1307,7 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for Iter<'list, T>
     }
 }
 
-impl<'list, T: Linked<Links<T>> + ?Sized> iter::FusedIterator for Iter<'list, T> {}
+impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for Iter<'_, T> {}
 
 // === impl IterMut ====
 
@@ -1340,14 +1344,14 @@ impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for IterMut<'list, T> {
     }
 }
 
-impl<'list, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for IterMut<'list, T> {
+impl<T: Linked<Links<T>> + ?Sized> ExactSizeIterator for IterMut<'_, T> {
     #[inline]
     fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list, T> {
+impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'_, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -1372,7 +1376,7 @@ impl<'list, T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'list,
     }
 }
 
-impl<'list, T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterMut<'list, T> {}
+impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterMut<'_, T> {}
 
 // === impl IntoIter ===
 
