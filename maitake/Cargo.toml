@@ -79,3 +79,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 [[example]]
 name = "tokio-console"
 required-features = ["tracing-01"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(maitake_ultraverbose)'] }
