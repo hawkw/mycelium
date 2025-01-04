@@ -237,10 +237,15 @@ impl Selector {
         tracing::trace!("setting code segment...");
         asm!(
             "push {selector}",
-            "lea {retaddr}, [1f + rip]",
+            "lea {retaddr}, [2f + rip]",
             "push {retaddr}",
             "retfq",
-            "1:",
+            // This is cool: apparently we can't use '0' or '1' as a label in
+            // LLVM assembly, due to an LLVM bug:
+            // https://github.com/llvm/llvm-project/issues/99547
+            //
+            // So, this is 2 instead of 1. lmao.
+            "2:",
             selector = in(reg) self.0 as u64,
             retaddr = lateout(reg) _,
             options(preserves_flags),

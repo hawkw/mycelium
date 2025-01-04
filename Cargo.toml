@@ -15,6 +15,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+thiserror = { version = "2.0.9", default_features = false }
+
 [package]
 name = "mycelium-kernel"
 version = "0.0.1"
@@ -42,6 +45,7 @@ maitake = { path = "maitake", features = ["tracing-02"] }
 mycelium-pci = { path = "pci" }
 mycelium-util = { path = "util" }
 mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
+
 rand_xoshiro = "0.6"
 rand = { version = "0.8", default_features = false }
 rlibc = "1.0"

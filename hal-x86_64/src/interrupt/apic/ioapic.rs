@@ -320,12 +320,13 @@ impl IoApic {
     /// # Returns
     /// - `Some(IoApic)` if this CPU supports the APIC interrupt model.
     /// - `None` if this CPU does not support APIC interrupt handling.
-    pub fn try_new<A>(
+    pub fn try_new<'m, A, M>(
         base_paddr: PAddr,
-        pagectrl: &mut impl page::Map<Size4Kb, A>,
+        pagectrl: &'m mut M,
         frame_alloc: &A,
     ) -> Result<Self, FeatureNotSupported>
     where
+        M: page::Map<'m, mm::size::AnySize, A>,
         A: page::Alloc<Size4Kb>,
     {
         if !super::is_supported() {
@@ -338,8 +339,8 @@ impl IoApic {
 
         unsafe {
             // ensure the I/O APIC's MMIO page is mapped and writable.
-            let virt = VirtPage::<Size4Kb>::containing_fixed(base);
-            let phys = PhysPage::<Size4Kb>::containing_fixed(base_paddr);
+            let virt = VirtPage::containing_addr(base, mm::size::AnySize::Size4Kb);
+            let phys = PhysPage::containing_addr(base_paddr, mm::size::AnySize::Size4Kb).unwrap();
             tracing::debug!(?virt, ?phys, "mapping I/O APIC MMIO page...");
             pagectrl
                 .map_page(virt, phys, frame_alloc)

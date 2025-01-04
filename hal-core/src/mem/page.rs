@@ -32,7 +32,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(Page)` if a page was successfully allocated.
     /// - `Err` if no more pages can be allocated by this allocator.
-    fn alloc(&self, size: S) -> Result<Page<PAddr, S>, AllocErr> {
+    fn alloc(&self, size: S) -> Result<Page<PAddr, S>, AllocError> {
         self.alloc_range(size, 1).map(|r| r.start())
     }
 
@@ -41,7 +41,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(PageRange)` if a range of pages was successfully allocated
     /// - `Err` if the requested range could not be satisfied by this allocator.
-    fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocErr>;
+    fn alloc_range(&self, size: S, len: usize) -> Result<PageRange<PAddr, S>, AllocError>;
 
     /// Deallocate a single page.
     ///
@@ -51,7 +51,7 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(())` if the page was successfully deallocated.
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc(&self, page: Page<PAddr, S>) -> Result<(), AllocErr> {
+    fn dealloc(&self, page: Page<PAddr, S>) -> Result<(), AllocError> {
         self.dealloc_range(page.range_inclusive(page))
     }
 
@@ -60,13 +60,12 @@ pub unsafe trait Alloc<S: Size> {
     /// # Returns
     /// - `Ok(())` if a range of pages was successfully deallocated
     /// - `Err` if the requested range could not be deallocated.
-    fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocErr>;
+    fn dealloc_range(&self, range: PageRange<PAddr, S>) -> Result<(), AllocError>;
 }
 
-pub trait Map<S, A>
+pub trait Map<'mapper, S, A>
 where
     S: Size,
-    A: Alloc<S>,
 {
     type Entry: PageFlags<S>;
 
@@ -95,13 +94,13 @@ where
     ///
     /// Good luck and have fun!
     unsafe fn map_page(
-        &mut self,
+        &'mapper mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
         frame_alloc: &A,
-    ) -> Handle<'_, S, Self::Entry>;
+    ) -> Handle<S, Self::Entry>;
 
-    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Handle<'_, S, Self::Entry>;
+    fn flags_mut(&'mapper mut self, virt: Page<VAddr, S>) -> Handle<S, Self::Entry>;
 
     /// Unmap the provided virtual page, returning the physical page it was
     /// previously mapped to.
@@ -121,10 +120,10 @@ where
     /// Identity map the provided physical page to the virtual page with the
     /// same address.
     fn identity_map(
-        &mut self,
+        &'mapper mut self,
         phys: Page<PAddr, S>,
         frame_alloc: &A,
-    ) -> Handle<'_, S, Self::Entry> {
+    ) -> Handle<S, Self::Entry> {
         let base_paddr = phys.base_addr().as_usize();
         let virt = Page::containing(VAddr::from_usize(base_paddr), phys.size());
         unsafe { self.map_page(virt, phys, frame_alloc) }
@@ -169,34 +168,35 @@ where
     ///
     /// Good luck and have fun!
     unsafe fn map_range<F>(
-        &mut self,
+        &'mapper mut self,
         virt: PageRange<VAddr, S>,
         phys: PageRange<PAddr, S>,
         mut set_flags: F,
         frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(&mut Handle<'_, S, Self::Entry>),
+        F: FnMut(&mut Handle<S, Self::Entry>),
     {
-        let _span = tracing::trace_span!("map_range", ?virt, ?phys).entered();
-        assert_eq!(
-            virt.len(),
-            phys.len(),
-            "virtual and physical page ranges must have the same number of pages"
-        );
-        assert_eq!(
-            virt.size(),
-            phys.size(),
-            "virtual and physical pages must be the same size"
-        );
-        for (virt, phys) in virt.into_iter().zip(&phys) {
-            tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
-            let mut flags = self.map_page(virt, phys, frame_alloc);
-            set_flags(&mut flags);
-            flags.commit();
-            tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapped");
-        }
-        virt
+        todo!("agh, mutability");
+        // let _span = tracing::trace_span!("map_range", ?virt, ?phys).entered();
+        // assert_eq!(
+        //     virt.len(),
+        //     phys.len(),
+        //     "virtual and physical page ranges must have the same number of pages"
+        // );
+        // assert_eq!(
+        //     virt.size(),
+        //     phys.size(),
+        //     "virtual and physical pages must be the same size"
+        // );
+        // for (virt, phys) in virt.into_iter().zip(&phys) {
+        //     tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapping...");
+        //     let mut flags = self.map_page(virt, phys, frame_alloc);
+        //     set_flags(&mut flags);
+        //     flags.commit();
+        //     tracing::trace!(virt.page = ?virt, phys.page = ?phys, "mapped");
+        // }
+        // virt
     }
 
     /// Unmap the provided range of virtual pages.
@@ -254,13 +254,13 @@ where
     /// - If any page's physical address is invalid.
     /// - If any page is already mapped.
     fn identity_map_range<F>(
-        &mut self,
+        &'mapper mut self,
         phys: PageRange<PAddr, S>,
         set_flags: F,
         frame_alloc: &A,
     ) -> PageRange<VAddr, S>
     where
-        F: FnMut(&mut Handle<'_, S, Self::Entry>),
+        F: FnMut(&mut Handle<S, Self::Entry>),
     {
         let base_paddr = phys.base_addr().as_usize();
         let page_size = phys.start().size();
@@ -272,26 +272,25 @@ where
     }
 }
 
-impl<M, A, S> Map<S, A> for &mut M
+impl<'mapper, M, A, S> Map<'mapper, S, A> for &'mapper mut M
 where
-    M: Map<S, A>,
+    M: Map<'mapper, S, A>,
     S: Size,
-    A: Alloc<S>,
 {
     type Entry = M::Entry;
 
     #[inline]
     unsafe fn map_page(
-        &mut self,
+        &'mapper mut self,
         virt: Page<VAddr, S>,
         phys: Page<PAddr, S>,
         frame_alloc: &A,
-    ) -> Handle<'_, S, Self::Entry> {
+    ) -> Handle<S, Self::Entry> {
         (*self).map_page(virt, phys, frame_alloc)
     }
 
     #[inline]
-    fn flags_mut(&mut self, virt: Page<VAddr, S>) -> Handle<'_, S, Self::Entry> {
+    fn flags_mut(&'mapper mut self, virt: Page<VAddr, S>) -> Handle<S, Self::Entry> {
         (*self).flags_mut(virt)
     }
 
@@ -302,10 +301,10 @@ where
 
     #[inline]
     fn identity_map(
-        &mut self,
+        &'mapper mut self,
         phys: Page<PAddr, S>,
         frame_alloc: &A,
-    ) -> Handle<'_, S, Self::Entry> {
+    ) -> Handle<S, Self::Entry> {
         (*self).identity_map(phys, frame_alloc)
     }
 }
@@ -362,13 +361,43 @@ pub trait PageFlags<S: Size>: fmt::Debug {
     fn commit(&mut self, page: Page<VAddr, S>);
 }
 
+impl<S: Size> PageFlags<S> for &'_ mut dyn PageFlags<S> {
+    unsafe fn set_writable(&mut self, writable: bool) {
+        (*self).set_writable(writable)
+    }
+
+    unsafe fn set_executable(&mut self, executable: bool) {
+        (*self).set_executable(executable)
+    }
+
+    unsafe fn set_present(&mut self, present: bool) {
+        (*self).set_present(present)
+    }
+
+    fn is_writable(&self) -> bool {
+        <dyn PageFlags<S>>::is_writable(*self)
+    }
+
+    fn is_executable(&self) -> bool {
+        <dyn PageFlags<S>>::is_executable(*self)
+    }
+
+    fn is_present(&self) -> bool {
+        <dyn PageFlags<S>>::is_present(*self)
+    }
+
+    fn commit(&mut self, page: Page<VAddr, S>) {
+        (*self).commit(page)
+    }
+}
+
 /// A page in the process of being remapped.
 ///
 /// This reference allows updating page table flags prior to committing changes.
 #[derive(Debug)]
 #[must_use = "page table updates may not be reflected until changes are committed (using `Handle::commit`)"]
-pub struct Handle<'mapper, S: Size, E: PageFlags<S>> {
-    entry: &'mapper mut E,
+pub struct Handle<S: Size, E: PageFlags<S>> {
+    entry: E,
     page: Page<VAddr, S>,
 }
 
@@ -391,21 +420,28 @@ pub struct PageRange<A: Address, S: Size> {
 pub struct EmptyAlloc {
     _p: (),
 }
-pub struct NotAligned<S> {
+
+#[derive(thiserror::Error)]
+#[error("not aligned on a {size} boundary")]
+pub struct NotAligned<S: Size> {
     size: S,
 }
 
-#[derive(Debug)]
-pub struct AllocErr {
+#[derive(Debug, thiserror::Error)]
+#[error("allocator error")]
+pub struct AllocError {
     // TODO: eliza
     _p: (),
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TranslateError<S: Size> {
+    #[error("cannot translate an unmapped page/address")]
     NotMapped,
+    #[error("mapped page is a different size ({0})")]
     WrongSize(S),
+    #[error("error translating page/address: {0}")]
     Other(&'static str),
 }
 
@@ -646,12 +682,12 @@ where
 }
 
 unsafe impl<S: Size> Alloc<S> for EmptyAlloc {
-    fn alloc_range(&self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocErr> {
-        Err(AllocErr { _p: () })
+    fn alloc_range(&self, _: S, _len: usize) -> Result<PageRange<PAddr, S>, AllocError> {
+        Err(AllocError { _p: () })
     }
 
-    fn dealloc_range(&self, _range: PageRange<PAddr, S>) -> Result<(), AllocErr> {
-        Err(AllocErr { _p: () })
+    fn dealloc_range(&self, _range: PageRange<PAddr, S>) -> Result<(), AllocError> {
+        Err(AllocError { _p: () })
     }
 }
 
@@ -689,35 +725,19 @@ impl<S: Size + fmt::Display> fmt::Debug for TranslateError<S> {
     }
 }
 
-impl<S: Size> fmt::Display for TranslateError<S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            TranslateError::Other(msg) => write!(f, "error translating page/address: {msg}"),
-            TranslateError::NotMapped => f.pad("error translating page/address: not mapped"),
-            TranslateError::WrongSize(_) => write!(
-                f,
-                "error translating page: mapped page is a different size ({})",
-                core::any::type_name::<S>()
-            ),
-        }
-    }
-}
-
 // === impl AllocErr ===
 
-impl AllocErr {
+impl AllocError {
     pub fn oom() -> Self {
         Self { _p: () }
     }
 }
 
-impl<S: Size> From<NotAligned<S>> for AllocErr {
+impl<S: Size> From<NotAligned<S>> for AllocError {
     fn from(_na: NotAligned<S>) -> Self {
         Self { _p: () } // TODO(eliza)
     }
 }
-
-impl<S: Size> mycelium_util::error::Error for TranslateError<S> {}
 
 impl<S> Size for S
 where
@@ -730,12 +750,12 @@ where
 
 // === impl Handle ===
 
-impl<'mapper, S, E> Handle<'mapper, S, E>
+impl<S, E> Handle<S, E>
 where
     S: Size,
     E: PageFlags<S>,
 {
-    pub fn new(page: Page<VAddr, S>, entry: &'mapper mut E) -> Self {
+    pub fn new(page: Page<VAddr, S>, entry: E) -> Self {
         Self { entry, page }
     }
 
@@ -754,7 +774,7 @@ where
     /// page table (i.e. it has multiple page table entries pointing to it) may
     /// also cause undefined behavior.
     #[inline]
-    pub unsafe fn set_writable(self, writable: bool) -> Self {
+    pub unsafe fn set_writable(mut self, writable: bool) -> Self {
         self.entry.set_writable(writable);
         self
     }
@@ -768,7 +788,7 @@ where
     /// undefined behavior. Also, this can be used to execute the contents of
     /// arbitrary memory, which (of course) is wildly unsafe.
     #[inline]
-    pub unsafe fn set_executable(self, executable: bool) -> Self {
+    pub unsafe fn set_executable(mut self, executable: bool) -> Self {
         self.entry.set_executable(executable);
         self
     }
@@ -779,7 +799,7 @@ where
     ///
     /// Manual control of page flags can be used to violate Rust invariants.
     #[inline]
-    pub unsafe fn set_present(self, present: bool) -> Self {
+    pub unsafe fn set_present(mut self, present: bool) -> Self {
         self.entry.set_present(present);
         self
     }
@@ -800,7 +820,7 @@ where
     }
 
     #[inline]
-    pub fn commit(self) -> Page<VAddr, S> {
+    pub fn commit(mut self) -> Page<VAddr, S> {
         tracing::debug!(
             page = ?self.page,
             entry = ?self.entry,

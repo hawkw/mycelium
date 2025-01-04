@@ -35,13 +35,15 @@ pub trait RegisterAccess {
     ) -> Volatile<&'static mut Self::Target, Self::Access>;
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum LocalApicError {
     /// The system is configured to use the PIC interrupt model rather than the
     /// APIC interrupt model.
+    #[error("interrupt model is PIC, not APIC")]
     NoApic,
 
     /// The local APIC is uninitialized.
+    #[error("the local APIC has not been initialized on this core")]
     Uninitialized,
 }
 
