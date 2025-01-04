@@ -1116,6 +1116,12 @@ impl<T: Linked<Links<T>> + ?Sized> Drop for List<T> {
     }
 }
 
+impl<T: Linked<Links<T>> + ?Sized> Default for List<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ==== impl Links ====
 
 impl<T: ?Sized> Links<T> {

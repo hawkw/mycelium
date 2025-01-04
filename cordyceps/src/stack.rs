@@ -197,6 +197,15 @@ where
     }
 }
 
+impl<T> Default for TransferStack<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // === impl Stack ===
 
 impl<T> Stack<T>
@@ -310,6 +319,15 @@ where
     }
 }
 
+impl<T> Default for Stack<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// # Safety
 ///
 /// A `Stack` is `Send` if `T` is send, because moving it across threads
@@ -373,6 +391,12 @@ unsafe impl<T: Sync> Sync for Links<T> {}
 impl<T> fmt::Debug for Links<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("transfer_stack::Links { ... }")
+    }
+}
+
+impl<T> Default for Links<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
