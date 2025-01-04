@@ -35,20 +35,20 @@ cordyceps = { version = "0.3.0", path = "../cordyceps" }
 critical-section = { version = "1.1", optional = true }
 pin-project = "1"
 portable-atomic = "1.2"
-tracing = { version = "0.1", default_features = false, optional = true }
+tracing = { version = "0.1", default-features = false, optional = true }
 
 # this is a normal dependency, rather than a dev dependency, so that
 # `maitake-sync` may be used in other crates' loom tests as well (but only when
 # the cfg is enabled).
 [target.'cfg(loom)'.dependencies]
-loom = { version = "0.7", default_features = false }
-tracing = { version = "0.1", default_features = false }
+loom = { version = "0.7", default-features = false }
+tracing = { version = "0.1", default-features = false }
 
 [dev-dependencies]
 futures-util = "0.3"
 futures = "0.3"
 tokio-test = "0.4"
-tracing = { version = "0.1", default_features = false, features = ["std"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.11", features = ["fmt", "env-filter"] }
 
 [target.'cfg(not(loom))'.dev-dependencies]

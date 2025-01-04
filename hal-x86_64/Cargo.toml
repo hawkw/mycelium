@@ -18,10 +18,10 @@ maitake = { path = "../maitake" }
 mycelium-util = { path = "../util" }
 mycelium-trace = { path = "../trace" }
 mycotest = { path = "../mycotest"}
-rand_core = { version = "0.6.4", default_features = false, optional = true }
+rand_core = { version = "0.6.4", default-features = false, optional = true }
 raw-cpuid = "10.6.0"
 thiserror = { workspace = true }
-tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, features = ["attributes"] }
+tracing = { git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["attributes"] }
 volatile = { version = "0.4.5", features = ["unstable"] }
 
 [dev-dependencies]

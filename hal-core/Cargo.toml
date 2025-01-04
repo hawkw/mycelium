@@ -9,7 +9,7 @@ rust-version = "1.81.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false }
+tracing = { git = "https://github.com/tokio-rs/tracing", default-features = false }
 thiserror = { workspace = true }
 maitake-sync = { path = "../maitake-sync", default-features = false }
 mycelium-util = { path = "../util" }
