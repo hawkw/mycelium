@@ -61,3 +61,6 @@ loom = { version = "0.7", features = ["futures", "checkpoint"] }
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(maitake_ultraverbose)'] }
