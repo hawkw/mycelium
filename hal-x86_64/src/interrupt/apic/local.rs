@@ -168,12 +168,11 @@ impl LocalApic {
 
             // set timer divisor to 16
             self.write_register(TIMER_DIVISOR, 0b11);
-            self.write_register(
-                LVT_TIMER,
-                LvtTimer::new()
-                    .with(LvtTimer::MODE, TimerMode::OneShot)
-                    .with(LvtTimer::MASKED, false),
-            );
+            self.register(LVT_TIMER).update(|lvt_timer| {
+                lvt_timer
+                    .set(LvtTimer::MODE, TimerMode::OneShot)
+                    .set(LvtTimer::MASKED, false);
+            });
             // set initial count to -1
             self.write_register(TIMER_INITIAL_COUNT, -1i32 as u32);
         }
@@ -184,12 +183,9 @@ impl LocalApic {
 
         unsafe {
             // stop the timer
-            self.write_register(
-                LVT_TIMER,
-                LvtTimer::new()
-                    .with(LvtTimer::MODE, TimerMode::OneShot)
-                    .with(LvtTimer::MASKED, true),
-            );
+            self.register(LVT_TIMER).update(|lvt_timer| {
+                lvt_timer.set(LvtTimer::MASKED, true);
+            });
         }
 
         let elapsed_ticks = unsafe { self.register(TIMER_CURRENT_COUNT).read() };
@@ -316,13 +312,21 @@ impl LocalApic {
             )
         })?;
 
+        // Set the divisor configuration, update the LVT entry, and set the
+        // initial count. Per the OSDev Wiki, we must do this in this specific
+        // order (divisor, then unmask the LVT entry, then set the initial
+        // count), or else we may miss IRQs or have other issues. I'm not sure
+        // why this is, but see:
+        // https://wiki.osdev.org/APIC_Timer#Enabling_APIC_Timer
         unsafe {
-            let lvt_entry = register::LvtTimer::new()
-                .with(register::LvtTimer::VECTOR, vector)
-                .with(register::LvtTimer::MODE, register::TimerMode::Periodic);
             // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
             self.write_register(register::TIMER_DIVISOR, 0b11);
-            self.write_register(register::LVT_TIMER, lvt_entry);
+            self.register(register::LVT_TIMER).update(|lvt_timer| {
+                lvt_timer
+                    .set(register::LvtTimer::VECTOR, vector)
+                    .set(register::LvtTimer::MODE, register::TimerMode::Periodic)
+                    .set(register::LvtTimer::MASKED, false);
+            });
             self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
         }
 
