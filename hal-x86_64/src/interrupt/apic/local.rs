@@ -258,6 +258,7 @@ impl LocalApic {
     #[inline(always)]
     fn calibrate_frequency_hz_pit(&self, divisor: TimerDivisor) -> u32 {
         tracing::debug!(?divisor, "calibrating APIC timer frequency using PIT...");
+        const ATTEMPTS: usize = 5;
 
         // lock the PIT now, before actually starting the timer IRQ, so that we
         // don't include any time spent waiting for the PIT lock.
@@ -267,42 +268,55 @@ impl LocalApic {
         // should do it the right way, anyway.
         let mut pit = crate::time::PIT.lock();
 
-        unsafe {
-            // start the timer
+        let mut sum = 0;
+        let mut min = u32::MAX;
+        let mut max = 0;
+        for attempt in 1..ATTEMPTS + 1 {
+            unsafe {
+                // start the timer
 
-            // set timer divisor to 16
-            self.write_register(register::TIMER_DIVISOR, divisor);
-            self.register(register::LVT_TIMER).update(|lvt_timer| {
-                lvt_timer
-                    .set(LvtTimer::MODE, TimerMode::OneShot)
-                    .set(LvtTimer::MASKED, false);
-            });
-            // set initial count to -1
-            self.write_register(register::TIMER_INITIAL_COUNT, -1i32 as u32);
+                // set timer divisor to 16
+                self.write_register(register::TIMER_DIVISOR, divisor);
+                self.register(register::LVT_TIMER).update(|lvt_timer| {
+                    lvt_timer
+                        .set(LvtTimer::MODE, TimerMode::OneShot)
+                        .set(LvtTimer::MASKED, false);
+                });
+                // set initial count to -1
+                self.write_register(register::TIMER_INITIAL_COUNT, -1i32 as u32);
+            }
+
+            // use the PIT to sleep for 10ms
+            pit.sleep_blocking(Duration::from_millis(10))
+                .expect("the PIT should be able to send a 10ms interrupt...");
+
+            unsafe {
+                // stop the timer
+                self.register(register::LVT_TIMER).update(|lvt_timer| {
+                    lvt_timer.set(LvtTimer::MASKED, true);
+                });
+            }
+
+            let elapsed_ticks = unsafe { self.register(register::TIMER_CURRENT_COUNT).read() };
+            // since we slept for ten milliseconds, each tick is 10 kHz. we don't
+            // need to account for the divisor since we ran the timer at that
+            // divisor already.
+            let ticks_per_10ms = (-1i32 as u32).wrapping_sub(elapsed_ticks);
+            // convert the frequency to Hz.
+            let frequency_hz = ticks_per_10ms * 100;
+            // TODO(eliza): throw out attempts that differ too substantially
+            // from the min/max?
+            sum += frequency_hz;
+            min = core::cmp::min(min, frequency_hz);
+            max = core::cmp::max(max, frequency_hz);
+            tracing::trace!(attempt, frequency_hz, sum, min, max);
         }
-
-        // use the PIT to sleep for 10ms
-        pit.sleep_blocking(Duration::from_millis(10))
-            .expect("the PIT should be able to send a 10ms interrupt...");
-
-        unsafe {
-            // stop the timer
-            self.register(register::LVT_TIMER).update(|lvt_timer| {
-                lvt_timer.set(LvtTimer::MASKED, true);
-            });
-        }
-
-        let elapsed_ticks = unsafe { self.register(register::TIMER_CURRENT_COUNT).read() };
-        // since we slept for ten milliseconds, each tick is 10 kHz. we don't
-        // need to account for the divisor since we ran the timer at that
-        // divisor already.
-        let ticks_per_10ms = (-1i32 as u32).wrapping_sub(elapsed_ticks);
-        tracing::debug!(?ticks_per_10ms);
-        // convert the frequency to Hz.
-        let frequency_hz = ticks_per_10ms * 100;
+        let frequency_hz = sum / ATTEMPTS as u32;
         tracing::debug!(
             ?divisor,
             frequency_hz,
+            min_hz = min,
+            max_hz = max,
             "calibrated local APIC timer using PIT"
         );
         frequency_hz
