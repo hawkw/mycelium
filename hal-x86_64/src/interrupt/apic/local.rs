@@ -1,20 +1,63 @@
+//! Local APIC
 pub use self::register::{ErrorStatus, Version};
+use self::register::{LvtTimer, TimerMode};
 use super::{PinPolarity, TriggerMode};
 use crate::{
     cpu::{local, FeatureNotSupported, Msr},
     mm::{self, page, size::Size4Kb, PhysPage, VirtPage},
     time::{Duration, InvalidDuration},
 };
-use core::{cell::RefCell, convert::TryInto, marker::PhantomData, num::NonZeroU32};
+use core::{
+    cell::{Cell, RefCell},
+    convert::TryInto,
+    marker::PhantomData,
+    num::NonZeroU32,
+};
 use hal_core::{PAddr, VAddr};
 use mycelium_util::fmt;
 use raw_cpuid::CpuId;
+use register::TimerDivisor;
 use volatile::{access, Volatile};
 
+/// Local APIC state.
+///
+///# Notes on Mutability
+///
+/// In a multi-core x86_64 system, each CPU core has its own local APIC.
+/// Therefore, the Mycelium HAL's [`interrupt::Controller`] type uses
+/// [core-local storage] to store a reference to each CPU core's local APIC that
+/// can be accessed only by that core. The value in core-local storage is a
+/// [`RefCell`]`<`[`Option`]`<`[`LocalApic`]`>>`, as the local APIC must be
+/// initialized on a per-core basis before it can be used.
+///
+/// Note that the [`RefCell`] must *only* be [borrowed
+/// mutably](RefCell::borrow_mut) in order to *initialize* the `LocalApic`
+/// value. Once the local APIC has been initialized, it may receive interrupts,
+/// and may also be accessed by interrupt *handlers* in order to send an
+/// end-of-interrupt. This means that mutably borrowing the `RefCell` once
+/// interrupts are enabled may result in a panic if an ISR attempts to borrow
+/// the local APIC immutably to send an EOI while the local APIC is borrowed
+/// mutably.
+///
+/// Therefore, all local APIC operations that mutate state, such as setting the
+/// timer calibration, must use interior mutability, so that an interrupt
+/// handler may access the local APIC's state. Interior mutability need not be
+/// thread-safe, however, as the local APIC state is only accessed from the core
+/// that owns it.
+///
+/// [`interrupt::Controller`]: crate::interrupt::Controller
+/// [core-local storage]: crate::cpu::local
 #[derive(Debug)]
 pub struct LocalApic {
     msr: Msr,
     base: VAddr,
+    timer_calibration: Cell<Option<TimerCalibration>>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct TimerCalibration {
+    frequency_hz: u32,
+    divisor: register::TimerDivisor,
 }
 
 /// Represents a register in the local APIC's configuration area.
@@ -48,14 +91,16 @@ pub enum LocalApicError {
     Uninitialized,
 }
 
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
+pub enum TimerError {
+    #[error(transparent)]
+    InvalidDuration(#[from] InvalidDuration),
+    #[error("local APIC timer has not been calibrated on this core")]
+    NotCalibrated,
+}
+
 impl LocalApic {
     const BASE_PADDR_MASK: u64 = 0xffff_ffff_f000;
-
-    // divisor for the APIC timer.
-    //
-    // it would be nicer if we could set this to 1, but apparently some
-    // platforms "don't like" that...
-    const TIMER_DIVISOR: u32 = 16;
 
     /// Try to construct a `LocalApic`.
     ///
@@ -100,7 +145,11 @@ impl LocalApic {
             tracing::debug!("mapped local APIC MMIO page");
         }
 
-        Ok(Self { msr, base })
+        Ok(Self {
+            msr,
+            base,
+            timer_calibration: Cell::new(None),
+        })
     }
 
     #[must_use]
@@ -140,6 +189,22 @@ impl LocalApic {
         );
     }
 
+    pub fn calibrate_timer(&self, divisor: TimerDivisor) {
+        if let Some(prev) = self.timer_calibration.get() {
+            if prev.divisor == divisor {
+                tracing::info!(
+                    ?divisor,
+                    "local APIC timer already calibrated with this divisor"
+                );
+                return;
+            }
+        }
+        self.timer_calibration.set(Some(TimerCalibration {
+            frequency_hz: self.calibrate_frequency_hz(divisor),
+            divisor,
+        }));
+    }
+
     /// Reads the local APIC's version register.
     ///
     /// The returned [`Version`] struct indicates the version of the local APIC,
@@ -149,11 +214,50 @@ impl LocalApic {
         unsafe { self.register(register::VERSION) }.read()
     }
 
+    fn calibrate_frequency_hz(&self, divisor: TimerDivisor) -> u32 {
+        // How sloppy do we expect the PIT frequency calibration to be?
+        // If the delta between the CPUID frequency and the frequency we
+        // determined using PIT calibration is > this value, we'll yell about
+        // it.
+        const PIT_SLOPPINESS: u32 = 1000;
+
+        // Start out by calibrating the APIC frequency using the PIT.
+        let pit_frequency_hz = self.calibrate_frequency_hz_pit(divisor);
+
+        // See if we can get something from CPUID.
+        let Some(cpuid_frequency_hz) = Self::calibrate_frequency_hz_cpuid(divisor) else {
+            tracing::info!(
+                pit.frequency_hz = pit_frequency_hz,
+                "CPUID does not indicate APIC timer frequency; using PIT \
+                 calibration only"
+            );
+            return pit_frequency_hz;
+        };
+
+        // Cross-check the PIT calibration result and CPUID value.
+        let distance = if pit_frequency_hz > cpuid_frequency_hz {
+            pit_frequency_hz - cpuid_frequency_hz
+        } else {
+            cpuid_frequency_hz - pit_frequency_hz
+        };
+        if distance > PIT_SLOPPINESS {
+            tracing::warn!(
+                pit.frequency_hz = pit_frequency_hz,
+                cpuid.frequency_hz = cpuid_frequency_hz,
+                distance,
+                ?divisor,
+                "APIC timer frequency from PIT calibration differs substantially \
+                 from CPUID!"
+            );
+        }
+
+        cpuid_frequency_hz
+    }
+
     /// Calibrate the timer frequency using the PIT.
     #[inline(always)]
-    fn calibrate_frequency_hz_pit(&self) -> u32 {
-        use register::*;
-        tracing::debug!("calibrating APIC timer frequency using PIT...");
+    fn calibrate_frequency_hz_pit(&self, divisor: TimerDivisor) -> u32 {
+        tracing::debug!(?divisor, "calibrating APIC timer frequency using PIT...");
 
         // lock the PIT now, before actually starting the timer IRQ, so that we
         // don't include any time spent waiting for the PIT lock.
@@ -167,14 +271,14 @@ impl LocalApic {
             // start the timer
 
             // set timer divisor to 16
-            self.write_register(TIMER_DIVISOR, 0b11);
-            self.register(LVT_TIMER).update(|lvt_timer| {
+            self.write_register(register::TIMER_DIVISOR, divisor);
+            self.register(register::LVT_TIMER).update(|lvt_timer| {
                 lvt_timer
                     .set(LvtTimer::MODE, TimerMode::OneShot)
                     .set(LvtTimer::MASKED, false);
             });
             // set initial count to -1
-            self.write_register(TIMER_INITIAL_COUNT, -1i32 as u32);
+            self.write_register(register::TIMER_INITIAL_COUNT, -1i32 as u32);
         }
 
         // use the PIT to sleep for 10ms
@@ -183,12 +287,12 @@ impl LocalApic {
 
         unsafe {
             // stop the timer
-            self.register(LVT_TIMER).update(|lvt_timer| {
+            self.register(register::LVT_TIMER).update(|lvt_timer| {
                 lvt_timer.set(LvtTimer::MASKED, true);
             });
         }
 
-        let elapsed_ticks = unsafe { self.register(TIMER_CURRENT_COUNT).read() };
+        let elapsed_ticks = unsafe { self.register(register::TIMER_CURRENT_COUNT).read() };
         // since we slept for ten milliseconds, each tick is 10 kHz. we don't
         // need to account for the divisor since we ran the timer at that
         // divisor already.
@@ -196,12 +300,16 @@ impl LocalApic {
         tracing::debug!(?ticks_per_10ms);
         // convert the frequency to Hz.
         let frequency_hz = ticks_per_10ms * 100;
-        tracing::debug!(frequency_hz, "calibrated local APIC timer using PIT");
+        tracing::debug!(
+            ?divisor,
+            frequency_hz,
+            "calibrated local APIC timer using PIT"
+        );
         frequency_hz
     }
 
     #[inline(always)]
-    fn calibrate_frequency_hz_cpuid() -> Option<u32> {
+    fn calibrate_frequency_hz_cpuid(divisor: TimerDivisor) -> Option<u32> {
         let cpuid = CpuId::new();
         if let Some(freq_khz) = cpuid.get_hypervisor_info().and_then(|hypervisor| {
             tracing::trace!("CPUID contains hypervisor info");
@@ -211,8 +319,9 @@ impl LocalApic {
         }) {
             // the hypervisor info CPUID leaf expresses the frequency in kHz,
             // and the frequency is not divided by the target timer divisor.
-            let frequency_hz = (freq_khz.get() * 1000) / Self::TIMER_DIVISOR;
+            let frequency_hz = (freq_khz.get() * 1000) / divisor.into_divisor();
             tracing::debug!(
+                ?divisor,
                 frequency_hz,
                 "determined APIC timer frequency from CPUID hypervisor info"
             );
@@ -241,45 +350,6 @@ impl LocalApic {
         None
     }
 
-    fn timer_frequency_hz(&self) -> u32 {
-        // How sloppy do we expect the PIT frequency calibration to be?
-        // If the delta between the CPUID frequency and the frequency we
-        // determined using PIT calibration is > this value, we'll yell about
-        // it.
-        const PIT_SLOPPINESS: u32 = 1000;
-
-        // Start out by calibrating the APIC frequency using the PIT.
-        let pit_frequency_hz = self.calibrate_frequency_hz_pit();
-
-        // See if we can get something from CPUID.
-        let Some(cpuid_frequency_hz) = Self::calibrate_frequency_hz_cpuid() else {
-            tracing::info!(
-                pit.frequency_hz = pit_frequency_hz,
-                "CPUID does not indicate APIC timer frequency; using PIT \
-                 calibration only"
-            );
-            return pit_frequency_hz;
-        };
-
-        // Cross-check the PIT calibration result and CPUID value.
-        let distance = if pit_frequency_hz > cpuid_frequency_hz {
-            pit_frequency_hz - cpuid_frequency_hz
-        } else {
-            cpuid_frequency_hz - pit_frequency_hz
-        };
-        if distance > PIT_SLOPPINESS {
-            tracing::warn!(
-                pit.frequency_hz = pit_frequency_hz,
-                cpuid.frequency_hz = cpuid_frequency_hz,
-                distance,
-                "APIC timer frequency from PIT calibration differs substantially \
-                 from CPUID!"
-            );
-        }
-
-        cpuid_frequency_hz
-    }
-
     #[tracing::instrument(
         level = tracing::Level::DEBUG,
         name = "LocalApic::start_periodic_timer",
@@ -287,16 +357,19 @@ impl LocalApic {
         fields(?interval, vector),
         err
     )]
-    pub fn start_periodic_timer(
-        &self,
-        interval: Duration,
-        vector: u8,
-    ) -> Result<(), InvalidDuration> {
-        let timer_frequency_hz = self.timer_frequency_hz();
-        let ticks_per_ms = timer_frequency_hz / 1000;
+    pub fn start_periodic_timer(&self, interval: Duration, vector: u8) -> Result<(), TimerError> {
+        let TimerCalibration {
+            frequency_hz,
+            divisor,
+        } = self
+            .timer_calibration
+            .get()
+            .ok_or(TimerError::NotCalibrated)?;
+        let ticks_per_ms = frequency_hz / 1000;
         tracing::trace!(
-            timer_frequency_hz,
+            frequency_hz,
             ticks_per_ms,
+            ?divisor,
             "starting local APIC timer"
         );
         let interval_ms: u32 = interval.as_millis().try_into().map_err(|_| {
@@ -319,20 +392,19 @@ impl LocalApic {
         // why this is, but see:
         // https://wiki.osdev.org/APIC_Timer#Enabling_APIC_Timer
         unsafe {
-            // set the divisor to 16. (ed. note: how does 3 say this? idk lol...)
-            self.write_register(register::TIMER_DIVISOR, 0b11);
+            self.write_register(register::TIMER_DIVISOR, divisor);
             self.register(register::LVT_TIMER).update(|lvt_timer| {
                 lvt_timer
-                    .set(register::LvtTimer::VECTOR, vector)
-                    .set(register::LvtTimer::MODE, register::TimerMode::Periodic)
-                    .set(register::LvtTimer::MASKED, false);
+                    .set(LvtTimer::VECTOR, vector)
+                    .set(LvtTimer::MODE, register::TimerMode::Periodic)
+                    .set(LvtTimer::MASKED, false);
             });
             self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
         }
 
         tracing::info!(
             ?interval,
-            timer_frequency_hz,
+            frequency_hz,
             ticks_per_ms,
             vector,
             "started local APIC timer"
@@ -601,7 +673,7 @@ pub mod register {
 
         TIMER_INITIAL_COUNT = 0x380, ReadWrite;
         TIMER_CURRENT_COUNT = 0x390, ReadOnly;
-        TIMER_DIVISOR = 0x3e0, ReadWrite;
+        TIMER_DIVISOR<TimerDivisor> = 0x3e0, ReadWrite;
     }
 
     bitfield! {
@@ -664,6 +736,36 @@ pub mod register {
             Periodic = 0b01,
             /// TSC-Deadline mode, program target value in IA32_TSC_DEADLINE MSR.
             TscDeadline = 0b10,
+        }
+    }
+
+    enum_from_bits! {
+        /// Configures the LVT time divisor.
+        #[derive(Debug, Eq, PartialEq)]
+        pub enum TimerDivisor<u32> {
+            By1 = 0b1011,
+            By2 = 0b0000,
+            By4 = 0b0001,
+            By8 = 0b0010,
+            By16 = 0b0011,
+            By32 = 0b1000,
+            By64 = 0b1001,
+            By128 = 0b1010,
+        }
+    }
+    impl TimerDivisor {
+        /// Returns the numeric value of the divisor configuration.
+        pub(super) fn into_divisor(self) -> u32 {
+            match self {
+                TimerDivisor::By1 => 1,
+                TimerDivisor::By2 => 2,
+                TimerDivisor::By4 => 4,
+                TimerDivisor::By8 => 8,
+                TimerDivisor::By16 => 16,
+                TimerDivisor::By32 => 32,
+                TimerDivisor::By64 => 64,
+                TimerDivisor::By128 => 128,
+            }
         }
     }
 

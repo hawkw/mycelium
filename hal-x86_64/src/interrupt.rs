@@ -48,8 +48,10 @@ pub enum PeriodicTimerError {
     Pit(#[from] time::PitError),
     #[error(transparent)]
     InvalidDuration(#[from] time::InvalidDuration),
-    #[error("could not start local APIC periodic timer: {0}")]
+    #[error("could access local APIC: {0}")]
     Apic(#[from] apic::local::LocalApicError),
+    #[error("could not start local APIC periodic timer: {0}")]
+    ApicTimer(#[from] apic::local::TimerError),
 }
 
 #[derive(Debug)]
@@ -379,8 +381,10 @@ impl Controller {
                 .start_periodic_timer(interval)
                 .map_err(Into::into),
             InterruptModel::Apic { ref local, .. } => local.with(|apic| {
-                apic.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)
-                    .map_err(PeriodicTimerError::from)
+                // divide by 16 is chosen kinda arbitrarily lol
+                apic.calibrate_timer(apic::local::register::TimerDivisor::By16);
+                apic.start_periodic_timer(interval, Idt::LOCAL_APIC_TIMER as u8)?;
+                Ok(())
             })?,
         }
     }
