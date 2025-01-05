@@ -364,6 +364,35 @@ impl LocalApic {
         None
     }
 
+    pub fn interrupt_in(&self, duration: Duration, vector: u8) -> Result<(), TimerError> {
+        let TimerCalibration {
+            frequency_hz,
+            divisor,
+        } = self
+            .timer_calibration
+            .get()
+            .ok_or(TimerError::NotCalibrated)?;
+        let duration_ms: u32 = duration.as_millis().try_into().map_err(|_| {
+            InvalidDuration::new(
+                duration,
+                "local APIC oneshot timer duration exceeds a `u32`",
+            )
+        })?;
+        let ticks = duration_ms
+            .checked_mul(frequency_hz / 1000)
+            .ok_or_else(|| {
+                InvalidDuration::new(
+                duration,
+                "local APIC oneshot timer duration requires a number of ticks that exceed a `u32`",
+            )
+            })?;
+        unsafe {
+            self.configure_timer(divisor, TimerMode::OneShot, vector, ticks);
+        }
+
+        Ok(())
+    }
+
     #[tracing::instrument(
         level = tracing::Level::DEBUG,
         name = "LocalApic::start_periodic_timer",
@@ -399,21 +428,8 @@ impl LocalApic {
             )
         })?;
 
-        // Set the divisor configuration, update the LVT entry, and set the
-        // initial count. Per the OSDev Wiki, we must do this in this specific
-        // order (divisor, then unmask the LVT entry, then set the initial
-        // count), or else we may miss IRQs or have other issues. I'm not sure
-        // why this is, but see:
-        // https://wiki.osdev.org/APIC_Timer#Enabling_APIC_Timer
         unsafe {
-            self.write_register(register::TIMER_DIVISOR, divisor);
-            self.register(register::LVT_TIMER).update(|lvt_timer| {
-                lvt_timer
-                    .set(LvtTimer::VECTOR, vector)
-                    .set(LvtTimer::MODE, register::TimerMode::Periodic)
-                    .set(LvtTimer::MASKED, false);
-            });
-            self.write_register(register::TIMER_INITIAL_COUNT, ticks_per_interval);
+            self.configure_timer(divisor, TimerMode::Periodic, vector, ticks_per_interval);
         }
 
         tracing::info!(
@@ -425,6 +441,31 @@ impl LocalApic {
         );
 
         Ok(())
+    }
+
+    #[inline(always)]
+    unsafe fn configure_timer(
+        &self,
+        divisor: TimerDivisor,
+        mode: TimerMode,
+        vector: u8,
+        initial_count: u32,
+    ) {
+        // Set the divisor configuration, update the LVT entry, and set the
+        // initial count. Per the OSDev Wiki, we must do this in this specific
+        // order (divisor, then unmask the LVT entry, then set the initial
+        // count), or else we may miss IRQs or have other issues. I'm not sure
+        // why this is, but see:
+        // https://wiki.osdev.org/APIC_Timer#Enabling_APIC_Timer
+        self.register(register::TIMER_DIVISOR).write(divisor);
+        self.register(register::LVT_TIMER).update(|lvt_timer| {
+            lvt_timer
+                .set(LvtTimer::VECTOR, vector)
+                .set(LvtTimer::MODE, mode)
+                .set(LvtTimer::MASKED, false);
+        });
+        self.register(register::TIMER_INITIAL_COUNT)
+            .write(initial_count)
     }
 
     /// Sends an End of Interrupt (EOI) to the local APIC.
