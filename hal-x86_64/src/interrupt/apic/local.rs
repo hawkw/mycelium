@@ -1,4 +1,4 @@
-pub use self::register::ErrorStatus;
+pub use self::register::{ErrorStatus, Version};
 use super::{PinPolarity, TriggerMode};
 use crate::{
     cpu::{local, FeatureNotSupported, Msr},
@@ -113,6 +113,7 @@ impl LocalApic {
     }
 
     pub fn enable(&self, spurious_vector: u8) {
+        use register::Version;
         /// Writing this to the IA32_APIC_BASE MSR enables the local APIC.
         const MSR_ENABLE: u64 = 0x800;
         /// Bit 8 in the spurious interrupt vector register enables the APIC.
@@ -127,7 +128,25 @@ impl LocalApic {
         // SPURIOUS_VECTOR register.
         let value = spurious_vector as u32 | SPURIOUS_VECTOR_ENABLE_BIT;
         unsafe { self.register(register::SPURIOUS_VECTOR).write(value) }
-        tracing::info!(base = ?self.base, spurious_vector, "local APIC enabled");
+
+        let version = self.version();
+        tracing::info!(
+            base = ?self.base,
+            spurious_vector,
+            version = ?version.get(Version::VERSION),
+            max_lvt_entry = ?version.get(Version::MAX_LVT),
+            supports_eoi_suppression = ?version.get(Version::EOI_SUPPRESSION),
+            "local APIC enabled",
+        );
+    }
+
+    /// Reads the local APIC's version register.
+    ///
+    /// The returned [`Version`] struct indicates the version of the local APIC,
+    /// the maximum LVT entry index, and whether or not EOI suppression is
+    /// supported.
+    pub fn version(&self) -> register::Version {
+        unsafe { self.register(register::VERSION) }.read()
     }
 
     /// Calibrate the timer frequency using the PIT.
@@ -509,7 +528,7 @@ pub mod register {
         /// Local APIC version
         ///
         /// **Access**: read-only
-        VERSION = 0x030, ReadOnly;
+        VERSION<Version> = 0x030, ReadOnly;
 
         /// Task Priority Register (TPR)
         ///
@@ -579,6 +598,33 @@ pub mod register {
         TIMER_INITIAL_COUNT = 0x380, ReadWrite;
         TIMER_CURRENT_COUNT = 0x390, ReadOnly;
         TIMER_DIVISOR = 0x3e0, ReadWrite;
+    }
+
+    bitfield! {
+        /// Value of the `VERSION` register in the local APIC.
+        pub struct Version<u32> {
+            /// The version numbers of the local APIC:
+            /// - 0XH: 82489DX discrete APIC.
+            /// -10H - 15H: Integrated APIC.
+            /// Other values reserved.
+            pub const VERSION: u8;
+            const _RESERVED_0 = 8;
+            /// The maximum number of LVT entries in the local APIC, minus one.
+            ///
+            /// For the Pentium 4 and Intel Xeon processors (which
+            /// have 6 LVT entries), the value returned in the Max LVT field is
+            /// 5; for the P6 family processors (which have 5 LVT entries), the
+            /// value returned is 4; for the Pentium processor (which has 4 LVT
+            /// entries), the value returned is 3. For processors based on the
+            /// Nehalem microarchitecture (which has 7 LVT entries) and onward,
+            /// the value returned is 6.
+            pub const MAX_LVT: u8;
+            /// Indicates whether software can inhibit the broadcast of EOI
+            /// message by setting bit 12 of the  Spurious Interrupt Vector
+            /// Register; see Section 12.8.5 and Section 12.9. in Ch. 7 of Vol.
+            /// 3A of the Intel SDM for details.
+            pub const EOI_SUPPRESSION: bool;
+        }
     }
 
     bitfield! {
