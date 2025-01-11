@@ -48,7 +48,7 @@ static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
     tss.interrupt_stacks[Idt::DOUBLE_FAULT_IST_OFFSET] = unsafe {
         // safety: asdf
         VAddr::from_usize_unchecked(core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize)
-            .offset(DOUBLE_FAULT_STACK_SIZE as i32)
+            .offset(DOUBLE_FAULT_STACK_SIZE as isize)
     };
     tracing::debug!(?tss, "TSS initialized");
     tss
