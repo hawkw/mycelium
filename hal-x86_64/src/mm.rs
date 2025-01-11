@@ -303,7 +303,7 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
-        Some(unsafe { &*NonNull::new(vaddr.as_ptr())?.as_ptr() })
+        Some(unsafe { &*NonNull::new(vaddr.as_mut_ptr())?.as_ptr() })
     }
 
     #[inline]
@@ -893,7 +893,7 @@ mycotest::decl_test! {
         };
         tracing::info!(?page, "page mapped!");
 
-        let page_ptr = page.base_addr().as_ptr::<u64>();
+        let page_ptr = page.base_addr().as_mut_ptr::<u64>();
         unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
 
         tracing::info!("wow, it didn't fault");

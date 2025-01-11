@@ -348,7 +348,7 @@ impl IoApic {
             tracing::debug!("mapped I/O APIC MMIO page!");
         }
 
-        let registers = unsafe { Volatile::new(&mut *base.as_ptr::<MmioRegisters>()) };
+        let registers = unsafe { Volatile::new(&mut *base.as_mut_ptr::<MmioRegisters>()) };
         let mut ioapic = Self { registers };
         tracing::info!(
             addr = ?base,
