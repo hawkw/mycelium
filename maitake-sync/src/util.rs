@@ -217,7 +217,6 @@ pub(crate) mod test {
     ///
     /// Returns a [TestGuard] that must be held for the duration of test to ensure
     /// tracing messages are correctly output
-
     #[cfg(all(test, not(loom)))]
     pub(crate) fn trace_init() -> TestGuard {
         trace_init_with_default("maitake=debug,cordyceps=debug")

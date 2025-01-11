@@ -110,14 +110,14 @@ where
 /// This value should only be set once, early in the kernel boot process before
 /// we have access to multiple cores. So, technically, it could be a `static
 /// mut`. But, using an atomic is safe, even though it's not strictly necessary.
-static VM_OFFSET: AtomicUsize = AtomicUsize::new(core::usize::MAX);
+static VM_OFFSET: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 // XXX(eliza): this sucks
 pub fn vm_offset() -> VAddr {
     let off = VM_OFFSET.load(Ordering::Acquire);
     assert_ne!(
         off,
-        core::usize::MAX,
+        usize::MAX,
         "`init_paging` must be called before calling `vm_offset`!"
     );
     VAddr::from_usize(off)
@@ -204,7 +204,7 @@ impl PageCtrl {
         let vm_offset = VM_OFFSET.load(Ordering::Acquire);
         assert_ne!(
             vm_offset,
-            core::usize::MAX,
+            usize::MAX,
             "`init_paging` must be called before calling `PageTable::current`!"
         );
         let vm_offset = VAddr::from_usize(vm_offset);
@@ -303,7 +303,7 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
-        Some(unsafe { &*NonNull::new(vaddr.as_ptr())?.as_ptr() })
+        Some(unsafe { vaddr.as_non_null()?.as_ref() })
     }
 
     #[inline]
@@ -336,7 +336,7 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
-        Some(unsafe { &mut *NonNull::new(vaddr.as_ptr())?.as_ptr() })
+        Some(unsafe { vaddr.as_non_null()?.as_mut() })
     }
 
     fn create_next_table<S: Size>(
@@ -587,7 +587,7 @@ impl<L: level::PointsToPage> page::PageFlags<L::Size> for Entry<L> {
 impl<L: Level> fmt::Debug for Entry<L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct FmtFlags<'a, L>(&'a Entry<L>);
-        impl<'a, L> fmt::Debug for FmtFlags<'a, L> {
+        impl<L> fmt::Debug for FmtFlags<'_, L> {
             #[inline(always)]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 macro_rules! write_flags {
@@ -893,7 +893,7 @@ mycotest::decl_test! {
         };
         tracing::info!(?page, "page mapped!");
 
-        let page_ptr = page.base_addr().as_ptr::<u64>();
+        let page_ptr = page.base_addr().as_mut_ptr::<u64>();
         unsafe { page_ptr.offset(400).write_volatile(0x_f021_f077_f065_f04e)};
 
         tracing::info!("wow, it didn't fault");

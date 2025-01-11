@@ -561,6 +561,7 @@ impl mycelium_bitfield::FromBits<usize> for JoinWakerState {
     const BITS: u32 = 2;
 
     #[inline]
+    #[allow(clippy::literal_string_with_formatting_args)]
     fn try_from_bits(bits: usize) -> Result<Self, Self::Error> {
         match bits {
             b if b == Self::Registering as usize => Ok(Self::Registering),
@@ -590,7 +591,7 @@ mod tests {
     fn packing_specs_valid() {
         State::assert_valid()
     }
-    
+
     #[test]
     // No sense spending time running these trivial tests under Miri...
     #[cfg_attr(miri, ignore)]

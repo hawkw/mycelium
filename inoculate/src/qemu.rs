@@ -31,9 +31,15 @@ pub enum Cmd {
     Test {
         /// Timeout for failing test run, in seconds.
         ///
-        /// If a test run doesn't complete before this timeout has elapsed, it's
-        /// considered to have failed.
-        #[clap(long, value_parser = parse_secs, default_value = "60")]
+        /// If a test run doesn't complete before this timeout has elapsed, the
+        /// QEMU VM is killed and the test run is assumed to have failed.
+        ///
+        /// Note that this timeout applies to the entire test run, including
+        /// booting the kernel and running the whole kernel test suite, rather
+        /// than to each individual test.
+        ///
+        /// By default, this is 20 minutes (1200 seconds).
+        #[clap(long, value_parser = parse_secs, default_value = "1200")]
         timeout_secs: Duration,
 
         /// Disables capturing test serial output.
@@ -78,12 +84,7 @@ struct TestResults {
 impl Cmd {
     fn should_capture(&self) -> bool {
         match self {
-            Cmd::Test {
-                nocapture: true, ..
-            } => {
-                tracing::debug!("running tests with `--nocapture`, will not capture.");
-                false
-            }
+            Cmd::Test { .. } => true,
             Cmd::Run { serial: true, .. } => {
                 tracing::debug!("running normally with `--serial`, will not capture");
                 false
@@ -184,6 +185,7 @@ impl Cmd {
             }
 
             Cmd::Test {
+                nocapture,
                 qemu_settings,
                 timeout_secs,
                 ..
@@ -198,16 +200,21 @@ impl Cmd {
                     "none",
                     "-serial",
                     "stdio",
+                    // tell QEMU to log guest errors
+                    "-d",
+                    "guest_errors",
                 ];
                 tracing::info!("running kernel tests ({})", paths.relative(image).display());
                 qemu_settings.configure(&mut qemu);
+
+                tracing::info!(qemu.test_args = ?TEST_ARGS, "using test mode qemu args");
                 qemu.args(TEST_ARGS);
 
+                let nocapture = *nocapture;
                 let mut child = self.spawn_qemu(&mut qemu, paths.kernel_bin())?;
-                let stdout = child
-                    .stdout
-                    .take()
-                    .map(|stdout| std::thread::spawn(move || TestResults::watch_tests(stdout)));
+                let stdout = child.stdout.take().map(|stdout| {
+                    std::thread::spawn(move || TestResults::watch_tests(stdout, nocapture))
+                });
 
                 let res = match child
                     .wait_timeout(*timeout_secs)
@@ -293,7 +300,7 @@ fn parse_secs(s: &str) -> Result<Duration> {
 }
 
 impl TestResults {
-    fn watch_tests(output: impl std::io::Read) -> Result<Self> {
+    fn watch_tests(output: impl std::io::Read, nocapture: bool) -> Result<Self> {
         use std::io::{BufRead, BufReader};
         let mut results = Self {
             tests: 0,
@@ -358,8 +365,11 @@ impl TestResults {
                             .note(format!("line: {line:?}"));
                         }
                     }
-
-                    curr_output.push(line);
+                    if nocapture {
+                        println!("{line}")
+                    } else {
+                        curr_output.push(line);
+                    }
                 }
 
                 match curr_outcome {
@@ -380,7 +390,9 @@ impl TestResults {
                     }
                     None => {
                         tracing::info!("qemu exited unexpectedly! wtf!");
-                        curr_output.push("<AND THEN QEMU EXITS???>".to_string());
+                        if !nocapture {
+                            curr_output.push("<AND THEN QEMU EXITS???>".to_string());
+                        }
                         eprintln!(" {}", "exit!".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                         break;

@@ -285,7 +285,7 @@ impl<W, const BIT: u64> Output<W, BIT> {
 
 // === impl WriterPair ===
 
-impl<'a, D, S> SetColor for WriterPair<'a, D, S>
+impl<D, S> SetColor for WriterPair<'_, D, S>
 where
     D: Write + SetColor,
     S: Write + SetColor,
@@ -317,7 +317,7 @@ where
     }
 }
 
-impl<'a, D, S> Write for WriterPair<'a, D, S>
+impl<D, S> Write for WriterPair<'_, D, S>
 where
     D: Write,
     S: Write,
@@ -347,7 +347,7 @@ where
     }
 }
 
-impl<'a, D, S> WriterPair<'a, D, S>
+impl<D, S> WriterPair<'_, D, S>
 where
     D: Write,
     S: Write,
@@ -371,7 +371,7 @@ where
 
 // ==== impl Writer ===
 
-impl<'a, W: Write> Writer<'a, W> {
+impl<W: Write> Writer<'_, W> {
     fn indent(&mut self, kind: IndentKind) -> fmt::Result {
         let indent = self.cfg.indent.load(Ordering::Acquire);
         self.write_indent(" ")?;
@@ -409,7 +409,7 @@ impl<'a, W: Write> Writer<'a, W> {
     }
 }
 
-impl<'a, W> Write for Writer<'a, W>
+impl<W> Write for Writer<'_, W>
 where
     W: Write,
 {
@@ -456,7 +456,7 @@ where
     }
 }
 
-impl<'a, W> SetColor for Writer<'a, W>
+impl<W> SetColor for Writer<'_, W>
 where
     W: Write + SetColor,
 {
@@ -473,7 +473,7 @@ where
     }
 }
 
-impl<'a, W: Write> Drop for Writer<'a, W> {
+impl<W: Write> Drop for Writer<'_, W> {
     fn drop(&mut self) {
         let _ = self.finish();
     }
@@ -539,7 +539,7 @@ where
             has_written_punct: bool,
         }
 
-        impl<'a, W: fmt::Write> fmt::Write for HasWrittenNewline<'a, W> {
+        impl<W: fmt::Write> fmt::Write for HasWrittenNewline<'_, W> {
             #[inline]
             fn write_str(&mut self, s: &str) -> fmt::Result {
                 self.has_written_punct = s.ends_with(|ch: char| ch.is_ascii_punctuation());
@@ -550,7 +550,7 @@ where
             }
         }
 
-        impl<'a, W: fmt::Write> SetColor for HasWrittenNewline<'a, W>
+        impl<W: fmt::Write> SetColor for HasWrittenNewline<'_, W>
         where
             W: SetColor,
         {

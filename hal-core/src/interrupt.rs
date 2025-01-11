@@ -91,7 +91,7 @@ enum RegistrationErrorKind {
 
 // === impl CriticalGuard ===
 
-impl<'a, C: Control + ?Sized> Drop for CriticalGuard<'a, C> {
+impl<C: Control + ?Sized> Drop for CriticalGuard<'_, C> {
     fn drop(&mut self) {
         unsafe {
             self.ctrl.enable();

@@ -34,6 +34,7 @@ macro_rules! unreachable_unchecked {
     });
     ($fmt:expr, $($arg:tt)*) => ({
         #[cfg(any(test, debug_assertions))]
+        #[allow(clippy::literal_string_with_formatting_args)]
         panic!(
             concat!(
                 "internal error: entered unreachable code: ",

@@ -246,7 +246,7 @@ feature! {
 
 // === impl Settings ===
 
-impl<'a> Settings<'a> {
+impl Settings<'_> {
     /// Returns a new, empty task builder with no settings configured.
     #[must_use]
     pub(crate) const fn new() -> Self {

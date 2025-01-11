@@ -187,7 +187,7 @@ macro_rules! deref_draw_body {
     };
 }
 
-impl<'lock, D, L> Draw for blocking::MutexGuard<'lock, D, L>
+impl<D, L> Draw for blocking::MutexGuard<'_, D, L>
 where
     D: Draw,
     L: blocking::RawMutex,
@@ -195,7 +195,7 @@ where
     deref_draw_body! {}
 }
 
-impl<'draw, D> Draw for &'draw mut D
+impl<D> Draw for &'_ mut D
 where
     D: Draw,
 {

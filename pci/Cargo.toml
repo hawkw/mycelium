@@ -13,7 +13,7 @@ readme = "README.md"
 keywords = ["no_std", "pci", "pcie"]
 categories = ["no-std",]
 edition = "2021"
-rust-version = "1.61.0"
+rust-version = "1.62.0"
 
 [dependencies]
 mycelium-util = { path = "../util" }

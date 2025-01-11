@@ -1,4 +1,4 @@
-use core::{fmt, ops};
+use core::{fmt, ops, ptr};
 
 pub trait Address:
     Copy
@@ -76,10 +76,10 @@ pub trait Address:
         self.align_down(core::mem::align_of::<T>())
     }
 
-    /// Offsets this address by `offset`.
+    /// Offsets this address by `offset` bytes.
     ///
     /// If the specified offset would overflow, this function saturates instead.
-    fn offset(self, offset: i32) -> Self {
+    fn offset(self, offset: isize) -> Self {
         if offset > 0 {
             self + offset as usize
         } else {
@@ -117,11 +117,14 @@ pub trait Address:
         self.is_aligned(core::mem::align_of::<T>())
     }
 
+    /// Converts this address into a const pointer to a value of type `T`.
+    ///
     /// # Panics
     ///
     /// - If `self` is not aligned for a `T`-typed value.
+    #[inline]
     #[track_caller]
-    fn as_ptr<T>(self) -> *mut T {
+    fn as_ptr<T>(self) -> *const T {
         // Some architectures permit unaligned reads, but Rust considers
         // dereferencing a pointer that isn't type-aligned to be UB.
         assert!(
@@ -129,7 +132,37 @@ pub trait Address:
             "assertion failed: self.is_aligned_for::<{}>();\n\tself={self:?}",
             core::any::type_name::<T>(),
         );
-        self.as_usize() as *mut T
+        ptr::with_exposed_provenance(self.as_usize())
+    }
+
+    /// Converts this address into a mutable pointer to a value of type `T`.
+    ///
+    /// # Panics
+    ///
+    /// - If `self` is not aligned for a `T`-typed value.
+    #[inline]
+    #[track_caller]
+    fn as_mut_ptr<T>(self) -> *mut T {
+        // Some architectures permit unaligned reads, but Rust considers
+        // dereferencing a pointer that isn't type-aligned to be UB.
+        assert!(
+            self.is_aligned_for::<T>(),
+            "assertion failed: self.is_aligned_for::<{}>();\n\tself={self:?}",
+            core::any::type_name::<T>(),
+        );
+        ptr::with_exposed_provenance_mut(self.as_usize())
+    }
+
+    /// Converts this address into a `Option<NonNull<T>>` from a
+    /// `VAddr`, returning `None` if the address is null.
+    ///
+    /// # Panics
+    ///
+    /// - If `self` is not aligned for a `T`-typed value.
+    #[inline]
+    #[track_caller]
+    fn as_non_null<T>(self) -> Option<ptr::NonNull<T>> {
+        ptr::NonNull::new(self.as_mut_ptr::<T>())
     }
 }
 
@@ -300,11 +333,11 @@ macro_rules! impl_addrs {
                     Address::align_down(self, align)
                 }
 
-                /// Offsets this address by `offset`.
+                /// Offsets this address by `offset` bytes.
                 ///
                 /// If the specified offset would overflow, this function saturates instead.
                 #[inline]
-                pub fn offset(self, offset: i32) -> Self {
+                pub fn offset(self, offset: isize) -> Self {
                     Address::offset(self, offset)
                 }
 
@@ -327,12 +360,38 @@ macro_rules! impl_addrs {
                     Address::is_aligned_for::<T>(self)
                 }
 
+                /// Converts this address into a const pointer to a value of type `T`.
+                ///
                 /// # Panics
                 ///
                 /// - If `self` is not aligned for a `T`-typed value.
                 #[inline]
-                pub fn as_ptr<T>(self) -> *mut T {
+                #[track_caller]
+                pub fn as_ptr<T>(self) -> *const T {
                     Address::as_ptr(self)
+                }
+
+                /// Converts this address into a mutable pointer to a value of type `T`.
+                ///
+                /// # Panics
+                ///
+                /// - If `self` is not aligned for a `T`-typed value.
+                #[inline]
+                #[track_caller]
+                pub fn as_mut_ptr<T>(self) -> *mut T {
+                    Address::as_mut_ptr(self)
+                }
+
+                /// Converts this address into a `Option<NonNull<T>>` from a
+                /// `VAddr`, returning `None` if the address is null.
+                ///
+                /// # Panics
+                ///
+                /// - If `self` is not aligned for a `T`-typed value.
+                #[inline]
+                #[track_caller]
+                pub fn as_non_null<T>(self) -> Option<ptr::NonNull<T>> {
+                    ptr::NonNull::new(self.as_mut_ptr::<T>())
                 }
             }
         )+
@@ -392,9 +451,15 @@ impl VAddr {
         Self(u)
     }
 
+    /// Constructs a `VAddr` from a `*const T` pointer, exposing its provenance.
+    #[inline]
+    pub fn from_ptr<T: ?Sized>(ptr: *const T) -> Self {
+        Self::from_usize(ptr.expose_provenance())
+    }
+
     #[inline]
     pub fn of<T: ?Sized>(pointee: &T) -> Self {
-        Self::from_usize(pointee as *const _ as *const () as usize)
+        Self::from_ptr(pointee as *const T)
     }
 }
 

@@ -1229,7 +1229,7 @@ mod tests {
                         prop_assert_bits_eq!(packed, pack_from_src.set_all(0), state);
                         prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);
 
-                        let dst = <$Bits>::max_value();
+                        let dst = <$Bits>::MAX;
                         let packed = pair.pack_from_src(src, dst);
                         prop_assert_bits_eq!(packed, pack_from_src.set_all(0), state);
                         prop_assert_bits_eq!(pack_from_src.unpack_bits(packed), pack_from_dst.unpack_bits(dst), &state);

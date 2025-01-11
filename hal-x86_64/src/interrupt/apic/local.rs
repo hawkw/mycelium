@@ -545,7 +545,7 @@ impl LocalApic {
             addr.is_aligned(16usize),
             "Local APIC memory-mapped registers must be 16-byte aligned!"
         );
-        let reference = &mut *addr.as_ptr::<T>();
+        let reference = &mut *addr.as_mut_ptr::<T>();
         LocalApicRegister::<T, A>::volatile(reference)
     }
 }

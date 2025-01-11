@@ -103,6 +103,12 @@ impl WaitCell {
     }
 }
 
+impl Default for WaitCell {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WaitCell {
     /// Poll to wait on this `WaitCell`, consuming a stored wakeup or
     /// registering the [`Waker`] from the provided [`Context`] to be woken by
