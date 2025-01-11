@@ -51,6 +51,12 @@ impl<const SIZE: usize> Alloc<SIZE> {
     }
 }
 
+impl<const SIZE: usize> Default for Alloc<SIZE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 unsafe impl<const SIZE: usize> GlobalAlloc for Alloc<SIZE> {
     /// # Safety
     ///

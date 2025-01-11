@@ -237,6 +237,12 @@ impl Idt {
     }
 }
 
+impl Default for Idt {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Debug for Idt {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let Self { descriptors } = self;

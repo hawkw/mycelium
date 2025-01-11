@@ -109,6 +109,12 @@ impl Address {
     }
 }
 
+impl Default for Address {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::LowerHex::fmt(self, f)
