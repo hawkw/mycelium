@@ -31,9 +31,15 @@ pub enum Cmd {
     Test {
         /// Timeout for failing test run, in seconds.
         ///
-        /// If a test run doesn't complete before this timeout has elapsed, it's
-        /// considered to have failed.
-        #[clap(long, value_parser = parse_secs, default_value = "60")]
+        /// If a test run doesn't complete before this timeout has elapsed, the
+        /// QEMU VM is killed and the test run is assumed to have failed.
+        ///
+        /// Note that this timeout applies to the entire test run, including
+        /// booting the kernel and running the whole kernel test suite, rather
+        /// than to each individual test.
+        ///
+        /// By default, this is 20 minutes (1200 seconds).
+        #[clap(long, value_parser = parse_secs, default_value = "1200")]
         timeout_secs: Duration,
 
         /// Disables capturing test serial output.
