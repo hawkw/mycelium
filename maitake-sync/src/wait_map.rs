@@ -735,7 +735,7 @@ where
     wait: Pin<&'a mut Wait<'b, K, V, Lock>>,
 }
 
-impl<'a, 'b, K, V, Lock> Future for Subscribe<'a, 'b, K, V, Lock>
+impl<K, V, Lock> Future for Subscribe<'_, '_, K, V, Lock>
 where
     K: PartialEq,
     Lock: ScopedRawMutex,

@@ -274,7 +274,7 @@ impl<B> Lock<'_, B> {
         }
 
         let divisor = Port::MAX_BAUD_RATE / baud;
-        if divisor > (core::u16::MAX as usize) {
+        if divisor > (u16::MAX as usize) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "divisor for target baud rate is too high!",

@@ -96,7 +96,7 @@ impl<W: SetColor> SetColor for &'_ mut W {
 
 // === impl WithFgColor ===
 
-impl<'writer, W> fmt::Write for WithFgColor<'writer, W>
+impl<W> fmt::Write for WithFgColor<'_, W>
 where
     W: fmt::Write + SetColor,
 {
@@ -116,7 +116,7 @@ where
     }
 }
 
-impl<'writer, W> Drop for WithFgColor<'writer, W>
+impl<W> Drop for WithFgColor<'_, W>
 where
     W: fmt::Write + SetColor,
 {
@@ -127,7 +127,7 @@ where
 
 // === impl WithBold ===
 
-impl<'writer, W> fmt::Write for WithBold<'writer, W>
+impl<W> fmt::Write for WithBold<'_, W>
 where
     W: fmt::Write + SetColor,
 {
@@ -147,7 +147,7 @@ where
     }
 }
 
-impl<'writer, W> Drop for WithBold<'writer, W>
+impl<W> Drop for WithBold<'_, W>
 where
     W: fmt::Write + SetColor,
 {

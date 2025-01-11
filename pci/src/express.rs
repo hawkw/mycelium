@@ -17,7 +17,7 @@ enum MmKind<'device> {
     PciBridge(Volatile<&'device mut PciBridgeDetails>),
 }
 
-impl<'device> MemoryMappedDevice<'device> {
+impl MemoryMappedDevice<'_> {
     pub fn header(&self) -> device::Header {
         self.header.read()
     }
