@@ -1,5 +1,5 @@
 use acpi::{AcpiError, AcpiHandler, AcpiTables};
-use core::{fmt, ptr::NonNull};
+use core::fmt;
 use hal_core::{Address, PAddr};
 use hal_x86_64::mm;
 
@@ -74,8 +74,9 @@ impl AcpiHandler for IdentityMappedAcpiHandler {
     ) -> acpi::PhysicalMapping<Self, T> {
         let paddr = PAddr::from_u64(physical_address as u64);
         let vaddr = mm::kernel_vaddr_of(paddr);
-        let vptr =
-            NonNull::new(vaddr.as_ptr()).expect("virtual address for ACPI region is not null");
+        let vptr = vaddr
+            .as_non_null()
+            .expect("virtual address for ACPI region is not null");
         // we have identity mapped all physical memory, so we don't actually
         // have to map any pages --- just tell the ACPI crate that it can use
         // this region.
