@@ -396,7 +396,7 @@ where
     }
 }
 
-impl<'a, W, Lock> fmt::Write for MutexGuardWriter<'a, W, Lock>
+impl<W, Lock> fmt::Write for MutexGuardWriter<'_, W, Lock>
 where
     W: fmt::Write,
     Lock: RawMutex,

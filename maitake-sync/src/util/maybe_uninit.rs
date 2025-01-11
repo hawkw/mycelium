@@ -365,7 +365,6 @@ impl<T> CheckedMaybeUninit<T> {
     ///     foo.assume_init()
     /// };
     /// ```
-
     #[inline(always)]
     #[track_caller]
     pub unsafe fn assume_init_mut(&mut self) -> &mut T {

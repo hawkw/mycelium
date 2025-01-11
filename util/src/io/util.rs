@@ -15,10 +15,10 @@ use core::{fmt, mem::MaybeUninit};
 /// This function will return an error immediately if any call to `read` or
 /// `write` returns an error. All instances of `ErrorKind::Interrupted` are
 /// handled by this function and the underlying operation is retried.
-pub fn copy<R: ?Sized, W: ?Sized>(reader: &mut R, writer: &mut W) -> io::Result<u64>
+pub fn copy<R, W>(reader: &mut R, writer: &mut W) -> io::Result<u64>
 where
-    R: Read,
-    W: Write,
+    R: ?Sized + Read,
+    W: ?Sized + Write,
 {
     let mut buf = MaybeUninit::<[u8; super::DEFAULT_BUF_SIZE]>::uninit();
     // FIXME(eliza): the stdlib has a scary comment that says we haven't decided

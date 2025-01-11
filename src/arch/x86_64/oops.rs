@@ -312,7 +312,7 @@ impl<'a> From<&'a PanicInfo<'a>> for Oops<'a> {
 
 // === impl OopsSituation ===
 
-impl<'a> OopsSituation<'a> {
+impl OopsSituation<'_> {
     fn header(&self) -> &'static str {
         match self {
             Self::Fault { .. } => " OOPSIE-WOOPSIE! ",

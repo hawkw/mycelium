@@ -18,7 +18,6 @@ use core::fmt;
 /// [`io::Error`]: Error
 /// [`Result`]: core::result::Result
 /// [prelude]: core::prelude
-
 pub type Result<T> = core::result::Result<T, self::Error>;
 
 /// The error type for I/O operations of the [`Read`], [`Write`], [`Seek`], and

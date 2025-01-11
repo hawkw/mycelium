@@ -35,7 +35,7 @@ pub struct TextWriter<'mk, D> {
 }
 
 const fn pack_point(Point { x, y }: Point) -> u64 {
-    (x as u64) << 32 | y as u64
+    ((x as u64) << 32) | y as u64
 }
 
 const fn unpack_point(u: u64) -> Point {
@@ -140,7 +140,7 @@ where
     }
 }
 
-impl<'mk, D> SetColor for TextWriter<'mk, D>
+impl<D> SetColor for TextWriter<'_, D>
 where
     D: Draw,
 {
@@ -188,7 +188,7 @@ where
     }
 }
 
-impl<'mk, D> TextWriter<'mk, D>
+impl<D> TextWriter<'_, D>
 where
     D: Draw,
 {

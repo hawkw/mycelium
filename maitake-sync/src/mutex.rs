@@ -94,7 +94,6 @@ mod tests;
 // for some reason, intra-doc links don't work in footnotes?
 /// [storage]: https://mycelium.elizas.website/maitake/task/trait.Storage.html
 /// [no-unwinding]: https://mycelium.elizas.website/maitake/index.html#maitake-does-not-support-unwinding
-
 pub struct Mutex<T: ?Sized, L: ScopedRawMutex = DefaultMutex> {
     wait: WaitQueue<L>,
     data: UnsafeCell<T>,

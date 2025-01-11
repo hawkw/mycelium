@@ -110,14 +110,14 @@ where
 /// This value should only be set once, early in the kernel boot process before
 /// we have access to multiple cores. So, technically, it could be a `static
 /// mut`. But, using an atomic is safe, even though it's not strictly necessary.
-static VM_OFFSET: AtomicUsize = AtomicUsize::new(core::usize::MAX);
+static VM_OFFSET: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 // XXX(eliza): this sucks
 pub fn vm_offset() -> VAddr {
     let off = VM_OFFSET.load(Ordering::Acquire);
     assert_ne!(
         off,
-        core::usize::MAX,
+        usize::MAX,
         "`init_paging` must be called before calling `vm_offset`!"
     );
     VAddr::from_usize(off)
@@ -204,7 +204,7 @@ impl PageCtrl {
         let vm_offset = VM_OFFSET.load(Ordering::Acquire);
         assert_ne!(
             vm_offset,
-            core::usize::MAX,
+            usize::MAX,
             "`init_paging` must be called before calling `PageTable::current`!"
         );
         let vm_offset = VAddr::from_usize(vm_offset);
@@ -587,7 +587,7 @@ impl<L: level::PointsToPage> page::PageFlags<L::Size> for Entry<L> {
 impl<L: Level> fmt::Debug for Entry<L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct FmtFlags<'a, L>(&'a Entry<L>);
-        impl<'a, L> fmt::Debug for FmtFlags<'a, L> {
+        impl<L> fmt::Debug for FmtFlags<'_, L> {
             #[inline(always)]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 macro_rules! write_flags {

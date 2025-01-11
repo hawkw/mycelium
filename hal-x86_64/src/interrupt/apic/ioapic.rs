@@ -440,7 +440,7 @@ impl IoApic {
     fn entry_raw(&mut self, register_low: u32) -> RedirectionEntry {
         let low = self.read(register_low);
         let high = self.read(register_low + 1);
-        RedirectionEntry::from_bits((high as u64) << 32 | low as u64)
+        RedirectionEntry::from_bits(((high as u64) << 32) | low as u64)
     }
 
     #[inline]
@@ -453,7 +453,6 @@ impl IoApic {
     }
 
     #[must_use]
-
     fn read(&mut self, offset: u32) -> u32 {
         self.set_offset(offset);
         self.registers.map_mut(|ioapic| &mut ioapic.data).read()

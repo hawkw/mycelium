@@ -386,7 +386,7 @@ impl Controller {
     }
 }
 
-impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
+impl<T> hal_core::interrupt::Context for Context<'_, T> {
     type Registers = Registers;
 
     fn registers(&self) -> &Registers {
@@ -402,7 +402,7 @@ impl<'a, T> hal_core::interrupt::Context for Context<'a, T> {
     }
 }
 
-impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
+impl ctx::PageFault for Context<'_, PageFaultCode> {
     fn fault_vaddr(&self) -> crate::VAddr {
         crate::control_regs::Cr2::read()
     }
@@ -416,7 +416,7 @@ impl<'a> ctx::PageFault for Context<'a, PageFaultCode> {
     }
 }
 
-impl<'a> ctx::CodeFault for Context<'a, CodeFault<'a>> {
+impl ctx::CodeFault for Context<'_, CodeFault<'_>> {
     fn is_user_mode(&self) -> bool {
         false // TODO(eliza)
     }
@@ -434,13 +434,13 @@ impl<'a> ctx::CodeFault for Context<'a, CodeFault<'a>> {
     }
 }
 
-impl<'a> Context<'a, ErrorCode> {
+impl Context<'_, ErrorCode> {
     pub fn error_code(&self) -> ErrorCode {
         self.code
     }
 }
 
-impl<'a> Context<'a, PageFaultCode> {
+impl Context<'_, PageFaultCode> {
     pub fn page_fault_code(&self) -> PageFaultCode {
         self.code
     }
