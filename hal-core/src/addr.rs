@@ -76,10 +76,10 @@ pub trait Address:
         self.align_down(core::mem::align_of::<T>())
     }
 
-    /// Offsets this address by `offset`.
+    /// Offsets this address by `offset` bytes.
     ///
     /// If the specified offset would overflow, this function saturates instead.
-    fn offset(self, offset: i32) -> Self {
+    fn offset(self, offset: isize) -> Self {
         if offset > 0 {
             self + offset as usize
         } else {
@@ -333,11 +333,11 @@ macro_rules! impl_addrs {
                     Address::align_down(self, align)
                 }
 
-                /// Offsets this address by `offset`.
+                /// Offsets this address by `offset` bytes.
                 ///
                 /// If the specified offset would overflow, this function saturates instead.
                 #[inline]
-                pub fn offset(self, offset: i32) -> Self {
+                pub fn offset(self, offset: isize) -> Self {
                     Address::offset(self, offset)
                 }
 

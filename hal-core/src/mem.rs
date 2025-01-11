@@ -84,13 +84,13 @@ impl<A: Address> Region<A> {
     }
 
     pub fn split_front(&mut self, size: usize) -> Option<Self> {
-        assert!(size <= core::i32::MAX as usize);
+        assert!(size <= isize::MAX as usize);
         if size > self.size {
             return None;
         }
         let base = self.base;
         tracing::trace!(size, self.size, "splitting down by");
-        self.base = self.base.offset(size as i32);
+        self.base = self.base.offset(size as isize);
         self.size -= size;
         Some(Self {
             base,
@@ -100,12 +100,12 @@ impl<A: Address> Region<A> {
     }
 
     pub fn split_back(&mut self, size: usize) -> Option<Self> {
-        assert!(size <= core::i32::MAX as usize);
+        assert!(size <= isize::MAX as usize);
         if size >= self.size {
             return None;
         }
         let rem_size = self.size - size;
-        let base = self.base.offset(size as i32);
+        let base = self.base.offset(size as isize);
         tracing::trace!(
             size,
             self.size,
