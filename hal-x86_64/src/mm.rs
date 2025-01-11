@@ -303,7 +303,7 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
-        Some(unsafe { &*NonNull::new(vaddr.as_mut_ptr())?.as_ptr() })
+        Some(unsafe { vaddr.as_non_null()?.as_ref() })
     }
 
     #[inline]
@@ -336,7 +336,7 @@ impl<R: level::Recursive> PageTable<R> {
         tracing::trace!(next.addr = ?vaddr, "found next table virtual address");
         // XXX(eliza): this _probably_ could be be a `new_unchecked`...if, after
         // all this, the next table address is null...we're probably pretty fucked!
-        Some(unsafe { &mut *NonNull::new(vaddr.as_ptr())?.as_ptr() })
+        Some(unsafe { vaddr.as_non_null()?.as_mut() })
     }
 
     fn create_next_table<S: Size>(

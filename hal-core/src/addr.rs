@@ -152,6 +152,18 @@ pub trait Address:
         );
         ptr::with_exposed_provenance_mut(self.as_usize())
     }
+
+    /// Converts this address into a `Option<NonNull<T>>` from a
+    /// `VAddr`, returning `None` if the address is null.
+    ///
+    /// # Panics
+    ///
+    /// - If `self` is not aligned for a `T`-typed value.
+    #[inline]
+    #[track_caller]
+    fn as_non_null<T>(self) -> Option<ptr::NonNull<T>> {
+        ptr::NonNull::new(self.as_mut_ptr::<T>())
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -368,6 +380,18 @@ macro_rules! impl_addrs {
                 #[track_caller]
                 pub fn as_mut_ptr<T>(self) -> *mut T {
                     Address::as_mut_ptr(self)
+                }
+
+                /// Converts this address into a `Option<NonNull<T>>` from a
+                /// `VAddr`, returning `None` if the address is null.
+                ///
+                /// # Panics
+                ///
+                /// - If `self` is not aligned for a `T`-typed value.
+                #[inline]
+                #[track_caller]
+                pub fn as_non_null<T>(self) -> Option<ptr::NonNull<T>> {
+                    ptr::NonNull::new(self.as_mut_ptr::<T>())
                 }
             }
         )+
