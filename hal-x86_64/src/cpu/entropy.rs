@@ -69,7 +69,7 @@ pub fn seed_rng<R: SeedableRng>() -> R {
 #[derive(Debug, Copy, Clone)]
 pub struct Rdrand(());
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct PitEntropy(());
 
 // === impl Rdrand ===

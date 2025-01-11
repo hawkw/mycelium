@@ -419,6 +419,10 @@ macro_rules! bitfield {
             /// Constructs a new instance of `Self` with all bits set to 0.
             #[inline]
             #[must_use]
+            // Allow "new without default", as the user may wish to derive
+            // default or provide their own implementation with different values
+            // from `new`.
+            #[allow(clippy::new_without_default)]
             $vis const fn new() -> Self {
                 Self(0)
             }

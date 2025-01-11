@@ -528,6 +528,9 @@ struct Core {
 impl TaskStub {
     loom_const_fn! {
         /// Create a new unique stub [`Task`].
+        // Thee whole point of this thing is to be const-initialized, so a
+        // non-const-fn `Default` impl is basically useless.
+        #[allow(clippy::new_without_default)]
         pub fn new() -> Self {
             Self {
                 hdr: Header::new_static_stub(),

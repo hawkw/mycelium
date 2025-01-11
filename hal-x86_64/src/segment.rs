@@ -396,6 +396,12 @@ impl<const SIZE: usize> Gdt<SIZE> {
     }
 }
 
+impl<const SIZE: usize> Default for Gdt<SIZE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct GdtEntries<'a, const SIZE: usize>(&'a Gdt<SIZE>);

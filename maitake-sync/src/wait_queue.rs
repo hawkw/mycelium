@@ -379,6 +379,15 @@ impl WaitQueue {
     }
 }
 
+impl<Lock> Default for WaitQueue<Lock>
+where
+    Lock: ScopedRawMutex + Default,
+{
+    fn default() -> Self {
+        Self::new_with_raw_mutex(Lock::default())
+    }
+}
+
 impl<Lock> WaitQueue<Lock>
 where
     Lock: ScopedRawMutex,

@@ -465,6 +465,16 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 }
 
+impl<K, V, Lock> Default for WaitMap<K, V, Lock>
+where
+    K: PartialEq,
+    Lock: ScopedRawMutex + Default,
+{
+    fn default() -> Self {
+        Self::new_with_raw_mutex(Lock::default())
+    }
+}
+
 impl<K, V, Lock> WaitMap<K, V, Lock>
 where
     K: PartialEq,
