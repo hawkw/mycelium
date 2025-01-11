@@ -78,12 +78,7 @@ struct TestResults {
 impl Cmd {
     fn should_capture(&self) -> bool {
         match self {
-            Cmd::Test {
-                nocapture: true, ..
-            } => {
-                tracing::debug!("running tests with `--nocapture`, will not capture.");
-                false
-            }
+            Cmd::Test { .. } => true,
             Cmd::Run { serial: true, .. } => {
                 tracing::debug!("running normally with `--serial`, will not capture");
                 false
@@ -184,6 +179,7 @@ impl Cmd {
             }
 
             Cmd::Test {
+                nocapture,
                 qemu_settings,
                 timeout_secs,
                 ..
@@ -208,11 +204,11 @@ impl Cmd {
                 tracing::info!(qemu.test_args = ?TEST_ARGS, "using test mode qemu args");
                 qemu.args(TEST_ARGS);
 
+                let nocapture = *nocapture;
                 let mut child = self.spawn_qemu(&mut qemu, paths.kernel_bin())?;
-                let stdout = child
-                    .stdout
-                    .take()
-                    .map(|stdout| std::thread::spawn(move || TestResults::watch_tests(stdout)));
+                let stdout = child.stdout.take().map(|stdout| {
+                    std::thread::spawn(move || TestResults::watch_tests(stdout, nocapture))
+                });
 
                 let res = match child
                     .wait_timeout(*timeout_secs)
@@ -298,7 +294,7 @@ fn parse_secs(s: &str) -> Result<Duration> {
 }
 
 impl TestResults {
-    fn watch_tests(output: impl std::io::Read) -> Result<Self> {
+    fn watch_tests(output: impl std::io::Read, nocapture: bool) -> Result<Self> {
         use std::io::{BufRead, BufReader};
         let mut results = Self {
             tests: 0,
@@ -363,8 +359,11 @@ impl TestResults {
                             .note(format!("line: {line:?}"));
                         }
                     }
-
-                    curr_output.push(line);
+                    if nocapture {
+                        println!("{line}")
+                    } else {
+                        curr_output.push(line);
+                    }
                 }
 
                 match curr_outcome {
@@ -385,7 +384,9 @@ impl TestResults {
                     }
                     None => {
                         tracing::info!("qemu exited unexpectedly! wtf!");
-                        curr_output.push("<AND THEN QEMU EXITS???>".to_string());
+                        if !nocapture {
+                            curr_output.push("<AND THEN QEMU EXITS???>".to_string());
+                        }
                         eprintln!(" {}", "exit!".style(red));
                         results.failed.insert(test.to_static(), curr_output);
                         break;
