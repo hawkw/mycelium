@@ -198,9 +198,14 @@ impl Cmd {
                     "none",
                     "-serial",
                     "stdio",
+                    // tell QEMU to log guest errors
+                    "-d",
+                    "guest_errors",
                 ];
                 tracing::info!("running kernel tests ({})", paths.relative(image).display());
                 qemu_settings.configure(&mut qemu);
+
+                tracing::info!(qemu.test_args = ?TEST_ARGS, "using test mode qemu args");
                 qemu.args(TEST_ARGS);
 
                 let mut child = self.spawn_qemu(&mut qemu, paths.kernel_bin())?;
