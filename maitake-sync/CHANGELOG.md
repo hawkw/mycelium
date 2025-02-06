@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## maitake-sync-v0.2.1 - (2025-02-06)
+
+[dd00208](https://github.com/hawkw/mycelium/dd0020892564c77ee4c20ffbc2f7f5b046ad54c8)...[dd00208](https://github.com/hawkw/mycelium/dd0020892564c77ee4c20ffbc2f7f5b046ad54c8)
+
+
+### Fixed
+
+- For cs-mutex, enter cs before locking mutex ([#514](https://github.com/hawkw/mycelium/issues/514)) ([bf8d93b](https://github.com/hawkw/mycelium/bf8d93b1dace827005a37a149fe59aeb970ab4a6), closes [#513](https://github.com/hawkw/mycelium/issues/513))
+- Add proper `ScopedRawMutex` bound to `wait_map::Wait` ([#515](https://github.com/hawkw/mycelium/issues/515)) ([509a8b7](https://github.com/hawkw/mycelium/509a8b723306de80e533e248e7042abb720bce44))
+- Impl `Future` for `mutex::Lock` with generic `ScopedRawMutex` ([#517](https://github.com/hawkw/mycelium/issues/517)) ([12c5b21](https://github.com/hawkw/mycelium/12c5b2164a42ba1cf99443aacae72f00c9a12339))
+
 ## maitake-sync-v0.2.0 - (2025-01-30)
 
 [e43cad5](https://github.com/hawkw/mycelium/e43cad5e425cadae393a425520fe3a9a8cea71e1)...[e43cad5](https://github.com/hawkw/mycelium/e43cad5e425cadae393a425520fe3a9a8cea71e1)
