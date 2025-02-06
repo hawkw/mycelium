@@ -348,8 +348,12 @@ where
 
 // === impl Lock ===
 
-impl<'a, T> Future for Lock<'a, T> {
-    type Output = MutexGuard<'a, T>;
+impl<'a, T, L> Future for Lock<'a, T, L>
+where
+    T: ?Sized,
+    L: ScopedRawMutex,
+{
+    type Output = MutexGuard<'a, T, L>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
