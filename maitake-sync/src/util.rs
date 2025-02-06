@@ -263,4 +263,27 @@ pub(crate) mod test {
     #[allow(dead_code)]
     pub(crate) fn assert_sync<T: Sync>() {}
     pub(crate) fn assert_send_sync<T: Send + Sync>() {}
+
+    pub(crate) fn assert_future<F: core::future::Future>(_: F) {}
+
+    pub(crate) struct NopRawMutex;
+
+    unsafe impl mutex_traits::RawMutex for NopRawMutex {
+        type GuardMarker = ();
+        fn lock(&self) {
+            unimplemented!("don't actually try to lock this thing")
+        }
+
+        fn is_locked(&self) -> bool {
+            unimplemented!("don't actually try to lock this thing")
+        }
+
+        fn try_lock(&self) -> bool {
+            unimplemented!("don't actually try to lock this thing")
+        }
+
+        unsafe fn unlock(&self) {
+            unimplemented!("don't actually try to lock this thing")
+        }
+    }
 }
