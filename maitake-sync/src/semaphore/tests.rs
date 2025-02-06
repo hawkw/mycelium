@@ -18,15 +18,11 @@ fn acquire_is_send_and_sync() {
 
 #[test]
 fn acquire_is_future() {
-    crate::loom::model(|| {
-        // Semaphore with `DefaultRawMutex`
-        let sem = Semaphore::new(1);
-        assert_future(sem.acquire(1));
+    // Semaphore with `DefaultRawMutex`
+    assert_future::<Acquire<'_>>();
 
-        // Semaphore with overridden `ScopedRawMutex`
-        let sem = Semaphore::new_with_raw_mutex(1, NopRawMutex);
-        assert_future(sem.acquire(1));
-    });
+    // Semaphore with overridden `ScopedRawMutex`
+    assert_future::<Acquire<'_, NopRawMutex>>();
 }
 
 #[cfg(feature = "alloc")]
@@ -45,15 +41,8 @@ mod owned {
 
     #[test]
     fn acquire_owned_is_future() {
-        crate::loom::model(|| {
-            // Semaphore with `DefaultRawMutex`
-            let sem = alloc::sync::Arc::new(Semaphore::new(1));
-            assert_future(sem.acquire_owned(1));
-
-            // Semaphore with overridden `ScopedRawMutex`
-            let sem = alloc::sync::Arc::new(Semaphore::new(1));
-            assert_future(sem.acquire_owned(1));
-        });
+        assert_future::<AcquireOwned>();
+        assert_future::<AcquireOwned<NopRawMutex>>();
     }
 }
 

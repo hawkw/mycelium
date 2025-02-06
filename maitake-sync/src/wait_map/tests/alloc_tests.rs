@@ -406,13 +406,9 @@ fn drop_wake_bailed() {
 
 #[test]
 fn wait_owned_future_is_future() {
-    crate::loom::model(|| {
-        // WaitMap with default mutex.
-        let m = Arc::new(WaitMap::<i32, i32>::new());
-        assert_future(m.wait_owned(1));
+    // WaitMap with default mutex.
+    assert_future::<WaitOwned<i32, i32>>();
 
-        // WaitMap with overridden `ScopedRawMutex`.
-        let m = Arc::new(WaitMap::<i32, i32, _>::new_with_raw_mutex(NopRawMutex));
-        assert_future(m.wait_owned(1));
-    })
+    // WaitMap with overridden `ScopedRawMutex`.
+    assert_future::<WaitOwned<i32, i32, NopRawMutex>>();
 }

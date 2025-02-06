@@ -7,30 +7,18 @@ mod loom;
 
 #[test]
 fn wait_future_is_future() {
-    crate::loom::model(|| {
-        // WaitMap with default mutex.
-        let m = WaitMap::<i32, i32>::new();
-        assert_future(m.wait(1));
+    // WaitMap with default mutex.
+    assert_future::<Wait<'_, i32, i32>>();
 
-        // WaitMap with overridden `ScopedRawMutex`.
-        let m = WaitMap::<i32, i32, _>::new_with_raw_mutex(NopRawMutex);
-        assert_future(m.wait(1));
-    })
+    // WaitMap with overridden `ScopedRawMutex`.
+    assert_future::<Wait<'_, i32, i32, NopRawMutex>>();
 }
 
 #[test]
 fn subscribe_future_is_future() {
-    crate::loom::model(|| {
-        // WaitMap with default mutex.
-        let m = WaitMap::<i32, i32>::new();
-        let f = m.wait(1);
-        let f = core::pin::pin!(f);
-        assert_future(f.subscribe());
+    // WaitMap with default mutex.
+    assert_future::<Subscribe<'_, '_, i32, i32>>();
 
-        // WaitMap with overridden `ScopedRawMutex`.
-        let m = WaitMap::<i32, i32, _>::new_with_raw_mutex(NopRawMutex);
-        let f = m.wait(1);
-        let f = core::pin::pin!(f);
-        assert_future(f.subscribe());
-    })
+    // WaitMap with overridden `ScopedRawMutex`.
+    assert_future::<Subscribe<'_, '_, i32, i32, NopRawMutex>>();
 }

@@ -9,13 +9,8 @@ mod loom;
 
 #[test]
 fn wait_future_is_future() {
-    crate::loom::model(|| {
-        // WaitQueue with default mutex.
-        let q = WaitQueue::new();
-        assert_future(q.wait());
-
-        // WaitQueue with overridden `ScopedRawMutex`.
-        let q = WaitQueue::new_with_raw_mutex(NopRawMutex);
-        assert_future(q.wait());
-    })
+    // WaitQueue with default raw mutex
+    assert_future::<Wait<'_>>();
+    // WaitQueue with overridden raw mutex
+    assert_future::<Wait<'_, NopRawMutex>>();
 }

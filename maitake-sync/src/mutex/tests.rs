@@ -1,6 +1,6 @@
-use mutex_traits::ScopedRawMutex;
-
+use super::*;
 use crate::loom::{self, future};
+use crate::util::test::{assert_future, NopRawMutex};
 use crate::Mutex;
 
 #[test]
@@ -57,49 +57,11 @@ fn basic_multi_threaded() {
     });
 }
 
-struct NopRawMutex;
-
-unsafe impl ScopedRawMutex for NopRawMutex {
-    fn try_with_lock<R>(&self, _: impl FnOnce() -> R) -> Option<R> {
-        None
-    }
-
-    fn with_lock<R>(&self, _: impl FnOnce() -> R) -> R {
-        unimplemented!("this doesn't actually do anything")
-    }
-
-    fn is_locked(&self) -> bool {
-        true
-    }
-}
-
-fn assert_future<F: core::future::Future>(_: F) {}
-
 #[test]
 fn lock_future_impls_future() {
-    loom::model(|| {
-        // Mutex with `DefaultMutex` as the `ScopedRawMutex` implementation
-        let mutex = Mutex::new(());
-        assert_future(mutex.lock());
+    // Mutex with `DefaultMutex` as the `ScopedRawMutex` implementation
+    assert_future::<Lock<'_, ()>>();
 
-        // Mutex with a custom `ScopedRawMutex` implementation
-        let mutex = Mutex::new_with_raw_mutex((), NopRawMutex);
-        assert_future(mutex.lock());
-    })
-}
-
-#[test]
-#[cfg(feature = "alloc")]
-fn lock_owned_future_impls_future() {
-    loom::model(|| {
-        use alloc::sync::Arc;
-
-        // Mutex with `DefaultMutex` as the `ScopedRawMutex` implementation
-        let mutex = Arc::new(Mutex::new(()));
-        assert_future(mutex.lock_owned());
-
-        // Mutex with a custom `ScopedRawMutex` implementation
-        let mutex = Arc::new(Mutex::new_with_raw_mutex((), NopRawMutex));
-        assert_future(mutex.lock_owned());
-    })
+    // Mutex with a custom `ScopedRawMutex` implementation
+    assert_future::<Lock<'_, (), NopRawMutex>>();
 }

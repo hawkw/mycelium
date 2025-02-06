@@ -173,13 +173,9 @@ fn subscribe_consumes_wakeup() {
 
 #[test]
 fn wait_owned_future_is_future() {
-    crate::loom::model(|| {
-        // WaitQueue with default mutex.
-        let q = Arc::new(WaitQueue::new());
-        assert_future(q.wait_owned());
+    // WaitQueue with default raw mutex
+    assert_future::<WaitOwned>();
 
-        // WaitQueue with overridden `ScopedRawMutex`.
-        let q = Arc::new(WaitQueue::new_with_raw_mutex(NopRawMutex));
-        assert_future(q.wait_owned());
-    })
+    // WaitQueue with overridden raw mutex
+    assert_future::<WaitOwned<NopRawMutex>>();
 }

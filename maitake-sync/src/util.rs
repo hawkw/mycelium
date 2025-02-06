@@ -264,7 +264,7 @@ pub(crate) mod test {
     pub(crate) fn assert_sync<T: Sync>() {}
     pub(crate) fn assert_send_sync<T: Send + Sync>() {}
 
-    pub(crate) fn assert_future<F: core::future::Future>(_: F) {}
+    pub(crate) fn assert_future<F: core::future::Future>() {}
 
     pub(crate) struct NopRawMutex;
 
