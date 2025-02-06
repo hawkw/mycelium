@@ -997,7 +997,11 @@ unsafe impl<K: PartialEq, V> Linked<list::Links<Waiter<K, V>>> for Waiter<K, V> 
 
 // === impl Wait ===
 
-impl<K: PartialEq, V> Future for Wait<'_, K, V> {
+impl<K, V, Lock> Future for Wait<'_, K, V, Lock>
+where
+    K: PartialEq,
+    Lock: ScopedRawMutex,
+{
     type Output = WaitResult<V>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
