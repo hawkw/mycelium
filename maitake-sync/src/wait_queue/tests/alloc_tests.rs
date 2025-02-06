@@ -1,5 +1,6 @@
 use super::*;
 use crate::loom::sync::Arc;
+use crate::util::test::{assert_future, NopRawMutex};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use tokio_test::{assert_pending, assert_ready, assert_ready_ok, task};
 
@@ -168,4 +169,13 @@ fn subscribe_consumes_wakeup() {
 
     let mut future2 = task::spawn(q.wait());
     future2.enter(|_, f| assert_pending!(f.subscribe()));
+}
+
+#[test]
+fn wait_owned_future_is_future() {
+    // WaitQueue with default raw mutex
+    assert_future::<WaitOwned>();
+
+    // WaitQueue with overridden raw mutex
+    assert_future::<WaitOwned<NopRawMutex>>();
 }

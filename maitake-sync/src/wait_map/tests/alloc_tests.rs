@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::loom::sync::Arc;
+use crate::util::test::{assert_future, NopRawMutex};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use futures::{future::poll_fn, pin_mut, select_biased, FutureExt};
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
@@ -401,4 +402,13 @@ fn drop_wake_bailed() {
     assert_eq!(COMPLETED.load(Ordering::Relaxed), 0);
     assert_eq!(KEY_DROPS.load(Ordering::Relaxed), TASKS);
     assert_eq!(VAL_DROPS.load(Ordering::Relaxed), TASKS);
+}
+
+#[test]
+fn wait_owned_future_is_future() {
+    // WaitMap with default mutex.
+    assert_future::<WaitOwned<i32, i32>>();
+
+    // WaitMap with overridden `ScopedRawMutex`.
+    assert_future::<WaitOwned<i32, i32, NopRawMutex>>();
 }
