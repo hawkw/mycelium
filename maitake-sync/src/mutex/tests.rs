@@ -1,3 +1,5 @@
+use mutex_traits::ScopedRawMutex;
+
 use crate::loom::{self, future};
 use crate::Mutex;
 
@@ -53,4 +55,35 @@ fn basic_multi_threaded() {
             assert_eq!(*lock, 2)
         })
     });
+}
+
+#[test]
+fn lock_future_impls_future() {
+    struct NopRawMutex;
+
+    unsafe impl ScopedRawMutex for NopRawMutex {
+        fn try_with_lock<R>(&self, _: impl FnOnce() -> R) -> Option<R> {
+            None
+        }
+
+        fn with_lock<R>(&self, _: impl FnOnce() -> R) -> R {
+            unimplemented!("this doesn't actually do anything")
+        }
+
+        fn is_locked(&self) -> bool {
+            true
+        }
+    }
+
+    fn assert_future<F: core::future::Future>(_: F) {}
+
+    loom::model(|| {
+        // Mutex with `DefaultMutex` as the `ScopedRawMutex` implementation
+        let mutex = Mutex::new(());
+        assert_future(mutex.lock());
+
+        // Mutex with a custom `ScopedRawMutex` implementation
+        let mutex = Mutex::new_with_raw_mutex((), NopRawMutex);
+        assert_future(mutex.lock());
+    })
 }
