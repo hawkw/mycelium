@@ -662,6 +662,29 @@ pub(crate) mod test_util {
         track: alloc::Track<()>,
     }
 
+    // ----------------------------------------------------------------------
+    // Helper impls for `sorted_list`
+    impl PartialEq for Entry {
+        fn eq(&self, other: &Self) -> bool {
+            self.val.eq(&other.val)
+        }
+    }
+
+    impl Eq for Entry {}
+
+    impl PartialOrd for Entry {
+        fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for Entry {
+        fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+            self.val.cmp(&other.val)
+        }
+    }
+    // ----------------------------------------------------------------------
+
     unsafe impl Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
 

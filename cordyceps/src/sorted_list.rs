@@ -14,10 +14,16 @@ pub use crate::stack::Links;
 ///
 /// This behaves similar to [`Stack`], in that it is a singly linked list,
 /// however items are stored in an ordered fashion. This means that insertion
-/// is an O(n) operation, and retrieval of the first item is an O(1) operation.
+/// is an `O(n)` operation, and retrieval of the first item is an `O(1)` operation.
 ///
-/// It allows for a user selected ordering operation, see [`SortedList::new`]
-/// for usage example.
+/// It allows for a user selected ordering operation. If your type `T` implements
+/// [`Ord`]:
+///
+/// * Consider using [`SortedList::new_min()`] if you want **smallest** items sorted first.
+/// * Consider using [`SortedList::new_max()`] if you want **largest** items sorted first.
+///
+/// If your type `T` does NOT implement [`Ord`], or you want to use
+/// a custom sorting anyway, consider using [`SortedList::new_custom()`]
 #[derive(Debug)]
 pub struct SortedList<T: Linked<Links<T>>> {
     head: Option<NonNull<T>>,
@@ -25,8 +31,59 @@ pub struct SortedList<T: Linked<Links<T>>> {
     func: fn(&T, &T) -> core::cmp::Ordering,
 }
 
+#[inline]
+fn invert_sort<T: core::cmp::Ord>(a: &T, b: &T) -> core::cmp::Ordering {
+    // Inverted sort order!
+    T::cmp(b, a)
+}
+
+impl<T> SortedList<T>
+where
+    T: Linked<Links<T>>,
+    T: core::cmp::Ord,
+{
+    /// Create a new (empty) sorted list, sorted LEAST FIRST
+    ///
+    /// * Consider using [`SortedList::new_max()`] if you want **largest** items sorted first.
+    /// * Consider using [`SortedList::new_custom()`] if you want to provide your own sorting
+    ///   implementation.
+    ///
+    /// If two items are considered of equal value, new values will be placed AFTER
+    /// old values.
+    pub const fn new_min() -> Self {
+        Self::new_custom(T::cmp)
+    }
+
+    /// Create a new sorted list, consuming the stack, sorted LEAST FIRST
+    pub fn from_stack_min(stack: Stack<T>) -> Self {
+        Self::from_stack_custom(stack, T::cmp)
+    }
+
+    /// Create a new (empty) sorted list, sorted GREATEST FIRST
+    ///
+    /// * Consider using [`SortedList::new_min()`] if you want **smallest** items sorted first.
+    /// * Consider using [`SortedList::new_custom()`] if you want to provide your own sorting
+    ///   implementation.
+    ///
+    /// If two items are considered of equal value, new values will be placed AFTER
+    /// old values.
+    pub const fn new_max() -> Self {
+        Self::new_custom(invert_sort::<T>)
+    }
+
+    /// Create a new sorted list, consuming the stack, sorted GREATEST FIRST
+    pub fn from_stack_max(stack: Stack<T>) -> Self {
+        Self::from_stack_custom(stack, invert_sort::<T>)
+    }
+}
+
 impl<T: Linked<Links<T>>> SortedList<T> {
     /// Create a new (empty) sorted list with the given ordering function
+    ///
+    /// If your type T implements [`Ord`]:
+    ///
+    /// * Consider using [`SortedList::new_min()`] if you want **smallest** items sorted first.
+    /// * Consider using [`SortedList::new_max()`] if you want **largest** items sorted first.
     ///
     /// If `T` contained an `i32`, and you wanted the SMALLEST items at the
     /// front, then you could provide a function something like:
@@ -43,7 +100,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     ///
     /// If two items are considered of equal value, new values will be placed AFTER
     /// old values.
-    pub const fn new(f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+    pub const fn new_custom(f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
         Self {
             func: f,
             head: None,
@@ -51,13 +108,15 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     }
 
     /// Create a new sorted list, consuming the stack, using the provided ordering function
-    pub fn from_stack(stack: Stack<T>, f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
-        let mut slist = Self::new(f);
+    pub fn from_stack_custom(stack: Stack<T>, f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+        let mut slist = Self::new_custom(f);
         slist.extend(stack);
         slist
     }
 
     /// Pop the front-most item from the list, returning it by ownership (if it exists)
+    ///
+    /// This is an `O(1)` operation.
     #[must_use]
     pub fn pop_front(&mut self) -> Option<T::Handle> {
         test_trace!(?self.head, "SortedList::pop_front");
@@ -77,6 +136,8 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     }
 
     /// Insert a single item into the list, in it's sorted order position
+    ///
+    /// This is an `O(n)` operation.
     pub fn insert(&mut self, element: T::Handle) {
         let ptr = T::into_ptr(element);
         test_trace!(?ptr, ?self.head, "SortedList::insert");
@@ -247,9 +308,109 @@ mod loom {
     use crate::stack::test_util::Entry;
 
     #[test]
+    fn builtin_sort_min() {
+        loom::model(|| {
+            let mut slist = SortedList::<Entry>::new_min();
+            // Insert out of order
+            slist.insert(Entry::new(20));
+            slist.insert(Entry::new(10));
+            slist.insert(Entry::new(30));
+            slist.insert(Entry::new(25));
+            slist.insert(Entry::new(35));
+            slist.insert(Entry::new(1));
+            slist.insert(Entry::new(2));
+            slist.insert(Entry::new(3));
+            // expected is in order
+            let expected = [1, 2, 3, 10, 20, 25, 30, 35];
+
+            // Does iteration work (twice)?
+            {
+                let mut ct = 0;
+                let siter = slist.iter();
+                for (l, r) in expected.iter().zip(siter) {
+                    ct += 1;
+                    assert_eq!(*l, r.val);
+                }
+                assert_eq!(ct, expected.len());
+            }
+            {
+                let mut ct = 0;
+                let siter = slist.iter();
+                for (l, r) in expected.iter().zip(siter) {
+                    ct += 1;
+                    assert_eq!(*l, r.val);
+                }
+                assert_eq!(ct, expected.len());
+            }
+
+            // Does draining work (once)?
+            {
+                let mut ct = 0;
+                for exp in expected.iter() {
+                    let act = slist.pop_front().unwrap();
+                    ct += 1;
+                    assert_eq!(*exp, act.val);
+                }
+                assert_eq!(ct, expected.len());
+                assert!(slist.pop_front().is_none());
+            }
+        })
+    }
+
+    #[test]
+    fn builtin_sort_max() {
+        loom::model(|| {
+            let mut slist = SortedList::<Entry>::new_max();
+            // Insert out of order
+            slist.insert(Entry::new(20));
+            slist.insert(Entry::new(10));
+            slist.insert(Entry::new(30));
+            slist.insert(Entry::new(25));
+            slist.insert(Entry::new(35));
+            slist.insert(Entry::new(1));
+            slist.insert(Entry::new(2));
+            slist.insert(Entry::new(3));
+            // expected is in order (reverse!)
+            let expected = [35, 30, 25, 20, 10, 3, 2, 1];
+
+            // Does iteration work (twice)?
+            {
+                let mut ct = 0;
+                let siter = slist.iter();
+                for (l, r) in expected.iter().zip(siter) {
+                    ct += 1;
+                    assert_eq!(*l, r.val);
+                }
+                assert_eq!(ct, expected.len());
+            }
+            {
+                let mut ct = 0;
+                let siter = slist.iter();
+                for (l, r) in expected.iter().zip(siter) {
+                    ct += 1;
+                    assert_eq!(*l, r.val);
+                }
+                assert_eq!(ct, expected.len());
+            }
+
+            // Does draining work (once)?
+            {
+                let mut ct = 0;
+                for exp in expected.iter() {
+                    let act = slist.pop_front().unwrap();
+                    ct += 1;
+                    assert_eq!(*exp, act.val);
+                }
+                assert_eq!(ct, expected.len());
+                assert!(slist.pop_front().is_none());
+            }
+        })
+    }
+
+    #[test]
     fn slist_basic() {
         loom::model(|| {
-            let mut slist = SortedList::<Entry>::new(|lhs, rhs| lhs.val.cmp(&rhs.val));
+            let mut slist = SortedList::<Entry>::new_custom(|lhs, rhs| lhs.val.cmp(&rhs.val));
             // Insert out of order
             slist.insert(Entry::new(20));
             slist.insert(Entry::new(10));
