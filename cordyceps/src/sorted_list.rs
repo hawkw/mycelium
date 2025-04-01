@@ -1,0 +1,298 @@
+//! [Intrusive], singly-linked, sorted, linked-list.
+//!
+//! See the documentation for the [`SortedList`] and [`SortedListIter`] types for
+//! details.
+//!
+//! [intrusive]: crate#intrusive-data-structures
+
+use crate::{Linked, Stack};
+use core::{marker::PhantomData, ptr::NonNull};
+
+pub use crate::stack::Links;
+
+/// A sorted singly linked list
+///
+/// This behaves similar to [`Stack`], in that it is a singly linked list,
+/// however items are stored in an ordered fashion. This means that insertion
+/// is an O(n) operation, and retrieval of the first item is an O(1) operation.
+///
+/// It allows for a user selected ordering operation, see [`SortedList::new`]
+/// for usage example.
+#[derive(Debug)]
+pub struct SortedList<T: Linked<Links<T>>> {
+    head: Option<NonNull<T>>,
+    // Returns if LHS is less/same/greater than RHS
+    func: fn(&T, &T) -> core::cmp::Ordering,
+}
+
+impl<T: Linked<Links<T>>> SortedList<T> {
+    /// Create a new (empty) sorted list with the given ordering function
+    ///
+    /// If `T` contained an `i32`, and you wanted the SMALLEST items at the
+    /// front, then you could provide a function something like:
+    ///
+    /// ```rust
+    /// let f: fn(&i32, &i32) -> core::cmp::Ordering = |lhs, rhs| {
+    ///     lhs.cmp(rhs)
+    /// };
+    /// ```
+    ///
+    /// SortedList takes a function (and not just [Ord]) so you can use it on types
+    /// that don't have a general way of ordering them, allowing you to select a
+    /// specific metric within the sorting function.
+    ///
+    /// If two items are considered of equal value, new values will be placed AFTER
+    /// old values.
+    pub const fn new(f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+        Self {
+            func: f,
+            head: None,
+        }
+    }
+
+    /// Create a new sorted list, consuming the stack, using the provided ordering function
+    pub fn from_stack(stack: Stack<T>, f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+        let mut slist = Self::new(f);
+        slist.extend(stack);
+        slist
+    }
+
+    /// Pop the front-most item from the list, returning it by ownership (if it exists)
+    #[must_use]
+    pub fn pop_front(&mut self) -> Option<T::Handle> {
+        test_trace!(?self.head, "SortedList::pop_front");
+        let head = self.head.take()?;
+        unsafe {
+            // Safety: we have exclusive ownership over this chunk of stack.
+
+            // advance the head link to the next node after the current one (if
+            // there is one).
+            self.head = T::links(head).as_mut().next.with_mut(|next| (*next).take());
+
+            test_trace!(?self.head, "SortedList::pop -> popped");
+
+            // return the current node
+            Some(T::from_ptr(head))
+        }
+    }
+
+    /// Insert a single item into the list, in it's sorted order position
+    pub fn insert(&mut self, element: T::Handle) {
+        let ptr = T::into_ptr(element);
+        test_trace!(?ptr, ?self.head, "SortedList::insert");
+
+        // Take a long-lived reference to the new element
+        let eref = unsafe { ptr.as_ref() };
+
+        // Special case for empty head
+        //
+        // If the head is null, then just place the item
+        let Some(mut cursor) = self.head else {
+            // todo: assert element.next is null?
+            self.head = Some(ptr);
+            return;
+        };
+
+        // Special case for head: do we replace current head with new element?
+        {
+            // compare, but make sure we drop the live reference to the cursor
+            let cmp = {
+                let cref = unsafe { cursor.as_ref() };
+                (self.func)(cref, eref)
+            };
+
+            // If cursor node is LESS or EQUAL: keep moving.
+            // If cursor node is GREATER: we need to place the new item BEFORE
+            if cmp == core::cmp::Ordering::Greater {
+                unsafe {
+                    let links = T::links(ptr).as_mut();
+                    links.next.with_mut(|next| {
+                        // ensure that `element`'s next is null
+                        debug_assert!((*next).is_none());
+                        *next = self.head.replace(ptr);
+                    });
+                    return;
+                }
+            }
+        }
+
+        // On every iteration of the loop, we know that the new element should
+        // be placed AFTER the current value of `cursor`, meaning that we need
+        // to decide whether we:
+        //
+        // * just append (if next is null)
+        // * insert between cursor and cursor.next (if elem is < c.next)
+        // * just iterate (if elem >= c.next)
+        loop {
+            // SAFETY: We have exclusive access to the list, we are allowed to
+            // access and mutate it (carefully)
+            unsafe {
+                // Get the cursor's links
+                let clinks = T::links(cursor).as_mut();
+                // Peek into the cursor's next item
+                let next = clinks.next.with_mut(|next| {
+                    // We can take a reference here, as we have exclusive access
+                    let mutref = &mut *next;
+
+                    if let Some(n) = mutref {
+                        // If next is some, store this pointer
+                        let nptr: NonNull<T> = *n;
+                        // Then compare the next element with the new element
+                        let cmp = {
+                            let nref: &T = nptr.as_ref();
+                            (self.func)(nref, eref)
+                        };
+
+                        if cmp == core::cmp::Ordering::Greater {
+                            // As above, if cursor.next > element, then we
+                            // need to insert between cursor and next.
+                            //
+                            // First, get the current element's links...
+                            let elinks = T::links(ptr).as_mut();
+                            // ...then store cursor.next.next in element.next,
+                            // and store element in cursor.next.
+                            elinks.next.with_mut(|enext| {
+                                *enext = mutref.replace(ptr);
+                            });
+                            // If we have placed element, there is no next value
+                            // for cursor.
+                            None
+                        } else {
+                            // If cursor.next <= element, then we just need to
+                            // iterate, so return the NonNull that represents
+                            // cursor.next, so we can move cursor there.
+                            Some(nptr)
+                        }
+                    } else {
+                        // "just append" case - assign element to cursor.next
+                        *mutref = Some(ptr);
+                        // If we have placed element, there is no next value
+                        // for cursor
+                        None
+                    }
+                });
+
+                // We do the assignment through this tricky return to ensure that the
+                // mutable reference to cursor.next we held as "mutref" above has been
+                // dropped, so we are not mutating `cursor` while a reference derived
+                // from it's provenance is live.
+                //
+                // We also can't early return inside the loop because all of the body
+                // is inside a closure.
+                //
+                // This might be overly cautious, refactor carefully (with miri).
+                let Some(n) = next else {
+                    // We're done, return
+                    return;
+                };
+                cursor = n;
+            }
+        }
+    }
+
+    /// Iterate through the items of the list, in sorted order
+    pub fn iter(&self) -> SortedListIter<'_, T> {
+        SortedListIter {
+            _plt: PhantomData,
+            node: self.head,
+        }
+    }
+}
+
+impl<T: Linked<Links<T>>> Extend<T::Handle> for SortedList<T> {
+    fn extend<I: IntoIterator<Item = T::Handle>>(&mut self, iter: I) {
+        for elem in iter {
+            self.insert(elem);
+        }
+    }
+}
+
+impl<T: Linked<Links<T>>> Drop for SortedList<T> {
+    fn drop(&mut self) {
+        // We just turn the list into a stack then run the stack drop code.
+        // It already has correct + tested logic for dropping a singly
+        // linked list of items one at a time.
+        let stack = Stack {
+            head: self.head.take(),
+        };
+        drop(stack);
+    }
+}
+
+/// A borrowing iterator of a [`SortedList`]
+#[derive(Debug)]
+pub struct SortedListIter<'a, T: Linked<Links<T>>> {
+    _plt: PhantomData<&'a SortedList<T>>,
+    node: Option<NonNull<T>>,
+}
+
+impl<'a, T: Linked<Links<T>>> Iterator for SortedListIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let nn = self.node.take()?;
+        unsafe {
+            // Advance our pointer to next
+            let links = T::links(nn).as_ref();
+            self.node = links.next.with(|t| *t);
+            Some(nn.as_ref())
+        }
+    }
+}
+
+#[cfg(test)]
+mod loom {
+    use super::*;
+    use crate::loom;
+    use crate::stack::test_util::Entry;
+
+    #[test]
+    fn slist_basic() {
+        loom::model(|| {
+            let mut slist = SortedList::<Entry>::new(|lhs, rhs| lhs.val.cmp(&rhs.val));
+            // Insert out of order
+            slist.insert(Entry::new(20));
+            slist.insert(Entry::new(10));
+            slist.insert(Entry::new(30));
+            slist.insert(Entry::new(25));
+            slist.insert(Entry::new(35));
+            slist.insert(Entry::new(1));
+            slist.insert(Entry::new(2));
+            slist.insert(Entry::new(3));
+            // expected is in order
+            let expected = [1, 2, 3, 10, 20, 25, 30, 35];
+
+            // Does iteration work (twice)?
+            {
+                let mut ct = 0;
+                let siter = slist.iter();
+                for (l, r) in expected.iter().zip(siter) {
+                    ct += 1;
+                    assert_eq!(*l, r.val);
+                }
+                assert_eq!(ct, expected.len());
+            }
+            {
+                let mut ct = 0;
+                let siter = slist.iter();
+                for (l, r) in expected.iter().zip(siter) {
+                    ct += 1;
+                    assert_eq!(*l, r.val);
+                }
+                assert_eq!(ct, expected.len());
+            }
+
+            // Does draining work (once)?
+            {
+                let mut ct = 0;
+                for exp in expected.iter() {
+                    let act = slist.pop_front().unwrap();
+                    ct += 1;
+                    assert_eq!(*exp, act.val);
+                }
+                assert_eq!(ct, expected.len());
+                assert!(slist.pop_front().is_none());
+            }
+        })
+    }
+}

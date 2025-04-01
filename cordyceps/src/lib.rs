@@ -69,6 +69,7 @@ pub(crate) mod util;
 
 pub mod list;
 pub mod mpsc_queue;
+pub mod sorted_list;
 pub mod stack;
 
 #[doc(inline)]
@@ -76,7 +77,9 @@ pub use list::List;
 #[doc(inline)]
 pub use mpsc_queue::MpscQueue;
 #[doc(inline)]
-pub use stack::{Stack, TransferStack, SortedList, SortedListIter};
+pub use sorted_list::{SortedList, SortedListIter};
+#[doc(inline)]
+pub use stack::{Stack, TransferStack};
 
 pub(crate) mod loom;
 
