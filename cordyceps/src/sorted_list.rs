@@ -1,9 +1,9 @@
-//! [Intrusive], singly-linked, sorted, linked-list.
+//! [Intrusive], singly-linked, sorted, linked list.
 //!
 //! See the documentation for the [`SortedList`] and [`SortedListIter`] types for
 //! details.
 //!
-//! [intrusive]: crate#intrusive-data-structures
+//! [Intrusive]: crate#intrusive-data-structures
 
 use crate::{Linked, Stack};
 use core::{marker::PhantomData, ptr::NonNull};
@@ -14,7 +14,7 @@ pub use crate::stack::Links;
 ///
 /// This behaves similar to [`Stack`], in that it is a singly linked list,
 /// however items are stored in an ordered fashion. This means that insertion
-/// is an `O(n)` operation, and retrieval of the first item is an `O(1)` operation.
+/// is an _O_(_n_) operation, and retrieval of the first item is an _O_(1) operation.
 ///
 /// It allows for a user selected ordering operation. If your type `T` implements
 /// [`Ord`]:
@@ -50,11 +50,13 @@ where
     ///
     /// If two items are considered of equal value, new values will be placed AFTER
     /// old values.
+    #[must_use]
     pub const fn new_min() -> Self {
         Self::new_custom(T::cmp)
     }
 
     /// Create a new sorted list, consuming the stack, sorted LEAST FIRST
+    #[must_use]
     pub fn from_stack_min(stack: Stack<T>) -> Self {
         Self::from_stack_custom(stack, T::cmp)
     }
@@ -67,11 +69,13 @@ where
     ///
     /// If two items are considered of equal value, new values will be placed AFTER
     /// old values.
+    #[must_use]
     pub const fn new_max() -> Self {
         Self::new_custom(invert_sort::<T>)
     }
 
     /// Create a new sorted list, consuming the stack, sorted GREATEST FIRST
+    #[must_use]
     pub fn from_stack_max(stack: Stack<T>) -> Self {
         Self::from_stack_custom(stack, invert_sort::<T>)
     }
@@ -116,7 +120,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
 
     /// Pop the front-most item from the list, returning it by ownership (if it exists)
     ///
-    /// This is an `O(1)` operation.
+    /// This is an _O_(1) operation.
     #[must_use]
     pub fn pop_front(&mut self) -> Option<T::Handle> {
         test_trace!(?self.head, "SortedList::pop_front");
@@ -135,9 +139,9 @@ impl<T: Linked<Links<T>>> SortedList<T> {
         }
     }
 
-    /// Insert a single item into the list, in it's sorted order position
+    /// Insert a single item into the list, in its sorted order position
     ///
-    /// This is an `O(n)` operation.
+    /// This is an _O_(_n_) operation.
     pub fn insert(&mut self, element: T::Handle) {
         let ptr = T::into_ptr(element);
         test_trace!(?ptr, ?self.head, "SortedList::insert");
