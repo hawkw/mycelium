@@ -83,17 +83,25 @@ pub struct TransferStack<T: Linked<Links<T>>> {
 ///
 /// [intrusive]: crate#intrusive-data-structures
 pub struct Stack<T: Linked<Links<T>>> {
-    head: Option<NonNull<T>>,
+    pub(crate) head: Option<NonNull<T>>,
 }
 
-/// Links to other nodes in a [`TransferStack`] or [`Stack`].
+/// Singly-linked-list linkage
 ///
-/// In order to be part of a [`Stack`] or [`TransferStack`], a type must contain
-/// an instance of this type, and must implement the [`Linked`] trait for
-/// `Links<Self>`.
+/// Links to other nodes in a [`TransferStack`], [`Stack`], or [`SortedList`].
+///
+/// In order to be part of a [`TransferStack`], [`Stack`], or [`SortedList`],
+/// a type must contain an instance of this type, and must implement the
+/// [`Linked`] trait for `Links<Self>`.
+///
+/// [`SortedList`]: crate::SortedList
+//
+// TODO(AJM): In the next breaking change, we might want to specifically have
+// a `SingleLinks` and `DoubleLinks` type to make the relationship more clear,
+// instead of "stack" being singly-flavored and "list" being doubly-flavored
 pub struct Links<T> {
     /// The next node in the queue.
-    next: UnsafeCell<Option<NonNull<T>>>,
+    pub(crate) next: UnsafeCell<Option<NonNull<T>>>,
 
     /// Linked list links must always be `!Unpin`, in order to ensure that they
     /// never recieve LLVM `noalias` annotations; see also
@@ -135,7 +143,23 @@ where
     /// This takes ownership over `element` through its [owning `Handle`
     /// type](Linked::Handle). If the `TransferStack` is dropped before the
     /// pushed `element` is removed from the stack, the `element` will be dropped.
+    #[inline]
     pub fn push(&self, element: T::Handle) {
+        self.push_was_empty(element);
+    }
+
+    /// Pushes `element` onto the end of this `TransferStack`, taking ownership
+    /// of it. Returns `true` if the stack was previously empty (the previous
+    /// head was null).
+    ///
+    /// This is an *O*(1) operation, although it performs a compare-and-swap
+    /// loop that may repeat if another producer is concurrently calling `push`
+    /// on the same `TransferStack`.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `TransferStack` is dropped before the
+    /// pushed `element` is removed from the stack, the `element` will be dropped.
+    pub fn push_was_empty(&self, element: T::Handle) -> bool {
         let ptr = T::into_ptr(element);
         test_trace!(?ptr, "TransferStack::push");
         let links = unsafe { T::links(ptr).as_mut() };
@@ -152,9 +176,10 @@ where
                 .head
                 .compare_exchange_weak(head, ptr.as_ptr(), AcqRel, Acquire)
             {
-                Ok(_) => {
-                    test_trace!(?ptr, ?head, "TransferStack::push -> pushed");
-                    return;
+                Ok(old) => {
+                    let was_empty = old.is_null();
+                    test_trace!(?ptr, ?head, was_empty, "TransferStack::push -> pushed");
+                    return was_empty;
                 }
                 Err(actual) => head = actual,
             }
@@ -624,18 +649,41 @@ mod test {
 }
 
 #[cfg(test)]
-mod test_util {
+pub(crate) mod test_util {
     use super::*;
     use crate::loom::alloc;
     use core::pin::Pin;
 
     #[pin_project::pin_project]
-    pub(super) struct Entry {
+    pub(crate) struct Entry {
         #[pin]
         links: Links<Entry>,
-        pub(super) val: i32,
+        pub(crate) val: i32,
         track: alloc::Track<()>,
     }
+
+    // ----------------------------------------------------------------------
+    // Helper impls for `sorted_list`
+    impl PartialEq for Entry {
+        fn eq(&self, other: &Self) -> bool {
+            self.val.eq(&other.val)
+        }
+    }
+
+    impl Eq for Entry {}
+
+    impl PartialOrd for Entry {
+        fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for Entry {
+        fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+            self.val.cmp(&other.val)
+        }
+    }
+    // ----------------------------------------------------------------------
 
     unsafe impl Linked<Links<Self>> for Entry {
         type Handle = Pin<Box<Entry>>;
@@ -668,7 +716,7 @@ mod test_util {
     }
 
     impl Entry {
-        pub(super) fn new(val: i32) -> Pin<Box<Entry>> {
+        pub(crate) fn new(val: i32) -> Pin<Box<Entry>> {
             Box::pin(Entry {
                 links: Links::new(),
                 val,
