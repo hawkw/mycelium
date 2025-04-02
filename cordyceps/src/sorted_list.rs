@@ -6,7 +6,12 @@
 //! [Intrusive]: crate#intrusive-data-structures
 
 use crate::{Linked, Stack};
-use core::{cmp::{Ord, Ordering}, marker::PhantomData, ptr::NonNull};
+use core::{
+    cmp::{Ord, Ordering},
+    fmt,
+    marker::PhantomData,
+    ptr::NonNull,
+};
 
 pub use crate::stack::Links;
 
@@ -24,7 +29,6 @@ pub use crate::stack::Links;
 ///
 /// If your type `T` does NOT implement [`Ord`], or you want to use
 /// a custom sorting anyway, consider using [`SortedList::new_with_cmp()`]
-#[derive(Debug)]
 pub struct SortedList<T: Linked<Links<T>>> {
     head: Option<NonNull<T>>,
     // Returns if LHS is less/same/greater than RHS
@@ -189,7 +193,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
         // * insert between cursor and cursor.next (if elem is < c.next)
         // * just iterate (if elem >= c.next)
         loop {
-            // SAFETY: We have exclusive access to the list, we are allowed to
+            // Safety: We have exclusive access to the list, we are allowed to
             // access and mutate it (carefully)
             unsafe {
                 // Get the cursor's links
@@ -272,6 +276,16 @@ impl<T: Linked<Links<T>>> Extend<T::Handle> for SortedList<T> {
     }
 }
 
+impl<T> fmt::Debug for SortedList<T>
+where
+    T: Linked<Links<T>>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { head, func: _ } = self;
+        f.debug_struct("SortedList").field("head", head).finish()
+    }
+}
+
 impl<T: Linked<Links<T>>> Drop for SortedList<T> {
     fn drop(&mut self) {
         // We just turn the list into a stack then run the stack drop code.
@@ -285,7 +299,6 @@ impl<T: Linked<Links<T>>> Drop for SortedList<T> {
 }
 
 /// A borrowing iterator of a [`SortedList`]
-#[derive(Debug)]
 pub struct SortedListIter<'a, T: Linked<Links<T>>> {
     _plt: PhantomData<&'a SortedList<T>>,
     node: Option<NonNull<T>>,
