@@ -23,7 +23,7 @@ pub use crate::stack::Links;
 /// * Consider using [`SortedList::new_max()`] if you want **largest** items sorted first.
 ///
 /// If your type `T` does NOT implement [`Ord`], or you want to use
-/// a custom sorting anyway, consider using [`SortedList::new_custom()`]
+/// a custom sorting anyway, consider using [`SortedList::new_with_cmp()`]
 #[derive(Debug)]
 pub struct SortedList<T: Linked<Links<T>>> {
     head: Option<NonNull<T>>,
@@ -45,39 +45,39 @@ where
     /// Create a new (empty) sorted list, sorted LEAST FIRST
     ///
     /// * Consider using [`SortedList::new_max()`] if you want **largest** items sorted first.
-    /// * Consider using [`SortedList::new_custom()`] if you want to provide your own sorting
+    /// * Consider using [`SortedList::new_with_cmp()`] if you want to provide your own sorting
     ///   implementation.
     ///
     /// If two items are considered of equal value, new values will be placed AFTER
     /// old values.
     #[must_use]
     pub const fn new_min() -> Self {
-        Self::new_custom(T::cmp)
+        Self::new_with_cmp(T::cmp)
     }
 
     /// Create a new sorted list, consuming the stack, sorted LEAST FIRST
     #[must_use]
     pub fn from_stack_min(stack: Stack<T>) -> Self {
-        Self::from_stack_custom(stack, T::cmp)
+        Self::from_stack_with_cmp(stack, T::cmp)
     }
 
     /// Create a new (empty) sorted list, sorted GREATEST FIRST
     ///
     /// * Consider using [`SortedList::new_min()`] if you want **smallest** items sorted first.
-    /// * Consider using [`SortedList::new_custom()`] if you want to provide your own sorting
+    /// * Consider using [`SortedList::new_with_cmp()`] if you want to provide your own sorting
     ///   implementation.
     ///
     /// If two items are considered of equal value, new values will be placed AFTER
     /// old values.
     #[must_use]
     pub const fn new_max() -> Self {
-        Self::new_custom(invert_sort::<T>)
+        Self::new_with_cmp(invert_sort::<T>)
     }
 
     /// Create a new sorted list, consuming the stack, sorted GREATEST FIRST
     #[must_use]
     pub fn from_stack_max(stack: Stack<T>) -> Self {
-        Self::from_stack_custom(stack, invert_sort::<T>)
+        Self::from_stack_with_cmp(stack, invert_sort::<T>)
     }
 }
 
@@ -104,7 +104,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     ///
     /// If two items are considered of equal value, new values will be placed AFTER
     /// old values.
-    pub const fn new_custom(f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+    pub const fn new_with_cmp(f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
         Self {
             func: f,
             head: None,
@@ -112,8 +112,8 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     }
 
     /// Create a new sorted list, consuming the stack, using the provided ordering function
-    pub fn from_stack_custom(stack: Stack<T>, f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
-        let mut slist = Self::new_custom(f);
+    pub fn from_stack_with_cmp(stack: Stack<T>, f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+        let mut slist = Self::new_with_cmp(f);
         slist.extend(stack);
         slist
     }
@@ -414,7 +414,7 @@ mod loom {
     #[test]
     fn slist_basic() {
         loom::model(|| {
-            let mut slist = SortedList::<Entry>::new_custom(|lhs, rhs| lhs.val.cmp(&rhs.val));
+            let mut slist = SortedList::<Entry>::new_with_cmp(|lhs, rhs| lhs.val.cmp(&rhs.val));
             // Insert out of order
             slist.insert(Entry::new(20));
             slist.insert(Entry::new(10));
