@@ -29,6 +29,17 @@ pub use crate::stack::Links;
 ///
 /// If your type `T` does NOT implement [`Ord`], or you want to use
 /// a custom sorting anyway, consider using [`SortedList::new_with_cmp()`]
+///
+/// In order to be part of a `SortedList`, a type `T` must implement
+/// the [`Linked`] trait for [`sorted_list::Links<T>`](Links), which is an alias for
+/// [`stack::Links<T>`](Links). This means that you can link the same element into
+/// either structure, but you can't have something that's linked into a `SortedList`
+/// and a `Stack` at the same time (without wrapper structs that have separate sets
+/// of links, left as an exercise for the reader).
+///
+/// Pushing elements into a `SortedList` takes ownership of those elements
+/// through an owning [`Handle` type](Linked::Handle). Dropping a
+/// `SortedList` drops all elements currently linked into the stack.
 pub struct SortedList<T: Linked<Links<T>>> {
     head: Option<NonNull<T>>,
     // Returns if LHS is less/same/greater than RHS
@@ -124,6 +135,10 @@ impl<T: Linked<Links<T>>> SortedList<T> {
 
     /// Pop the front-most item from the list, returning it by ownership (if it exists)
     ///
+    /// Note that "front" here refers to the sorted ordering. If this list was created
+    /// with [`SortedList::new_min`], the SMALLEST item will be popped. If this was
+    /// created with [`SortedList::new_max`], the LARGEST item will be popped.
+    ///
     /// This is an _O_(1) operation.
     #[must_use]
     pub fn pop_front(&mut self) -> Option<T::Handle> {
@@ -145,26 +160,36 @@ impl<T: Linked<Links<T>>> SortedList<T> {
 
     /// Insert a single item into the list, in its sorted order position
     ///
+    /// Note that if the inserted item is [`Equal`](Ordering::Equal) to another
+    /// item in the list, the newest item is always sorted AFTER the existing
+    /// item.
+    ///
     /// This is an _O_(_n_) operation.
     pub fn insert(&mut self, element: T::Handle) {
-        let ptr = T::into_ptr(element);
-        test_trace!(?ptr, ?self.head, "SortedList::insert");
+        let eptr = T::into_ptr(element);
+        test_trace!(?eptr, ?self.head, "SortedList::insert");
+        debug_assert!(
+            unsafe { T::links(eptr).as_ref().next.with(|n| (*n).is_none()) },
+            "Inserted items should not already be part of a list"
+        );
 
         // Take a long-lived reference to the new element
-        let eref = unsafe { ptr.as_ref() };
+        let eref = unsafe { eptr.as_ref() };
 
         // Special case for empty head
         //
         // If the head is null, then just place the item
         let Some(mut cursor) = self.head else {
-            // todo: assert element.next is null?
-            self.head = Some(ptr);
+            self.head = Some(eptr);
             return;
         };
 
         // Special case for head: do we replace current head with new element?
         {
             // compare, but make sure we drop the live reference to the cursor
+            // so to be extra sure about NOT violating provenance, when we
+            // potentially mutate the cursor below, and we really don't want
+            // a shared reference to be live.
             let cmp = {
                 let cref = unsafe { cursor.as_ref() };
                 (self.func)(cref, eref)
@@ -174,11 +199,9 @@ impl<T: Linked<Links<T>>> SortedList<T> {
             // If cursor node is GREATER: we need to place the new item BEFORE
             if cmp == Ordering::Greater {
                 unsafe {
-                    let links = T::links(ptr).as_mut();
+                    let links = T::links(eptr).as_mut();
                     links.next.with_mut(|next| {
-                        // ensure that `element`'s next is null
-                        debug_assert!((*next).is_none());
-                        *next = self.head.replace(ptr);
+                        *next = self.head.replace(eptr);
                     });
                     return;
                 }
@@ -217,11 +240,11 @@ impl<T: Linked<Links<T>>> SortedList<T> {
                             // need to insert between cursor and next.
                             //
                             // First, get the current element's links...
-                            let elinks = T::links(ptr).as_mut();
+                            let elinks = T::links(eptr).as_mut();
                             // ...then store cursor.next.next in element.next,
                             // and store element in cursor.next.
                             elinks.next.with_mut(|enext| {
-                                *enext = mutref.replace(ptr);
+                                *enext = mutref.replace(eptr);
                             });
                             // If we have placed element, there is no next value
                             // for cursor.
@@ -234,7 +257,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
                         }
                     } else {
                         // "just append" case - assign element to cursor.next
-                        *mutref = Some(ptr);
+                        *mutref = Some(eptr);
                         // If we have placed element, there is no next value
                         // for cursor
                         None
@@ -471,6 +494,18 @@ mod loom {
                 assert_eq!(ct, expected.len());
                 assert!(slist.pop_front().is_none());
             }
+
+            // Do a little pop and remove dance to make sure we correctly unset
+            // next on popped items (there is a debug assert for this)
+            slist.insert(Entry::new(20));
+            slist.insert(Entry::new(10));
+            slist.insert(Entry::new(30));
+            let x = slist.pop_front().unwrap();
+            slist.insert(x);
+            let y = slist.pop_front().unwrap();
+            let z = slist.pop_front().unwrap();
+            slist.insert(y);
+            slist.insert(z);
         })
     }
 }
