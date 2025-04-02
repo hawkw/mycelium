@@ -6,7 +6,7 @@
 //! [Intrusive]: crate#intrusive-data-structures
 
 use crate::{Linked, Stack};
-use core::{marker::PhantomData, ptr::NonNull};
+use core::{cmp::{Ord, Ordering}, marker::PhantomData, ptr::NonNull};
 
 pub use crate::stack::Links;
 
@@ -28,11 +28,11 @@ pub use crate::stack::Links;
 pub struct SortedList<T: Linked<Links<T>>> {
     head: Option<NonNull<T>>,
     // Returns if LHS is less/same/greater than RHS
-    func: fn(&T, &T) -> core::cmp::Ordering,
+    func: fn(&T, &T) -> Ordering,
 }
 
 #[inline]
-fn invert_sort<T: core::cmp::Ord>(a: &T, b: &T) -> core::cmp::Ordering {
+fn invert_sort<T: Ord>(a: &T, b: &T) -> Ordering {
     // Inverted sort order!
     T::cmp(b, a)
 }
@@ -40,7 +40,7 @@ fn invert_sort<T: core::cmp::Ord>(a: &T, b: &T) -> core::cmp::Ordering {
 impl<T> SortedList<T>
 where
     T: Linked<Links<T>>,
-    T: core::cmp::Ord,
+    T: Ord,
 {
     /// Create a new (empty) sorted list, sorted LEAST FIRST
     ///
@@ -104,7 +104,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     ///
     /// If two items are considered of equal value, new values will be placed AFTER
     /// old values.
-    pub const fn new_with_cmp(f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+    pub const fn new_with_cmp(f: fn(&T, &T) -> Ordering) -> Self {
         Self {
             func: f,
             head: None,
@@ -112,7 +112,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     }
 
     /// Create a new sorted list, consuming the stack, using the provided ordering function
-    pub fn from_stack_with_cmp(stack: Stack<T>, f: fn(&T, &T) -> core::cmp::Ordering) -> Self {
+    pub fn from_stack_with_cmp(stack: Stack<T>, f: fn(&T, &T) -> Ordering) -> Self {
         let mut slist = Self::new_with_cmp(f);
         slist.extend(stack);
         slist
@@ -168,7 +168,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
 
             // If cursor node is LESS or EQUAL: keep moving.
             // If cursor node is GREATER: we need to place the new item BEFORE
-            if cmp == core::cmp::Ordering::Greater {
+            if cmp == Ordering::Greater {
                 unsafe {
                     let links = T::links(ptr).as_mut();
                     links.next.with_mut(|next| {
@@ -208,7 +208,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
                             (self.func)(nref, eref)
                         };
 
-                        if cmp == core::cmp::Ordering::Greater {
+                        if cmp == Ordering::Greater {
                             // As above, if cursor.next > element, then we
                             // need to insert between cursor and next.
                             //
