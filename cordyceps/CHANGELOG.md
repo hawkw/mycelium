@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## cordyceps-v0.3.3 - (2025-04-03)
+
+[5e46e35](https://github.com/hawkw/mycelium/5e46e35cae131d5f60f527e6659dc53b18e30ebb)...[c8d6e0c](https://github.com/hawkw/mycelium/c8d6e0c849bdd226815477c8f4f699d164aa2ff6)
+
+### Added
+
+- Add `SortedList` and `TransferStack::push_was_empty` ([#520](https://github.com/hawkw/mycelium/pull/520)) ([1dad987](https://github.com/hawkw/mycelium/commit/1dad987b483078b248ac3e2e7a75f1ff2b463cc4))
+- Add `Default` impls ([#502](https://github.com/hawkw/mycelium/pull/520)) ([213291d](https://github.com/hawkw/mycelium/commit/213291d13bfe908f03ebc6ab449ec9e25380bdc8))
+
+### Documented
+
+- Link to changelogs in published crate READMEs ([#485](https://github.com/hawkw/mycelium/pull/485)) ([73ba776](https://github.com/hawkw/mycelium/commit/73ba776ca0c651431a4af9a97f45a71ba524b335))
+- Fix docs lints ([#468](https://github.com/hawkw/mycelium/pull/468)) ([b904673](https://github.com/hawkw/mycelium/commit/b90467361f8df44a81e01ce12d30dab76f04879b))
+
+### Style
+
+- Fix ambiguous wide ptr lint ([#502](https://github.com/hawkw/mycelium/pull/502)) ([005cb3e](https://github.com/hawkw/mycelium/pull/502/commits/005cb3e89b2a00d4d9797d132b36f9ebd7380456))
+- Adjust lints ([#502](https://github.com/hawkw/mycelium/pull/502)) ([2690648](https://github.com/hawkw/mycelium/commit/26906482d1f5ac64a7bdb00f7f23b4926f0173f6))
+- Fix `clippy::redundant_guards` lints ([#468](https://github.com/hawkw/mycelium/pull/468)) ([b4bf635](https://github.com/hawkw/mycelium/commit/b4bf63555c5bf1fbc611b040035fb92893c4c88e))
+- Remove unused imports ([#468](https://github.com/hawkw/mycelium/pull/468)) ([b5c6a73](https://github.com/hawkw/mycelium/commit/b5c6a738360d01152ccdd339d58259bfd180b0f8))
+- Make thread-local initializers `const` ([#468](https://github.com/hawkw/mycelium/pull/468)) ([d95332b](https://github.com/hawkw/mycelium/commit/d95332b345968c44ce6af1352d2866d48c1e6003))
+
 ## cordyceps-v0.3.2 - (2023-06-26)
 
 [192e3e4](https://github.com/hawkw/mycelium/192e3e4dd9794fe9c4573c9bf3602f331b291c97)...[5e46e35](https://github.com/hawkw/mycelium/5e46e35cae131d5f60f527e6659dc53b18e30ebb)
