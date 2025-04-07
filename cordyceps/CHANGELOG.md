@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## cordyceps-v0.3.3 - (2025-04-07)
+
+[339fd74](https://github.com/hawkw/mycelium/339fd745140513f802b67ec4ff9fe25987d8fae5)...[1dad987](https://github.com/hawkw/mycelium/1dad987b483078b248ac3e2e7a75f1ff2b463cc4)
+
+
+### Added
+
+- Singly-linked intrusive `SortedList` ([#520](https://github.com/hawkw/mycelium/issues/520)) ([1dad987](https://github.com/hawkw/mycelium/1dad987b483078b248ac3e2e7a75f1ff2b463cc4))
+
 ## cordyceps-v0.3.2 - (2023-06-26)
 
 [192e3e4](https://github.com/hawkw/mycelium/192e3e4dd9794fe9c4573c9bf3602f331b291c97)...[5e46e35](https://github.com/hawkw/mycelium/5e46e35cae131d5f60f527e6659dc53b18e30ebb)
