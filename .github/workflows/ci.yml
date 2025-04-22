@@ -252,12 +252,17 @@ jobs:
     name: no-atomics compat (cordyceps)
     steps:
     - name: install rust toolchain
-      run: |
-        rustup show
-        rustup target add thumbv6m-none-eabi
+      run: rustup show
     - uses: actions/checkout@v4
     - name: run check
-      run: cargo check -p cordyceps --target thumbv6m-none-eabi
+      # we add the target HERE instead of in the 'install rust toolchain' step
+      # because we need the `rust-toolchain.toml` file to be checked out, otherwise
+      # the target is only added for `stable`. We could also add this to the
+      # `targets` item in the toolchain file, but that would be a waste for all
+      # other tests.
+      run: |
+        rustup target add thumbv6m-none-eabi
+        cargo check -p cordyceps --target thumbv6m-none-eabi
 
   ### maitake ###
 
