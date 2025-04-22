@@ -7,17 +7,18 @@
 #![warn(missing_debug_implementations)]
 
 use crate::{
-    loom::{
-        cell::UnsafeCell,
-        sync::atomic::{AtomicPtr, Ordering::*},
-    },
+    loom::cell::UnsafeCell,
     Linked,
 };
 use core::{
     fmt,
     marker::PhantomPinned,
-    ptr::{self, NonNull},
+    ptr::NonNull,
 };
+#[cfg(target_has_atomic="ptr")]
+use crate::loom::sync::atomic::{AtomicPtr, Ordering::*};
+#[cfg(target_has_atomic="ptr")]
+use core::ptr;
 
 /// An [intrusive] lock-free singly-linked FIFO stack, where all entries
 /// currently in the stack are consumed in a single atomic operation.
@@ -61,6 +62,7 @@ use core::{
 ///
 /// [intrusive]: crate#intrusive-data-structures
 /// [mimalloc]: https://www.microsoft.com/en-us/research/uploads/prod/2019/06/mimalloc-tr-v1.pdf
+#[cfg(target_has_atomic="ptr")]
 pub struct TransferStack<T: Linked<Links<T>>> {
     head: AtomicPtr<T>,
 }
@@ -110,7 +112,7 @@ pub struct Links<T> {
 }
 
 // === impl AtomicStack ===
-
+#[cfg(target_has_atomic="ptr")]
 impl<T> TransferStack<T>
 where
     T: Linked<Links<T>>,
@@ -199,6 +201,7 @@ where
     }
 }
 
+#[cfg(target_has_atomic="ptr")]
 impl<T> Drop for TransferStack<T>
 where
     T: Linked<Links<T>>,
@@ -212,6 +215,7 @@ where
     }
 }
 
+#[cfg(target_has_atomic="ptr")]
 impl<T> fmt::Debug for TransferStack<T>
 where
     T: Linked<Links<T>>,
@@ -222,6 +226,7 @@ where
     }
 }
 
+#[cfg(target_has_atomic="ptr")]
 impl<T> Default for TransferStack<T>
 where
     T: Linked<Links<T>>,

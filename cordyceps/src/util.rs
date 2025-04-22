@@ -1,9 +1,9 @@
-use crate::loom::hint;
 use core::{
     fmt,
     ops::{Deref, DerefMut},
 };
 
+#[cfg(target_has_atomic="ptr")]
 macro_rules! feature {
     (
         #![$meta:meta]
@@ -24,6 +24,7 @@ macro_rules! test_trace {
 }
 
 /// An exponential backoff for spin loops
+#[cfg(target_has_atomic="ptr")]
 #[derive(Debug, Clone)]
 pub(crate) struct Backoff {
     exp: u8,
@@ -45,6 +46,7 @@ mod cache_pad {
 /// Align to 128 bytes on 64-bit x86/ARM targets, otherwise align to 64 bytes.
 #[cfg(not(feature = "no-cache-pad"))]
 mod cache_pad {
+    #[cfg_attr(not(target_has_atomic="ptr"), allow(dead_code))]
     #[cfg_attr(any(target_arch = "x86_64", target_arch = "aarch64"), repr(align(128)))]
     #[cfg_attr(
         not(any(target_arch = "x86_64", target_arch = "aarch64")),
@@ -61,6 +63,7 @@ pub(crate) struct FmtOption<'a, T> {
 
 // === impl Backoff ===
 
+#[cfg(target_has_atomic="ptr")]
 impl Backoff {
     pub(crate) const DEFAULT_MAX_EXPONENT: u8 = 8;
 
@@ -79,8 +82,11 @@ impl Backoff {
     }
 
     /// Perform one spin, squarin the backoff
+    #[cfg(target_has_atomic="ptr")]
     #[inline(always)]
     pub(crate) fn spin(&mut self) {
+        use crate::loom::hint;
+
         // Issue 2^exp pause instructions.
         for _ in 0..(1 << self.exp) {
             hint::spin_loop();
@@ -92,6 +98,7 @@ impl Backoff {
     }
 }
 
+#[cfg(target_has_atomic="ptr")]
 impl Default for Backoff {
     fn default() -> Self {
         Self::new()

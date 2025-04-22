@@ -68,18 +68,23 @@ extern crate std;
 pub(crate) mod util;
 
 pub mod list;
+#[cfg(target_has_atomic="ptr")]
 pub mod mpsc_queue;
 pub mod sorted_list;
 pub mod stack;
 
 #[doc(inline)]
 pub use list::List;
+#[cfg(target_has_atomic="ptr")]
 #[doc(inline)]
 pub use mpsc_queue::MpscQueue;
 #[doc(inline)]
 pub use sorted_list::{SortedList, SortedListIter};
 #[doc(inline)]
-pub use stack::{Stack, TransferStack};
+pub use stack::Stack;
+#[cfg(target_has_atomic="ptr")]
+#[doc(inline)]
+pub use stack::TransferStack;
 
 pub(crate) mod loom;
 
