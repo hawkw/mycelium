@@ -65,6 +65,12 @@
 //!
 //!   This structure is only available if the target supports CAS (Compare and
 //!   Swap) atomics.
+//!
+//! ## Compatibility
+//!
+//! Rudimentary support for targets without CAS (Compare and Swap) atomics, such as
+//! Cortex-M0+/`thumbv6m-none-eabi`, is provided, however not all structures and
+//! features may be available.
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(test)]

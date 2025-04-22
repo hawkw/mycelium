@@ -104,7 +104,7 @@ pub struct Links<T> {
     _unpin: PhantomPinned,
 }
 
-// === impl AtomicStack ===
+// === impl TransferStack ===
 #[cfg(target_has_atomic = "ptr")]
 impl<T> TransferStack<T>
 where
