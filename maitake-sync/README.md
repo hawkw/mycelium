@@ -208,7 +208,7 @@ details.
 
 The following features are available (this list is incomplete; you can help by [expanding it].)
 
-[expanding it]: https://github.com/hawkw/mycelium/edit/main/maitake-suync/README.md
+[expanding it]: https://github.com/hawkw/mycelium/edit/main/maitake-sync/README.md
 
 | Feature        | Default | Explanation |
 | :---           | :---    | :---        |
