@@ -34,6 +34,18 @@
 //!   [`MpscQueue`]s can be used to efficiently share data from multiple
 //!   concurrent producers with a consumer.
 //!
+//! - **[`SortedList`]: a mutable, singly-linked list, with elements stored
+//!   in sorted order.**
+//!
+//!   This is a simple, singly-linked list with *O*(*n*) insertion and *O*(1)
+//!   pop operations. The push operation performs an insertion sort, while the
+//!   pop operation removes the item at the front of the list. The front/back
+//!   sorting order is based on [`Ordering`][core::cmp::Ordering] and can be
+//!   min- or max-oriented, or a custom ordering function can be provided.
+//!
+//!   The [`SortedList`] type is **not** a lock-free data structure, and can
+//!   only be modified through `&mut` references.
+//!
 //! - **[`Stack`]: a mutable, singly-linked first-in, first-out (FIFO)
 //!   stack.**
 //!
