@@ -418,17 +418,27 @@ where
         for line in lines {
             let mut line = line;
             while self.current_line + line.len() >= self.cfg.line_len {
-                let offset = if let Some(last_ws) = line[..self.cfg.line_len - self.current_line]
+                let len_max = self.cfg.line_len - self.current_line;
+                let offset = if let Some(last_ws) = line[..len_max]
                     .chars()
                     .rev()
                     .position(|c| c.is_whitespace())
                 {
                     // found a nice whitespace to break on!
-                    self.writer.write_str(&line[..last_ws])?;
                     last_ws
                 } else {
-                    0
+                    len_max
                 };
+
+                let offset = if offset == 0 {
+                    // Ugly hard-wrap :(
+                    self.writer.write_str(&line[..len_max])?;
+                    len_max
+                } else {
+                    self.writer.write_str(&line[..offset])?;
+                    offset
+                };
+
                 self.writer.write_char('\n')?;
                 self.write_newline()?;
                 self.writer.write_str(" ")?;
