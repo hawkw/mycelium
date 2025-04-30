@@ -65,12 +65,6 @@
 //!
 //!   This structure is only available if the target supports CAS (Compare and
 //!   Swap) atomics.
-//!
-//! ## Compatibility
-//!
-//! Rudimentary support for targets without CAS (Compare and Swap) atomics, such as
-//! Cortex-M0+/`thumbv6m-none-eabi`, is provided, however not all structures and
-//! features may be available.
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(test)]
@@ -97,11 +91,16 @@ pub use stack::Stack;
 pub mod mpsc_queue;
 
 #[cfg(target_has_atomic = "ptr")]
-#[doc(inline)]
-pub use mpsc_queue::MpscQueue;
+pub use has_cas_atomics::*;
+
 #[cfg(target_has_atomic = "ptr")]
-#[doc(inline)]
-pub use stack::TransferStack;
+mod has_cas_atomics {
+    #[doc(inline)]
+    pub use crate::mpsc_queue::MpscQueue;
+
+    #[doc(inline)]
+    pub use crate::stack::TransferStack;
+}
 
 pub(crate) mod loom;
 

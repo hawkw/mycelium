@@ -21,6 +21,18 @@ use core::{
     ptr::{self, NonNull},
 };
 
+macro_rules! feature {
+    (
+        #![$meta:meta]
+        $($item:item)*
+    ) => {
+        $(
+            #[cfg($meta)]
+            $item
+        )*
+    }
+}
+
 /// A multi-producer, single-consumer (MPSC) queue, implemented using a
 /// lock-free [intrusive] singly-linked list.
 ///
