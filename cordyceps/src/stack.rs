@@ -18,10 +18,12 @@ mod has_cas_atomics {
     use core::{
         fmt,
         ptr::{self, NonNull},
-        sync::atomic::{AtomicPtr, Ordering::*},
     };
 
-    use crate::Linked;
+    use crate::{
+        loom::sync::atomic::{AtomicPtr, Ordering::*},
+        Linked,
+    };
 
     use super::{Links, Stack};
 
