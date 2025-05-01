@@ -34,6 +34,9 @@
 //!   [`MpscQueue`]s can be used to efficiently share data from multiple
 //!   concurrent producers with a consumer.
 //!
+//!   This structure is only available if the target supports CAS (Compare and
+//!   Swap) atomics.
+//!
 //! - **[`SortedList`]: a mutable, singly-linked list, with elements stored
 //!   in sorted order.**
 //!
@@ -71,6 +74,9 @@
 //!   A [`TransferStack`] can be used to efficiently transfer ownership of
 //!   resources from multiple producers to a consumer, such as for reuse or
 //!   cleanup.
+//!
+//!   This structure is only available if the target supports CAS (Compare and
+//!   Swap) atomics.
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(test)]
@@ -80,18 +86,33 @@ extern crate std;
 pub(crate) mod util;
 
 pub mod list;
-pub mod mpsc_queue;
 pub mod sorted_list;
 pub mod stack;
 
 #[doc(inline)]
 pub use list::List;
 #[doc(inline)]
-pub use mpsc_queue::MpscQueue;
-#[doc(inline)]
 pub use sorted_list::{SortedList, SortedListIter};
 #[doc(inline)]
-pub use stack::{Stack, TransferStack};
+pub use stack::Stack;
+
+//
+// The following items are only available if we have atomics
+//
+#[cfg(target_has_atomic = "ptr")]
+pub mod mpsc_queue;
+
+#[cfg(target_has_atomic = "ptr")]
+pub use has_cas_atomics::*;
+
+#[cfg(target_has_atomic = "ptr")]
+mod has_cas_atomics {
+    #[doc(inline)]
+    pub use crate::mpsc_queue::MpscQueue;
+
+    #[doc(inline)]
+    pub use crate::stack::TransferStack;
+}
 
 pub(crate) mod loom;
 

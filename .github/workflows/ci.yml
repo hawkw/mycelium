@@ -244,6 +244,26 @@ jobs:
     - name: run Miri tests
       run: just miri cordyceps
 
+  # run no-atomics target tests
+  cordyceps_no_atomics_compat:
+    needs: changed_paths
+    if: needs.changed_paths.outputs.should_skip != 'true' || !fromJSON(needs.changed_paths.outputs.paths_result).cordyceps.should_skip
+    runs-on: ubuntu-latest
+    name: no-atomics compat (cordyceps)
+    steps:
+    - name: install rust toolchain
+      run: rustup show
+    - uses: actions/checkout@v4
+    - name: run check
+      # we add the target HERE instead of in the 'install rust toolchain' step
+      # because we need the `rust-toolchain.toml` file to be checked out, otherwise
+      # the target is only added for `stable`. We could also add this to the
+      # `targets` item in the toolchain file, but that would be a waste for all
+      # other tests.
+      run: |
+        rustup target add thumbv6m-none-eabi
+        cargo check -p cordyceps --target thumbv6m-none-eabi
+
   ### maitake ###
 
   # test with `--no-default-features`
@@ -313,6 +333,7 @@ jobs:
     - docs
     - cordyceps_loom
     - cordyceps_miri
+    - cordyceps_no_atomics_compat
     - maitake_no_default_features
     - maitake_loom
     - maitake_miri
