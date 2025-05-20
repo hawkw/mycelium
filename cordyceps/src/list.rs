@@ -248,7 +248,7 @@ pub struct Iter<'list, T: Linked<Links<T>> + ?Sized> {
     len: usize,
 }
 
-/// Iterates over the items in a [`List`] by `NonNull<T>` node pointers.
+/// Iterates over the items in a [`List`] as [`NonNull`]`<T>` node pointers.
 ///
 /// Whenever possible, prefer [`Iter`] or [`IterMut`], as they provide
 /// easier-to-hold-right interfaces when iterating over nodes.
@@ -929,7 +929,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// Although this method is safe, care must be taken with the items
     /// yielded by the returned iterator.
     ///
-    /// This iterator returns `NonNull<T>` of the individual node elements,
+    /// This iterator returns [`NonNull`]`<T>` of the individual node elements,
     /// rather than references. This is done to allow "type punning" of nodes,
     /// where the creation of a reference could restrict the provenance of the
     /// pointed-to item. This is relevant if your nodes are of a common header
