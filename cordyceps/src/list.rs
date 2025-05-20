@@ -248,6 +248,22 @@ pub struct Iter<'list, T: Linked<Links<T>> + ?Sized> {
     len: usize,
 }
 
+/// Iterates over the items in a [`List`] by pointer.
+pub struct RawIter<'list, T: Linked<Links<T>> + ?Sized> {
+    _list: &'list List<T>,
+
+    /// The current node when iterating head -> tail.
+    curr: Link<T>,
+
+    /// The current node when iterating tail -> head.
+    ///
+    /// This is used by the [`DoubleEndedIterator`] impl.
+    curr_back: Link<T>,
+
+    /// The number of remaining entries in the iterator.
+    len: usize,
+}
+
 /// Iterates over the items in a [`List`] by mutable reference.
 pub struct IterMut<'list, T: Linked<Links<T>> + ?Sized> {
     _list: &'list mut List<T>,
@@ -897,6 +913,17 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         }
     }
 
+    /// Returns an iterator over the items in this list, by pointer.
+    #[must_use]
+    pub fn raw_iter(&self) -> RawIter<'_, T> {
+        RawIter {
+            _list: self,
+            curr: self.head,
+            curr_back: self.tail,
+            len: self.len(),
+        }
+    }
+
     /// Returns an iterator which uses a closure to determine if an element
     /// should be removed from the list.
     ///
@@ -1377,6 +1404,64 @@ impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'_, T> {
 }
 
 impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterMut<'_, T> {}
+
+// === impl RawIter ====
+
+impl<T: Linked<Links<T>> + ?Sized> Iterator for RawIter<'_, T> {
+    type Item = NonNull<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let curr = self.curr.take()?;
+        self.len -= 1;
+        unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
+            self.curr = T::links(curr).as_ref().next();
+            Some(curr)
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> ExactSizeIterator for RawIter<'_, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for RawIter<'_, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let curr = self.curr_back.take()?;
+        self.len -= 1;
+        unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
+            self.curr_back = T::links(curr).as_ref().prev();
+            Some(curr)
+        }
+    }
+}
+
+impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for RawIter<'_, T> {}
+
 
 // === impl IntoIter ===
 
