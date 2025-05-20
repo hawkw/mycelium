@@ -248,8 +248,17 @@ pub struct Iter<'list, T: Linked<Links<T>> + ?Sized> {
     len: usize,
 }
 
-/// Iterates over the items in a [`List`] by pointer.
-pub struct RawIter<'list, T: Linked<Links<T>> + ?Sized> {
+/// Iterates over the items in a [`List`] by `NonNull<T>` node pointers.
+///
+/// Whenever possible, prefer [`Iter`] or [`IterMut`], as they provide
+/// easier-to-hold-right interfaces when iterating over nodes.
+///
+/// ## Safety
+///
+/// Although iteration of items is safe, care must be taken with
+/// the returned `NonNull<T>` nodes. See [`List::iter_raw()`] for
+/// more details on safety invariants.
+pub struct IterRaw<'list, T: Linked<Links<T>> + ?Sized> {
     _list: &'list List<T>,
 
     /// The current node when iterating head -> tail.
@@ -914,9 +923,36 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     }
 
     /// Returns an iterator over the items in this list, by pointer.
+    ///
+    /// ## Safety
+    ///
+    /// Although this method is safe, care must be taken with the items
+    /// yielded by the returned iterator.
+    ///
+    /// This iterator returns `NonNull<T>` of the individual node elements,
+    /// rather than references. This is done to allow "type punning" of nodes,
+    /// where the creation of a reference could restrict the provenance of the
+    /// pointed-to item. This is relevant if your nodes are of a common header
+    /// type, but may have different "body" types you'd like to cast to. This is similar
+    /// to how executors like `maitake` or `tokio` store `Task`s: with a common
+    /// `TaskHeader` but containing varying futured in their bodies. If this is
+    /// NOT a feature you need, consider using [`List::iter()`] or
+    /// [`List::iter_mut()`] instead.
+    ///
+    /// Morally, the elements yielded by this iterator should be treated *as if*
+    /// they were `Pin<NonNull<T>>`, or `Pin<&mut T>`, in that you MUST NOT move
+    /// out of the pointed-to nodes. The nodes are still logically OWNED by the
+    /// list, and must not be removed using this interface. You may still use
+    /// these pointers with whatever provenance they were originally created with,
+    /// allowing for type-punning to a larger type with a common header base.
+    ///
+    /// Unfortunatly we [cannot create] a `Pin<NonNull<T>>`, so you must use the
+    /// pointers yielded by this iterator carefully.
+    ///
+    /// [cannot create]: https://github.com/rust-lang/rust/issues/54815
     #[must_use]
-    pub fn raw_iter(&self) -> RawIter<'_, T> {
-        RawIter {
+    pub fn iter_raw(&mut self) -> IterRaw<'_, T> {
+        IterRaw {
             _list: self,
             curr: self.head,
             curr_back: self.tail,
@@ -1407,7 +1443,7 @@ impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterMut<'_, T> {}
 
 // === impl RawIter ====
 
-impl<T: Linked<Links<T>> + ?Sized> Iterator for RawIter<'_, T> {
+impl<T: Linked<Links<T>> + ?Sized> Iterator for IterRaw<'_, T> {
     type Item = NonNull<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1434,14 +1470,14 @@ impl<T: Linked<Links<T>> + ?Sized> Iterator for RawIter<'_, T> {
     }
 }
 
-impl<T: Linked<Links<T>> + ?Sized> ExactSizeIterator for RawIter<'_, T> {
+impl<T: Linked<Links<T>> + ?Sized> ExactSizeIterator for IterRaw<'_, T> {
     #[inline]
     fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for RawIter<'_, T> {
+impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterRaw<'_, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -1460,7 +1496,7 @@ impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for RawIter<'_, T> {
     }
 }
 
-impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for RawIter<'_, T> {}
+impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterRaw<'_, T> {}
 
 
 // === impl IntoIter ===
