@@ -950,6 +950,16 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     /// pointers yielded by this iterator carefully.
     ///
     /// [cannot create]: https://github.com/rust-lang/rust/issues/54815
+    ///
+    /// ## Example
+    ///
+    /// For an end-to-end example of the kind of "spooky type punning" this interface
+    /// aims to allow, check out the [test for `iter_raw`], which demonstrates the
+    /// ability to call a dynamic "print" function on any item in the list, where
+    /// all items are of differing types (but all implement the [`Debug`][core::fmt::Debug]
+    /// trait).
+    ///
+    /// [test for `iter_raw`]: https://github.com/hawkw/mycelium/blob/main/cordyceps/src/list/tests/iter_raw.rs
     #[must_use]
     pub fn iter_raw(&mut self) -> IterRaw<'_, T> {
         IterRaw {
