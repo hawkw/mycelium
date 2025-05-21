@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## cordyceps-v0.3.4 - (2025-05-21)
+
+[2d2c3e2](https://github.com/hawkw/mycelium/2d2c3e267814628b9355c8e8a504b4b30604efa3)...[37a369f](https://github.com/hawkw/mycelium/37a369ff6bdddc72847378d9b5500b8c1ed2cc38)
+
+
+### Added
+
+- Initial support for non-CAS targets ([#526](https://github.com/hawkw/mycelium/issues/526)) ([82284c4](https://github.com/hawkw/mycelium/82284c465ee6aa0b1468854def75ced2b09e4fc7))
+- Add "raw" iter for `List` ([#533](https://github.com/hawkw/mycelium/issues/533)) ([37a369f](https://github.com/hawkw/mycelium/37a369ff6bdddc72847378d9b5500b8c1ed2cc38))
+
+### Documented
+
+- Add SortedList top level docs ([#525](https://github.com/hawkw/mycelium/issues/525)) ([e2394c2](https://github.com/hawkw/mycelium/e2394c254b5c1dfc6f902fe91536a67c544f9938))
+
 ## cordyceps-v0.3.3 - (2025-04-07)
 
 [339fd74](https://github.com/hawkw/mycelium/339fd745140513f802b67ec4ff9fe25987d8fae5)...[1dad987](https://github.com/hawkw/mycelium/1dad987b483078b248ac3e2e7a75f1ff2b463cc4)
