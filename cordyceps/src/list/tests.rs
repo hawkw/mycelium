@@ -109,6 +109,7 @@ macro_rules! assert_ptr_eq {
 }
 
 mod cursor;
+mod iter_raw;
 mod owned_entry;
 mod remove_by_addr;
 
