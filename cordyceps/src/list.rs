@@ -259,7 +259,7 @@ pub struct Iter<'list, T: Linked<Links<T>> + ?Sized> {
 /// the returned `NonNull<T>` nodes. See [`List::iter_raw()`] for
 /// more details on safety invariants.
 pub struct IterRaw<'list, T: Linked<Links<T>> + ?Sized> {
-    _list: &'list List<T>,
+    _list: &'list mut List<T>,
 
     /// The current node when iterating head -> tail.
     curr: Link<T>,
@@ -963,10 +963,10 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
     #[must_use]
     pub fn iter_raw(&mut self) -> IterRaw<'_, T> {
         IterRaw {
-            _list: self,
+            len: self.len(),
             curr: self.head,
             curr_back: self.tail,
-            len: self.len(),
+            _list: self,
         }
     }
 
@@ -1451,7 +1451,13 @@ impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterMut<'_, T> {
 
 impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterMut<'_, T> {}
 
-// === impl RawIter ====
+// === impl IterRaw ====
+
+/// ## SAFETY
+///
+/// IterRaw contains an exclusive reference to the given List, and objects
+/// within the list are pinned. Therefore, `Send`-ing the iterator is sound.
+unsafe impl<T: Linked<Links<T>> + ?Sized> Send for IterRaw<'_, T> {}
 
 impl<T: Linked<Links<T>> + ?Sized> Iterator for IterRaw<'_, T> {
     type Item = NonNull<T>;
@@ -1496,7 +1502,7 @@ impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterRaw<'_, T> {
         let curr = self.curr_back.take()?;
         self.len -= 1;
         unsafe {
-            // safety: it is safe for us to borrow `curr`, because the iterator
+            // safety: it is safe for us to borrow `curr_back`, because the iterator
             // borrows the `List`, ensuring that the list will not be dropped
             // while the iterator exists. the returned item will not outlive the
             // iterator.
@@ -1507,7 +1513,6 @@ impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterRaw<'_, T> {
 }
 
 impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterRaw<'_, T> {}
-
 
 // === impl IntoIter ===
 
