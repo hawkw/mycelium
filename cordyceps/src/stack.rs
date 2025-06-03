@@ -12,6 +12,199 @@ use core::{fmt, marker::PhantomPinned, ptr::NonNull};
 #[cfg(target_has_atomic = "ptr")]
 pub use has_cas_atomics::*;
 
+#[cfg(not(target_has_atomic = "ptr"))]
+pub use no_cas_atomics::*;
+
+/// Items exclusive to targets WITHOUT CAS atomics
+#[cfg(any(test, not(target_has_atomic = "ptr")))]
+mod no_cas_atomics {
+    #[cfg(not(loom))]
+    use mutex::ConstInit;
+
+    use mutex::{BlockingMutex, ScopedRawMutex};
+
+    use core::{fmt, ptr::NonNull};
+
+    use crate::Linked;
+
+    use super::{Links, Stack};
+
+    /// An [intrusive] lock-free singly-linked FIFO stack, where all entries
+    /// currently in the stack are consumed in a single atomic operation.
+    ///
+    /// A transfer stack is perhaps the world's simplest lock-free concurrent data
+    /// structure. It provides two primary operations:
+    ///
+    /// - [`TransferStack::push`], which appends an element to the end of the
+    ///   transfer stack,
+    ///
+    /// - [`TransferStack::take_all`], which atomically takes all elements currently
+    ///   on the transfer stack and returns them as a new mutable [`Stack`].
+    ///
+    /// These are both *O*(1) operations, although `push` performs a
+    /// compare-and-swap loop that may be retried if another producer concurrently
+    /// pushed an element.
+    ///
+    /// In order to be part of a `TransferStack`, a type `T` must implement
+    /// the [`Linked`] trait for [`stack::Links<T>`](Links).
+    ///
+    /// Pushing elements into a `TransferStack` takes ownership of those elements
+    /// through an owning [`Handle` type](Linked::Handle). Dropping a
+    /// [`TransferStack`] drops all elements currently linked into the stack.
+    ///
+    /// A transfer stack is often useful in cases where a large number of resources
+    /// must be efficiently transferred from several producers to a consumer, such
+    /// as for reuse or cleanup. For example, a [`TransferStack`] can be used as the
+    /// "thread" (shared) free list in a [`mimalloc`-style sharded
+    /// allocator][mimalloc], with a mutable [`Stack`] used as the local
+    /// (unsynchronized) free list. When an allocation is freed from the same CPU
+    /// core that it was allocated on, it is pushed to the local free list, using an
+    /// unsynchronized mutable [`Stack::push`] operation. If an allocation is freed
+    /// from a different thread, it is instead pushed to that thread's shared free
+    /// list, a [`TransferStack`], using an atomic [`TransferStack::push`]
+    /// operation. New allocations are popped from the local unsynchronized free
+    /// list, and if the local free list is empty, the entire shared free list is
+    /// moved onto the local free list. This allows objects which do not leave the
+    /// CPU core they were allocated on to be both allocated and deallocated using
+    /// unsynchronized operations, and new allocations only perform an atomic
+    /// operation when the local free list is empty.
+    ///
+    /// [intrusive]: crate#intrusive-data-structures
+    /// [mimalloc]: https://www.microsoft.com/en-us/research/uploads/prod/2019/06/mimalloc-tr-v1.pdf
+    pub struct TransferStack<R: ScopedRawMutex, T: Linked<Links<T>>> {
+        head: BlockingMutex<R, Option<NonNull<T>>>,
+    }
+
+    // === impl TransferStack ===
+    #[cfg(not(loom))]
+    impl<R, T> TransferStack<R, T>
+    where
+        R: ConstInit + ScopedRawMutex,
+        T: Linked<Links<T>>,
+    {
+        /// Returns a new `TransferStack` with no elements.
+        #[must_use]
+        pub const fn new() -> Self {
+            Self {
+                head: BlockingMutex::new(None),
+            }
+        }
+    }
+
+    impl<R, T> TransferStack<R, T>
+    where
+        R: ScopedRawMutex,
+        T: Linked<Links<T>>,
+    {
+        /// Returns a new `TransferStack` with no elements.
+        #[must_use]
+        pub fn new_const(r: R) -> Self {
+            Self {
+                head: BlockingMutex::const_new(r, None),
+            }
+        }
+
+        /// Pushes `element` onto the end of this `TransferStack`, taking ownership
+        /// of it.
+        ///
+        /// This is an *O*(1) operation, although it performs a compare-and-swap
+        /// loop that may repeat if another producer is concurrently calling `push`
+        /// on the same `TransferStack`.
+        ///
+        /// This takes ownership over `element` through its [owning `Handle`
+        /// type](Linked::Handle). If the `TransferStack` is dropped before the
+        /// pushed `element` is removed from the stack, the `element` will be dropped.
+        #[inline]
+        pub fn push(&self, element: T::Handle) {
+            self.push_was_empty(element);
+        }
+
+        /// Pushes `element` onto the end of this `TransferStack`, taking ownership
+        /// of it. Returns `true` if the stack was previously empty (the previous
+        /// head was null).
+        ///
+        /// This is an *O*(1) operation, although it performs a compare-and-swap
+        /// loop that may repeat if another producer is concurrently calling `push`
+        /// on the same `TransferStack`.
+        ///
+        /// This takes ownership over `element` through its [owning `Handle`
+        /// type](Linked::Handle). If the `TransferStack` is dropped before the
+        /// pushed `element` is removed from the stack, the `element` will be dropped.
+        pub fn push_was_empty(&self, element: T::Handle) -> bool {
+            let ptr = T::into_ptr(element);
+            test_trace!(?ptr, "TransferStack::push");
+            let links = unsafe { T::links(ptr).as_mut() };
+            debug_assert!(links.next.with(|next| unsafe { (*next).is_none() }));
+            self.head.with_lock(|hd| {
+                let _head = *hd;
+                // set new.next = head
+                links.next.with_mut(|next| unsafe {
+                    next.write(*hd);
+                });
+                let was_empty = hd.is_none();
+                // set head = new
+                *hd = Some(ptr);
+                test_trace!(?ptr, ?_head, was_empty, "TransferStack::push -> pushed");
+                was_empty
+            })
+        }
+
+        /// Takes all elements *currently* in this `TransferStack`, returning a new
+        /// mutable [`Stack`] containing those elements.
+        ///
+        /// This is an *O*(1) operation which does not allocate memory. It will
+        /// never loop and does not spin.
+        #[must_use]
+        pub fn take_all(&self) -> Stack<T> {
+            self.head.with_lock(|hd| {
+                let head = hd.take();
+                Stack { head }
+            })
+        }
+    }
+
+    unsafe impl<R: ScopedRawMutex + Send, T: Linked<Links<T>> + Send> Send for TransferStack<R, T> {}
+    unsafe impl<R: ScopedRawMutex + Sync, T: Linked<Links<T>> + Send> Sync for TransferStack<R, T> {}
+
+    impl<R, T> Drop for TransferStack<R, T>
+    where
+        R: ScopedRawMutex,
+        T: Linked<Links<T>>,
+    {
+        fn drop(&mut self) {
+            // The stack owns any entries that are still in the stack; ensure they
+            // are dropped before dropping the stack.
+            for entry in self.take_all() {
+                drop(entry);
+            }
+        }
+    }
+
+    impl<R, T> fmt::Debug for TransferStack<R, T>
+    where
+        T: Linked<Links<T>>,
+        R: ScopedRawMutex,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let Self { head } = self;
+            f.debug_struct("TransferStack")
+                .field("head", &head.with_lock(|hd| *hd))
+                .finish()
+        }
+    }
+
+    #[cfg(not(loom))]
+    impl<R, T> Default for TransferStack<R, T>
+    where
+        R: ConstInit + ScopedRawMutex,
+        T: Linked<Links<T>>,
+    {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+}
+
 /// Items exclusive to targets with CAS atomics
 #[cfg(target_has_atomic = "ptr")]
 mod has_cas_atomics {
@@ -444,6 +637,7 @@ mod loom {
         },
         thread,
     };
+    use mutex::raw_impls::cs::CriticalSectionRawMutex;
     use test_util::Entry;
 
     #[test]
@@ -489,7 +683,49 @@ mod loom {
 
             thread1.join().unwrap();
             thread2.join().unwrap();
-        })
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(no_cas_atomics::TransferStack::<CriticalSectionRawMutex, _>::new_const(CriticalSectionRawMutex::new()));
+            let threads = Arc::new(AtomicUsize::new(2));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                let threads = threads.clone();
+                move || {
+                    Entry::push_all_nca(&stack, 1, PUSHES);
+                    threads.fetch_sub(1, Ordering::Relaxed);
+                }
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                let threads = threads.clone();
+                move || {
+                    Entry::push_all_nca(&stack, 2, PUSHES);
+                    threads.fetch_sub(1, Ordering::Relaxed);
+                }
+            });
+
+            let mut seen = Vec::new();
+
+            loop {
+                seen.extend(stack.take_all().map(|entry| entry.val));
+
+                if threads.load(Ordering::Relaxed) == 0 {
+                    break;
+                }
+
+                thread::yield_now();
+            }
+
+            seen.extend(stack.take_all().map(|entry| entry.val));
+
+            seen.sort();
+            assert_eq!(seen, vec![10, 11, 20, 21]);
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+        });
     }
 
     #[test]
@@ -505,6 +741,39 @@ mod loom {
             let thread2 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all(&stack, 2, PUSHES)
+            });
+
+            let thread3 = thread::spawn({
+                let stack = stack.clone();
+                move || stack.take_all().map(|entry| entry.val).collect::<Vec<_>>()
+            });
+
+            let seen_thread0 = stack.take_all().map(|entry| entry.val).collect::<Vec<_>>();
+            let seen_thread3 = thread3.join().unwrap();
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+
+            let seen_thread0_final = stack.take_all().map(|entry| entry.val).collect::<Vec<_>>();
+
+            let mut all = dbg!(seen_thread0);
+            all.extend(dbg!(seen_thread3));
+            all.extend(dbg!(seen_thread0_final));
+
+            all.sort();
+            assert_eq!(all, vec![10, 11, 20, 21]);
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
             });
 
             let thread3 = thread::spawn({
@@ -549,6 +818,25 @@ mod loom {
 
             thread1.join().unwrap();
             thread2.join().unwrap();
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
+            });
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
         })
     }
 
@@ -577,6 +865,30 @@ mod loom {
 
             tracing::info!("dropping take_all");
             drop(take_all);
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
+            });
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+
+            let take_all = stack.take_all();
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            tracing::info!("dropping take_all");
+            drop(take_all);
         })
     }
 
@@ -593,6 +905,30 @@ mod loom {
             let thread2 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all(&stack, 2, PUSHES)
+            });
+
+            let take_all = stack.take_all();
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            tracing::info!("dropping take_all");
+            drop(take_all);
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
             });
 
             let take_all = stack.take_all();
@@ -644,10 +980,12 @@ mod loom {
 #[cfg(test)]
 mod test {
     use super::{test_util::Entry, *};
+    use mutex::raw_impls::cs::CriticalSectionRawMutex;
 
     #[test]
     fn stack_is_send_sync() {
-        crate::util::assert_send_sync::<TransferStack<Entry>>()
+        crate::util::assert_send_sync::<TransferStack<Entry>>();
+        crate::util::assert_send_sync::<no_cas_atomics::TransferStack<CriticalSectionRawMutex, Entry>>();
     }
 
     #[test]
@@ -658,6 +996,8 @@ mod test {
 
 #[cfg(test)]
 pub(crate) mod test_util {
+    use mutex::ScopedRawMutex;
+
     use super::*;
     use crate::loom::alloc;
     use core::pin::Pin;
@@ -734,6 +1074,13 @@ pub(crate) mod test_util {
         }
 
         pub(super) fn push_all(stack: &TransferStack<Self>, thread: i32, n: i32) {
+            for i in 0..n {
+                let entry = Self::new((thread * 10) + i);
+                stack.push(entry);
+            }
+        }
+
+        pub(super) fn push_all_nca<R: ScopedRawMutex>(stack: &no_cas_atomics::TransferStack<R, Self>, thread: i32, n: i32) {
             for i in 0..n {
                 let entry = Self::new((thread * 10) + i);
                 stack.push(entry);
