@@ -75,8 +75,8 @@
 //!   resources from multiple producers to a consumer, such as for reuse or
 //!   cleanup.
 //!
-//!   This structure is only available if the target supports CAS (Compare and
-//!   Swap) atomics.
+//!   If the target does NOT support CAS (Compare and Swap) atomics, a lock-full
+//!   version of [`TransferStack`] is provided.
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(test)]
@@ -94,7 +94,7 @@ pub use list::List;
 #[doc(inline)]
 pub use sorted_list::{SortedList, SortedListIter};
 #[doc(inline)]
-pub use stack::Stack;
+pub use stack::{Stack, TransferStack};
 
 //
 // The following items are only available if we have atomics
@@ -109,9 +109,6 @@ pub use has_cas_atomics::*;
 mod has_cas_atomics {
     #[doc(inline)]
     pub use crate::mpsc_queue::MpscQueue;
-
-    #[doc(inline)]
-    pub use crate::stack::TransferStack;
 }
 
 pub(crate) mod loom;

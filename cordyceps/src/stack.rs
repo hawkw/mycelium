@@ -29,11 +29,17 @@ mod no_cas_atomics {
 
     use super::{Links, Stack};
 
-    /// An [intrusive] lock-free singly-linked FIFO stack, where all entries
-    /// currently in the stack are consumed in a single atomic operation.
+    /// An [intrusive] lock-full singly-linked FIFO stack, where all entries
+    /// currently in the stack are consumed in a single locking operation.
     ///
-    /// A transfer stack is perhaps the world's simplest lock-free concurrent data
-    /// structure. It provides two primary operations:
+    /// This structure is a simulacrum of the normally lock-free transfer stack,
+    /// useful for portability reasons when you would like to use a nearly-identical
+    /// data structure on targets that don't support compare and swap operations.
+    ///
+    /// Instead of using compare and swaps, a short mutex lock will be made, with the
+    /// selected [`ScopedRawMutex`][mutex::ScopedRawMutex] implementation.
+    ///
+    /// A transfer stack provides two primary operations:
     ///
     /// - [`TransferStack::push`], which appends an element to the end of the
     ///   transfer stack,
@@ -41,9 +47,7 @@ mod no_cas_atomics {
     /// - [`TransferStack::take_all`], which atomically takes all elements currently
     ///   on the transfer stack and returns them as a new mutable [`Stack`].
     ///
-    /// These are both *O*(1) operations, although `push` performs a
-    /// compare-and-swap loop that may be retried if another producer concurrently
-    /// pushed an element.
+    /// These are both *O*(1) operations.
     ///
     /// In order to be part of a `TransferStack`, a type `T` must implement
     /// the [`Linked`] trait for [`stack::Links<T>`](Links).
@@ -51,26 +55,6 @@ mod no_cas_atomics {
     /// Pushing elements into a `TransferStack` takes ownership of those elements
     /// through an owning [`Handle` type](Linked::Handle). Dropping a
     /// [`TransferStack`] drops all elements currently linked into the stack.
-    ///
-    /// A transfer stack is often useful in cases where a large number of resources
-    /// must be efficiently transferred from several producers to a consumer, such
-    /// as for reuse or cleanup. For example, a [`TransferStack`] can be used as the
-    /// "thread" (shared) free list in a [`mimalloc`-style sharded
-    /// allocator][mimalloc], with a mutable [`Stack`] used as the local
-    /// (unsynchronized) free list. When an allocation is freed from the same CPU
-    /// core that it was allocated on, it is pushed to the local free list, using an
-    /// unsynchronized mutable [`Stack::push`] operation. If an allocation is freed
-    /// from a different thread, it is instead pushed to that thread's shared free
-    /// list, a [`TransferStack`], using an atomic [`TransferStack::push`]
-    /// operation. New allocations are popped from the local unsynchronized free
-    /// list, and if the local free list is empty, the entire shared free list is
-    /// moved onto the local free list. This allows objects which do not leave the
-    /// CPU core they were allocated on to be both allocated and deallocated using
-    /// unsynchronized operations, and new allocations only perform an atomic
-    /// operation when the local free list is empty.
-    ///
-    /// [intrusive]: crate#intrusive-data-structures
-    /// [mimalloc]: https://www.microsoft.com/en-us/research/uploads/prod/2019/06/mimalloc-tr-v1.pdf
     pub struct TransferStack<R: ScopedRawMutex, T: Linked<Links<T>>> {
         head: BlockingMutex<R, Option<NonNull<T>>>,
     }
@@ -107,9 +91,7 @@ mod no_cas_atomics {
         /// Pushes `element` onto the end of this `TransferStack`, taking ownership
         /// of it.
         ///
-        /// This is an *O*(1) operation, although it performs a compare-and-swap
-        /// loop that may repeat if another producer is concurrently calling `push`
-        /// on the same `TransferStack`.
+        /// This is an *O*(1) operation.
         ///
         /// This takes ownership over `element` through its [owning `Handle`
         /// type](Linked::Handle). If the `TransferStack` is dropped before the
@@ -123,9 +105,7 @@ mod no_cas_atomics {
         /// of it. Returns `true` if the stack was previously empty (the previous
         /// head was null).
         ///
-        /// This is an *O*(1) operation, although it performs a compare-and-swap
-        /// loop that may repeat if another producer is concurrently calling `push`
-        /// on the same `TransferStack`.
+        /// This is an *O*(1) operation.
         ///
         /// This takes ownership over `element` through its [owning `Handle`
         /// type](Linked::Handle). If the `TransferStack` is dropped before the
