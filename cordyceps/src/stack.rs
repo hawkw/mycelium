@@ -98,7 +98,7 @@ mod no_cas_atomics {
     {
         /// Returns a new `TransferStack` with no elements.
         #[must_use]
-        pub fn new_const(r: R) -> Self {
+        pub fn const_new(r: R) -> Self {
             Self {
                 head: BlockingMutex::const_new(r, None),
             }
@@ -634,11 +634,47 @@ mod loom {
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
+            Mutex,
         },
         thread,
     };
-    use mutex::raw_impls::cs::CriticalSectionRawMutex;
+    use mutex::ScopedRawMutex;
     use test_util::Entry;
+
+    struct LoomRawMutex {
+        inner: Mutex<()>,
+    }
+
+    impl LoomRawMutex {
+        fn new() -> Self {
+            Self {
+                inner: Mutex::new(()),
+            }
+        }
+    }
+
+    unsafe impl ScopedRawMutex for LoomRawMutex {
+        fn try_with_lock<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
+            if let Ok(guard) = self.inner.try_lock() {
+                let res = Some(f());
+                drop(guard);
+                res
+            } else {
+                None
+            }
+        }
+
+        fn with_lock<R>(&self, f: impl FnOnce() -> R) -> R {
+            let guard = self.inner.lock().unwrap();
+            let res = f();
+            drop(guard);
+            res
+        }
+
+        fn is_locked(&self) -> bool {
+            self.inner.try_lock().is_ok()
+        }
+    }
 
     #[test]
     fn multithreaded_push() {
@@ -686,7 +722,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::<CriticalSectionRawMutex, _>::new_const(CriticalSectionRawMutex::new()));
+            let stack = Arc::new(no_cas_atomics::TransferStack::<LoomRawMutex, _>::const_new(LoomRawMutex::new()));
             let threads = Arc::new(AtomicUsize::new(2));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
@@ -765,7 +801,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
@@ -821,7 +857,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
@@ -868,7 +904,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
@@ -920,7 +956,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::new_const(CriticalSectionRawMutex::new()));
+            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
