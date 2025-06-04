@@ -23,20 +23,20 @@ std = ["alloc"]
 # See the documentation of `CachePadded` for more details.
 no-cache-pad = []
 
+[dependencies]
+mutex = "1.0"
+
 [dev-dependencies]
 proptest = "1"
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 pin-project = "1"
-mutex = "1.0"
 critical-section = { version = "1.2", features = ["std"] }
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.7"
 tracing = { version = "0.1" }
 
-[target.'cfg(not(target_has_atomic = "ptr"))'.dependencies]
-mutex = "1.0"
 
 [package.metadata.docs.rs]
 all-features = true

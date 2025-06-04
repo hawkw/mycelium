@@ -12,176 +12,174 @@ use core::{fmt, marker::PhantomPinned, ptr::NonNull};
 #[cfg(target_has_atomic = "ptr")]
 pub use has_cas_atomics::*;
 
-#[cfg(not(target_has_atomic = "ptr"))]
-pub use no_cas_atomics::*;
+#[cfg(not(loom))]
+use mutex::ConstInit;
 
-/// Items exclusive to targets WITHOUT CAS atomics
-#[cfg(any(test, not(target_has_atomic = "ptr")))]
-mod no_cas_atomics {
-    #[cfg(not(loom))]
-    use mutex::ConstInit;
+use mutex::{BlockingMutex, ScopedRawMutex};
 
-    use mutex::{BlockingMutex, ScopedRawMutex};
+/// An [intrusive] lock-full singly-linked FIFO stack, where all entries
+/// currently in the stack are consumed in a single locking operation.
+///
+/// This structure is a simulacrum of the normally lock-free transfer stack,
+/// useful for portability reasons when you would like to use a nearly-identical
+/// data structure on targets that don't support compare and swap operations.
+///
+/// Instead of using compare and swaps, a short mutex lock will be made, with the
+/// selected [`ScopedRawMutex`] implementation.
+///
+/// A transfer stack provides two primary operations:
+///
+/// - [`MutexTransferStack::push`], which appends an element to the end of the
+///   transfer stack,
+///
+/// - [`MutexTransferStack::take_all`], which atomically takes all elements currently
+///   on the transfer stack and returns them as a new mutable [`Stack`].
+///
+/// These are both *O*(1) operations.
+///
+/// In order to be part of a `MutexTransferStack`, a type `T` must implement
+/// the [`Linked`] trait for [`stack::Links<T>`](Links).
+///
+/// Pushing elements into a `MutexTransferStack` takes ownership of those elements
+/// through an owning [`Handle` type](Linked::Handle). Dropping a
+/// [`MutexTransferStack`] drops all elements currently linked into the stack.
+pub struct MutexTransferStack<R: ScopedRawMutex, T: Linked<Links<T>>> {
+    head: BlockingMutex<R, Option<NonNull<T>>>,
+}
 
-    use core::{fmt, ptr::NonNull};
-
-    use crate::Linked;
-
-    use super::{Links, Stack};
-
-    /// An [intrusive] lock-full singly-linked FIFO stack, where all entries
-    /// currently in the stack are consumed in a single locking operation.
-    ///
-    /// This structure is a simulacrum of the normally lock-free transfer stack,
-    /// useful for portability reasons when you would like to use a nearly-identical
-    /// data structure on targets that don't support compare and swap operations.
-    ///
-    /// Instead of using compare and swaps, a short mutex lock will be made, with the
-    /// selected [`ScopedRawMutex`][mutex::ScopedRawMutex] implementation.
-    ///
-    /// A transfer stack provides two primary operations:
-    ///
-    /// - [`TransferStack::push`], which appends an element to the end of the
-    ///   transfer stack,
-    ///
-    /// - [`TransferStack::take_all`], which atomically takes all elements currently
-    ///   on the transfer stack and returns them as a new mutable [`Stack`].
-    ///
-    /// These are both *O*(1) operations.
-    ///
-    /// In order to be part of a `TransferStack`, a type `T` must implement
-    /// the [`Linked`] trait for [`stack::Links<T>`](Links).
-    ///
-    /// Pushing elements into a `TransferStack` takes ownership of those elements
-    /// through an owning [`Handle` type](Linked::Handle). Dropping a
-    /// [`TransferStack`] drops all elements currently linked into the stack.
-    pub struct TransferStack<R: ScopedRawMutex, T: Linked<Links<T>>> {
-        head: BlockingMutex<R, Option<NonNull<T>>>,
-    }
-
-    // === impl TransferStack ===
-    #[cfg(not(loom))]
-    impl<R, T> TransferStack<R, T>
-    where
-        R: ConstInit + ScopedRawMutex,
-        T: Linked<Links<T>>,
-    {
-        /// Returns a new `TransferStack` with no elements.
-        #[must_use]
-        pub const fn new() -> Self {
-            Self {
-                head: BlockingMutex::new(None),
-            }
+// === impl MutexTransferStack ===
+#[cfg(not(loom))]
+impl<R, T> MutexTransferStack<R, T>
+where
+    R: ConstInit + ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    /// Returns a new `MutexTransferStack` with no elements.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            head: BlockingMutex::new(None),
         }
     }
+}
 
-    impl<R, T> TransferStack<R, T>
-    where
-        R: ScopedRawMutex,
-        T: Linked<Links<T>>,
-    {
-        /// Returns a new `TransferStack` with no elements.
-        #[must_use]
-        pub fn const_new(r: R) -> Self {
-            Self {
-                head: BlockingMutex::const_new(r, None),
-            }
-        }
-
-        /// Pushes `element` onto the end of this `TransferStack`, taking ownership
-        /// of it.
-        ///
-        /// This is an *O*(1) operation.
-        ///
-        /// This takes ownership over `element` through its [owning `Handle`
-        /// type](Linked::Handle). If the `TransferStack` is dropped before the
-        /// pushed `element` is removed from the stack, the `element` will be dropped.
-        #[inline]
-        pub fn push(&self, element: T::Handle) {
-            self.push_was_empty(element);
-        }
-
-        /// Pushes `element` onto the end of this `TransferStack`, taking ownership
-        /// of it. Returns `true` if the stack was previously empty (the previous
-        /// head was null).
-        ///
-        /// This is an *O*(1) operation.
-        ///
-        /// This takes ownership over `element` through its [owning `Handle`
-        /// type](Linked::Handle). If the `TransferStack` is dropped before the
-        /// pushed `element` is removed from the stack, the `element` will be dropped.
-        pub fn push_was_empty(&self, element: T::Handle) -> bool {
-            let ptr = T::into_ptr(element);
-            test_trace!(?ptr, "TransferStack::push");
-            let links = unsafe { T::links(ptr).as_mut() };
-            debug_assert!(links.next.with(|next| unsafe { (*next).is_none() }));
-            self.head.with_lock(|hd| {
-                let _head = *hd;
-                // set new.next = head
-                links.next.with_mut(|next| unsafe {
-                    next.write(*hd);
-                });
-                let was_empty = hd.is_none();
-                // set head = new
-                *hd = Some(ptr);
-                test_trace!(?ptr, ?_head, was_empty, "TransferStack::push -> pushed");
-                was_empty
-            })
-        }
-
-        /// Takes all elements *currently* in this `TransferStack`, returning a new
-        /// mutable [`Stack`] containing those elements.
-        ///
-        /// This is an *O*(1) operation which does not allocate memory. It will
-        /// never loop and does not spin.
-        #[must_use]
-        pub fn take_all(&self) -> Stack<T> {
-            self.head.with_lock(|hd| {
-                let head = hd.take();
-                Stack { head }
-            })
+impl<R, T> MutexTransferStack<R, T>
+where
+    R: ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    /// Returns a new `MutexTransferStack` with no elements.
+    #[must_use]
+    pub fn const_new(r: R) -> Self {
+        Self {
+            head: BlockingMutex::const_new(r, None),
         }
     }
 
-    unsafe impl<R: ScopedRawMutex + Send, T: Linked<Links<T>> + Send> Send for TransferStack<R, T> {}
-    unsafe impl<R: ScopedRawMutex + Sync, T: Linked<Links<T>> + Send> Sync for TransferStack<R, T> {}
-
-    impl<R, T> Drop for TransferStack<R, T>
-    where
-        R: ScopedRawMutex,
-        T: Linked<Links<T>>,
-    {
-        fn drop(&mut self) {
-            // The stack owns any entries that are still in the stack; ensure they
-            // are dropped before dropping the stack.
-            for entry in self.take_all() {
-                drop(entry);
-            }
-        }
+    /// Pushes `element` onto the end of this `MutexTransferStack`, taking ownership
+    /// of it.
+    ///
+    /// This is an *O*(1) operation.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `MutexTransferStack` is dropped before the
+    /// pushed `element` is removed from the stack, the `element` will be dropped.
+    #[inline]
+    pub fn push(&self, element: T::Handle) {
+        self.push_was_empty(element);
     }
 
-    impl<R, T> fmt::Debug for TransferStack<R, T>
-    where
-        T: Linked<Links<T>>,
-        R: ScopedRawMutex,
-    {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let Self { head } = self;
-            f.debug_struct("TransferStack")
-                .field("head", &head.with_lock(|hd| *hd))
-                .finish()
-        }
+    /// Pushes `element` onto the end of this `MutexTransferStack`, taking ownership
+    /// of it. Returns `true` if the stack was previously empty (the previous
+    /// head was null).
+    ///
+    /// This is an *O*(1) operation.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `MutexTransferStack` is dropped before the
+    /// pushed `element` is removed from the stack, the `element` will be dropped.
+    pub fn push_was_empty(&self, element: T::Handle) -> bool {
+        let ptr = T::into_ptr(element);
+        test_trace!(?ptr, "MutexTransferStack::push");
+        let links = unsafe { T::links(ptr).as_mut() };
+        debug_assert!(links.next.with(|next| unsafe { (*next).is_none() }));
+        self.head.with_lock(|hd| {
+            let _head = *hd;
+            // set new.next = head
+            links.next.with_mut(|next| unsafe {
+                next.write(*hd);
+            });
+            let was_empty = hd.is_none();
+            // set head = new
+            *hd = Some(ptr);
+            test_trace!(
+                ?ptr,
+                ?_head,
+                was_empty,
+                "MutexTransferStack::push -> pushed"
+            );
+            was_empty
+        })
     }
 
-    #[cfg(not(loom))]
-    impl<R, T> Default for TransferStack<R, T>
-    where
-        R: ConstInit + ScopedRawMutex,
-        T: Linked<Links<T>>,
-    {
-        fn default() -> Self {
-            Self::new()
+    /// Takes all elements *currently* in this `MutexTransferStack`, returning a new
+    /// mutable [`Stack`] containing those elements.
+    ///
+    /// This is an *O*(1) operation which does not allocate memory. It will
+    /// never loop and does not spin.
+    #[must_use]
+    pub fn take_all(&self) -> Stack<T> {
+        self.head.with_lock(|hd| {
+            let head = hd.take();
+            Stack { head }
+        })
+    }
+}
+
+unsafe impl<R: ScopedRawMutex + Send, T: Linked<Links<T>> + Send> Send
+    for MutexTransferStack<R, T>
+{
+}
+unsafe impl<R: ScopedRawMutex + Sync, T: Linked<Links<T>> + Send> Sync
+    for MutexTransferStack<R, T>
+{
+}
+
+impl<R, T> Drop for MutexTransferStack<R, T>
+where
+    R: ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    fn drop(&mut self) {
+        // The stack owns any entries that are still in the stack; ensure they
+        // are dropped before dropping the stack.
+        for entry in self.take_all() {
+            drop(entry);
         }
+    }
+}
+
+impl<R, T> fmt::Debug for MutexTransferStack<R, T>
+where
+    T: Linked<Links<T>>,
+    R: ScopedRawMutex,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { head } = self;
+        f.debug_struct("MutexTransferStack")
+            .field("head", &head.with_lock(|hd| *hd))
+            .finish()
+    }
+}
+
+#[cfg(not(loom))]
+impl<R, T> Default for MutexTransferStack<R, T>
+where
+    R: ConstInit + ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -613,8 +611,7 @@ mod loom {
         self,
         sync::{
             atomic::{AtomicUsize, Ordering},
-            Arc,
-            Mutex,
+            Arc, Mutex,
         },
         thread,
     };
@@ -702,7 +699,9 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::<LoomRawMutex, _>::const_new(LoomRawMutex::new()));
+            let stack = Arc::new(MutexTransferStack::<LoomRawMutex, _>::const_new(
+                LoomRawMutex::new(),
+            ));
             let threads = Arc::new(AtomicUsize::new(2));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
@@ -781,7 +780,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
@@ -837,7 +836,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
@@ -884,7 +883,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
@@ -936,7 +935,7 @@ mod loom {
         });
 
         loom::model(|| {
-            let stack = Arc::new(no_cas_atomics::TransferStack::const_new(LoomRawMutex::new()));
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
             let thread1 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all_nca(&stack, 1, PUSHES)
@@ -1001,7 +1000,7 @@ mod test {
     #[test]
     fn stack_is_send_sync() {
         crate::util::assert_send_sync::<TransferStack<Entry>>();
-        crate::util::assert_send_sync::<no_cas_atomics::TransferStack<CriticalSectionRawMutex, Entry>>();
+        crate::util::assert_send_sync::<MutexTransferStack<CriticalSectionRawMutex, Entry>>();
     }
 
     #[test]
@@ -1096,7 +1095,11 @@ pub(crate) mod test_util {
             }
         }
 
-        pub(super) fn push_all_nca<R: ScopedRawMutex>(stack: &no_cas_atomics::TransferStack<R, Self>, thread: i32, n: i32) {
+        pub(super) fn push_all_nca<R: ScopedRawMutex>(
+            stack: &MutexTransferStack<R, Self>,
+            thread: i32,
+            n: i32,
+        ) {
             for i in 0..n {
                 let entry = Self::new((thread * 10) + i);
                 stack.push(entry);

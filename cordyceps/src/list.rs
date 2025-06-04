@@ -1508,7 +1508,6 @@ impl<T: Linked<Links<T>> + ?Sized> DoubleEndedIterator for IterRaw<'_, T> {
 
 impl<T: Linked<Links<T>> + ?Sized> iter::FusedIterator for IterRaw<'_, T> {}
 
-
 // === impl IntoIter ===
 
 impl<T: Linked<Links<T>> + ?Sized> fmt::Debug for IntoIter<T> {
