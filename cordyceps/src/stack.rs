@@ -43,6 +43,8 @@ use mutex::{BlockingMutex, ScopedRawMutex};
 /// Pushing elements into a `MutexTransferStack` takes ownership of those elements
 /// through an owning [`Handle` type](Linked::Handle). Dropping a
 /// [`MutexTransferStack`] drops all elements currently linked into the stack.
+///
+/// [intrusive]: crate#intrusive-data-structures
 pub struct MutexTransferStack<R: ScopedRawMutex, T: Linked<Links<T>>> {
     head: BlockingMutex<R, Option<NonNull<T>>>,
 }
