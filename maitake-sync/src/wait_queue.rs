@@ -7,8 +7,8 @@ use crate::util::fmt;
 use crate::{
     blocking::{DefaultMutex, Mutex, ScopedRawMutex},
     loom::{
+        atomic::{AtomicUsize, Ordering::*},
         cell::UnsafeCell,
-        sync::atomic::{AtomicUsize, Ordering::*},
     },
     util::{CachePadded, WakeBatch},
     WaitResult,

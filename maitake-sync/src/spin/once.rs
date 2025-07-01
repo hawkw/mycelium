@@ -8,7 +8,7 @@
 //!       [`Lazy`] cell ensures the initializer is called to initialize the
 //!       value the first time it is accessed.
 use crate::{
-    loom::sync::atomic::{AtomicU8, Ordering},
+    loom::atomic::{AtomicU8, Ordering},
     util::{Backoff, CheckedMaybeUninit},
 };
 use core::{
