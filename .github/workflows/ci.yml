@@ -264,6 +264,8 @@ jobs:
         rustup target add thumbv6m-none-eabi
         cargo check -p cordyceps --target thumbv6m-none-eabi
 
+  ### maitake ###
+
   # run no-atomics target tests
   maitake_sync_no_atomics_compat:
     needs: changed_paths
@@ -279,8 +281,6 @@ jobs:
       run: rustup target add thumbv6m-none-eabi
     - name: run check
       run: cargo check -p maitake-sync --target thumbv6m-none-eabi --no-default-features --features=critical-section
-
-  ### maitake ###
 
   # test with `--no-default-features`
   maitake_no_default_features:
@@ -350,6 +350,7 @@ jobs:
     - cordyceps_loom
     - cordyceps_miri
     - cordyceps_no_atomics_compat
+    - maitake_sync_no_atomics_compat
     - maitake_no_default_features
     - maitake_loom
     - maitake_miri
