@@ -271,18 +271,14 @@ jobs:
     runs-on: ubuntu-latest
     name: no-atomics compat (maitake-sync)
     steps:
-    - name: install rust toolchain
-      run: rustup show
     - uses: actions/checkout@v4
+    - name: install rust toolchain
+      # We add the target here, rather than in the `targets` item in the 
+      # toolchain file, because it would be a waste for all other CI jobs to
+      # have to install it.
+      run: rustup target add thumbv6m-none-eabi
     - name: run check
-      # we add the target HERE instead of in the 'install rust toolchain' step
-      # because we need the `rust-toolchain.toml` file to be checked out, otherwise
-      # the target is only added for `stable`. We could also add this to the
-      # `targets` item in the toolchain file, but that would be a waste for all
-      # other tests.
-      run: |
-        rustup target add thumbv6m-none-eabi
-        cargo check -p maitake-sync --target thumbv6m-none-eabi --no-default-features --features=critical-section
+      run: cargo check -p maitake-sync --target thumbv6m-none-eabi --no-default-features --features=critical-section
 
   ### maitake ###
 
