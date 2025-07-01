@@ -38,7 +38,7 @@ pub use self::once::{InitOnce, Lazy};
 
 use crate::{
     blocking,
-    loom::atomic::{AtomicBool, AtomicUsize, Ordering::*},
+    loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
     util::{fmt, Backoff},
 };
 // This import is pulled out because we want to reference it in docs, and

@@ -3,11 +3,11 @@
 //! See the documentation for the [`WaitCell`] type for details.
 use crate::{
     loom::{
-        atomic::{
+        cell::UnsafeCell,
+        sync::atomic::{
             AtomicUsize,
             Ordering::{self, *},
         },
-        cell::UnsafeCell,
     },
     util::{fmt, CachePadded},
     Closed,

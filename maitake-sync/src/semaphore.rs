@@ -7,9 +7,11 @@
 use crate::{
     blocking::RawMutex,
     loom::{
-        atomic::{AtomicUsize, Ordering::*},
         cell::UnsafeCell,
-        sync::blocking::{Mutex, MutexGuard},
+        sync::{
+            atomic::{AtomicUsize, Ordering::*},
+            blocking::{Mutex, MutexGuard},
+        },
     },
     spin::Spinlock,
     util::{fmt, CachePadded, WakeBatch},
