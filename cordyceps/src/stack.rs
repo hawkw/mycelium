@@ -46,7 +46,7 @@ use mutex::{BlockingMutex, ScopedRawMutex};
 ///
 /// [intrusive]: crate#intrusive-data-structures
 pub struct MutexTransferStack<R: ScopedRawMutex, T: Linked<Links<T>>> {
-    head: BlockingMutex<R, Option<NonNull<T>>>,
+    inner: BlockingMutex<R, Stack<T>>,
 }
 
 // === impl MutexTransferStack ===
@@ -60,7 +60,7 @@ where
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            head: BlockingMutex::new(None),
+            inner: BlockingMutex::new(Stack::new()),
         }
     }
 }
@@ -74,7 +74,7 @@ where
     #[must_use]
     pub fn const_new(r: R) -> Self {
         Self {
-            head: BlockingMutex::const_new(r, None),
+            inner: BlockingMutex::const_new(r, Stack::new()),
         }
     }
 
@@ -101,26 +101,10 @@ where
     /// type](Linked::Handle). If the `MutexTransferStack` is dropped before the
     /// pushed `element` is removed from the stack, the `element` will be dropped.
     pub fn push_was_empty(&self, element: T::Handle) -> bool {
-        let ptr = T::into_ptr(element);
-        test_trace!(?ptr, "MutexTransferStack::push");
-        let links = unsafe { T::links(ptr).as_mut() };
-        debug_assert!(links.next.with(|next| unsafe { (*next).is_none() }));
-        self.head.with_lock(|hd| {
-            let _head = *hd;
-            // set new.next = head
-            links.next.with_mut(|next| unsafe {
-                next.write(*hd);
-            });
-            let was_empty = hd.is_none();
-            // set head = new
-            *hd = Some(ptr);
-            test_trace!(
-                ?ptr,
-                ?_head,
-                was_empty,
-                "MutexTransferStack::push -> pushed"
-            );
-            was_empty
+        self.inner.with_lock(|stack| {
+            let is_empty = stack.is_empty();
+            stack.push(element);
+            is_empty
         })
     }
 
@@ -131,10 +115,7 @@ where
     /// never loop and does not spin.
     #[must_use]
     pub fn take_all(&self) -> Stack<T> {
-        self.head.with_lock(|hd| {
-            let head = hd.take();
-            Stack { head }
-        })
+        self.inner.with_lock(|stack| stack.take_all())
     }
 }
 
@@ -167,9 +148,8 @@ where
     R: ScopedRawMutex,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { head } = self;
         f.debug_struct("MutexTransferStack")
-            .field("head", &head.with_lock(|hd| *hd))
+            .field("inner", &"...")
             .finish()
     }
 }
