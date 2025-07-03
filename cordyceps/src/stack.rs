@@ -264,7 +264,6 @@ where
     /// type](Linked::Handle). If the `Stack` is dropped before the
     /// pushed `element` is [`pop`](Self::pop)pped from the stack, the `element`
     /// will be dropped.
-    #[inline]
     pub fn push_was_empty(&mut self, element: T::Handle) -> bool {
         let ptr = T::into_ptr(element);
         test_trace!(?ptr, ?self.head, "Stack::push_was_empty");
@@ -293,6 +292,7 @@ where
     ///
     /// For a variant of this method that returns a `bool` indicating if the
     /// list was empty, see [`Stack::push_was_empty`].
+    #[inline]
     pub fn push(&mut self, element: T::Handle) {
         self.push_was_empty(element);
     }
