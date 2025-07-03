@@ -254,6 +254,35 @@ where
     /// Pushes `element` onto the end of this `Stack`, taking ownership
     /// of it.
     ///
+    /// Returns `true` if the stack was previously empty, and `false` if the stack
+    /// contained at least one other element.
+    ///
+    /// This is an *O*(1) operation that does not allocate memory. It will never
+    /// loop.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `Stack` is dropped before the
+    /// pushed `element` is [`pop`](Self::pop)pped from the stack, the `element`
+    /// will be dropped.
+    #[inline]
+    pub fn push_was_empty(&mut self, element: T::Handle) -> bool {
+        let ptr = T::into_ptr(element);
+        test_trace!(?ptr, ?self.head, "Stack::push_was_empty");
+        unsafe {
+            // Safety: we have exclusive mutable access to the stack, and
+            // therefore can also mutate the stack's entries.
+            let links = T::links(ptr).as_mut();
+            links.next.with_mut(|next| {
+                debug_assert!((*next).is_none());
+                *next = self.head.replace(ptr);
+                (*next).is_none()
+            })
+        }
+    }
+
+    /// Pushes `element` onto the end of this `Stack`, taking ownership
+    /// of it.
+    ///
     /// This is an *O*(1) operation that does not allocate memory. It will never
     /// loop.
     ///
@@ -262,17 +291,7 @@ where
     /// pushed `element` is [`pop`](Self::pop)pped from the stack, the `element`
     /// will be dropped.
     pub fn push(&mut self, element: T::Handle) {
-        let ptr = T::into_ptr(element);
-        test_trace!(?ptr, ?self.head, "Stack::push");
-        unsafe {
-            // Safety: we have exclusive mutable access to the stack, and
-            // therefore can also mutate the stack's entries.
-            let links = T::links(ptr).as_mut();
-            links.next.with_mut(|next| {
-                debug_assert!((*next).is_none());
-                *next = self.head.replace(ptr);
-            })
-        }
+        self.push_was_empty(element);
     }
 
     /// Returns the element most recently [push](Self::push)ed to this `Stack`,
