@@ -90,7 +90,8 @@ than owning those values.
 
 Rudimentary support for targets without CAS (Compare and Swap) atomics, such as
 Cortex-M0+/`thumbv6m-none-eabi`, is provided, however not all structures and
-features may be available.
+features may be available. In some cases, lock-full alternatives are provided
+for compatibility when lock-free structures are not possible.
 
 CAS atomic support is automatically detected with `cfg(target_has_atomic = "ptr")`,
 which notes that a [platform has support] for both load/store operations as well
