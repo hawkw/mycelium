@@ -12,6 +12,159 @@ use core::{fmt, marker::PhantomPinned, ptr::NonNull};
 #[cfg(target_has_atomic = "ptr")]
 pub use has_cas_atomics::*;
 
+#[cfg(not(loom))]
+use mutex::ConstInit;
+
+use mutex::{BlockingMutex, ScopedRawMutex};
+
+/// An [intrusive] lock-full singly-linked FIFO stack, where all entries
+/// currently in the stack are consumed in a single locking operation.
+///
+/// This structure is a simulacrum of the normally lock-free transfer stack,
+/// useful for portability reasons when you would like to use a nearly-identical
+/// data structure on targets that don't support compare and swap operations.
+///
+/// Instead of using compare and swaps, a short mutex lock will be made, with the
+/// selected [`ScopedRawMutex`] implementation.
+///
+/// A transfer stack provides two primary operations:
+///
+/// - [`MutexTransferStack::push`], which appends an element to the end of the
+///   transfer stack,
+///
+/// - [`MutexTransferStack::take_all`], which atomically takes all elements currently
+///   on the transfer stack and returns them as a new mutable [`Stack`].
+///
+/// These are both *O*(1) operations.
+///
+/// In order to be part of a `MutexTransferStack`, a type `T` must implement
+/// the [`Linked`] trait for [`stack::Links<T>`](Links).
+///
+/// Pushing elements into a `MutexTransferStack` takes ownership of those elements
+/// through an owning [`Handle` type](Linked::Handle). Dropping a
+/// [`MutexTransferStack`] drops all elements currently linked into the stack.
+///
+/// [intrusive]: crate#intrusive-data-structures
+pub struct MutexTransferStack<R: ScopedRawMutex, T: Linked<Links<T>>> {
+    inner: BlockingMutex<R, Stack<T>>,
+}
+
+// === impl MutexTransferStack ===
+#[cfg(not(loom))]
+impl<R, T> MutexTransferStack<R, T>
+where
+    R: ConstInit + ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    /// Returns a new `MutexTransferStack` with no elements.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            inner: BlockingMutex::new(Stack::new()),
+        }
+    }
+}
+
+impl<R, T> MutexTransferStack<R, T>
+where
+    R: ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    /// Returns a new `MutexTransferStack` with no elements.
+    #[must_use]
+    pub fn const_new(r: R) -> Self {
+        Self {
+            inner: BlockingMutex::const_new(r, Stack::new()),
+        }
+    }
+
+    /// Pushes `element` onto the end of this `MutexTransferStack`, taking ownership
+    /// of it.
+    ///
+    /// This is an *O*(1) operation.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `MutexTransferStack` is dropped before the
+    /// pushed `element` is removed from the stack, the `element` will be dropped.
+    #[inline]
+    pub fn push(&self, element: T::Handle) {
+        self.push_was_empty(element);
+    }
+
+    /// Pushes `element` onto the end of this `MutexTransferStack`, taking ownership
+    /// of it. Returns `true` if the stack was previously empty (the previous
+    /// head was null).
+    ///
+    /// This is an *O*(1) operation.
+    ///
+    /// This takes ownership over `element` through its [owning `Handle`
+    /// type](Linked::Handle). If the `MutexTransferStack` is dropped before the
+    /// pushed `element` is removed from the stack, the `element` will be dropped.
+    pub fn push_was_empty(&self, element: T::Handle) -> bool {
+        self.inner.with_lock(|stack| {
+            let is_empty = stack.is_empty();
+            stack.push(element);
+            is_empty
+        })
+    }
+
+    /// Takes all elements *currently* in this `MutexTransferStack`, returning a new
+    /// mutable [`Stack`] containing those elements.
+    ///
+    /// This is an *O*(1) operation which does not allocate memory. It will
+    /// never loop and does not spin.
+    #[must_use]
+    pub fn take_all(&self) -> Stack<T> {
+        self.inner.with_lock(|stack| stack.take_all())
+    }
+}
+
+unsafe impl<R: ScopedRawMutex + Send, T: Linked<Links<T>> + Send> Send
+    for MutexTransferStack<R, T>
+{
+}
+unsafe impl<R: ScopedRawMutex + Sync, T: Linked<Links<T>> + Send> Sync
+    for MutexTransferStack<R, T>
+{
+}
+
+impl<R, T> Drop for MutexTransferStack<R, T>
+where
+    R: ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    fn drop(&mut self) {
+        // The stack owns any entries that are still in the stack; ensure they
+        // are dropped before dropping the stack.
+        for entry in self.take_all() {
+            drop(entry);
+        }
+    }
+}
+
+impl<R, T> fmt::Debug for MutexTransferStack<R, T>
+where
+    T: Linked<Links<T>>,
+    R: ScopedRawMutex,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MutexTransferStack")
+            .field("inner", &"...")
+            .finish()
+    }
+}
+
+#[cfg(not(loom))]
+impl<R, T> Default for MutexTransferStack<R, T>
+where
+    R: ConstInit + ScopedRawMutex,
+    T: Linked<Links<T>>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Items exclusive to targets with CAS atomics
 #[cfg(target_has_atomic = "ptr")]
 mod has_cas_atomics {
@@ -462,11 +615,47 @@ mod loom {
         self,
         sync::{
             atomic::{AtomicUsize, Ordering},
-            Arc,
+            Arc, Mutex,
         },
         thread,
     };
+    use mutex::ScopedRawMutex;
     use test_util::Entry;
+
+    struct LoomRawMutex {
+        inner: Mutex<()>,
+    }
+
+    impl LoomRawMutex {
+        fn new() -> Self {
+            Self {
+                inner: Mutex::new(()),
+            }
+        }
+    }
+
+    unsafe impl ScopedRawMutex for LoomRawMutex {
+        fn try_with_lock<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
+            if let Ok(guard) = self.inner.try_lock() {
+                let res = Some(f());
+                drop(guard);
+                res
+            } else {
+                None
+            }
+        }
+
+        fn with_lock<R>(&self, f: impl FnOnce() -> R) -> R {
+            let guard = self.inner.lock().unwrap();
+            let res = f();
+            drop(guard);
+            res
+        }
+
+        fn is_locked(&self) -> bool {
+            self.inner.try_lock().is_ok()
+        }
+    }
 
     #[test]
     fn multithreaded_push() {
@@ -511,7 +700,51 @@ mod loom {
 
             thread1.join().unwrap();
             thread2.join().unwrap();
-        })
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(MutexTransferStack::<LoomRawMutex, _>::const_new(
+                LoomRawMutex::new(),
+            ));
+            let threads = Arc::new(AtomicUsize::new(2));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                let threads = threads.clone();
+                move || {
+                    Entry::push_all_nca(&stack, 1, PUSHES);
+                    threads.fetch_sub(1, Ordering::Relaxed);
+                }
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                let threads = threads.clone();
+                move || {
+                    Entry::push_all_nca(&stack, 2, PUSHES);
+                    threads.fetch_sub(1, Ordering::Relaxed);
+                }
+            });
+
+            let mut seen = Vec::new();
+
+            loop {
+                seen.extend(stack.take_all().map(|entry| entry.val));
+
+                if threads.load(Ordering::Relaxed) == 0 {
+                    break;
+                }
+
+                thread::yield_now();
+            }
+
+            seen.extend(stack.take_all().map(|entry| entry.val));
+
+            seen.sort();
+            assert_eq!(seen, vec![10, 11, 20, 21]);
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+        });
     }
 
     #[test]
@@ -527,6 +760,39 @@ mod loom {
             let thread2 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all(&stack, 2, PUSHES)
+            });
+
+            let thread3 = thread::spawn({
+                let stack = stack.clone();
+                move || stack.take_all().map(|entry| entry.val).collect::<Vec<_>>()
+            });
+
+            let seen_thread0 = stack.take_all().map(|entry| entry.val).collect::<Vec<_>>();
+            let seen_thread3 = thread3.join().unwrap();
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+
+            let seen_thread0_final = stack.take_all().map(|entry| entry.val).collect::<Vec<_>>();
+
+            let mut all = dbg!(seen_thread0);
+            all.extend(dbg!(seen_thread3));
+            all.extend(dbg!(seen_thread0_final));
+
+            all.sort();
+            assert_eq!(all, vec![10, 11, 20, 21]);
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
             });
 
             let thread3 = thread::spawn({
@@ -571,6 +837,25 @@ mod loom {
 
             thread1.join().unwrap();
             thread2.join().unwrap();
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
+            });
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
         })
     }
 
@@ -599,6 +884,30 @@ mod loom {
 
             tracing::info!("dropping take_all");
             drop(take_all);
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
+            });
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+
+            let take_all = stack.take_all();
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            tracing::info!("dropping take_all");
+            drop(take_all);
         })
     }
 
@@ -615,6 +924,30 @@ mod loom {
             let thread2 = thread::spawn({
                 let stack = stack.clone();
                 move || Entry::push_all(&stack, 2, PUSHES)
+            });
+
+            let take_all = stack.take_all();
+
+            thread1.join().unwrap();
+            thread2.join().unwrap();
+
+            tracing::info!("dropping stack");
+            drop(stack);
+
+            tracing::info!("dropping take_all");
+            drop(take_all);
+        });
+
+        loom::model(|| {
+            let stack = Arc::new(MutexTransferStack::const_new(LoomRawMutex::new()));
+            let thread1 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 1, PUSHES)
+            });
+
+            let thread2 = thread::spawn({
+                let stack = stack.clone();
+                move || Entry::push_all_nca(&stack, 2, PUSHES)
             });
 
             let take_all = stack.take_all();
@@ -666,10 +999,12 @@ mod loom {
 #[cfg(test)]
 mod test {
     use super::{test_util::Entry, *};
+    use mutex::raw_impls::cs::CriticalSectionRawMutex;
 
     #[test]
     fn stack_is_send_sync() {
-        crate::util::assert_send_sync::<TransferStack<Entry>>()
+        crate::util::assert_send_sync::<TransferStack<Entry>>();
+        crate::util::assert_send_sync::<MutexTransferStack<CriticalSectionRawMutex, Entry>>();
     }
 
     #[test]
@@ -680,6 +1015,8 @@ mod test {
 
 #[cfg(test)]
 pub(crate) mod test_util {
+    use mutex::ScopedRawMutex;
+
     use super::*;
     use crate::loom::alloc;
     use core::pin::Pin;
@@ -756,6 +1093,17 @@ pub(crate) mod test_util {
         }
 
         pub(super) fn push_all(stack: &TransferStack<Self>, thread: i32, n: i32) {
+            for i in 0..n {
+                let entry = Self::new((thread * 10) + i);
+                stack.push(entry);
+            }
+        }
+
+        pub(super) fn push_all_nca<R: ScopedRawMutex>(
+            stack: &MutexTransferStack<R, Self>,
+            thread: i32,
+            n: i32,
+        ) {
             for i in 0..n {
                 let entry = Self::new((thread * 10) + i);
                 stack.push(entry);

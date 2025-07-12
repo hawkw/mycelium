@@ -75,8 +75,13 @@
 //!   resources from multiple producers to a consumer, such as for reuse or
 //!   cleanup.
 //!
-//!   This structure is only available if the target supports CAS (Compare and
-//!   Swap) atomics.
+//! - **[`MutexTransferStack`]: a lock-full, multi-producer FIFO stack, where
+//!   all elements currently in the stack are popped in a single locking operation.**
+//!
+//!   A [`MutexTransferStack`] is API-wise identical to a [`TransferStack`], but uses
+//!   a mutex to ensure atomicity. This is useful for targets where atomics are not
+//!   available. The mutex is parameterized over the [`ScopedRawMutex`][mutex::ScopedRawMutex]
+//!   trait from the [`mutex`] crate.
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(test)]
@@ -94,7 +99,7 @@ pub use list::List;
 #[doc(inline)]
 pub use sorted_list::{SortedList, SortedListIter};
 #[doc(inline)]
-pub use stack::Stack;
+pub use stack::{MutexTransferStack, Stack};
 
 //
 // The following items are only available if we have atomics

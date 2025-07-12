@@ -586,7 +586,9 @@ dependencies = [
 name = "cordyceps"
 version = "0.3.4"
 dependencies = [
+ "critical-section",
  "loom",
+ "mutex",
  "pin-project",
  "proptest",
  "tracing 0.1.40",
@@ -625,9 +627,9 @@ dependencies = [
 
 [[package]]
 name = "critical-section"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7059fff8937831a9ae6f0fe4d658ffabf58f2ca96aa9dec1c889f936f705f216"
+checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
 name = "crossbeam-channel"
@@ -1538,6 +1540,16 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "mutex"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d28c89c319522a8ee27f304b1aeb4faebf652c6b7e04de8b263d715ca68a5c71"
+dependencies = [
+ "critical-section",
+ "mutex-traits",
 ]
 
 [[package]]
