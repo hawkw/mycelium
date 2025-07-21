@@ -84,8 +84,6 @@ impl Logarithm for usize {
 /// This is exposed in addition to the [`Logarithm`] extension trait because it
 /// is a  `const fn`, while trait methods cannot be `const fn`s.
 #[inline(always)]
-#[must_use = "this returns the result of the operation, \
-                without modifying the original"]
 pub const fn usize_const_log2_ceil(n: usize) -> usize {
     n.next_power_of_two().trailing_zeros() as usize
 }
@@ -96,8 +94,6 @@ pub const fn usize_const_log2_ceil(n: usize) -> usize {
 /// is a
 /// `const fn`, while trait methods cannot be `const fn`s.
 #[inline(always)]
-#[must_use = "this returns the result of the operation, \
-                without modifying the original"]
 pub const fn usize_const_log2(n: usize) -> usize {
     (usize::BITS - 1) as usize - n.leading_zeros() as usize
 }
@@ -107,8 +103,6 @@ pub const fn usize_const_log2(n: usize) -> usize {
 /// This is exposed in addition to the [`Logarithm`] extension trait because it
 /// is a `const fn`, while trait methods cannot be `const fn`s.
 #[inline(always)]
-#[must_use = "this returns the result of the operation, \
-                without modifying the original"]
 pub const fn usize_const_checked_log(mut n: usize, base: usize) -> Option<usize> {
     if n == 0 || base <= 1 {
         return None;

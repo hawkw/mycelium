@@ -1,7 +1,7 @@
 use super::{Link, Links, List};
 use crate::{util::FmtOption, Linked};
 use core::{
-    fmt, mem,
+    fmt,
     ops::{Deref, DerefMut},
     pin::Pin,
     ptr::NonNull,
@@ -339,7 +339,7 @@ impl<'list, T: Linked<Links<T>> + ?Sized> CursorMut<'list, T> {
         let split_node = match self.core.curr {
             Some(node) => node,
             // the split portion is the entire list. just return it.
-            None => return mem::replace(self.core.list, List::new()),
+            None => return core::mem::take(self.core.list),
         };
 
         // the tail of the new list is the split node's `prev` node (which is
