@@ -21,14 +21,14 @@
 //! This module provides the following APIs:
 //!
 //! - [`Spinlock`]: a synchronous [mutual exclusion] spinlock, which implements
-//!       the [`blocking::RawMutex`] and [`blocking::ScopedRawMutex`] traits.
+//!   the [`blocking::RawMutex`] and [`blocking::ScopedRawMutex`] traits.
 //! - [`RwSpinlock`]: a synchronous [reader-writer] spinlock, which implements
-//!       the [`blocking::RawRwLock`] trait.
+//!   the [`blocking::RawRwLock`] trait.
 //! - [`InitOnce`]: a cell storing a [`MaybeUninit`](core::mem::MaybeUninit)
-//!       value which must be manually initialized prior to use.
+//!   value which must be manually initialized prior to use.
 //! - [`Lazy`]: an [`InitOnce`] cell coupled with an initializer function. The
-//!       [`Lazy`] cell ensures the initializer is called to initialize the
-//!       value the first time it is accessed.
+//!   [`Lazy`] cell ensures the initializer is called to initialize the
+//!   value the first time it is accessed.
 //!
 //! [mutual exclusion lock]: https://en.wikipedia.org/wiki/Mutual_exclusion
 //! [reader-writer lock]: https://en.wikipedia.org/wiki/Readers%E2%80%93writer_lock

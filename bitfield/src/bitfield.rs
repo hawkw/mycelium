@@ -65,20 +65,20 @@
 /// implementations are always generated:
 ///
 /// - [`fmt::Debug`]: The `Debug` implementation prints the bitfield as a
-///       "struct", with a "field" for each packing spec in the bitfield. If any
-///       of the bitfield's packing specs pack typed values, that type's
-///       [`fmt::Debug`] implementation is used rather than printing the value
-///       as an integer.
+///   "struct", with a "field" for each packing spec in the bitfield. If any
+///   of the bitfield's packing specs pack typed values, that type's
+///   [`fmt::Debug`] implementation is used rather than printing the value
+///   as an integer.
 /// - [`fmt::Binary`]: Prints the raw bits of this bitfield as a binary number.
 /// - [`fmt::UpperHex`] and [`fmt::LowerHex`]: Prints the raw bits of this
-///       bitfield in hexadecimal.
+///   bitfield in hexadecimal.
 /// - [`fmt::Display`]: Pretty-prints the bitfield in a very nice-looking
-///       multi-line format which I'm rather proud of. See
-///       [here](#example-display-output) for examples of this format.
+///   multi-line format which I'm rather proud of. See
+///   [here](#example-display-output) for examples of this format.
 /// - [`Copy`]: Behaves identically as the [`Copy`] implementation for the
-///       underlying integer type.
+///   underlying integer type.
 /// - [`Clone`]: Behaves identically as the [`Clone`] implementation for the
-///       underlying integer type.
+///   underlying integer type.
 /// - [`From`]`<{int}> for Self`: Converts a raw integer value into an instance
 ///   of the bitfield type. This is equivalent to calling the bitfield type's
 ///   `from_bits` function.
@@ -396,7 +396,6 @@ macro_rules! bitfield {
         // Some generated methods may not always be used, which may emit dead
         // code warnings if the type is private.
         #[allow(dead_code)]
-        #[automatically_derived]
         impl $Name {
             $crate::bitfield! { @field<$T>:
                 $(

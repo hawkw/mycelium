@@ -40,22 +40,22 @@ be generally useful for other projects, and have been or will be published to
 the general-purpose crates in this repository include:
 
 - [`cordyceps`]: a library of [intrusive data structures][intrusive], including
-      linked lists and lock-free MPSC queues,
+  linked lists and lock-free MPSC queues,
 - [`maitake`]: an "async runtime construction kit" for using Rust's async/await
-      in bare metal applications such as operating systems,
+  in bare metal applications such as operating systems,
 - [`mycelium-alloc`]: an implementation of a [buddy-block memory allocator][buddy],
 - [`mycelium-bitfield`]: a bitfield library based on const eval and declarative
-      macros,
+  macros,
 - [`mycelium-util`]: a "standard library" of reusable components for bare-metal
-      `no_std` Rust projects, such as `no_std` synchronization primitives.
+  `no_std` Rust projects, such as `no_std` synchronization primitives.
 
 in addition, beyond the kernel itself, this repository also contains the
 following Mycelium components:
 
 - [`hal-core`]: the core interface definitions of Mycelium's (admittedly
-      somewhat half-baked) hardware abstraction layer,
+  somewhat half-baked) hardware abstraction layer,
 - [`hal-x86_64`]: implementations of the Mycelium HAL for 64-bit x86 (amd64)
-      CPUs,
+  CPUs,
 - [`mycotest`]: testing utilities for Mycelium's in-kernel tests,
 - [`inoculate`]: Mycelium's Horrible Build Tool™
 
