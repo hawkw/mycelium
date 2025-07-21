@@ -56,29 +56,21 @@ pub trait Logarithm: Sized {
 
 impl Logarithm for usize {
     #[inline(always)]
-    #[must_use = "this returns the result of the operation, \
-                    without modifying the original"]
     fn log2_ceil(self) -> usize {
         usize_const_log2_ceil(self)
     }
 
     #[inline(always)]
-    #[must_use = "this returns the result of the operation, \
-                    without modifying the original"]
     fn log2(self) -> usize {
         usize_const_log2(self)
     }
 
     #[inline(always)]
-    #[must_use = "this returns the result of the operation, \
-                    without modifying the original"]
     fn checked_log(self, base: usize) -> Option<Self> {
         usize_const_checked_log(self, base)
     }
 
     #[inline(always)]
-    #[must_use = "this returns the result of the operation, \
-                    without modifying the original"]
     fn log(self, base: usize) -> Self {
         match self.checked_log(base) {
             Some(log) => log,
