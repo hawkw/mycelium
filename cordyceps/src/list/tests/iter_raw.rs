@@ -129,3 +129,8 @@ fn smoke() {
 
     drop(list);
 }
+
+#[test]
+fn assert_send() {
+    crate::util::assert_send::<IterRaw<'_, OwnedEntryHeader>>();
+}
