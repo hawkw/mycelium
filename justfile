@@ -41,7 +41,7 @@ preflight crate='': (lint crate) (test crate)
 
 # run all tests (normal tests, loom, and miri) for `crate` or for the whole workspace.
 test crate='': (test-host crate) (loom crate) (miri crate) (test-docs crate)
-    if crate == '' { _cargo inoculate test } else { }
+    if [[ -z '{{ crate }}' ]]; then {{ _cargo }} inoculate test; fi
 
 # run host tests for `crate` (or for the whole workspace).
 test-host crate='': _get-nextest
