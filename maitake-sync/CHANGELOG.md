@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## maitake-sync-v0.2.2 - (2025-08-16)
+
+[e896466](https://github.com/hawkw/mycelium/e89646637bd946d27e265e7954887845707ba975)...[0c04556](https://github.com/hawkw/mycelium/0c045561b69ba6faff638a4b5cc0d08374667718)
+
+
+### Fixed
+
+- No-cas maitake-sync ([#538](https://github.com/hawkw/mycelium/issues/538)) ([5dfdd75](https://github.com/hawkw/mycelium/5dfdd75448c8c931628834de707a174524957542))
+
 ## maitake-sync-v0.2.1 - (2025-02-06)
 
 [dd00208](https://github.com/hawkw/mycelium/dd0020892564c77ee4c20ffbc2f7f5b046ad54c8)...[dd00208](https://github.com/hawkw/mycelium/dd0020892564c77ee4c20ffbc2f7f5b046ad54c8)
