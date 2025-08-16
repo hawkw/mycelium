@@ -526,6 +526,51 @@ macro_rules! bitfield {
                 DisplayUnicode(*self)
             }
 
+            /// Returns a value that formats the bit value of the bitfield,
+            /// followed by any fields that have non-zero bits.
+            ///
+            /// If formatted using `{:#}`, the formatted representation is multi-line.
+            $vis fn display_set_bits(&self) -> impl core::fmt::Display {
+                struct DisplaySetBits($Name);
+                impl core::fmt::Display for DisplaySetBits {
+                    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        self.0.fmt_set_bits(f)
+                    }
+                }
+                DisplaySetBits(*self)
+            }
+
+            fn fmt_set_bits(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{:#0width$b}", self.0, width = $T::BITS as usize)?;
+                let mut wrote_any = false;
+
+                $({
+                    let field = Self::$Field;
+                    const NAME: &str = stringify!($Field);
+                    if !NAME.starts_with("_") {
+                        let bits = field.unpack_bits(self.0);
+                        if bits > 0 {
+                            if f.alternate() {
+                                if !wrote_any {
+                                    f.write_str("\n")?;
+                                }
+                                writeln!(f, "  {NAME}: {:?}", field.unpack(self.0))?;
+                            } else if !wrote_any {
+                                write!(f, " ({NAME}: {:?}", field.unpack(self.0))?;
+                            } else {
+                                write!(f, ", {NAME}: {:?}", field.unpack(self.0))?;
+                            }
+                            wrote_any = true;
+                        }
+                    }
+                })+
+
+                if wrote_any && !f.alternate() {
+                    f.write_str(")")?;
+                }
+
+                Ok(())
+            }
 
             fn fmt_ascii(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.pad("")?;
