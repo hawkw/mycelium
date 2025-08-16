@@ -1,4 +1,5 @@
 use crate::shell::{Command, NumberFormat};
+use hal_x86_64::control_regs;
 use mycelium_util::fmt;
 
 pub const DUMP_ARCH: Command = Command::new("arch")
@@ -86,6 +87,43 @@ pub const DUMP_ARCH: Command = Command::new("arch")
                         "CPUID {leaf:#x}:{subleaf:x}",
                     ),
                 }
+                Ok(())
+            }),
+        Command::new("cr0")
+            .with_help("print the value of control register CR0")
+            .with_fn(|_| {
+                tracing::info!(
+                    target: "shell",
+                    "CR0:\n{}",
+                    control_regs::Cr0::read(),
+                );
+                Ok(())
+            }),
+        Command::new("cr2")
+            .with_help("print the value of control register CR2")
+            .with_fn(|_| {
+                tracing::info!(
+                    target: "shell",
+                    cr2 = ?control_regs::Cr2::read(),
+                    "CR2",
+                );
+                Ok(())
+            }),
+        Command::new("cr3")
+            .with_help("print the value of control register CR3")
+            .with_fn(|_| {
+                let (page, flags) = control_regs::cr3::read();
+                tracing::info!(target: "shell", ?page, ?flags, "CR3");
+                Ok(())
+            }),
+        Command::new("cr4")
+            .with_help("print the value of control register CR4")
+            .with_fn(|_| {
+                tracing::info!(
+                    target: "shell",
+                    "CR4\n{}",
+                    control_regs::Cr4::read(),
+                );
                 Ok(())
             }),
     ]);
