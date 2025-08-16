@@ -5,24 +5,17 @@ pub use self::{
     pit::{Pit, PitError, PIT},
     tsc::Rdtsc,
 };
-use core::fmt;
 pub use core::time::Duration;
 
 /// Error indicating that a [`Duration`] was invalid for a particular use.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("invalid duration {duration:?}: {message}")]
 pub struct InvalidDuration {
     duration: Duration,
     message: &'static str,
 }
 
 // === impl InvalidDuration ===
-
-impl fmt::Display for InvalidDuration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { duration, message } = self;
-        write!(f, "invalid duration {duration:?}: {message}")
-    }
-}
 
 impl InvalidDuration {
     /// Returns the [`Duration`] that was invalid.

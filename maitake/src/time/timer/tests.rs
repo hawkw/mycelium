@@ -9,6 +9,9 @@ use crate::time::{timer::Ticks, Clock};
 use std::time::Duration;
 
 crate::loom::thread_local! {
+    // Clippy doesn't realize that this might be a loom simulated thread local,
+    // which doessn't accept const initializers...
+    #[allow(clippy::missing_const_for_thread_local)]
     static CLOCK: RefCell<Option<Arc<TestClockState>>> = RefCell::new(None);
 }
 

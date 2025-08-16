@@ -71,7 +71,7 @@ where
     }
 }
 
-impl<'buf, B> Draw for Framebuffer<'buf, B>
+impl<B> Draw for Framebuffer<'_, B>
 where
     B: Deref<Target = [u8]> + DerefMut,
 {
@@ -101,7 +101,7 @@ where
 
 // `Volatile<B>` is only `Debug` if `<B as Deref>::Target: Copy`,
 // so we must implement this manually.
-impl<'buf, B> fmt::Debug for Framebuffer<'buf, B>
+impl<B> fmt::Debug for Framebuffer<'_, B>
 where
     B: Deref<Target = [u8]>,
 {

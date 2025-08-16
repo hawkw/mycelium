@@ -281,7 +281,7 @@ impl<V> Msr<V> {
                 options(nomem, nostack, preserves_flags)
             );
         }
-        (hi as u64) << 32 | (lo as u64)
+        ((hi as u64) << 32) | (lo as u64)
     }
 
     /// Writes the given raw `u64` value to this MSR.

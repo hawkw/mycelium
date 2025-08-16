@@ -1,6 +1,6 @@
 [package]
 name = "cordyceps"
-version = "0.3.2"
+version = "0.3.4"
 edition = "2021"
 description = "Mycelium intrusive data structures."
 authors = ["Eliza Weisman <eliza@elizas.website>"]
@@ -36,3 +36,6 @@ tracing = { version = "0.1" }
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)']}

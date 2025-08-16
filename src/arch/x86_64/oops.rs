@@ -13,7 +13,7 @@ use hal_core::{
     framebuffer::{Draw, RgbColor},
     interrupt, Address,
 };
-use hal_x86_64::{cpu, interrupt::Registers as X64Registers, serial, vga};
+use hal_x86_64::{control_regs, cpu, interrupt::Registers as X64Registers, serial, vga};
 use mycelium_trace::{embedded_graphics::TextWriterBuilder, writer::MakeWriter};
 use mycelium_util::fmt::{self, Write};
 
@@ -111,10 +111,7 @@ pub fn oops(oops: Oops<'_>) -> ! {
         } => writeln!(mk_writer.make_writer(), "a {kind} occurred!\n").unwrap(),
         OopsSituation::Panic(panic) => {
             let mut writer = mk_writer.make_writer();
-            match panic.message() {
-                Some(msg) => writeln!(writer, "mycelium panicked: {msg}").unwrap(),
-                None => writeln!(writer, "mycelium panicked!").unwrap(),
-            }
+            write!(writer, "mycelium panicked: {}", panic.message()).unwrap();
             if let Some(loc) = panic.location() {
                 writeln!(writer, "at {}:{}:{}", loc.file(), loc.line(), loc.column()).unwrap();
             }
@@ -151,7 +148,23 @@ pub fn oops(oops: Oops<'_>) -> ! {
         tracing::debug!(target: "oops", code_segment = ?registers.code_segment);
         tracing::debug!(target: "oops", stack_segment = ?registers.stack_segment);
         tracing::debug!(target: "oops", cpu_flags = ?fmt::bin(registers.cpu_flags));
+    }
 
+    // control regs
+    {
+        let mut writer = mk_writer.make_writer();
+
+        let cr0 = control_regs::Cr0::read();
+        writeln!(&mut writer, "%cr0    = {:#}", cr0.display_set_bits()).unwrap();
+        let cr2 = control_regs::Cr2::read();
+        writeln!(&mut writer, "%cr2    = {cr2:?}").unwrap();
+        let (cr3_page, cr3_flags) = control_regs::cr3::read();
+        writeln!(&mut writer, "%cr3    = {cr3_page:?} ({cr3_flags:?})").unwrap();
+        let cr4 = control_regs::Cr4::read();
+        writeln!(&mut writer, "%cr4    = {:#}", cr4.display_set_bits()).unwrap();
+    }
+
+    if let Some(registers) = oops.situation.registers() {
         // skip printing disassembly if we already faulted; disassembling the
         // fault address may fault a second time.
         if !oops.already_faulted {
@@ -315,7 +328,7 @@ impl<'a> From<&'a PanicInfo<'a>> for Oops<'a> {
 
 // === impl OopsSituation ===
 
-impl<'a> OopsSituation<'a> {
+impl OopsSituation<'_> {
     fn header(&self) -> &'static str {
         match self {
             Self::Fault { .. } => " OOPSIE-WOOPSIE! ",

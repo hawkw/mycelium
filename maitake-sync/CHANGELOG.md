@@ -3,6 +3,39 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## maitake-sync-v0.2.1 - (2025-02-06)
+
+[dd00208](https://github.com/hawkw/mycelium/dd0020892564c77ee4c20ffbc2f7f5b046ad54c8)...[dd00208](https://github.com/hawkw/mycelium/dd0020892564c77ee4c20ffbc2f7f5b046ad54c8)
+
+
+### Fixed
+
+- For cs-mutex, enter cs before locking mutex ([#514](https://github.com/hawkw/mycelium/issues/514)) ([bf8d93b](https://github.com/hawkw/mycelium/bf8d93b1dace827005a37a149fe59aeb970ab4a6), closes [#513](https://github.com/hawkw/mycelium/issues/513))
+- Add proper `ScopedRawMutex` bound to `wait_map::Wait` ([#515](https://github.com/hawkw/mycelium/issues/515)) ([509a8b7](https://github.com/hawkw/mycelium/509a8b723306de80e533e248e7042abb720bce44))
+- Impl `Future` for `mutex::Lock` with generic `ScopedRawMutex` ([#517](https://github.com/hawkw/mycelium/issues/517)) ([12c5b21](https://github.com/hawkw/mycelium/12c5b2164a42ba1cf99443aacae72f00c9a12339))
+
+## maitake-sync-v0.2.0 - (2025-01-30)
+
+[e43cad5](https://github.com/hawkw/mycelium/e43cad5e425cadae393a425520fe3a9a8cea71e1)...[e43cad5](https://github.com/hawkw/mycelium/e43cad5e425cadae393a425520fe3a9a8cea71e1)
+
+### <a id = "maitake-sync-v0.2.0-breaking"></a>Breaking Changes
+- **`mutex-traits` integration ([#482](https://github.com/hawkw/mycelium/issues/482))** ([99da7e1](99da7e140b4646af1e44ae4560c260def8b9c0a3))<br />Renamed `spin::Mutex` and `spin::RwLock` to `blocking::Mutex` and
+
+### Added
+
+- Rename `EnqueueWait` to `Subscribe` ([#481](https://github.com/hawkw/mycelium/issues/481)) ([c499252](https://github.com/hawkw/mycelium/c4992526f87f5c38813e6671baf99089fa24d7f0))
+- [**breaking**](#maitake-sync-v0.2.0-breaking) `mutex-traits` integration ([#482](https://github.com/hawkw/mycelium/issues/482)) ([99da7e1](https://github.com/hawkw/mycelium/99da7e140b4646af1e44ae4560c260def8b9c0a3))
+- Add missing `Default` implementations ([#509](https://github.com/hawkw/mycelium/issues/509)) ([af69f72](https://github.com/hawkw/mycelium/af69f72d15e57078ba244a3e15e99a98a738840b))
+
+### Deprecated
+
+- S/default_features/default-features ([#502](https://github.com/hawkw/mycelium/issues/502)) ([fb4f514](https://github.com/hawkw/mycelium/fb4f51489e1cd04607f7a29a2f83a73e5077d28e))
+
+### Documented
+
+- Fix`RwLock` doctest imports ([e51eb8a](https://github.com/hawkw/mycelium/e51eb8aa98e7609490fa674f408db32fd51caa70))
+- Link to changelogs in published crate READMEs ([#485](https://github.com/hawkw/mycelium/issues/485)) ([73ba776](https://github.com/hawkw/mycelium/73ba776ca0c651431a4af9a97f45a71ba524b335))
+
 ## maitake-sync-v0.1.2 - (2024-07-18)
 
 [c67c62f](https://github.com/hawkw/mycelium/c67c62fd7c7e537833be6e0559f61f30ed40d0ca)...[c67c62f](https://github.com/hawkw/mycelium/c67c62fd7c7e537833be6e0559f61f30ed40d0ca)

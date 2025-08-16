@@ -219,11 +219,12 @@ mod inner {
         pub use alloc::sync::*;
         pub use core::sync::*;
 
-        pub use crate::blocking;
-    }
+        pub(crate) mod atomic {
+            pub use portable_atomic::*;
+            pub use core::sync::atomic::Ordering;
+        }
 
-    pub(crate) mod atomic {
-        pub use portable_atomic::*;
+        pub use crate::blocking;
     }
 
     pub(crate) use portable_atomic::hint;
@@ -238,7 +239,7 @@ mod inner {
             F: FnOnce() -> T + Send + 'static,
             T: Send + 'static,
         {
-            use super::atomic::{AtomicUsize, Ordering::Relaxed};
+            use super::sync::atomic::{AtomicUsize, Ordering::Relaxed};
             thread_local! {
                 static CHILDREN: AtomicUsize = const { AtomicUsize::new(1) };
             }

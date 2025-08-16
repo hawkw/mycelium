@@ -66,18 +66,18 @@ to the runtime scheduler, so that other tasks may run while they are waiting.
 The following synchronization primitives are provided:
 
 - [`Mutex`]: a fairly queued, asynchronous [mutual exclusion lock], for
-      protecting shared data
+  protecting shared data
 - [`RwLock`]: a fairly queued, asynchronous [readers-writer lock], which
-      allows concurrent read access to shared data while ensuring write
-      access is exclusive
+  allows concurrent read access to shared data while ensuring write access is
+  exclusive
 - [`Semaphore`]: an asynchronous [counting semaphore], for limiting the
-      number of tasks which may run concurrently
+  number of tasks which may run concurrently
 - [`WaitCell`], a cell that stores a *single* waiting task's [`Waker`], so
-      that the task can be woken by another task,
+  that the task can be woken by another task,
 - [`WaitQueue`], a queue of waiting tasks, which are woken in first-in,
-      first-out order
+  first-out order
 - [`WaitMap`], a set of waiting tasks associated with keys, in which a task
-      can be woken by its key
+  can be woken by its key
 
 In addition, the [`util` module] contains a collection of general-purpose
 utilities for implementing synchronization primitives, and the [`blocking`
@@ -208,7 +208,7 @@ details.
 
 The following features are available (this list is incomplete; you can help by [expanding it].)
 
-[expanding it]: https://github.com/hawkw/mycelium/edit/main/maitake-suync/README.md
+[expanding it]: https://github.com/hawkw/mycelium/edit/main/maitake-sync/README.md
 
 | Feature        | Default | Explanation |
 | :---           | :---    | :---        |

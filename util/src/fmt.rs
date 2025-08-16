@@ -272,7 +272,7 @@ where
     }
 }
 
-impl<'a, W: Write> Write for WithIndent<'a, W> {
+impl<W: Write> Write for WithIndent<'_, W> {
     fn write_str(&mut self, mut s: &str) -> Result {
         while !s.is_empty() {
             let (split, nl) = match s.find('\n') {

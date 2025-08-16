@@ -91,7 +91,7 @@ macro_rules! decl_test {
 
 // === impl TestName ===
 
-impl<'a, S> TestName<'a, S> {
+impl<S> TestName<'_, S> {
     pub const fn new(module: S, name: S) -> Self {
         Self {
             name,
@@ -101,7 +101,7 @@ impl<'a, S> TestName<'a, S> {
     }
 }
 
-impl<'a, S> TestName<'a, S>
+impl<S> TestName<'_, S>
 where
     S: AsRef<str>,
 {

@@ -237,10 +237,15 @@ impl Selector {
         tracing::trace!("setting code segment...");
         asm!(
             "push {selector}",
-            "lea {retaddr}, [1f + rip]",
+            "lea {retaddr}, [2f + rip]",
             "push {retaddr}",
             "retfq",
-            "1:",
+            // This is cool: apparently we can't use '0' or '1' as a label in
+            // LLVM assembly, due to an LLVM bug:
+            // https://github.com/llvm/llvm-project/issues/99547
+            //
+            // So, this is 2 instead of 1. lmao.
+            "2:",
             selector = in(reg) self.0 as u64,
             retaddr = lateout(reg) _,
             options(preserves_flags),
@@ -391,6 +396,12 @@ impl<const SIZE: usize> Gdt<SIZE> {
     }
 }
 
+impl<const SIZE: usize> Default for Gdt<SIZE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const SIZE: usize> fmt::Debug for Gdt<SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct GdtEntries<'a, const SIZE: usize>(&'a Gdt<SIZE>);
@@ -513,13 +524,32 @@ impl SystemDescriptor {
     const BASE_HIGH: bits::Pack64 = bits::Pack64::least_significant(32);
     const BASE_HIGH_PAIR: Pair64 = Self::BASE_HIGH.pair_with(base::HIGH);
 
+    /// Construct a system segment descriptor for the provided boxed task-state
+    /// segment (TSS).
     #[cfg(feature = "alloc")]
     pub fn boxed_tss(tss: alloc::boxed::Box<task::StateSegment>) -> Self {
         Self::tss(alloc::boxed::Box::leak(tss))
     }
 
+    /// Construct a system segment descriptor for the provided task-state
+    /// segment (TSS), stored in a `static`..
     pub fn tss(tss: &'static task::StateSegment) -> Self {
         let tss_addr = tss as *const _ as u64;
+        unsafe {
+            // Safety: we know the address is valid because we got it from a
+            // `&'static task::StateSegment` reference, which could only point
+            // to a valid TSS if it was constructed in safe code.
+            Self::tss_from_exposed_addr(tss_addr)
+        }
+    }
+
+    /// Construct a system segment descriptor for an alleged task-state segment
+    /// (TSS) address.
+    ///
+    /// # Safety
+    ///
+    ///  `tss_addr` must be a valid TSS address!
+    unsafe fn tss_from_exposed_addr(tss_addr: u64) -> Self {
         tracing::trace!(tss_addr = fmt::hex(tss_addr), "making TSS descriptor...");
 
         // limit (-1 because the bound is inclusive)
@@ -678,14 +708,21 @@ mod tests {
         dbg!(SystemDescriptor::BASE_HIGH_PAIR);
     }
 
+    fn any_valid_tss_addr() -> impl Strategy<Value = u64> {
+        any::<u64>().prop_filter(
+            "valid addresses for TSS base must be 4-byte aligned",
+            |addr| addr.is_multiple_of(0x4),
+        )
+    }
     proptest! {
         #[test]
-        fn system_segment_tss_base(addr: u64) {
-            let tss_addr = unsafe {
-                // safety: this address will never be dereferenced...
-                &*(addr as *const task::StateSegment)
+        fn system_segment_tss_base(addr in any_valid_tss_addr()) {
+            let tss_descr = unsafe {
+                // Safety: this address doesn't point at a valid TSS descriptor.
+                // But, that's fine, because we're only using it to test the
+                // bitfield packing, and it won't ever be set as the real TSS.
+                SystemDescriptor::tss_from_exposed_addr(addr)
             };
-            let tss_descr = SystemDescriptor::tss(tss_addr);
             let base = tss_descr.base();
             prop_assert_eq!(
                 base, addr,
@@ -695,12 +732,13 @@ mod tests {
         }
 
         #[test]
-        fn system_segment_tss_limit(addr: u64) {
-            let tss_addr = unsafe {
-                // safety: this address will never be dereferenced...
-                &*(addr as *const task::StateSegment)
+        fn system_segment_tss_limit(addr in any_valid_tss_addr()) {
+            let tss_descr = unsafe {
+                // Safety: this address doesn't point at a valid TSS descriptor.
+                // But, that's fine, because we're only using it to test the
+                // bitfield packing, and it won't ever be set as the real TSS.
+                SystemDescriptor::tss_from_exposed_addr(addr)
             };
-            let tss_descr = SystemDescriptor::tss(tss_addr);
             prop_assert_eq!(
                 tss_descr.limit(),
                 mem::size_of::<task::StateSegment>() as u64 - 1,

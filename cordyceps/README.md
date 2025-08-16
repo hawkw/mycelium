@@ -86,6 +86,21 @@ than owning those values.
   *must* be pinned in memory; they may not move (or be dropped) while linked
   into an intrusive collection.
 
+## Compatibility
+
+Rudimentary support for targets without CAS (Compare and Swap) atomics, such as
+Cortex-M0+/`thumbv6m-none-eabi`, is provided, however not all structures and
+features may be available.
+
+CAS atomic support is automatically detected with `cfg(target_has_atomic = "ptr")`,
+which notes that a [platform has support] for both load/store operations as well
+as support for CAS atomics.
+
+No crate-level features are necessary to enable/disable structures that require
+CAS atomics.
+
+[platform has support]: https://doc.rust-lang.org/reference/conditional-compilation.html#r-cfg.target_has_atomic
+
 ## about the name
 
 In keeping with Mycelium's fungal naming theme, _Cordyceps_ is a genus of

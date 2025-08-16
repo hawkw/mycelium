@@ -90,7 +90,6 @@ use core::future::Future;
 /// [global]: #global-timers
 /// [max]: Timer::max_duration
 #[track_caller]
-
 pub fn sleep(duration: Duration) -> Sleep<'static> {
     util::expect_display(try_sleep(duration), "cannot create `Sleep` future")
 }
@@ -105,7 +104,7 @@ pub fn sleep(duration: Duration) -> Sleep<'static> {
 /// # Returns
 ///
 /// - [`Ok`]`(`[`Sleep`]`)` if a new [`Sleep`] future was created
-///  successfully.
+///   successfully.
 /// - [`Err`]`(`[`TimerError::NoGlobalTimer`]`)` if a [global timer][global] was
 ///   not set by calling [`set_global_timer`] first.
 /// - [`Err`]`(`[`TimerError::DurationTooLong`]`)` if the requested sleep

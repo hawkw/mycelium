@@ -37,7 +37,7 @@ impl StateSegment {
     /// Returns the virtual address of the I/O permission bitmap.
     #[inline]
     pub fn iomap_addr(&self) -> VAddr {
-        VAddr::of(self).offset(self.iomap_offset as i32)
+        VAddr::of(self).offset(self.iomap_offset as isize)
     }
 
     /// Loads the provided [`selector`](segment::Selector) into the current task

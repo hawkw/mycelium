@@ -15,6 +15,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+thiserror = { version = "2.0.9", default-features = false }
+
 [package]
 name = "mycelium-kernel"
 version = "0.0.1"
@@ -43,12 +46,12 @@ mycelium-pci = { path = "pci" }
 mycelium-util = { path = "util" }
 mycelium-trace = { path = "trace", features = ["embedded-graphics"] }
 rand_xoshiro = "0.6"
-rand = { version = "0.8", default_features = false }
+rand = { version = "0.8", default-features = false }
 rlibc = "1.0"
 # NOTE FOR FUTURE ELIZAS WHO ARE MESSING WITH THIS: the bootloader crate's build
 # script is not that good, and breaks if you put this in `cfg(...).dependencies`
 # instead of normal [dependencies]. don't move this.
-bootloader_api = { version = "0.11" }
+bootloader_api = { version = "0.11.10" }
 embedded-graphics = "0.7"
 mycotest = { path = "mycotest" }
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "async-await-macro"] }
@@ -56,7 +59,7 @@ futures-util = { version = "0.3", default-features = false, features = ["async-a
 # Miri-compatible version of `once_cell`.
 once_cell = { version = "1.15.0", default-features = false }
 pc-keyboard = "0.6.1"
-thingbuf = { version = "0.1.4", default_features = false, features = ["static"] }
+thingbuf = { version = "0.1.4", default-features = false, features = ["static"] }
 
 [dev-dependencies]
 mycotest = { path = "mycotest", features = ["runner"] }
@@ -67,7 +70,7 @@ yaxpeax-x86 = { version = "1.0.0", default-features = false, features = ["fmt"] 
 yaxpeax-arch = { version = "0.2.0", default-features = false }
 
 [dependencies.tracing]
-default_features = false
+default-features = false
 features = ["attributes", "alloc"]
 git = "https://github.com/tokio-rs/tracing"
 

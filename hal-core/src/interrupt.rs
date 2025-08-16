@@ -68,7 +68,8 @@ pub trait Handlers<R: fmt::Debug + fmt::Display> {
 }
 
 /// Errors that may occur while registering an interrupt handler.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, thiserror::Error)]
+#[error("{kind}")]
 pub struct RegistrationError {
     kind: RegistrationErrorKind,
 }
@@ -78,16 +79,19 @@ pub struct CriticalGuard<'a, C: Control + ?Sized> {
     ctrl: &'a mut C,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 enum RegistrationErrorKind {
+    #[error("the provided interrupt vector does not exist")]
     Nonexistant,
+    #[error("an interrupt handler is already registered for this vector")]
     AlreadyRegistered,
+    #[error("{0}")]
     Other(&'static str),
 }
 
 // === impl CriticalGuard ===
 
-impl<'a, C: Control + ?Sized> Drop for CriticalGuard<'a, C> {
+impl<C: Control + ?Sized> Drop for CriticalGuard<'_, C> {
     fn drop(&mut self) {
         unsafe {
             self.ctrl.enable();

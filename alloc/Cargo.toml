@@ -13,6 +13,9 @@ bump = []
 buddy = ["hal-core", "mycelium-util", "tracing"]
 
 [dependencies]
-tracing = { git = "https://github.com/tokio-rs/tracing", default_features = false, optional = true }
+tracing = { git = "https://github.com/tokio-rs/tracing", default-features = false, optional = true }
 mycelium-util = { path = "../util", optional = true }
 hal-core = { path = "../hal-core", optional = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)']}

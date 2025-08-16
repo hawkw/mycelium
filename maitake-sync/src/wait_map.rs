@@ -464,6 +464,16 @@ impl<K: PartialEq, V> WaitMap<K, V> {
     }
 }
 
+impl<K, V, Lock> Default for WaitMap<K, V, Lock>
+where
+    K: PartialEq,
+    Lock: ScopedRawMutex + Default,
+{
+    fn default() -> Self {
+        Self::new_with_raw_mutex(Lock::default())
+    }
+}
+
 impl<K, V, Lock> WaitMap<K, V, Lock>
 where
     K: PartialEq,
@@ -724,7 +734,7 @@ where
     wait: Pin<&'a mut Wait<'b, K, V, Lock>>,
 }
 
-impl<'a, 'b, K, V, Lock> Future for Subscribe<'a, 'b, K, V, Lock>
+impl<K, V, Lock> Future for Subscribe<'_, '_, K, V, Lock>
 where
     K: PartialEq,
     Lock: ScopedRawMutex,
@@ -986,7 +996,11 @@ unsafe impl<K: PartialEq, V> Linked<list::Links<Waiter<K, V>>> for Waiter<K, V> 
 
 // === impl Wait ===
 
-impl<K: PartialEq, V> Future for Wait<'_, K, V> {
+impl<K, V, Lock> Future for Wait<'_, K, V, Lock>
+where
+    K: PartialEq,
+    Lock: ScopedRawMutex,
+{
     type Output = WaitResult<V>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

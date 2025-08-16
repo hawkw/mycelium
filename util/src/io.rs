@@ -641,7 +641,6 @@ pub trait BufRead: Read {
     /// Each line of the iterator has the same error semantics as [`BufRead::read_line`].
     ///
     /// [`BufRead::read_line`]: trait.BufRead.html#method.read_line
-
     #[cfg(feature = "alloc")]
     fn lines(self) -> Lines<Self>
     where

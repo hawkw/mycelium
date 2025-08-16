@@ -217,7 +217,6 @@ pub(crate) mod test {
     ///
     /// Returns a [TestGuard] that must be held for the duration of test to ensure
     /// tracing messages are correctly output
-
     #[cfg(all(test, not(loom)))]
     pub(crate) fn trace_init() -> TestGuard {
         trace_init_with_default("maitake=debug,cordyceps=debug")
@@ -264,4 +263,27 @@ pub(crate) mod test {
     #[allow(dead_code)]
     pub(crate) fn assert_sync<T: Sync>() {}
     pub(crate) fn assert_send_sync<T: Send + Sync>() {}
+
+    pub(crate) fn assert_future<F: core::future::Future>() {}
+
+    pub(crate) struct NopRawMutex;
+
+    unsafe impl mutex_traits::RawMutex for NopRawMutex {
+        type GuardMarker = ();
+        fn lock(&self) {
+            unimplemented!("don't actually try to lock this thing")
+        }
+
+        fn is_locked(&self) -> bool {
+            unimplemented!("don't actually try to lock this thing")
+        }
+
+        fn try_lock(&self) -> bool {
+            unimplemented!("don't actually try to lock this thing")
+        }
+
+        unsafe fn unlock(&self) {
+            unimplemented!("don't actually try to lock this thing")
+        }
+    }
 }

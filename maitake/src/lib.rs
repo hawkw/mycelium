@@ -2,7 +2,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
 #![cfg_attr(docsrs, doc(cfg_hide(docsrs, loom)))]
 #![cfg_attr(not(test), no_std)]
-#![cfg_attr(feature = "core-error", feature(error_in_core))]
 #![allow(unused_unsafe)]
 
 #[cfg(feature = "alloc")]
@@ -34,18 +33,18 @@ pub mod sync {
     //! The following synchronization primitives are provided:
     //!
     //! - [`Mutex`]: a fairly queued, asynchronous [mutual exclusion lock], for
-    //!       protecting shared data
+    //!   protecting shared data
     //! - [`RwLock`]: a fairly queued, asynchronous [readers-writer lock], which
-    //!       allows concurrent read access to shared data while ensuring write
-    //!       access is exclusive
+    //!   allows concurrent read access to shared data while ensuring write
+    //!   access is exclusive
     //! - [`Semaphore`]: an asynchronous [counting semaphore], for limiting the
-    //!       number of tasks which may run concurrently
+    //!   number of tasks which may run concurrently
     //! - [`WaitCell`], a cell that stores a *single* waiting task's [`Waker`], so
-    //!       that the task can be woken by another task,
+    //!   that the task can be woken by another task,
     //! - [`WaitQueue`], a queue of waiting tasks, which are woken in first-in,
-    //!       first-out order
+    //!   first-out order
     //! - [`WaitMap`], a set of waiting tasks associated with keys, in which a task
-    //!       can be woken by its key
+    //!   can be woken by its key
     //!
     //! **Note**: `maitake`'s synchronization primitives *do not* require the
     //! `maitake` runtime, and can be used with any async executor. Therefore,

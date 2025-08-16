@@ -45,11 +45,9 @@ static mut DOUBLE_FAULT_STACK: [StackFrame; DOUBLE_FAULT_STACK_SIZE] =
 static TSS: sync::Lazy<task::StateSegment> = sync::Lazy::new(|| {
     tracing::trace!("initializing TSS..");
     let mut tss = task::StateSegment::empty();
-    tss.interrupt_stacks[Idt::DOUBLE_FAULT_IST_OFFSET] = unsafe {
-        // safety: asdf
-        VAddr::from_usize_unchecked(core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize)
-            .offset(DOUBLE_FAULT_STACK_SIZE as i32)
-    };
+    tss.interrupt_stacks[Idt::DOUBLE_FAULT_IST_OFFSET] =
+        VAddr::from_ptr(core::ptr::addr_of!(DOUBLE_FAULT_STACK))
+            .offset(DOUBLE_FAULT_STACK_SIZE as isize);
     tracing::debug!(?tss, "TSS initialized");
     tss
 });

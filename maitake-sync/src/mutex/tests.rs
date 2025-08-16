@@ -1,4 +1,6 @@
+use super::*;
 use crate::loom::{self, future};
+use crate::util::test::{assert_future, NopRawMutex};
 use crate::Mutex;
 
 #[test]
@@ -53,4 +55,13 @@ fn basic_multi_threaded() {
             assert_eq!(*lock, 2)
         })
     });
+}
+
+#[test]
+fn lock_future_impls_future() {
+    // Mutex with `DefaultMutex` as the `ScopedRawMutex` implementation
+    assert_future::<Lock<'_, ()>>();
+
+    // Mutex with a custom `ScopedRawMutex` implementation
+    assert_future::<Lock<'_, (), NopRawMutex>>();
 }

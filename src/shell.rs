@@ -634,7 +634,7 @@ impl<'cmd> Context<'cmd> {
         T::Err: core::fmt::Display,
     {
         self.parse_optional_flag(names).and_then(|val| {
-            val.ok_or_else(|| Error {
+            val.ok_or(Error {
                 line: self.line,
                 kind: ErrorKind::FlagRequired { flags: names },
             })

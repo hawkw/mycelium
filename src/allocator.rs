@@ -84,6 +84,12 @@ impl Allocator {
     }
 }
 
+impl Default for Allocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 unsafe impl GlobalAlloc for Allocator {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -126,7 +132,7 @@ where
         &self,
         size: S,
         len: usize,
-    ) -> Result<page::PageRange<PAddr, S>, page::AllocErr> {
+    ) -> Result<page::PageRange<PAddr, S>, page::AllocError> {
         self.allocating.fetch_add(1, Ordering::Release);
         let res = self.allocator.alloc_range(size, len);
         self.allocating.fetch_sub(1, Ordering::Release);
@@ -134,7 +140,7 @@ where
     }
 
     #[inline]
-    fn dealloc_range(&self, range: page::PageRange<PAddr, S>) -> Result<(), page::AllocErr> {
+    fn dealloc_range(&self, range: page::PageRange<PAddr, S>) -> Result<(), page::AllocError> {
         self.deallocating.fetch_add(1, Ordering::Release);
         let res = self.allocator.dealloc_range(range);
         self.deallocating.fetch_sub(1, Ordering::Release);

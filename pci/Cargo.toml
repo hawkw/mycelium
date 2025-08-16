@@ -13,7 +13,7 @@ readme = "README.md"
 keywords = ["no_std", "pci", "pcie"]
 categories = ["no-std",]
 edition = "2021"
-rust-version = "1.61.0"
+rust-version = "1.62.0"
 
 [dependencies]
 mycelium-util = { path = "../util" }
@@ -21,12 +21,15 @@ mycelium-bitfield = { path = "../bitfield" }
 hal-x86_64 = { path = "../hal-x86_64" }
 volatile = "0.4.5"
 pci-ids = "0.2.5"
-hex = { version = "0.4.3", default_features = false }
+hex = { version = "0.4.3", default-features = false }
 
 [dependencies.tracing]
-default_features = false
+default-features = false
 features = ["attributes", "alloc"]
 git = "https://github.com/tokio-rs/tracing"
 
 [dev-dependencies]
 proptest = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)']}

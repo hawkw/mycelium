@@ -21,6 +21,18 @@ use core::{
     ptr::{self, NonNull},
 };
 
+macro_rules! feature {
+    (
+        #![$meta:meta]
+        $($item:item)*
+    ) => {
+        $(
+            #[cfg($meta)]
+            $item
+        )*
+    }
+}
+
 /// A multi-producer, single-consumer (MPSC) queue, implemented using a
 /// lock-free [intrusive] singly-linked list.
 ///
@@ -903,7 +915,7 @@ unsafe impl<T: Send + Linked<Links<T>>> Sync for MpscQueue<T> {}
 
 // === impl Consumer ===
 
-impl<'q, T: Send + Linked<Links<T>>> Consumer<'q, T> {
+impl<T: Send + Linked<Links<T>>> Consumer<'_, T> {
     /// Dequeue an element from the queue.
     ///
     /// This method will wait by spinning with an exponential backoff if the

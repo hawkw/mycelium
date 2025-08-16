@@ -129,12 +129,12 @@ impl CargoFormatter {
 
 // === impl Visitor ===
 
-impl<'styles, 'writer> Visitor<'styles, 'writer> {
+impl Visitor<'_, '_> {
     const MESSAGE: &'static str = "message";
     const INDENT: usize = 12;
 }
 
-impl<'styles, 'writer> Visit for Visitor<'styles, 'writer> {
+impl Visit for Visitor<'_, '_> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         // If we're writing the first field of the event, either emit cargo
         // formatting, or a level header.
