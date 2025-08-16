@@ -74,18 +74,18 @@ bitfield! {
         ///
         /// Enables native error reporting for x87 FPU errors.
         pub const NUMERIC_ERROR: bool;
-        const RESERVED_0 = 11;
+        const _RESERVED_0 = 11;
         /// Write Protect (`WP`).
         ///
         /// Enables write protection for ring 0 pages.
         pub const WRITE_PROTECT: bool;
-        const RESERVED_1 = 1;
+        const _RESERVED_1 = 1;
         /// Alignment Mask (`AM`).
         ///
         /// Enables user-mode alignment checking if the `ALIGNMENT_CHECK` bit in
         /// `RFLAGS` is also set.
         pub const ALIGNMENT_MASK: bool;
-        const RESERVED_2 = 11;
+        const _RESERVED_2 = 11;
         /// Not Write Through (`NW`).
         pub const NOT_WRITE_THROUGH: bool;
         /// Cache Disable (`NW`).
@@ -117,9 +117,9 @@ impl Cr0 {
     pub unsafe fn write(value: Self) {
         Self::update(|current| {
             value
-                .with(Self::RESERVED_0, current.get(Self::RESERVED_0))
-                .with(Self::RESERVED_1, current.get(Self::RESERVED_1))
-                .with(Self::RESERVED_2, current.get(Self::RESERVED_2))
+                .with(Self::_RESERVED_0, current.get(Self::_RESERVED_0))
+                .with(Self::_RESERVED_1, current.get(Self::_RESERVED_1))
+                .with(Self::_RESERVED_2, current.get(Self::_RESERVED_2))
         })
     }
 
