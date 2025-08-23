@@ -369,6 +369,7 @@ impl Controller {
         // guess...
         controller.unmask_isa_irq(IsaInterrupt::PitTimer);
         controller.unmask_isa_irq(IsaInterrupt::Ps2Keyboard);
+        controller.unmask_isa_irq(IsaInterrupt::Com1);
         controller
     }
 
@@ -514,6 +515,7 @@ impl hal_core::interrupt::Control for Idt {
         // interrupt models.
         self.register_isa_isr(IsaInterrupt::PitTimer, isr::pit_timer::<H> as *const ());
         self.register_isa_isr(IsaInterrupt::Ps2Keyboard, isr::keyboard::<H> as *const ());
+        self.register_isa_isr(IsaInterrupt::Com1, isr::com1::<H> as *const ());
 
         // local APIC specific hardware interrupts
         self.register_isr(Self::LOCAL_APIC_SPURIOUS, isr::spurious as *const ());
@@ -724,6 +726,48 @@ mod isr {
             INTERRUPT_CONTROLLER
                 .get_unchecked()
                 .end_isa_irq(IsaInterrupt::Ps2Keyboard);
+        }
+    }
+
+    pub(super) extern "x86-interrupt" fn com1<H: Handlers<Registers>>(_regs: Registers) {
+        let port = crate::serial::com1().expect("can port??");
+        // This block must absolutely not log to COM1, because logging will try to lock COM1 too
+        // and then deadlock.
+        let (b, isr_code, res) = {
+            // TODO: this should be over in the 16550 driver.
+            let mut port = port.lock().set_non_blocking();
+            let isr = port.get_isr();
+            let isr_code = isr & 0b1111;
+            if isr_code == 0b0001 {
+                // We get a spurious irq after reading RHR? Why?
+                // But, nothing to do.
+                unsafe {
+                    INTERRUPT_CONTROLLER
+                        .get_unchecked()
+                        .end_isa_irq(IsaInterrupt::Com1);
+                }
+                return;
+            }
+            if isr_code != 0b1100 {
+                // We got an interrupt from com1 but dunno how to handle it. die.
+                panic!("unknown com1 ISR code: 0b{:04b}", isr_code);
+            }
+            let mut b = [0u8];
+            use mycelium_util::io::Read;
+            let res = port.read(&mut b);
+            (b[0], isr_code, res)
+        };
+        // If the read was blocking:
+        // * what did we get interrupted for?
+        // * `b` is bogus
+        //
+        // so dying here is the order of the day.
+        res.expect("read was not blocking");
+
+        unsafe {
+            INTERRUPT_CONTROLLER
+                .get_unchecked()
+                .end_isa_irq(IsaInterrupt::Com1);
         }
     }
 
