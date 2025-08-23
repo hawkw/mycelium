@@ -90,6 +90,11 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) -> maitake::time::Clock 
         interrupt::enable_hardware_interrupts(None)
     };
 
+    let mut serial_input_list = alloc::vec::Vec::new();
+    // this one input is implicitly what gets used in com1.
+    serial_input_list.push(crate::drivers::serial_input::SerialInput::new());
+    crate::drivers::serial_input::SERIAL_INPUTS.init(serial_input_list);
+
     time::Rdtsc::new()
         .map_err(|error| {
             tracing::warn!(%error, "RDTSC not supported");

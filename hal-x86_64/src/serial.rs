@@ -52,6 +52,7 @@ struct LockInner<'a> {
 struct Registers {
     data: cpu::Port,
     irq_enable: cpu::Port,
+    isr: cpu::Port,
     line_ctrl: cpu::Port,
     modem_ctrl: cpu::Port,
     status: cpu::Port,
@@ -89,6 +90,7 @@ impl Port {
         let mut registers = Registers {
             data: cpu::Port::at(port),
             irq_enable: cpu::Port::at(port + 1),
+            isr: cpu::Port::at(port + 2),
             line_ctrl: cpu::Port::at(port + 3),
             modem_ctrl: cpu::Port::at(port + 4),
             status: cpu::Port::at(port + 5),
@@ -190,6 +192,11 @@ impl Registers {
     }
 
     #[inline]
+    fn isr(&self) -> u8 {
+        unsafe { self.isr.readb() }
+    }
+
+    #[inline]
     fn line_status(&self) -> u8 {
         unsafe { self.status.readb() }
     }
@@ -248,6 +255,10 @@ impl<'a> Lock<'a> {
 }
 
 impl<B> Lock<'_, B> {
+    pub fn get_isr(&mut self) -> u8 {
+        self.inner.inner.isr()
+    }
+
     /// Set the serial port's baud rate for this `Lock`.
     ///
     /// When the `Lock` is dropped, the baud rate will be set to the previous value.
