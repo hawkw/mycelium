@@ -764,6 +764,8 @@ mod isr {
         // so dying here is the order of the day.
         res.expect("read was not blocking");
 
+        H::serial_input(0, b);
+
         unsafe {
             INTERRUPT_CONTROLLER
                 .get_unchecked()

@@ -114,6 +114,10 @@ impl hal_core::interrupt::Handlers<Registers> for InterruptHandlers {
         crate::drivers::ps2_keyboard::handle_scancode(scancode)
     }
 
+    fn serial_input(port: u8, byte: u8) {
+        crate::drivers::serial_input::SERIAL_INPUTS.get()[port as usize].handle_input(byte)
+    }
+
     fn test_interrupt<C>(cx: C)
     where
         C: hal_core::interrupt::ctx::Context<Registers = Registers>,

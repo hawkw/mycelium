@@ -59,6 +59,9 @@ pub trait Handlers<R: fmt::Debug + fmt::Display> {
     /// with the scancode read from the PS/2 keyboard controller.
     fn ps2_keyboard(scancode: u8);
 
+    /// Called when a COM port interrupt is fired and a new byte is available.
+    fn serial_input(port: u8, byte: u8);
+
     fn test_interrupt<C>(_cx: C)
     where
         C: ctx::Context<Registers = R>,
