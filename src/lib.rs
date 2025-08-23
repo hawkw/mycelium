@@ -232,14 +232,10 @@ async fn serial_line(port: usize) -> alloc::string::String {
             b'\n' | b'\r' => {
                 newline = true;
             }
-            /*
             // backspace
-            DecodedKey::RawKey(KeyCode::Backspace)
-            | DecodedKey::RawKey(KeyCode::Delete)
-            | DecodedKey::Unicode('\u{0008}') => {
+            0x7f => {
                 line.pop();
             }
-            */
             c @ b'a'..=b'z' | c @ b'A'..=b'Z' | c @ b' ' => line.push(c as char),
             other => tracing::warn!(?other, "you typed something weird"),
         }
