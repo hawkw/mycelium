@@ -278,10 +278,6 @@ impl<'a> Lock<'a> {
 }
 
 impl<B> Lock<'_, B> {
-    pub fn get_iir(&mut self) -> u8 {
-        self.inner.inner.iir()
-    }
-
     pub fn check_interrupt_type(&mut self) -> io::Result<Option<Pc16550dInterrupt>> {
         // IIR bits 0 through 3 describe what happened to produce an interrupt, with bits 4 and 5
         // always 0, and bits 6 and 7 set to 1 if `FCR0=1`.
