@@ -730,15 +730,19 @@ mod isr {
     }
 
     pub(super) extern "x86-interrupt" fn com1<H: Handlers<Registers>>(_regs: Registers) {
+        use crate::serial::Pc16550dInterrupt;
         let port = crate::serial::com1().expect("can port??");
         // This block must absolutely not log to COM1, because logging will try to lock COM1 too
         // and then deadlock.
-        let (b, isr_code, res) = {
-            // TODO: this should be over in the 16550 driver.
-            let mut port = port.lock().set_non_blocking();
-            let isr = port.get_isr();
-            let isr_code = isr & 0b1111;
-            if isr_code == 0b0001 {
+
+        // TODO(ixi): If we were interrupted while writing to the serial port, someone else may
+        // have already locked the port, at which point this will deadlock. That's bad. I think we
+        // need to split this into read-lock and write-lock, where someone can hold the write lock
+        // concurrent with us grabbing the read lock here.
+        let mut port = port.lock().set_non_blocking();
+        let interrupt = port.check_interrupt_type().expect("interrupt is valid");
+        match interrupt {
+            None => {
                 // We get a spurious irq after reading RHR? Why?
                 // But, nothing to do.
                 unsafe {
@@ -748,28 +752,37 @@ mod isr {
                 }
                 return;
             }
-            if isr_code != 0b1100 {
-                // We got an interrupt from com1 but dunno how to handle it. die.
-                panic!("unknown com1 ISR code: 0b{:04b}", isr_code);
+            Some(Pc16550dInterrupt::CharacterTimeout) => {
+                // Data is available for reading, so do that.
+                let mut b = [0u8];
+                use mycelium_util::io::Read;
+                let res = port.read(&mut b);
+
+                // We've done the read, so unlock the port.
+                core::mem::drop(port);
+
+                // If the read was blocking:
+                // * what did we get interrupted for?
+                // * `b` is bogus
+                //
+                // so dying here is the order of the day.
+                res.expect("read was not blocking");
+
+                H::serial_input(0, b[0]);
+
+                unsafe {
+                    INTERRUPT_CONTROLLER
+                        .get_unchecked()
+                        .end_isa_irq(IsaInterrupt::Com1);
+                }
             }
-            let mut b = [0u8];
-            use mycelium_util::io::Read;
-            let res = port.read(&mut b);
-            (b[0], isr_code, res)
-        };
-        // If the read was blocking:
-        // * what did we get interrupted for?
-        // * `b` is bogus
-        //
-        // so dying here is the order of the day.
-        res.expect("read was not blocking");
+            Some(other) => {
+                // We're gonna panic about the unhandled 16550 interrupt, but unlock the port
+                // first so when we panic we can write to serial instead of just deadlock.
+                core::mem::drop(port);
 
-        H::serial_input(0, b);
-
-        unsafe {
-            INTERRUPT_CONTROLLER
-                .get_unchecked()
-                .end_isa_irq(IsaInterrupt::Com1);
+                tracing::warn!("Unhandled 16550 interrupt cause: {other:?}");
+            }
         }
     }
 

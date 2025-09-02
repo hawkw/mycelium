@@ -1,4 +1,13 @@
-//! A simple 16550 UART serial port driver.
+//! A simple driver for 16550-like UARTs.
+//!
+//! This driver is primarily tested against the QEMU emulated 16550, which itself is intended to
+//! emulate a National Semiconductor PC16550D. From QEMU's
+//! [HardwareManuals](https://wiki.qemu.org/Documentation/HardwareManuals) wiki page, the emulated
+//! device is described by this datasheet: https://wiki.qemu.org/images/1/18/PC16550D.pdf.
+//!
+//! The COM1-4 defined here are, again, primarily in service of QEMU's PC layout, but should be
+//! relatively general.
+
 use crate::cpu;
 use core::{fmt, marker::PhantomData};
 use mycelium_util::{
@@ -31,6 +40,17 @@ pub fn com4() -> Option<&'static Port> {
     COM4.as_ref()
 }
 
+// For representation simplicity, the variants here have values corresponding to the IIR bits that
+// produce these variants.
+#[derive(Debug)]
+pub enum Pc16550dInterrupt {
+    ModemStatus = 0b0000,
+    TransmitterHoldingRegEmpty = 0b0010,
+    ReceivedDataAvailable = 0b0100,
+    ReceiverLineStatus = 0b110,
+    CharacterTimeout = 0b1100,
+}
+
 // #[derive(Debug)]
 pub struct Port {
     inner: Mutex<Registers, Spinlock>,
@@ -52,7 +72,10 @@ struct LockInner<'a> {
 struct Registers {
     data: cpu::Port,
     irq_enable: cpu::Port,
-    isr: cpu::Port,
+    // This register is called the Interrupt Identification Register ("IIR") in the PC16550D
+    // datasheet from which QEMU's implementation is derived, but other datasheets for similar
+    // parts also call this the "Interrupt Status Register" or "ISR".
+    iir: cpu::Port,
     line_ctrl: cpu::Port,
     modem_ctrl: cpu::Port,
     status: cpu::Port,
@@ -90,7 +113,7 @@ impl Port {
         let mut registers = Registers {
             data: cpu::Port::at(port),
             irq_enable: cpu::Port::at(port + 1),
-            isr: cpu::Port::at(port + 2),
+            iir: cpu::Port::at(port + 2),
             line_ctrl: cpu::Port::at(port + 3),
             modem_ctrl: cpu::Port::at(port + 4),
             status: cpu::Port::at(port + 5),
@@ -192,8 +215,8 @@ impl Registers {
     }
 
     #[inline]
-    fn isr(&self) -> u8 {
-        unsafe { self.isr.readb() }
+    fn iir(&self) -> u8 {
+        unsafe { self.iir.readb() }
     }
 
     #[inline]
@@ -255,8 +278,41 @@ impl<'a> Lock<'a> {
 }
 
 impl<B> Lock<'_, B> {
-    pub fn get_isr(&mut self) -> u8 {
-        self.inner.inner.isr()
+    pub fn get_iir(&mut self) -> u8 {
+        self.inner.inner.iir()
+    }
+
+    pub fn check_interrupt_type(&mut self) -> io::Result<Option<Pc16550dInterrupt>> {
+        // IIR bits 0 through 3 describe what happened to produce an interrupt, with bits 4 and 5
+        // always 0, and bits 6 and 7 set to 1 if `FCR0=1`.
+        let iir = self.inner.inner.iir();
+
+        if iir & 0b0011_0000 != 0b0000_0000 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "IIR indicates bogus interrupt bits"
+            ));
+        }
+
+        // TODO(ixi): probably should check IIR bits 6 and 7? punting on everything related to FIFO
+        // though.
+
+        let interrupt = match self.inner.inner.iir() & 0b1111 {
+            0b0000 => Pc16550dInterrupt::ModemStatus,
+            0b0001 => { return Ok(None); }
+            0b0010 => Pc16550dInterrupt::TransmitterHoldingRegEmpty,
+            0b0100 => Pc16550dInterrupt::ReceivedDataAvailable,
+            0b0110 => Pc16550dInterrupt::ReceiverLineStatus,
+            0b1100 => Pc16550dInterrupt::CharacterTimeout,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "IIR indicates unrecognized status"
+                ));
+            }
+        };
+
+        Ok(Some(interrupt))
     }
 
     /// Set the serial port's baud rate for this `Lock`.
@@ -308,6 +364,7 @@ impl io::Read for Lock<'_, Blocking> {
 impl io::Read for Lock<'_, Nonblocking> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         for byte in buf.iter_mut() {
+            // not ideal that this loses how many bytes were read if any read would block
             *byte = self.inner.read_nonblocking()?;
         }
         Ok(buf.len())

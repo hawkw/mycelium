@@ -162,8 +162,8 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
 }
 
 fn kernel_main(bootinfo: impl BootInfo) -> ! {
-    rt::spawn(keyboard_demo(|| alloc::boxed::Box::pin(keyboard_line())));
-    rt::spawn(keyboard_demo(|| alloc::boxed::Box::pin(serial_line(0))));
+    rt::spawn(demo_shell(|linebuf| alloc::boxed::Box::pin(keyboard_line(linebuf))));
+    rt::spawn(demo_shell(|linebuf| alloc::boxed::Box::pin(serial_line(0, linebuf))));
 
     let mut core = rt::Core::new();
     tracing::info!(
@@ -195,8 +195,7 @@ pub fn main() {
     /* no host-platform tests in this crate */
 }
 
-async fn keyboard_line() -> alloc::string::String {
-    let mut line = alloc::string::String::new();
+async fn keyboard_line(mut line: alloc::string::String) -> alloc::string::String {
     use drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
 
     loop {
@@ -221,8 +220,7 @@ async fn keyboard_line() -> alloc::string::String {
     }
 }
 
-async fn serial_line(port: usize) -> alloc::string::String {
-    let mut line = alloc::string::String::new();
+async fn serial_line(port: usize, mut line: alloc::string::String) -> alloc::string::String {
     let serial_iface = &crate::drivers::serial_input::SERIAL_INPUTS.get()[port];
 
     loop {
@@ -245,19 +243,22 @@ async fn serial_line(port: usize) -> alloc::string::String {
     }
 }
 
-/// Keyboard handler demo task: logs each line typed by the user.
+type ReadLineFn = fn(alloc::string::String) -> core::pin::Pin<
+    alloc::boxed::Box<dyn core::future::Future<Output = alloc::string::String> + Send>
+>;
+
+/// Demo shell task: *very* minimal debug shell.
 // TODO(eliza): let's do something Actually Useful with keyboard input...
-async fn keyboard_demo(line_source: fn() -> core::pin::Pin<alloc::boxed::Box<dyn core::future::Future<Output = alloc::string::String> + Send>>) {
+async fn demo_shell(line_source: ReadLineFn) {
     #[cfg(target_os = "none")]
     use alloc::string::String;
-    use drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
 
     let mut line = String::new();
     tracing::info!("type `help` to list available commands");
     loop {
-        let fut = line_source();
-        let line = fut.await;
+        let fut = line_source(line);
+        line = fut.await;
         shell::eval(&line);
-    //    line.clear();
+        line.clear();
     }
 }
