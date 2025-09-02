@@ -3,7 +3,7 @@
 //! This driver is primarily tested against the QEMU emulated 16550, which itself is intended to
 //! emulate a National Semiconductor PC16550D. From QEMU's
 //! [HardwareManuals](https://wiki.qemu.org/Documentation/HardwareManuals) wiki page, the emulated
-//! device is described by this datasheet: https://wiki.qemu.org/images/1/18/PC16550D.pdf.
+//! device is described by this datasheet: <https://wiki.qemu.org/images/1/18/PC16550D.pdf>.
 //!
 //! The COM1-4 defined here are, again, primarily in service of QEMU's PC layout, but should be
 //! relatively general.
