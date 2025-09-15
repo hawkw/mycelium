@@ -732,14 +732,12 @@ mod isr {
     pub(super) extern "x86-interrupt" fn com1<H: Handlers<Registers>>(_regs: Registers) {
         use crate::serial::Pc16550dInterrupt;
         let port = crate::serial::com1().expect("can port??");
-        // This block must absolutely not log to COM1, because logging will try to lock COM1 too
-        // and then deadlock.
 
-        // TODO(ixi): If we were interrupted while writing to the serial port, someone else may
-        // have already locked the port, at which point this will deadlock. That's bad. I think we
-        // need to split this into read-lock and write-lock, where someone can hold the write lock
-        // concurrent with us grabbing the read lock here.
-        let mut port = port.lock().set_non_blocking();
+        // This is the only point we'll read-lock the serial port. See the module comments on
+        // [`crate::serial`] for the locking procedure around the port.
+        let port = port.read_lock();
+
+        let mut port = port.set_non_blocking();
         let interrupt = port.check_interrupt_type().expect("interrupt is valid");
         match interrupt {
             None => {
@@ -777,8 +775,9 @@ mod isr {
                 }
             }
             Some(other) => {
-                // We're gonna panic about the unhandled 16550 interrupt, but unlock the port
-                // first so when we panic we can write to serial instead of just deadlock.
+                // We're gonna warn about the unhandled 16550 interrupt, but unlock the port for
+                // reading so we don't hold up anyone else waiting to read-lock for management
+                // operations.
                 core::mem::drop(port);
 
                 tracing::warn!("Unhandled 16550 interrupt cause: {other:?}");
