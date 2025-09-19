@@ -826,6 +826,7 @@ dependencies = [
  "embedded-graphics-core",
  "maitake-sync",
  "mycelium-util",
+ "portable-atomic",
  "thiserror 2.0.9",
  "tracing 0.2.0",
 ]
