@@ -91,7 +91,7 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) -> maitake::time::Clock 
     };
 
     // this one input is implicitly what gets used in com1.
-    let serial_input_list = vec![crate::drivers::serial_input::SerialInput::new()];
+    let serial_input_list = alloc::vec![crate::drivers::serial_input::SerialInput::new()];
     crate::drivers::serial_input::SERIAL_INPUTS.init(serial_input_list);
 
     time::Rdtsc::new()
