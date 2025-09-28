@@ -743,12 +743,6 @@ mod isr {
             None => {
                 // We get a spurious irq after reading RHR? Why?
                 // But, nothing to do.
-                unsafe {
-                    INTERRUPT_CONTROLLER
-                        .get_unchecked()
-                        .end_isa_irq(IsaInterrupt::Com1);
-                }
-                return;
             }
             Some(Pc16550dInterrupt::CharacterTimeout) => {
                 // Data is available for reading, so do that.
@@ -767,12 +761,6 @@ mod isr {
                 res.expect("read was not blocking");
 
                 H::serial_input(0, b[0]);
-
-                unsafe {
-                    INTERRUPT_CONTROLLER
-                        .get_unchecked()
-                        .end_isa_irq(IsaInterrupt::Com1);
-                }
             }
             Some(other) => {
                 // We're gonna warn about the unhandled 16550 interrupt, but unlock the port for
@@ -782,6 +770,12 @@ mod isr {
 
                 tracing::warn!("Unhandled 16550 interrupt cause: {other:?}");
             }
+        }
+
+        unsafe {
+            INTERRUPT_CONTROLLER
+                .get_unchecked()
+                .end_isa_irq(IsaInterrupt::Com1);
         }
     }
 

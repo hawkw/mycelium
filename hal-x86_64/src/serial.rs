@@ -8,6 +8,14 @@
 //! The COM1-4 defined here are, again, primarily in service of QEMU's PC layout, but should be
 //! relatively general.
 //!
+//! ## Nomenclature
+//!
+//! Several names around the 16550 vary from document to document, but here we generally use names
+//! as written in the National Semiconductor PC16550D datasheet above. Table II on page 14 is a
+//! useful reference for both bits in the 16550's registers and names of the registers
+//! themselves. Further, the PC16550D datasheet refers to individual bits in a register as
+//! `<reg><N>`, so "FCR0" refers to FIFO Control Register bit 0, for "FIFO Enable."
+//!
 //! ## Implementation
 //!
 //! Ports as implemented in this driver are split into a "read" part and a "write" part, which
@@ -91,31 +99,25 @@ pub enum Pc16550dInterrupt {
     CharacterTimeout = 0b1100,
 }
 
-// #[derive(Debug)]
 pub struct Port {
     read_inner: Mutex<ReadRegisters, Spinlock>,
     write_inner: Mutex<WriteRegisters, Spinlock>,
 }
 
 /// A lock for the read parts of a serial port. The read and write parts of this port state are
-/// described in the documentation for this module.
-// #[derive(Debug)]
+/// described in the [documentation for this module](crate::serial#implementation).
 pub struct ReadLock<'a, B = Blocking> {
     // This is the non-moveable part.
-    inner: ReadLockInner<'a>,
+    inner: MutexGuard<'a, ReadRegisters, Spinlock>,
     _is_blocking: PhantomData<B>,
 }
 
 /// A lock for the write parts of a serial port. The read and write parts of this port state are
-/// described in the documentation for this module.
+/// described in the [documentation for this module](crate::serial#implementation).
 pub struct WriteLock<'a, B = Blocking> {
     // This is the non-moveable part.
     inner: WriteLockInner<'a>,
     _is_blocking: PhantomData<B>,
-}
-
-struct ReadLockInner<'a> {
-    inner: MutexGuard<'a, ReadRegisters, Spinlock>,
 }
 
 struct WriteLockInner<'a> {
@@ -217,9 +219,7 @@ impl Port {
 
     pub fn read_lock(&self) -> ReadLock<'_> {
         ReadLock {
-            inner: ReadLockInner {
-                inner: self.read_inner.lock(),
-            },
+            inner: self.read_inner.lock(),
             _is_blocking: PhantomData,
         }
     }
@@ -378,22 +378,24 @@ impl<'a> WriteLock<'a> {
 impl<B> ReadLock<'_, B> {
     pub fn check_interrupt_type(&mut self) -> io::Result<Option<Pc16550dInterrupt>> {
         // IIR bits 0 through 3 describe what happened to produce an interrupt, with bits 4 and 5
-        // always 0, and bits 6 and 7 set to 1 if `FCR0=1`.
-        let iir = self.inner.inner.iir();
+        // always 0, and bits 6 and 7 set to 1 if FIFOs are enabled (e.g. `FCR` bit 0 is set).
+        let iir = self.inner.iir();
 
         if iir & 0b0011_0000 != 0b0000_0000 {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                "IIR indicates bogus interrupt bits"
+                "IIR indicates bogus interrupt bits",
             ));
         }
 
+        // The mapping here is described in "Table IV. Interrupt Control Functions" on page 17.
         // TODO(ixi): probably should check IIR bits 6 and 7? punting on everything related to FIFO
         // though.
-
-        let interrupt = match self.inner.inner.iir() & 0b1111 {
+        let interrupt = match iir & 0b1111 {
             0b0000 => Pc16550dInterrupt::ModemStatus,
-            0b0001 => { return Ok(None); }
+            0b0001 => {
+                return Ok(None);
+            }
             0b0010 => Pc16550dInterrupt::TransmitterHoldingRegEmpty,
             0b0100 => Pc16550dInterrupt::ReceivedDataAvailable,
             0b0110 => Pc16550dInterrupt::ReceiverLineStatus,
@@ -401,7 +403,7 @@ impl<B> ReadLock<'_, B> {
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    "IIR indicates unrecognized status"
+                    "IIR indicates unrecognized status",
                 ));
             }
         };
@@ -501,18 +503,6 @@ impl io::Write for WriteLock<'_, Nonblocking> {
     fn flush(&mut self) -> io::Result<()> {
         while !self.inner.is_write_ready() {}
         Ok(())
-    }
-}
-
-impl ReadLockInner<'_> {
-    #[inline(always)]
-    fn read_nonblocking(&mut self) -> io::Result<u8> {
-        self.inner.read_nonblocking()
-    }
-
-    #[inline(always)]
-    fn read_blocking(&mut self) -> u8 {
-        self.inner.read_blocking()
     }
 }
 

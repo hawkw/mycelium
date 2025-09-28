@@ -162,8 +162,12 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
 }
 
 fn kernel_main(bootinfo: impl BootInfo) -> ! {
-    rt::spawn(demo_shell(|linebuf| alloc::boxed::Box::pin(keyboard_line(linebuf))));
-    rt::spawn(demo_shell(|linebuf| alloc::boxed::Box::pin(serial_line(0, linebuf))));
+    rt::spawn(demo_shell(|linebuf| {
+        alloc::boxed::Box::pin(keyboard_line(linebuf))
+    }));
+    rt::spawn(demo_shell(|linebuf| {
+        alloc::boxed::Box::pin(serial_line(0, linebuf))
+    }));
 
     let mut core = rt::Core::new();
     tracing::info!(
@@ -243,8 +247,10 @@ async fn serial_line(port: usize, mut line: alloc::string::String) -> alloc::str
     }
 }
 
-type ReadLineFn = fn(alloc::string::String) -> core::pin::Pin<
-    alloc::boxed::Box<dyn core::future::Future<Output = alloc::string::String> + Send>
+type ReadLineFn = fn(
+    alloc::string::String,
+) -> core::pin::Pin<
+    alloc::boxed::Box<dyn core::future::Future<Output = alloc::string::String> + Send>,
 >;
 
 /// Demo shell task: *very* minimal debug shell.

@@ -17,6 +17,12 @@ impl SerialInput {
     }
 }
 
+impl Default for SerialInput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub static SERIAL_INPUTS: InitOnce<alloc::vec::Vec<SerialInput>> = InitOnce::uninitialized();
 
 impl SerialInput {
@@ -25,8 +31,14 @@ impl SerialInput {
             return byte.expect("buffer contains somes");
         }
 
-        self.waiters.wait().await.expect("serial waiters should never be closed FOR NOW");
-        self.buf.pop().expect("just got woken up wtf").expect("buffer contains somes")
+        self.waiters
+            .wait()
+            .await
+            .expect("serial waiters should never be closed FOR NOW");
+        self.buf
+            .pop()
+            .expect("just got woken up wtf")
+            .expect("buffer contains somes")
     }
 
     pub fn handle_input(&self, byte: u8) {
@@ -35,10 +47,7 @@ impl SerialInput {
             // we don't have space in the buffer to accept a byte. We should probably mask the
             // interrupt until space in the buffer is available, but instead for now we'll eat the
             // byte and drop it.
-            tracing::warn!(
-                ?byte,
-                "serial buffer full, dropping byte!"
-            )
+            tracing::warn!(?byte, "serial buffer full, dropping byte!")
         } else {
             // We actually enqueued a byte, let everyone know.
             self.waiters.wake_all();
