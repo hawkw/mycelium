@@ -239,7 +239,7 @@ async fn serial_line(port: usize, mut line: alloc::string::String) -> alloc::str
                 line.pop();
             }
             c @ b'a'..=b'z' | c @ b'A'..=b'Z' | c @ b' ' => line.push(c as char),
-            other => tracing::warn!(?other, "you typed something weird"),
+            other => tracing::warn!(?other, "the serial port got something weird"),
         }
         if newline {
             return line;
