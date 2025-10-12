@@ -70,7 +70,7 @@ pub use self::cursor::{Cursor, CursorMut};
 ///
 ///     /// Convert an owned `Handle` into a raw pointer
 ///     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
-///        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+///        unsafe { NonNull::new_unchecked(Box::into_raw(Pin::into_inner_unchecked(handle))) }
 ///     }
 ///
 ///     /// Convert a raw pointer back into an owned `Handle`.
@@ -126,7 +126,7 @@ pub use self::cursor::{Cursor, CursorMut};
 /// # unsafe impl Linked<list::Links<Entry>> for Entry {
 /// #     type Handle = Pin<Box<Self>>;
 /// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
-/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #        unsafe { NonNull::new_unchecked(Box::into_raw(Pin::into_inner_unchecked(handle))) }
 /// #     }
 /// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
 /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
@@ -180,7 +180,7 @@ pub use self::cursor::{Cursor, CursorMut};
 /// # unsafe impl Linked<list::Links<Entry>> for Entry {
 /// #     type Handle = Pin<Box<Self>>;
 /// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
-/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #        unsafe { NonNull::new_unchecked(Box::into_raw(Pin::into_inner_unchecked(handle))) }
 /// #     }
 /// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
 /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
