@@ -90,6 +90,10 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) -> maitake::time::Clock 
         interrupt::enable_hardware_interrupts(None)
     };
 
+    // this one input is implicitly what gets used in com1.
+    let serial_input_list = alloc::vec![crate::drivers::serial_input::SerialInput::new()];
+    crate::drivers::serial_input::SERIAL_INPUTS.init(serial_input_list);
+
     time::Rdtsc::new()
         .map_err(|error| {
             tracing::warn!(%error, "RDTSC not supported");
@@ -109,7 +113,7 @@ pub fn init(_info: &impl BootInfo, archinfo: &ArchInfo) -> maitake::time::Clock 
 pub fn run_tests() {
     use hal_x86_64::serial;
     let com1 = serial::com1().expect("if we're running tests, there ought to be a serial port");
-    let mk = || com1.lock();
+    let mk = || com1.write_lock();
     match mycotest::runner::run_tests(mk) {
         Ok(()) => qemu_exit(QemuExitCode::Success),
         Err(_) => qemu_exit(QemuExitCode::Failed),

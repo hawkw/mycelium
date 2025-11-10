@@ -220,8 +220,8 @@ mod inner {
         pub use core::sync::*;
 
         pub(crate) mod atomic {
-            pub use portable_atomic::*;
             pub use core::sync::atomic::Ordering;
+            pub use portable_atomic::*;
         }
 
         pub use crate::blocking;

@@ -162,7 +162,12 @@ pub fn kernel_start(bootinfo: impl BootInfo, archinfo: crate::arch::ArchInfo) ->
 }
 
 fn kernel_main(bootinfo: impl BootInfo) -> ! {
-    rt::spawn(keyboard_demo());
+    rt::spawn(demo_shell(|linebuf| {
+        alloc::boxed::Box::pin(keyboard_line(linebuf))
+    }));
+    rt::spawn(demo_shell(|linebuf| {
+        alloc::boxed::Box::pin(serial_line(0, linebuf))
+    }));
 
     let mut core = rt::Core::new();
     tracing::info!(
@@ -194,15 +199,9 @@ pub fn main() {
     /* no host-platform tests in this crate */
 }
 
-/// Keyboard handler demo task: logs each line typed by the user.
-// TODO(eliza): let's do something Actually Useful with keyboard input...
-async fn keyboard_demo() {
-    #[cfg(target_os = "none")]
-    use alloc::string::String;
+async fn keyboard_line(mut line: alloc::string::String) -> alloc::string::String {
     use drivers::ps2_keyboard::{self, DecodedKey, KeyCode};
 
-    let mut line = String::new();
-    tracing::info!("type `help` to list available commands");
     loop {
         let key = ps2_keyboard::next_key().await;
         let mut newline = false;
@@ -220,8 +219,52 @@ async fn keyboard_demo() {
             DecodedKey::RawKey(key) => tracing::warn!(?key, "you typed something weird"),
         }
         if newline {
-            shell::eval(&line);
-            line.clear();
+            return line;
         }
+    }
+}
+
+async fn serial_line(port: usize, mut line: alloc::string::String) -> alloc::string::String {
+    let serial_iface = &crate::drivers::serial_input::SERIAL_INPUTS.get()[port];
+
+    loop {
+        let b = serial_iface.next_byte().await;
+        let mut newline = false;
+        match b {
+            b'\n' | b'\r' => {
+                newline = true;
+            }
+            // backspace
+            0x7f => {
+                line.pop();
+            }
+            c @ b'a'..=b'z' | c @ b'A'..=b'Z' | c @ b' ' => line.push(c as char),
+            other => tracing::warn!(?other, "the serial port got something weird"),
+        }
+        if newline {
+            return line;
+        }
+    }
+}
+
+type ReadLineFn = fn(
+    alloc::string::String,
+) -> core::pin::Pin<
+    alloc::boxed::Box<dyn core::future::Future<Output = alloc::string::String> + Send>,
+>;
+
+/// Demo shell task: *very* minimal debug shell.
+// TODO(eliza): let's do something Actually Useful with keyboard input...
+async fn demo_shell(line_source: ReadLineFn) {
+    #[cfg(target_os = "none")]
+    use alloc::string::String;
+
+    let mut line = String::new();
+    tracing::info!("type `help` to list available commands");
+    loop {
+        let fut = line_source(line);
+        line = fut.await;
+        shell::eval(&line);
+        line.clear();
     }
 }

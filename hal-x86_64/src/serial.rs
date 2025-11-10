@@ -1,4 +1,61 @@
-//! A simple 16550 UART serial port driver.
+//! A simple driver for 16550-like UARTs.
+//!
+//! This driver is primarily tested against the QEMU emulated 16550, which itself is intended to
+//! emulate a National Semiconductor PC16550D. From QEMU's
+//! [HardwareManuals](https://wiki.qemu.org/Documentation/HardwareManuals) wiki page, the emulated
+//! device is described by this datasheet: <https://wiki.qemu.org/images/1/18/PC16550D.pdf>.
+//!
+//! The COM1-4 defined here are, again, primarily in service of QEMU's PC layout, but should be
+//! relatively general.
+//!
+//! ## Nomenclature
+//!
+//! Several names around the 16550 vary from document to document, but here we generally use names
+//! as written in the National Semiconductor PC16550D datasheet above. Table II on page 14 is a
+//! useful reference for both bits in the 16550's registers and names of the registers
+//! themselves. Further, the PC16550D datasheet refers to individual bits in a register as
+//! `<reg><N>`, so "FCR0" refers to FIFO Control Register bit 0, for "FIFO Enable."
+//!
+//! ## Implementation
+//!
+//! Ports as implemented in this driver are split into a "read" part and a "write" part, which
+//! provide access to not-quite-disjoint sets of registers for a port. Ports can be written to by
+//! any task ay any time, requiring the write lock to do so, but reading a port happens in an
+//! interrupt context which can take the read lock at any time.
+//!
+//! The behavior implemented by the read half of a port must be able to tolerate execution
+//! concurrent with any behavior implemented on the write half of a port, and vice versa with the
+//! write half of a port tolerating any behavior implemented on the read half of a port. As a
+//! trivial example, reading and writing a port both operate on the data register, but one is
+//! performed with `inb` while the other is performed with `outb`; no interleaving of `inb`/`outb`
+//! on the data register will cause misbehavior, so reads and writes can be split in this way.
+//!
+//! When a 16550 raises an interrupt, the pending interrupts cannot change as a result of a write,
+//! so the read lock may read IIR. Conceivably, modifying `modem_ctrl` may change the port's
+//! pending interrupts, so the write lock must not modify this register while interrupts are
+//! unmasked.
+//!
+//! If we must operate with exclusive access to all port registers, we have to:
+//!
+//! * acquire the port write lock
+//! * disable interrupts for the port
+//! * acquire the port read lock
+//! * perform the operation
+//! * release the read lock
+//! * enable interrupts for the port
+//! * release the write lock
+//!
+//! This ordering is critical and depends on current serial implementation! The write lock excludes
+//! other processors without blocking interrupts from completing, disabling interrupts prevents new
+//! interrupts from firing, and acquiring the read lock only completes when any potentially
+//! in-flight interrupt is done with the port state. If two processors race to perform management
+//! operations, the write lock prevents one processor from enabling interrupts between the other
+//! disabling interrupts and acquiring the read lock.
+//!
+//! If serial interrupts must ever take a write lock, or interrupts intermittently drop the read
+//! lock, we'll have to add additional synchronization to guarantee no combination of read/write
+//! operations can deadlock.
+
 use crate::cpu;
 use core::{fmt, marker::PhantomData};
 use mycelium_util::{
@@ -31,25 +88,61 @@ pub fn com4() -> Option<&'static Port> {
     COM4.as_ref()
 }
 
-// #[derive(Debug)]
-pub struct Port {
-    inner: Mutex<Registers, Spinlock>,
+// For representation simplicity, the variants here have values corresponding to the IIR bits that
+// produce these variants.
+#[derive(Debug)]
+pub enum Pc16550dInterrupt {
+    ModemStatus = 0b0000,
+    TransmitterHoldingRegEmpty = 0b0010,
+    ReceivedDataAvailable = 0b0100,
+    ReceiverLineStatus = 0b110,
+    CharacterTimeout = 0b1100,
 }
 
-// #[derive(Debug)]
-pub struct Lock<'a, B = Blocking> {
+pub struct Port {
+    read_inner: Mutex<ReadRegisters, Spinlock>,
+    write_inner: Mutex<WriteRegisters, Spinlock>,
+}
+
+/// A lock for the read parts of a serial port. The read and write parts of this port state are
+/// described in the [documentation for this module](crate::serial#implementation).
+pub struct ReadLock<'a, B = Blocking> {
     // This is the non-moveable part.
-    inner: LockInner<'a>,
+    inner: MutexGuard<'a, ReadRegisters, Spinlock>,
     _is_blocking: PhantomData<B>,
 }
 
-struct LockInner<'a> {
-    inner: MutexGuard<'a, Registers, Spinlock>,
+/// A lock for the write parts of a serial port. The read and write parts of this port state are
+/// described in the [documentation for this module](crate::serial#implementation).
+pub struct WriteLock<'a, B = Blocking> {
+    // This is the non-moveable part.
+    inner: WriteLockInner<'a>,
+    _is_blocking: PhantomData<B>,
+}
+
+struct WriteLockInner<'a> {
+    inner: MutexGuard<'a, WriteRegisters, Spinlock>,
     prev_divisor: Option<u16>,
 }
 
+/// The registers involved in handling a read of the UART.
+///
+/// This is closely related to the registers and implementation around `WriteRegisters`; we will
+/// concurrently access the port for reading and writing. While `data` is used in both reading and
+/// writing, it is only read while reading, and only written while writing, which means readers and
+/// writers do not interfere with one another.
 // #[derive(Debug)]
-struct Registers {
+struct ReadRegisters {
+    data: cpu::Port,
+    // This register is called the Interrupt Identification Register ("IIR") in the PC16550D
+    // datasheet from which QEMU's implementation is derived, but other datasheets for similar
+    // parts also call this the "Interrupt Status Register" or "ISR".
+    iir: cpu::Port,
+    status: cpu::Port,
+}
+
+// #[derive(Debug)]
+struct WriteRegisters {
     data: cpu::Port,
     irq_enable: cpu::Port,
     line_ctrl: cpu::Port,
@@ -86,7 +179,12 @@ impl Port {
             ));
         }
 
-        let mut registers = Registers {
+        let read_registers = ReadRegisters {
+            data: cpu::Port::at(port),
+            iir: cpu::Port::at(port + 2),
+            status: cpu::Port::at(port + 5),
+        };
+        let mut write_registers = WriteRegisters {
             data: cpu::Port::at(port),
             irq_enable: cpu::Port::at(port + 1),
             line_ctrl: cpu::Port::at(port + 3),
@@ -97,7 +195,7 @@ impl Port {
         let fifo_ctrl = cpu::Port::at(port + 2);
 
         // Disable all interrupts
-        registers.without_irqs(|registers| unsafe {
+        write_registers.without_irqs(|registers| unsafe {
             // Set divisor to 38400 baud
             registers.set_baud_rate_divisor(3)?;
 
@@ -114,14 +212,22 @@ impl Port {
         })?;
 
         Ok(Self {
-            inner: Mutex::new_with_raw_mutex(registers, Spinlock::new()),
+            read_inner: Mutex::new_with_raw_mutex(read_registers, Spinlock::new()),
+            write_inner: Mutex::new_with_raw_mutex(write_registers, Spinlock::new()),
         })
     }
 
-    pub fn lock(&self) -> Lock<'_> {
-        Lock {
-            inner: LockInner {
-                inner: self.inner.lock(),
+    pub fn read_lock(&self) -> ReadLock<'_> {
+        ReadLock {
+            inner: self.read_inner.lock(),
+            _is_blocking: PhantomData,
+        }
+    }
+
+    pub fn write_lock(&self) -> WriteLock<'_> {
+        WriteLock {
+            inner: WriteLockInner {
+                inner: self.write_inner.lock(),
                 prev_divisor: None,
             },
             _is_blocking: PhantomData,
@@ -135,11 +241,44 @@ impl Port {
     ///
     ///  /!\ only call this when oopsing!!! /!\
     pub unsafe fn force_unlock(&self) {
-        self.inner.force_unlock();
+        self.read_inner.force_unlock();
+        self.write_inner.force_unlock();
     }
 }
 
-impl Registers {
+impl ReadRegisters {
+    #[inline]
+    fn iir(&self) -> u8 {
+        unsafe { self.iir.readb() }
+    }
+
+    #[inline]
+    fn line_status(&self) -> u8 {
+        unsafe { self.status.readb() }
+    }
+
+    #[inline]
+    fn is_read_ready(&self) -> bool {
+        self.line_status() & 1 != 0
+    }
+
+    #[inline]
+    fn read_blocking(&mut self) -> u8 {
+        while !self.is_read_ready() {}
+        unsafe { self.data.readb() }
+    }
+
+    #[inline]
+    fn read_nonblocking(&mut self) -> io::Result<u8> {
+        if self.is_read_ready() {
+            Ok(unsafe { self.data.readb() })
+        } else {
+            Err(io::Error::from(io::ErrorKind::WouldBlock))
+        }
+    }
+}
+
+impl WriteRegisters {
     const DLAB_BIT: u8 = 0b1000_0000;
 
     fn without_irqs<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
@@ -200,26 +339,6 @@ impl Registers {
     }
 
     #[inline]
-    fn is_read_ready(&self) -> bool {
-        self.line_status() & 1 != 0
-    }
-
-    #[inline]
-    fn read_blocking(&mut self) -> u8 {
-        while !self.is_read_ready() {}
-        unsafe { self.data.readb() }
-    }
-
-    #[inline]
-    fn read_nonblocking(&mut self) -> io::Result<u8> {
-        if self.is_read_ready() {
-            Ok(unsafe { self.data.readb() })
-        } else {
-            Err(io::Error::from(io::ErrorKind::WouldBlock))
-        }
-    }
-
-    #[inline]
     fn write_blocking(&mut self, byte: u8) {
         while !self.is_write_ready() {}
         unsafe { self.data.writeb(byte) }
@@ -238,16 +357,62 @@ impl Registers {
     }
 }
 
-impl<'a> Lock<'a> {
-    pub fn set_non_blocking(self) -> Lock<'a, Nonblocking> {
-        Lock {
+impl<'a> ReadLock<'a> {
+    pub fn set_non_blocking(self) -> ReadLock<'a, Nonblocking> {
+        ReadLock {
             inner: self.inner,
             _is_blocking: PhantomData,
         }
     }
 }
 
-impl<B> Lock<'_, B> {
+impl<'a> WriteLock<'a> {
+    pub fn set_non_blocking(self) -> WriteLock<'a, Nonblocking> {
+        WriteLock {
+            inner: self.inner,
+            _is_blocking: PhantomData,
+        }
+    }
+}
+
+impl<B> ReadLock<'_, B> {
+    pub fn check_interrupt_type(&mut self) -> io::Result<Option<Pc16550dInterrupt>> {
+        // IIR bits 0 through 3 describe what happened to produce an interrupt, with bits 4 and 5
+        // always 0, and bits 6 and 7 set to 1 if FIFOs are enabled (e.g. `FCR` bit 0 is set).
+        let iir = self.inner.iir();
+
+        if iir & 0b0011_0000 != 0b0000_0000 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "IIR indicates bogus interrupt bits",
+            ));
+        }
+
+        // The mapping here is described in "Table IV. Interrupt Control Functions" on page 17.
+        // TODO(ixi): probably should check IIR bits 6 and 7? punting on everything related to FIFO
+        // though.
+        let interrupt = match iir & 0b1111 {
+            0b0000 => Pc16550dInterrupt::ModemStatus,
+            0b0001 => {
+                return Ok(None);
+            }
+            0b0010 => Pc16550dInterrupt::TransmitterHoldingRegEmpty,
+            0b0100 => Pc16550dInterrupt::ReceivedDataAvailable,
+            0b0110 => Pc16550dInterrupt::ReceiverLineStatus,
+            0b1100 => Pc16550dInterrupt::CharacterTimeout,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "IIR indicates unrecognized status",
+                ));
+            }
+        };
+
+        Ok(Some(interrupt))
+    }
+}
+
+impl<B> WriteLock<'_, B> {
     /// Set the serial port's baud rate for this `Lock`.
     ///
     /// When the `Lock` is dropped, the baud rate will be set to the previous value.
@@ -285,7 +450,7 @@ impl<B> Lock<'_, B> {
     }
 }
 
-impl io::Read for Lock<'_, Blocking> {
+impl io::Read for ReadLock<'_, Blocking> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         for byte in buf.iter_mut() {
             *byte = self.inner.read_blocking();
@@ -294,16 +459,17 @@ impl io::Read for Lock<'_, Blocking> {
     }
 }
 
-impl io::Read for Lock<'_, Nonblocking> {
+impl io::Read for ReadLock<'_, Nonblocking> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         for byte in buf.iter_mut() {
+            // not ideal that this loses how many bytes were read if any read would block
             *byte = self.inner.read_nonblocking()?;
         }
         Ok(buf.len())
     }
 }
 
-impl io::Write for Lock<'_, Blocking> {
+impl io::Write for WriteLock<'_, Blocking> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         for &byte in buf.iter() {
             self.inner.write_blocking(byte)
@@ -317,7 +483,7 @@ impl io::Write for Lock<'_, Blocking> {
     }
 }
 
-impl fmt::Write for Lock<'_, Blocking> {
+impl fmt::Write for WriteLock<'_, Blocking> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for byte in s.bytes() {
             self.inner.write_blocking(byte)
@@ -326,7 +492,7 @@ impl fmt::Write for Lock<'_, Blocking> {
     }
 }
 
-impl io::Write for Lock<'_, Nonblocking> {
+impl io::Write for WriteLock<'_, Nonblocking> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         for &byte in buf.iter() {
             self.inner.write_nonblocking(byte)?;
@@ -340,7 +506,7 @@ impl io::Write for Lock<'_, Nonblocking> {
     }
 }
 
-impl LockInner<'_> {
+impl WriteLockInner<'_> {
     #[inline(always)]
     fn is_write_ready(&self) -> bool {
         self.inner.is_write_ready()
@@ -352,18 +518,8 @@ impl LockInner<'_> {
     }
 
     #[inline(always)]
-    fn read_nonblocking(&mut self) -> io::Result<u8> {
-        self.inner.read_nonblocking()
-    }
-
-    #[inline(always)]
     fn write_blocking(&mut self, byte: u8) {
         self.inner.write_blocking(byte)
-    }
-
-    #[inline(always)]
-    fn read_blocking(&mut self) -> u8 {
-        self.inner.read_blocking()
     }
 
     #[inline(always)]
@@ -377,7 +533,7 @@ impl LockInner<'_> {
     }
 }
 
-impl Drop for LockInner<'_> {
+impl Drop for WriteLockInner<'_> {
     fn drop(&mut self) {
         if let Some(divisor) = self.prev_divisor {
             // Disable IRQs.
@@ -390,9 +546,9 @@ impl Drop for LockInner<'_> {
 }
 
 impl<'a> mycelium_trace::writer::MakeWriter<'a> for &Port {
-    type Writer = Lock<'a, Blocking>;
+    type Writer = WriteLock<'a, Blocking>;
     fn make_writer(&'a self) -> Self::Writer {
-        self.lock()
+        self.write_lock()
     }
 
     fn line_len(&self) -> usize {
