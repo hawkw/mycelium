@@ -70,7 +70,7 @@ pub use self::cursor::{Cursor, CursorMut};
 ///
 ///     /// Convert an owned `Handle` into a raw pointer
 ///     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
-///        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+///        unsafe { NonNull::new_unchecked(Box::into_raw(Pin::into_inner_unchecked(handle))) }
 ///     }
 ///
 ///     /// Convert a raw pointer back into an owned `Handle`.
@@ -126,7 +126,7 @@ pub use self::cursor::{Cursor, CursorMut};
 /// # unsafe impl Linked<list::Links<Entry>> for Entry {
 /// #     type Handle = Pin<Box<Self>>;
 /// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
-/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #        unsafe { NonNull::new_unchecked(Box::into_raw(Pin::into_inner_unchecked(handle))) }
 /// #     }
 /// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
 /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
@@ -180,7 +180,7 @@ pub use self::cursor::{Cursor, CursorMut};
 /// # unsafe impl Linked<list::Links<Entry>> for Entry {
 /// #     type Handle = Pin<Box<Self>>;
 /// #     fn into_ptr(handle: Pin<Box<Entry>>) -> NonNull<Entry> {
-/// #        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+/// #        unsafe { NonNull::new_unchecked(Box::into_raw(Pin::into_inner_unchecked(handle))) }
 /// #     }
 /// #     unsafe fn from_ptr(ptr: NonNull<Entry>) -> Pin<Box<Entry>> {
 /// #         Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
@@ -390,7 +390,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         let split_idx = match at {
             // trying to split at the 0th index. we can just return the whole
             // list, leaving `self` empty.
-            0 => return Some(mem::replace(self, Self::new())),
+            0 => return Some(core::mem::take(self)),
             // trying to split at the last index. the new list will be empty.
             at if at == len => return Some(Self::new()),
             // we cannot split at an index that is greater than the length of
@@ -1061,7 +1061,7 @@ impl<T: Linked<Links<T>> + ?Sized> List<T> {
         // that's supported on `cordyceps`' MSRV.
         let split_node = match split_node {
             Some(node) => node,
-            None => return mem::replace(self, Self::new()),
+            None => return core::mem::take(self),
         };
 
         // the head of the new list is the split node's `next` node (which is

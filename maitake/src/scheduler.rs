@@ -15,26 +15,26 @@
 //! spawned on that scheduler:
 //!
 //! - [`Scheduler`]: a reference-counted single-core scheduler (requires the
-//!       "alloc" [feature]). A [`Scheduler`] is internally implemented using an
-//!       [`Arc`], and each task spawned on a [`Scheduler`] holds an `Arc` clone
-//!       of the scheduler core.
+//!   "alloc" [feature]). A [`Scheduler`] is internally implemented using an
+//!   [`Arc`], and each task spawned on a [`Scheduler`] holds an `Arc` clone
+//!   of the scheduler core.
 //! - [`StaticScheduler`]: a single-core scheduler stored in a `static`
-//!       variable. A [`StaticScheduler`] is referenced by tasks spawned on it
-//!       as an `&'static StaticScheduler` reference. Therefore, it can be used
-//!       without requiring `alloc`, and avoids atomic reference count
-//!       increments when spawning tasks. However, in order to be used, a
-//!       [`StaticScheduler`] *must* be stored in a `'static`, which can limit
-//!       its usage in some cases.
+//!   variable. A [`StaticScheduler`] is referenced by tasks spawned on it
+//!   as an `&'static StaticScheduler` reference. Therefore, it can be used
+//!   without requiring `alloc`, and avoids atomic reference count
+//!   increments when spawning tasks. However, in order to be used, a
+//!   [`StaticScheduler`] *must* be stored in a `'static`, which can limit
+//!   its usage in some cases.
 //! - [`LocalScheduler`]: a reference-counted scheduler for `!`[`Send`] `Future`s
-//!       (requires the "alloc" [feature]). This type is identical to the
-//!       [`Scheduler`] type, except that it is capable of spawning `Future`s
-//!       that do not implement [`Send`], and is itself not [`Send`] or [`Sync`]
-//!       (it cannot be shared between CPU cores).
+//!   (requires the "alloc" [feature]). This type is identical to the
+//!   [`Scheduler`] type, except that it is capable of spawning `Future`s
+//!   that do not implement [`Send`], and is itself not [`Send`] or [`Sync`]
+//!   (it cannot be shared between CPU cores).
 //! - [`LocalStaticScheduler`]: a [`StaticScheduler`] variant for `!`[`Send`]
-//!       `Future`s.  This type is identical to the [`StaticScheduler`] type,
-//!       except that it is capable of spawning `Future`s that do not implement
-//!       [`Send`], and is itself not [`Send`] or [`Sync`] (it cannot be shared
-//!       between CPU cores).
+//!   `Future`s.  This type is identical to the [`StaticScheduler`] type,
+//!   except that it is capable of spawning `Future`s that do not implement
+//!   [`Send`], and is itself not [`Send`] or [`Sync`] (it cannot be shared
+//!   between CPU cores).
 //!
 //! The [`Schedule`] trait in this module is used by the [`Task`] type to
 //! abstract over both types of scheduler that tasks may be spawned on.
@@ -389,7 +389,6 @@ pub trait Schedule: Sized + Clone + 'static {
 
     /// Returns a [`TaskRef`] referencing the task currently being polled by
     /// this scheduler, if a task is currently being polled.
-    #[must_use]
     fn current_task(&self) -> Option<TaskRef>;
 
     /// Returns a new [task `Builder`] for configuring tasks prior to spawning
@@ -615,9 +614,8 @@ impl StaticScheduler {
     /// - [`None`] if the scheduler is not currently being polled (i.e., the
     ///   scheduler is not ticking or its run queue is empty and all polls have
     ///   completed).
-    #[must_use]
     #[inline]
-    pub fn current_task(&'static self) -> Option<TaskRef> {
+    pub fn current_task(&self) -> Option<TaskRef> {
         self.0.current_task()
     }
 
@@ -647,7 +645,6 @@ impl Schedule for &'static StaticScheduler {
         self.0.wake(task)
     }
 
-    #[must_use]
     fn current_task(&self) -> Option<TaskRef> {
         self.0.current_task()
     }
@@ -777,7 +774,6 @@ impl Schedule for &'static LocalStaticScheduler {
         self.core.wake(task)
     }
 
-    #[must_use]
     fn current_task(&self) -> Option<TaskRef> {
         self.core.current_task()
     }
@@ -1216,7 +1212,6 @@ feature! {
         /// - [`None`] if the scheduler is not currently being polled (i.e., the
         ///   scheduler is not ticking or its run queue is empty and all polls
         ///   have completed).
-        #[must_use]
         #[inline]
         pub fn current_task(&self) -> Option<TaskRef> {
             self.0.current_task()
@@ -1248,7 +1243,6 @@ feature! {
             self.0.wake(task)
         }
 
-        #[must_use]
         fn current_task(&self) -> Option<TaskRef> {
             self.0.current_task()
         }
@@ -1599,7 +1593,6 @@ feature! {
             self.core.wake(task)
         }
 
-        #[must_use]
         fn current_task(&self) -> Option<TaskRef> {
             self.core.current_task()
         }

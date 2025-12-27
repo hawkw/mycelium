@@ -65,20 +65,20 @@
 /// implementations are always generated:
 ///
 /// - [`fmt::Debug`]: The `Debug` implementation prints the bitfield as a
-///       "struct", with a "field" for each packing spec in the bitfield. If any
-///       of the bitfield's packing specs pack typed values, that type's
-///       [`fmt::Debug`] implementation is used rather than printing the value
-///       as an integer.
+///   "struct", with a "field" for each packing spec in the bitfield. If any
+///   of the bitfield's packing specs pack typed values, that type's
+///   [`fmt::Debug`] implementation is used rather than printing the value
+///   as an integer.
 /// - [`fmt::Binary`]: Prints the raw bits of this bitfield as a binary number.
 /// - [`fmt::UpperHex`] and [`fmt::LowerHex`]: Prints the raw bits of this
-///       bitfield in hexadecimal.
+///   bitfield in hexadecimal.
 /// - [`fmt::Display`]: Pretty-prints the bitfield in a very nice-looking
-///       multi-line format which I'm rather proud of. See
-///       [here](#example-display-output) for examples of this format.
+///   multi-line format which I'm rather proud of. See
+///   [here](#example-display-output) for examples of this format.
 /// - [`Copy`]: Behaves identically as the [`Copy`] implementation for the
-///       underlying integer type.
+///   underlying integer type.
 /// - [`Clone`]: Behaves identically as the [`Clone`] implementation for the
-///       underlying integer type.
+///   underlying integer type.
 /// - [`From`]`<{int}> for Self`: Converts a raw integer value into an instance
 ///   of the bitfield type. This is equivalent to calling the bitfield type's
 ///   `from_bits` function.
@@ -396,7 +396,6 @@ macro_rules! bitfield {
         // Some generated methods may not always be used, which may emit dead
         // code warnings if the type is private.
         #[allow(dead_code)]
-        #[automatically_derived]
         impl $Name {
             $crate::bitfield! { @field<$T>:
                 $(
@@ -527,6 +526,51 @@ macro_rules! bitfield {
                 DisplayUnicode(*self)
             }
 
+            /// Returns a value that formats the bit value of the bitfield,
+            /// followed by any fields that have non-zero bits.
+            ///
+            /// If formatted using `{:#}`, the formatted representation is multi-line.
+            $vis fn display_set_bits(&self) -> impl core::fmt::Display {
+                struct DisplaySetBits($Name);
+                impl core::fmt::Display for DisplaySetBits {
+                    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        self.0.fmt_set_bits(f)
+                    }
+                }
+                DisplaySetBits(*self)
+            }
+
+            fn fmt_set_bits(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{:#0width$b}", self.0, width = $T::BITS as usize)?;
+                let mut wrote_any = false;
+
+                $({
+                    let field = Self::$Field;
+                    const NAME: &str = stringify!($Field);
+                    if !NAME.starts_with("_") {
+                        let bits = field.unpack_bits(self.0);
+                        if bits > 0 {
+                            if f.alternate() {
+                                if !wrote_any {
+                                    f.write_str("\n")?;
+                                }
+                                writeln!(f, "  {NAME}: {:?}", field.unpack(self.0))?;
+                            } else if !wrote_any {
+                                write!(f, " ({NAME}: {:?}", field.unpack(self.0))?;
+                            } else {
+                                write!(f, ", {NAME}: {:?}", field.unpack(self.0))?;
+                            }
+                            wrote_any = true;
+                        }
+                    }
+                })+
+
+                if wrote_any && !f.alternate() {
+                    f.write_str(")")?;
+                }
+
+                Ok(())
+            }
 
             fn fmt_ascii(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.pad("")?;

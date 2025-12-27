@@ -614,6 +614,220 @@ impl<K: PartialEq, V, Lock: ScopedRawMutex> WaitMap<K, V, Lock> {
         }
     }
 
+    /// Asynchronously poll the given function `f` until a condition occurs,
+    /// using the [`WaitMap`] to only re-poll when notified.
+    ///
+    /// This can be used to implement a "wait loop", turning a "try" function
+    /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
+    /// "recv" or "send").
+    ///
+    /// In particular, this function correctly *registers* interest in the [`WaitMap`]
+    /// prior to polling the function, ensuring that there is not a chance of a race
+    /// where the condition occurs AFTER checking but BEFORE registering interest
+    /// in the [`WaitMap`], which could lead to deadlock.
+    ///
+    /// This is intended to have similar behavior to `Condvar` in the standard library,
+    /// but asynchronous, and not requiring operating system intervention (or existence).
+    ///
+    /// In particular, this can be used in cases where interrupts or events are used
+    /// to signify readiness or completion of some task, such as the completion of a
+    /// DMA transfer, or reception of an ethernet frame. In cases like this, the interrupt
+    /// can wake the queue, allowing the polling function to check status fields for
+    /// partial progress or completion, and also return the status flags at the same time.
+    ///
+    /// Consider using [`Self::wait_for()`] if your function does not return a value.
+    ///
+    /// Consider using [`WaitMap::wait_for_value()`](super::wait_map::WaitMap::wait_for_value)
+    /// if you do not need multiple waiters.
+    ///
+    /// * [`Ok`]`(T)` if the closure returns [`Some`]`(T)`.
+    /// * [`Err`]`(`[`Closed`](crate::Closed)`)` if the [`WaitMap`] is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
+    /// use std::sync::Arc;
+    /// use maitake_sync::WaitMap;
+    /// use std::sync::atomic::{AtomicBool, Ordering};
+    ///
+    /// let map = Arc::new(WaitMap::new());
+    /// let wake1 = Arc::new(AtomicBool::new(false));
+    /// let wake2 = Arc::new(AtomicBool::new(false));
+    ///
+    /// let waiter1 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let map = map.clone();
+    ///     let wake = wake1.clone();
+    ///     async move {
+    ///         map.wait_for(1, || wake.load(Ordering::Relaxed)).await;
+    ///         println!("received wakeup 1!");
+    ///     }
+    /// });
+    ///
+    /// let waiter2 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let map = map.clone();
+    ///     let wake = wake2.clone();
+    ///     async move {
+    ///         map.wait_for(2, || wake.load(Ordering::Relaxed)).await;
+    ///         println!("received wakeup 2!");
+    ///     }
+    /// });
+    ///
+    /// println!("poking tasks without completion condition...");
+    ///
+    /// for i in 0..3 {
+    ///     map.wake(&i, ());
+    /// }
+    ///
+    /// // Let poll check the wake condition.
+    /// tokio::task::yield_now().await;
+    ///
+    /// assert!(!wake1.load(Ordering::Relaxed));
+    /// assert!(!wake2.load(Ordering::Relaxed));
+    /// wake1.store(true, Ordering::Relaxed);
+    /// wake2.store(true, Ordering::Relaxed);
+    ///
+    /// println!("poking tasks after completion condition...");
+    /// for i in 0..3 {
+    ///     map.wake(&i, ());
+    /// }
+    ///
+    /// waiter1.await.unwrap();
+    /// waiter2.await.unwrap();
+    /// # }
+    /// # test();
+    /// ```
+    pub async fn wait_for<F: FnMut() -> bool>(&self, key: K, mut f: F) -> WaitResult<()> {
+        let wait = self.wait(key);
+        let mut wait = core::pin::pin!(wait);
+
+        loop {
+            let _ = wait.as_mut().subscribe().await?;
+            if f() {
+                return Ok(());
+            }
+            wait.as_mut().await?;
+        }
+    }
+
+    /// Asynchronously poll the given function `f` until a condition occurs,
+    /// using the [`WaitMap`] to only re-poll when notified.
+    ///
+    /// This can be used to implement a "wait loop", turning a "try" function
+    /// (e.g. "try_recv" or "try_send") into an asynchronous function (e.g.
+    /// "recv" or "send").
+    ///
+    /// In particular, this function correctly *registers* interest in the [`WaitMap`]
+    /// prior to polling the function, ensuring that there is not a chance of a race
+    /// where the condition occurs AFTER checking but BEFORE registering interest
+    /// in the [`WaitMap`], which could lead to deadlock.
+    ///
+    /// This is intended to have similar behavior to `Condvar` in the standard library,
+    /// but asynchronous, and not requiring operating system intervention (or existence).
+    ///
+    /// In particular, this can be used in cases where interrupts or events are used
+    /// to signify readiness or completion of some task, such as the completion of a
+    /// DMA transfer, or reception of an ethernet frame. In cases like this, the interrupt
+    /// can wake the queue, allowing the polling function to check status fields for
+    /// partial progress or completion, and also return the status flags at the same time.
+    ///
+    /// Consider using [`Self::wait_for()`] if your function does not return a value.
+    ///
+    /// Consider using [`WaitMap::wait_for_value()`](super::wait_map::WaitMap::wait_for_value)
+    /// if you do not need multiple waiters.
+    ///
+    /// * [`Ok`]`(T)` if the closure returns [`Some`]`(T)`.
+    /// * [`Err`]`(`[`Closed`](crate::Closed)`)` if the [`WaitMap`] is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use tokio::task;
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn test() {
+    /// use std::sync::Arc;
+    /// use maitake_sync::WaitMap;
+    /// use std::sync::atomic::{AtomicU8, Ordering};
+    ///
+    /// let map = Arc::new(WaitMap::new());
+    /// let num1 = Arc::new(AtomicU8::new(0));
+    /// let num2 = Arc::new(AtomicU8::new(0));
+    ///
+    /// let waiter1 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let map = map.clone();
+    ///     let num = num1.clone();
+    ///     async move {
+    ///         let rxd = map.wait_for_value(1, || {
+    ///             let val = num.load(Ordering::Relaxed);
+    ///             if val == 2 {
+    ///                 return Some(val);
+    ///             }
+    ///             None
+    ///         }).await.unwrap();
+    ///         assert_eq!(rxd, 2);
+    ///         println!("received wakeup with value: {rxd}");
+    ///     }
+    /// });
+    ///
+    /// let waiter2 = task::spawn({
+    ///     // clone items to move into the spawned task
+    ///     let map = map.clone();
+    ///     let num = num2.clone();
+    ///     async move {
+    ///         let rxd = map.wait_for_value(2, || {
+    ///             let val = num.load(Ordering::Relaxed);
+    ///             if val == 2 {
+    ///                 return Some(val);
+    ///             }
+    ///             None
+    ///         }).await.unwrap();
+    ///         assert_eq!(rxd, 2);
+    ///         println!("received wakeup with value: {rxd}");
+    ///     }
+    /// });
+    ///
+    /// println!("poking tasks without completion condition...");
+    ///
+    /// num1.fetch_add(1, Ordering::Relaxed);
+    /// map.wake(&1, ());
+    ///
+    /// num2.fetch_add(1, Ordering::Relaxed);
+    /// map.wake(&2, ());
+    ///
+    /// // Let poll check the wake condition.
+    /// tokio::task::yield_now().await;
+    ///
+    /// println!("poking tasks after completion condition...");
+    ///
+    /// num1.fetch_add(1, Ordering::Relaxed);
+    /// map.wake(&1, ());
+    ///
+    /// num2.fetch_add(1, Ordering::Relaxed);
+    /// map.wake(&2, ());
+    ///
+    /// waiter1.await.unwrap();
+    /// waiter2.await.unwrap();
+    /// # }
+    /// # test();
+    /// ```
+    pub async fn wait_for_value<T, F: FnMut() -> Option<T>>(&self, key: K, mut f: F) -> WaitResult<T> {
+        let wait = self.wait(key);
+        let mut wait = core::pin::pin!(wait);
+
+        loop {
+            let _ = wait.as_mut().subscribe().await?;
+            if let Some(t) = f() {
+                return Ok(t);
+            }
+            wait.as_mut().await?;
+        }
+    }
+
     /// Returns a [`Waiter`] entry in this queue.
     ///
     /// This is factored out into a separate function because it's used by both

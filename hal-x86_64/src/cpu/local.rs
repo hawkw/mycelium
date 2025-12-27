@@ -182,7 +182,6 @@ impl<T> fmt::Debug for LocalKey<T> {
 }
 
 impl<T: 'static> CoreLocal<T> for LocalKey<T> {
-    #[must_use]
     fn new(initializer: fn() -> T) -> Self {
         Self::new(initializer)
     }

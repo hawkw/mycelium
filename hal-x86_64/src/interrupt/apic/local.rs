@@ -235,11 +235,7 @@ impl LocalApic {
         };
 
         // Cross-check the PIT calibration result and CPUID value.
-        let distance = if pit_frequency_hz > cpuid_frequency_hz {
-            pit_frequency_hz - cpuid_frequency_hz
-        } else {
-            cpuid_frequency_hz - pit_frequency_hz
-        };
+        let distance = pit_frequency_hz.abs_diff(cpuid_frequency_hz);
         if distance > PIT_SLOPPINESS {
             tracing::warn!(
                 pit.frequency_hz = pit_frequency_hz,
