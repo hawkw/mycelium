@@ -369,6 +369,7 @@ impl Controller {
         // guess...
         controller.unmask_isa_irq(IsaInterrupt::PitTimer);
         controller.unmask_isa_irq(IsaInterrupt::Ps2Keyboard);
+        controller.unmask_isa_irq(IsaInterrupt::Com1);
         controller
     }
 
@@ -514,6 +515,7 @@ impl hal_core::interrupt::Control for Idt {
         // interrupt models.
         self.register_isa_isr(IsaInterrupt::PitTimer, isr::pit_timer::<H> as *const ());
         self.register_isa_isr(IsaInterrupt::Ps2Keyboard, isr::keyboard::<H> as *const ());
+        self.register_isa_isr(IsaInterrupt::Com1, isr::com1::<H> as *const ());
 
         // local APIC specific hardware interrupts
         self.register_isr(Self::LOCAL_APIC_SPURIOUS, isr::spurious as *const ());
@@ -724,6 +726,56 @@ mod isr {
             INTERRUPT_CONTROLLER
                 .get_unchecked()
                 .end_isa_irq(IsaInterrupt::Ps2Keyboard);
+        }
+    }
+
+    pub(super) extern "x86-interrupt" fn com1<H: Handlers<Registers>>(_regs: Registers) {
+        use crate::serial::Pc16550dInterrupt;
+        let port = crate::serial::com1().expect("can port??");
+
+        // This is the only point we'll read-lock the serial port. See the module comments on
+        // [`crate::serial`] for the locking procedure around the port.
+        let port = port.read_lock();
+
+        let mut port = port.set_non_blocking();
+        let interrupt = port.check_interrupt_type().expect("interrupt is valid");
+        match interrupt {
+            None => {
+                // We get a spurious irq after reading RHR? Why?
+                // But, nothing to do.
+            }
+            Some(Pc16550dInterrupt::CharacterTimeout) => {
+                // Data is available for reading, so do that.
+                let mut b = [0u8];
+                use mycelium_util::io::Read;
+                let res = port.read(&mut b);
+
+                // We've done the read, so unlock the port.
+                core::mem::drop(port);
+
+                // If the read was blocking:
+                // * what did we get interrupted for?
+                // * `b` is bogus
+                //
+                // so dying here is the order of the day.
+                res.expect("read was not blocking");
+
+                H::serial_input(0, b[0]);
+            }
+            Some(other) => {
+                // We're gonna warn about the unhandled 16550 interrupt, but unlock the port for
+                // reading so we don't hold up anyone else waiting to read-lock for management
+                // operations.
+                core::mem::drop(port);
+
+                tracing::warn!("Unhandled 16550 interrupt cause: {other:?}");
+            }
+        }
+
+        unsafe {
+            INTERRUPT_CONTROLLER
+                .get_unchecked()
+                .end_isa_irq(IsaInterrupt::Com1);
         }
     }
 

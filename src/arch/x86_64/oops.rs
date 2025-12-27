@@ -312,7 +312,7 @@ impl<'a> Oops<'a> {
         if let Some(test) = mycotest::runner::current_test() {
             if let Some(com1) = serial::com1() {
                 // if writing the test outcome fails, don't double panic...
-                let _ = test.write_outcome(Err(failure), com1.lock());
+                let _ = test.write_outcome(Err(failure), com1.write_lock());
             }
         }
         qemu_exit(QemuExitCode::Failed)
