@@ -236,7 +236,7 @@ unsafe impl RawRwLock for RwSpinlock {
     #[cfg_attr(test, track_caller)]
     #[inline]
     unsafe fn unlock_exclusive(&self) {
-        let _val = test_dbg!(self.state.swap(UNLOCKED, Release));
+        let _val = test_dbg!(self.state.fetch_sub(WRITER, Release));
     }
 
     #[inline]
