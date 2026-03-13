@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, doc(cfg_hide(docsrs, loom)))]
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 #![warn(missing_docs, missing_debug_implementations)]

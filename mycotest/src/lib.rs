@@ -3,7 +3,7 @@
 //! This is in its own crate mainly so the constants are the same and I can't
 //! have the kernel write the wrong strings (which I did lol).
 
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![no_std]
 
 #[cfg(feature = "alloc")]
