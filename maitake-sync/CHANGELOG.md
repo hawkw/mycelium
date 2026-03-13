@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## maitake-sync-v0.3.0 - (2026-03-13)
+
+[6607899](https://github.com/hawkw/mycelium/6607899e50ad5902b4d67ff67c3dbb79165acc76)...[a4ae029](https://github.com/hawkw/mycelium/a4ae0295d71fea46dad9fddc3a1f475311822388)
+
+### <a id = "maitake-sync-v0.3.0-breaking"></a>Breaking Changes
+- **Don't enable portable-atomic/critical-section ([#561](https://github.com/hawkw/mycelium/issues/561))** ([37ce233](37ce233465804a74359a9c43d77add2f2cbac1aa))<br />`critical-section` feature no longer enables
+`portable-atomic/critical-section`. When building with
+`critical-section`, the `portable-atomic` feature must now be enabled by
+the application.
+
+### Added
+
+- Add WaitMap::wait_for ([#555](https://github.com/hawkw/mycelium/issues/555)) ([86535ab](https://github.com/hawkw/mycelium/86535ab9a799c2bb35fc761a3aacd421dbf23022))
+- 16550 input plus UART shells ([#548](https://github.com/hawkw/mycelium/issues/548)) ([d13c2e5](https://github.com/hawkw/mycelium/d13c2e561669b2e7b145149fc0f1f74ff2785e0f))
+
+### Fixed
+
+- [**breaking**](#maitake-sync-v0.3.0-breaking) Don't enable portable-atomic/critical-section ([#561](https://github.com/hawkw/mycelium/issues/561)) ([37ce233](https://github.com/hawkw/mycelium/37ce233465804a74359a9c43d77add2f2cbac1aa), fixes [#559](https://github.com/hawkw/mycelium/issues/559))
+- Fix `RwSpinlock` spinlock race condition  ([#560](https://github.com/hawkw/mycelium/issues/560)) ([a4ae029](https://github.com/hawkw/mycelium/a4ae0295d71fea46dad9fddc3a1f475311822388))
+
 ## maitake-sync-v0.2.2 - (2025-08-16)
 
 [e896466](https://github.com/hawkw/mycelium/e89646637bd946d27e265e7954887845707ba975)...[0c04556](https://github.com/hawkw/mycelium/0c045561b69ba6faff638a4b5cc0d08374667718)
