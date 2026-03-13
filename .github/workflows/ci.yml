@@ -280,7 +280,15 @@ jobs:
       # have to install it.
       run: rustup target add thumbv6m-none-eabi
     - name: run check
-      run: cargo check -p maitake-sync --target thumbv6m-none-eabi --no-default-features --features=critical-section
+      # NOTE: we pass `portable-atomic/critical-section` here because, on
+      # targets without native CAS atomics, portable-atomic needs a backend.
+      # The maitake-sync crate intentionally does NOT enable this feature
+      # itself (see hawkw/mycelium#559), leaving the choice to the end user.
+      run: >-
+        cargo check -p maitake-sync
+        --target thumbv6m-none-eabi
+        --no-default-features
+        --features=critical-section,portable-atomic/critical-section
 
   # test with `--no-default-features`
   maitake_no_default_features:

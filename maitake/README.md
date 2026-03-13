@@ -234,15 +234,23 @@ atomic operations because they are *always* single-core, such as MSP430 or AVR
 microcontrollers, `portable-atomic` simply uses unsynchronized operations with
 interrupts temporarily disabled.
 
-**The only case where the user must be aware of `portable-atomic` is when
-compiling for targets which lack atomic operations but are not guaranteed to
-always be single-core**. This includes ARMv6-M (`thumbv6m`), pre-v6 ARM (e.g.,
-`thumbv4t`, `thumbv5te`), and RISC-V targets without the A extension. On these
-architectures, the user must manually enable the [`RUSTFLAGS`] configuration
-[`--cfg portable_atomic_unsafe_assume_single_core`][single-core] if (and **only
-if**) the specific target hardware is known to be single-core. Enabling this cfg
-is unsafe, as it will cause unsound behavior on multi-core systems using these
-architectures.
+**On targets which lack atomic compare-and-swap operations** (such as ARMv6-M
+(`thumbv6m`), pre-v6 ARM (e.g., `thumbv4t`, `thumbv5te`), and RISC-V targets
+without the A extension), **the user must configure `portable-atomic` with an
+appropriate backend**. The available options are:
+
+- [`portable-atomic/critical-section`][pa-critical-section]: Uses the
+  [`critical-section`] crate to provide atomic operations. This is the
+  recommended choice when a `critical-section` implementation is already
+  provided by a HAL or runtime (e.g., `embassy`, `cortex-m`).
+- [`--cfg portable_atomic_unsafe_assume_single_core`][single-core]: Assumes
+  the target is single-core, using unsynchronized operations with interrupts
+  disabled. This **must only** be enabled if the target hardware is known to be
+  single-core; enabling it on multi-core systems is **unsound**.
+
+Note that `portable-atomic/critical-section` and
+`portable-atomic/unsafe-assume-single-core` are **mutually exclusive** and
+cannot be enabled at the same time.
 
 Additional configurations for some single-core systems, which determine the
 specific sets of interrupts that `portable-atomic` will disable when entering a
@@ -252,6 +260,7 @@ critical section, are described [here][interrupt-cfgs].
 [`AtomicU64`]: https://doc.rust-lang.org/stable/core/sync/atomic/struct.AtomicU64.html
 [`portable-atomic`]: https://crates.io/crates/portable-atomic
 [`RUSTFLAGS`]: https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags
+[pa-critical-section]: https://docs.rs/portable-atomic/latest/portable_atomic/#optional-features-critical-section
 [single-core]: https://docs.rs/portable-atomic/latest/portable_atomic/#optional-cfg
 [interrupt-cfgs]:
     https://github.com/taiki-e/portable-atomic/blob/HEAD/src/imp/interrupt/README.md
@@ -313,7 +322,7 @@ The following features are available (this list is incomplete; you can help by [
 | :---           | :---    | :---        |
 | `alloc`        | `true`  | Enables [`liballoc`] dependency |
 | `std`          | `false`  | Enables the Rust standard library, disabling `#![no-std]`. When `std` is enabled, the [`DefaultMutex`] type will use [`std::sync::Mutex`]. This implies the `alloc` feature. |
-| `critical-section` | `false` | Enables support for the [`critical-section`] crate. This includes a variant of the [`DefaultMutex`] type that uses a critical section, as well as the [`portable-atomic`] crate's `critical-section` feature (as [discussed above](#support-for-atomic-operations)) |
+| `critical-section` | `false` | Enables support for the [`critical-section`] crate. This includes a variant of the [`DefaultMutex`] type that uses a critical section. Note that this feature does **not** enable `portable-atomic/critical-section`; on targets that require a `portable-atomic` backend, users must configure it themselves (as [discussed above](#support-for-atomic-operations)). |
 | `no-cache-pad` | `false` | Inhibits cache padding for the [`CachePadded`] struct. When this feature is NOT enabled, the size will be determined based on target platform. |
 | `tracing-01`   | `false` | Enables support for v0.1.x of [`tracing`] (the current release version). Requires `liballoc`.|
 | `tracing-02`   | `false` | Enables support for the upcoming v0.2 of [`tracing`] (via a Git dependency). |
