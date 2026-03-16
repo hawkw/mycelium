@@ -1,7 +1,9 @@
 use core::fmt;
 
 pub mod ctx;
+mod lock;
 pub use self::ctx::Context;
+pub use self::lock::IrqRawMutex;
 
 /// An interrupt controller for a platform.
 pub trait Control {
@@ -37,6 +39,27 @@ pub trait Control {
             self.disable();
         }
         CriticalGuard { ctrl: self }
+    }
+}
+
+pub trait MaskInterrupt<V> {
+    /// Mask the interrupt on vector `V`.
+    unsafe fn mask_irq(&self, vector: V);
+
+    /// Unmask the interrupt on vector `V`.
+    unsafe fn unmask_irq(&self, vector: V);
+}
+
+impl<T, V> MaskInterrupt<V> for &T
+where
+    T: MaskInterrupt<V>,
+{
+    unsafe fn mask_irq(&self, vector: V) {
+        (*self).mask_irq(vector);
+    }
+
+    unsafe fn unmask_irq(&self, vector: V) {
+        (*self).unmask_irq(vector);
     }
 }
 
