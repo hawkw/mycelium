@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(target_os = "none", no_std)]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(unused_unsafe)]
 #![warn(missing_docs, rustdoc::broken_intra_doc_links)]
 

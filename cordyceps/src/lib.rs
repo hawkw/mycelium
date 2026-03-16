@@ -1,5 +1,5 @@
 #![cfg_attr(docsrs, doc = include_str!("../README.md"))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg, doc_cfg_hide))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, deny(missing_docs))]
 #![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![allow(unused_unsafe)]
