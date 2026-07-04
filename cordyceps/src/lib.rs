@@ -194,7 +194,7 @@ use core::ptr::NonNull;
 /// will reject this reborrow as unsound.[^1]
 ///
 /// There are two ways we can implement [`Linked::links`] without creating a
-/// temporary reference in this manner. The recommended one is to use the
+/// temporary reference in this manner. The recommended one is to use
 /// `&raw mut`, as follows:
 ///
 /// ```
