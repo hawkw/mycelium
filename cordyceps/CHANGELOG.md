@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## cordyceps-v0.3.5 - (2026-07-29)
+
+[cce79a6](https://github.com/hawkw/mycelium/cce79a60259160a3059f31982047bb753ac1052f)...[856edd1](https://github.com/hawkw/mycelium/856edd139d91c88a005f752e953c35255c7dc5a2)
+
+
+### Added
+
+- Add `TransferStack::is_empty` ([#565](https://github.com/hawkw/mycelium/issues/565)) ([856edd1](https://github.com/hawkw/mycelium/856edd139d91c88a005f752e953c35255c7dc5a2))
+
 ## cordyceps-v0.3.4 - (2025-05-21)
 
 [2d2c3e2](https://github.com/hawkw/mycelium/2d2c3e267814628b9355c8e8a504b4b30604efa3)...[37a369f](https://github.com/hawkw/mycelium/37a369ff6bdddc72847378d9b5500b8c1ed2cc38)
