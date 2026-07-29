@@ -160,6 +160,23 @@ mod has_cas_atomics {
             let head = NonNull::new(head);
             Stack { head }
         }
+
+        /// Returns `true` if this `TransferStack` is empty.
+        ///
+        /// Unlike [`take_all`], this only loads the head pointer, so a consumer
+        /// polling a usually-empty stack can skip the read-modify-write. The
+        /// load is `Relaxed` and the result is a snapshot: a producer may
+        /// [`push`] the instant it returns, and a `false` result still has to be
+        /// followed by [`take_all`], whose `AcqRel` swap is what synchronizes
+        /// with the pushes it takes.
+        ///
+        /// [`take_all`]: Self::take_all
+        /// [`push`]: Self::push
+        #[inline]
+        #[must_use]
+        pub fn is_empty(&self) -> bool {
+            self.head.load(Relaxed).is_null()
+        }
     }
 
     impl<T> Drop for TransferStack<T>
@@ -659,6 +676,24 @@ mod loom {
             stack.push(Entry::new(1));
             stack.push(Entry::new(2));
             stack.push(Entry::new(3));
+        })
+    }
+
+    #[test]
+    fn transfer_stack_is_empty() {
+        loom::model(|| {
+            let stack = TransferStack::<Entry>::new();
+            assert!(stack.is_empty(), "a new stack is empty");
+
+            stack.push(Entry::new(1));
+            assert!(!stack.is_empty(), "a stack with one element is not empty");
+
+            stack.push(Entry::new(2));
+            assert!(!stack.is_empty(), "a stack with two elements is not empty");
+
+            let taken = stack.take_all();
+            assert!(stack.is_empty(), "the stack is empty after `take_all`");
+            assert_eq!(taken.into_iter().count(), 2, "`take_all` took both elements");
         })
     }
 }
