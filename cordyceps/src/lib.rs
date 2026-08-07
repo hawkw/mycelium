@@ -194,11 +194,11 @@ use core::ptr::NonNull;
 /// will reject this reborrow as unsound.[^1]
 ///
 /// There are two ways we can implement [`Linked::links`] without creating a
-/// temporary reference in this manner. The recommended one is to use the
-/// [`core::ptr::addr_of_mut!`] macro, as follows:
+/// temporary reference in this manner. The recommended one is to use
+/// `&raw mut`, as follows:
 ///
 /// ```
-/// use core::ptr::{self, NonNull};
+/// use core::ptr::NonNull;
 /// # use cordyceps::{Linked, list};
 /// # struct Entry {
 /// #    links: list::Links<Self>,
@@ -213,14 +213,14 @@ use core::ptr::NonNull;
 ///     unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Self>> {
 ///         let target = target.as_ptr();
 ///
-///         // Using the `ptr::addr_of_mut!` macro, we can offset a raw pointer to a
+///         // Using `&raw mut`, we can offset a raw pointer to a
 ///         // raw pointer to a field *without* creating a temporary reference.
-///         let links = ptr::addr_of_mut!((*target).links);
+///         let links = unsafe { &raw mut (*target).links };
 ///
 ///         // `NonNull::new_unchecked` is safe to use here, because the pointer that
 ///         // we offset was not null, implying that the pointer produced by offsetting
 ///         // it will also not be null.
-///         NonNull::new_unchecked(links)
+///         unsafe { NonNull::new_unchecked(links) }
 ///     }
 /// }
 /// ```
@@ -263,13 +263,13 @@ use core::ptr::NonNull;
 /// ```
 ///
 /// In general, this approach is not recommended, and using
-/// [`core::ptr::addr_of_mut!`] should be preferred in almost all cases. In
+/// `&raw mut` should be preferred in almost all cases. In
 /// particular, the layout-dependent cast is more error-prone, as it requires a
 /// `#[repr(C)]` attribute to avoid soundness issues. Additionally, the
 /// layout-based cast does not permit a single struct to contain `Links` fields
 /// for multiple intrusive data structures, as the `Links` type *must* be the
 /// struct's first field.[^2] Therefore, [`Linked::links`] should generally be
-/// implemented using [`addr_of_mut!`](core::ptr::addr_of_mut).
+/// implemented using `&raw mut`.
 ///
 /// [^1]: Note that code like this is not *currently* known to result in
 ///     miscompiles, but it is rejected by tools like Miri as being unsound.
