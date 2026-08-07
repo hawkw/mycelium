@@ -28,13 +28,13 @@ mod alloc {
     mycotest::decl_test! {
         fn alloc_big() {
             use alloc::vec::Vec;
-            let mut v = Vec::new();
+            // let mut v = Vec::new();
+            panic!("lol");
+            // for i in 0..2048 {
+            //     v.push(i);
+            // }
 
-            for i in 0..2048 {
-                v.push(i);
-            }
-
-            tracing::info!(vec = ?v);
+            // tracing::info!(vec = ?v);
         }
     }
 }
