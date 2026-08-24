@@ -80,8 +80,9 @@ macro_rules! decl_test {
         // make it visible.
         const _: () = {
             #[used]
-            #[link_section = "MyceliumTests"]
-            static TEST: $crate::Test = $crate::Test {
+            #[cfg_attr(target_vendor = "apple", link_section = "__DATA,MyceliumTests")]
+            #[cfg_attr(not(target_vendor = "apple"), link_section = "MyceliumTests")]
+              static TEST: $crate::Test = $crate::Test {
                 descr: $crate::TestName::new(module_path!(), stringify!($name)),
                 run: || $crate::TestReport::report($name()),
             };
