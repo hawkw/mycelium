@@ -1,4 +1,4 @@
-use super::{Context, Poll, TaskId, TaskRef};
+use super::{Context, Poll, TaskId, TaskRef, TaskStatus};
 use core::{future::Future, marker::PhantomData, pin::Pin};
 use mycelium_util::fmt;
 
@@ -103,6 +103,17 @@ impl<T> JoinHandle<T> {
                 panic!("`TaskRef` only taken while polling a `JoinHandle`; this is a bug")
             }
             JoinHandleState::Error(ref error) => panic!("`JoinHandle` errored: {error:?}"),
+        }
+    }
+
+    /// Returns a snapshot of the task's [status](TaskStatus), or [`None`] if
+    /// this `JoinHandle` no longer references a task.
+    #[inline]
+    #[must_use]
+    pub fn status(&self) -> Option<TaskStatus> {
+        match self.task {
+            JoinHandleState::Task(ref task) => Some(task.status()),
+            _ => None,
         }
     }
 

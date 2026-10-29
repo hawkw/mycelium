@@ -18,3 +18,6 @@ impl Schedule for NopSchedule {
 mod alloc_tests;
 #[cfg(any(loom, feature = "alloc"))]
 mod loom;
+
+#[cfg(loom)]
+mod task_observer_loom;

@@ -13,14 +13,21 @@ pub use self::{
     builder::Builder,
     id::TaskId,
     join_handle::{JoinError, JoinHandle},
+    status::{TaskObserver, TaskPhase, TaskStatus},
     storage::Storage,
 };
 pub use core::task::{Context, Poll, Waker};
+
+#[cfg(feature = "alloc")]
+mod monitor;
+#[cfg(feature = "alloc")]
+pub use monitor::{MonitorFull, TaskMonitor, TaskUpdate};
 
 mod builder;
 mod id;
 pub(crate) mod join_handle;
 mod state;
+mod status;
 mod storage;
 
 #[cfg(test)]
@@ -171,6 +178,8 @@ pub(crate) struct Header {
 
     /// The task's state, which can be atomically updated.
     state: StateCell,
+
+    progress: status::Progress,
 
     /// The task vtable for this task.
     ///
@@ -506,6 +515,7 @@ where
                         run_queue: mpsc_queue::Links::new(),
                         vtable: &Self::HEAP_STUB_VTABLE,
                         state: StateCell::new(),
+                        progress: status::Progress::new(),
                         id: TaskId::stub(),
                         span: crate::trace::Span::none(),
                         #[cfg(debug_assertions)]
@@ -547,6 +557,7 @@ where
                     run_queue: mpsc_queue::Links::new(),
                     vtable: &Self::TASK_VTABLE,
                     state: StateCell::new(),
+                    progress: status::Progress::new(),
                     id: TaskId::next(),
                     span: crate::trace::Span::none(),
                     #[cfg(debug_assertions)]
@@ -569,6 +580,13 @@ where
     #[must_use]
     pub fn id(&self) -> TaskId {
         self.header().id
+    }
+
+    /// Returns a snapshot of this task's [status](TaskStatus).
+    #[inline]
+    #[must_use]
+    pub fn status(&self) -> TaskStatus {
+        TaskStatus::new(self.header().state.load(Ordering::Acquire))
     }
 
     pub(crate) fn bind(&mut self, scheduler: S) {
@@ -623,6 +641,7 @@ where
 
         // post-poll state transition
         let result = test_dbg!(state.end_poll(poll.is_ready()));
+        this.as_ref().header().progress.publish();
 
         // if the task is ready and has a `JoinHandle` to wake, wake the join
         // waker now.
@@ -995,11 +1014,28 @@ impl TaskRef {
         // if the task was successfully canceled, wake it so that it can clean
         // up after itself.
         if canceled {
+            self.header().progress.publish();
             test_debug!("woke canceled task");
             self.wake_by_ref();
         }
 
         canceled
+    }
+
+    /// Creates an independent observer of this task's lifecycle progress.
+    #[must_use]
+    pub fn observe(&self) -> TaskObserver {
+        TaskObserver::new(self.clone())
+    }
+
+    /// Returns a snapshot of this task's [status](TaskStatus).
+    ///
+    /// The status describes what the task was doing when it was observed; the
+    /// task may make progress immediately afterwards.
+    #[inline]
+    #[must_use]
+    pub fn status(&self) -> TaskStatus {
+        TaskStatus::new(self.state().load(Ordering::Acquire))
     }
 
     /// Returns `true` if this task has completed.
@@ -1135,6 +1171,7 @@ impl TaskRef {
         #[cfg(not(any(feature = "tracing-01", feature = "tracing-02", test)))]
         let _ = builder;
         let this = Self(ptr);
+        this.state().set_woken();
         let join_handle = unsafe {
             // Safety: it's fine to create a `JoinHandle` here, because we know
             // the task's actual output type.
@@ -1323,6 +1360,7 @@ impl Header {
             Self {
                 run_queue: mpsc_queue::Links::new_stub(),
                 state: StateCell::new(),
+                progress: status::Progress::new(),
                 vtable: &Self::STATIC_STUB_VTABLE,
                 span: trace::Span::none(),
                 id: TaskId::stub(),

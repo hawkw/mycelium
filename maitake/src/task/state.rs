@@ -455,6 +455,7 @@ impl StateCell {
             let has_output = test_dbg!(state.get(State::HAS_OUTPUT));
 
             if test_dbg!(state.get(State::CANCELED)) {
+                state.set(State::HAS_OUTPUT, false);
                 return JoinAction::Canceled {
                     completed: has_output,
                 };
