@@ -7,7 +7,85 @@
 #![warn(missing_debug_implementations)]
 
 use crate::{loom::cell::UnsafeCell, Linked};
-use core::{fmt, marker::PhantomPinned, ptr::NonNull};
+
+pub use crate::singly::DrainFilter;
+
+/// A cursor over a [`Stack`], which walks it from the front.
+///
+/// This is returned by [`Stack::cursor_front_mut`]; see that method for
+/// details. Like [`List`]'s cursor, it has a position off the stack, where it
+/// holds no element and from which moving on arrives back at the front.
+///
+/// [`List`]: crate::List
+#[derive(Debug)]
+pub struct CursorMut<'list, T: Linked<Links<T>>> {
+    inner: crate::singly::CursorMut<'list, T>,
+}
+
+impl<T: Linked<Links<T>>> CursorMut<'_, T> {
+    /// Returns how far the cursor is from the front, or `None` when it is off
+    /// the stack.
+    #[must_use]
+    pub fn index(&self) -> Option<usize> {
+        self.inner.index()
+    }
+
+    /// Borrows the element the cursor is on, or `None` when it is off the
+    /// stack.
+    #[must_use]
+    pub fn current(&self) -> Option<Pin<&T>> {
+        self.inner.current()
+    }
+
+    /// Borrows the element after the one the cursor is on. Off the stack, that
+    /// is the front.
+    #[must_use]
+    pub fn peek_next(&self) -> Option<Pin<&T>> {
+        self.inner.peek_next()
+    }
+
+    /// Moves the cursor to the next element.
+    ///
+    /// From the last element this moves off the stack; from off the stack it
+    /// moves to the front, as [`List`]'s cursor does.
+    ///
+    /// [`List`]: crate::List
+    pub fn move_next(&mut self) {
+        self.inner.move_next()
+    }
+
+    /// Unlinks the element the cursor is on and returns the [`Handle`] owning
+    /// it, leaving the cursor on whatever followed.
+    ///
+    /// Returns `None`, taking nothing, when the cursor is off the stack. What
+    /// comes back is detached, so it can go straight into another collection.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn remove_current(&mut self) -> Option<T::Handle> {
+        self.inner.remove_current()
+    }
+
+    /// Inserts `element` after the one the cursor is on, leaving the cursor
+    /// where it was.
+    ///
+    /// Off the stack, the element goes to the front, as [`List`]'s cursor does.
+    ///
+    /// [`List`]: crate::List
+    pub fn insert_after(&mut self, element: T::Handle) {
+        self.inner.insert_after(element)
+    }
+
+    /// Splits the stack after the element the cursor is on, returning
+    /// everything after it and leaving that element and those before it here.
+    ///
+    /// Off the stack, every element is moved.
+    #[must_use]
+    pub fn split_after(&mut self) -> Stack<T> {
+        let (head, len) = self.inner.split_after();
+        Stack { head, len }
+    }
+}
+use core::{fmt, marker::PhantomPinned, pin::Pin, ptr::NonNull};
 
 #[cfg(target_has_atomic = "ptr")]
 pub use has_cas_atomics::*;
@@ -39,9 +117,11 @@ mod has_cas_atomics {
     /// - [`TransferStack::take_all`], which atomically takes all elements currently
     ///   on the transfer stack and returns them as a new mutable [`Stack`].
     ///
-    /// These are both *O*(1) operations, although `push` performs a
-    /// compare-and-swap loop that may be retried if another producer concurrently
-    /// pushed an element.
+    /// `push` is an *O*(1) operation, although it performs a compare-and-swap
+    /// loop that may be retried if another producer concurrently pushed an
+    /// element. `take_all` detaches every element in a single *O*(1) swap and
+    /// then walks them once to give the returned [`Stack`] its length, so it
+    /// is *O*(*n*) in the number of elements taken.
     ///
     /// In order to be part of a `TransferStack`, a type `T` must implement
     /// the [`Linked`] trait for [`stack::Links<T>`](Links).
@@ -152,13 +232,20 @@ mod has_cas_atomics {
         /// Takes all elements *currently* in this `TransferStack`, returning a new
         /// mutable [`Stack`] containing those elements.
         ///
-        /// This is an *O*(1) operation which does not allocate memory. It will
-        /// never loop and does not spin.
+        /// Taking the elements is a single atomic swap, which neither loops nor
+        /// spins. The chain arrives without a count, so the elements are walked
+        /// once to give the returned [`Stack`] its length, making this *O*(*n*)
+        /// in the number of elements taken. It does not allocate memory.
         #[must_use]
         pub fn take_all(&self) -> Stack<T> {
             let head = self.head.swap(ptr::null_mut(), AcqRel);
             let head = NonNull::new(head);
-            Stack { head }
+            // the chain came off the lock-free stack without a count,
+            // so there is nowhere cheaper to get one than by walking it.
+            Stack {
+                len: unsafe { crate::singly::count(head) },
+                head,
+            }
         }
 
         /// Returns `true` if this `TransferStack` is empty.
@@ -231,6 +318,8 @@ mod has_cas_atomics {
 /// [intrusive]: crate#intrusive-data-structures
 pub struct Stack<T: Linked<Links<T>>> {
     pub(crate) head: Option<NonNull<T>>,
+    /// The number of elements linked into this stack.
+    pub(crate) len: usize,
 }
 
 /// Singly-linked-list linkage
@@ -265,7 +354,7 @@ where
     /// Returns a new `Stack` with no elements in it.
     #[must_use]
     pub const fn new() -> Self {
-        Self { head: None }
+        Self { head: None, len: 0 }
     }
 
     /// Pushes `element` onto the end of this `Stack`, taking ownership
@@ -283,6 +372,7 @@ where
     /// will be dropped.
     pub fn push_was_empty(&mut self, element: T::Handle) -> bool {
         let ptr = T::into_ptr(element);
+        self.len += 1;
         test_trace!(?ptr, ?self.head, "Stack::push_was_empty");
         unsafe {
             // Safety: we have exclusive mutable access to the stack, and
@@ -323,6 +413,7 @@ where
     pub fn pop(&mut self) -> Option<T::Handle> {
         test_trace!(?self.head, "Stack::pop");
         let head = self.head.take()?;
+        self.len -= 1;
         unsafe {
             // Safety: we have exclusive ownership over this chunk of stack.
 
@@ -346,7 +437,116 @@ where
     pub fn take_all(&mut self) -> Self {
         Self {
             head: self.head.take(),
+            len: core::mem::replace(&mut self.len, 0),
         }
+    }
+
+    /// Returns the number of elements in this `Stack`.
+    ///
+    /// This is an *O*(1) operation.
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Borrows the element [`pop`](Self::pop) would return, without unlinking
+    /// it, or `None` if the stack is empty.
+    #[must_use]
+    pub fn front(&self) -> Option<Pin<&T>> {
+        let head = self.head?;
+        // Safety: the stack owns this element, so it lives at least as long as
+        // the borrow of `self`, and it is pinned for as long as it is linked.
+        unsafe { Some(Pin::new_unchecked(head.as_ref())) }
+    }
+
+    /// Drops every element still linked into this `Stack`, leaving it empty.
+    ///
+    /// If an element's destructor panics, the remaining elements stay linked
+    /// and the length continues to describe them.
+    pub fn clear(&mut self) {
+        // Safety: this stack owns every element in its chain and counts them.
+        unsafe { crate::singly::clear(&mut self.head, &mut self.len) }
+    }
+
+    /// Unlinks `item` from this `Stack`, returning the [`Handle`] that owns it.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(T::Handle)` owning `item`, if `item` was linked into this
+    ///   stack.
+    /// - [`None`] if `item` is not an element of this stack, in which case the
+    ///   stack is left exactly as it was.
+    ///
+    /// Because the stack is singly linked, this walks it to find the element
+    /// before `item`, and is therefore *O*(*n*).
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    ///
+    /// # Safety
+    ///
+    /// `item` must point to an element which has not been freed.
+    pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
+        if let Some(node) = crate::singly::unlink(&mut self.head, item) {
+            self.len -= 1;
+            Some(T::from_ptr(node))
+        } else {
+            None
+        }
+    }
+
+    /// Returns an iterator which unlinks and yields the elements `pred`
+    /// accepts, leaving the rest linked and in their existing order.
+    ///
+    /// Elements are handed to `pred` from the front. What the iterator yields
+    /// is owned by the caller; dropping the iterator before it is exhausted
+    /// leaves everything it has not reached linked, and the length correct.
+    pub fn drain_filter<F>(&mut self, pred: F) -> DrainFilter<'_, T, F>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        DrainFilter::new(&mut self.head, &mut self.len, pred)
+    }
+
+    /// Returns a cursor over this `Stack`, starting at the front.
+    ///
+    /// The cursor walks forwards only, which is all a singly-linked chain
+    /// allows, and can look at the element it is on, take it out, put another
+    /// one in after it, or split the stack there.
+    #[must_use]
+    pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
+        CursorMut {
+            inner: crate::singly::CursorMut::new(&mut self.head, &mut self.len),
+        }
+    }
+
+    /// Asserts that this stack holds together: that its length is the number of
+    /// elements actually linked into it.
+    ///
+    /// This is intended for tests and debug assertions.
+    ///
+    /// # Panics
+    ///
+    /// If the stack's length disagrees with its contents.
+    #[track_caller]
+    pub fn assert_valid(&self) {
+        let mut walked = 0;
+        let mut curr = self.head;
+        while let Some(node) = curr {
+            walked += 1;
+            assert!(
+                walked <= self.len,
+                "stack holds more than the {} elements it claims; it may be cyclic",
+                self.len
+            );
+            // Safety: `node` is a live element of this stack's chain.
+            curr = unsafe { crate::singly::next_of(node) };
+        }
+        assert_eq!(
+            walked, self.len,
+            "stack claims {} elements but {walked} are linked into it",
+            self.len
+        );
     }
 
     /// Returns `true` if this `Stack` is empty.
@@ -375,8 +575,11 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { head } = self;
-        f.debug_struct("Stack").field("head", head).finish()
+        let Self { head, len } = self;
+        f.debug_struct("Stack")
+            .field("head", head)
+            .field("len", len)
+            .finish()
     }
 }
 
@@ -693,7 +896,11 @@ mod loom {
 
             let taken = stack.take_all();
             assert!(stack.is_empty(), "the stack is empty after `take_all`");
-            assert_eq!(taken.into_iter().count(), 2, "`take_all` took both elements");
+            assert_eq!(
+                taken.into_iter().count(),
+                2,
+                "`take_all` took both elements"
+            );
         })
     }
 }

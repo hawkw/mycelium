@@ -6,10 +6,85 @@
 //! [Intrusive]: crate#intrusive-data-structures
 
 use crate::{Linked, Stack};
+
+pub use crate::singly::DrainFilter;
+
+/// A cursor over a [`SortedList`], which walks it in sorted order from the
+/// front.
+///
+/// This is returned by [`SortedList::cursor_front_mut`]; see that method for
+/// details. Like [`List`]'s cursor, it has a position off the list, where it
+/// holds no element and from which moving on arrives back at the front.
+///
+/// [`List`]: crate::List
+#[derive(Debug)]
+pub struct CursorMut<'list, T: Linked<Links<T>>> {
+    func: fn(&T, &T) -> Ordering,
+    inner: crate::singly::CursorMut<'list, T>,
+}
+
+impl<T: Linked<Links<T>>> CursorMut<'_, T> {
+    /// Returns how far the cursor is from the front, or `None` when it is off
+    /// the list.
+    #[must_use]
+    pub fn index(&self) -> Option<usize> {
+        self.inner.index()
+    }
+
+    /// Borrows the element the cursor is on, or `None` when it is off the list.
+    #[must_use]
+    pub fn current(&self) -> Option<Pin<&T>> {
+        self.inner.current()
+    }
+
+    /// Borrows the element after the one the cursor is on. Off the list, that
+    /// is the front.
+    #[must_use]
+    pub fn peek_next(&self) -> Option<Pin<&T>> {
+        self.inner.peek_next()
+    }
+
+    /// Moves the cursor to the next element.
+    ///
+    /// From the last element this moves off the list; from off the list it
+    /// moves to the front, as [`List`]'s cursor does.
+    ///
+    /// [`List`]: crate::List
+    pub fn move_next(&mut self) {
+        self.inner.move_next()
+    }
+
+    /// Unlinks the element the cursor is on and returns the [`Handle`] owning
+    /// it, leaving the cursor on whatever followed.
+    ///
+    /// Returns `None`, taking nothing, when the cursor is off the list. What
+    /// comes back is detached, so it can go straight into another collection.
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    pub fn remove_current(&mut self) -> Option<T::Handle> {
+        self.inner.remove_current()
+    }
+
+    /// Splits the list after the element the cursor is on, returning everything
+    /// after it as a new list ordered the same way, and leaving that element
+    /// and those before it here.
+    ///
+    /// Off the list, every element is moved.
+    #[must_use]
+    pub fn split_after(&mut self) -> SortedList<T> {
+        let (head, len) = self.inner.split_after();
+        SortedList {
+            func: self.func,
+            head,
+            len,
+        }
+    }
+}
 use core::{
     cmp::{Ord, Ordering},
     fmt,
     marker::PhantomData,
+    pin::Pin,
     ptr::NonNull,
 };
 
@@ -42,6 +117,8 @@ pub use crate::stack::Links;
 /// `SortedList` drops all elements currently linked into the stack.
 pub struct SortedList<T: Linked<Links<T>>> {
     head: Option<NonNull<T>>,
+    /// The number of elements linked into this list.
+    len: usize,
     // Returns if LHS is less/same/greater than RHS
     func: fn(&T, &T) -> Ordering,
 }
@@ -123,6 +200,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
         Self {
             func: f,
             head: None,
+            len: 0,
         }
     }
 
@@ -144,6 +222,7 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     pub fn pop_front(&mut self) -> Option<T::Handle> {
         test_trace!(?self.head, "SortedList::pop_front");
         let head = self.head.take()?;
+        self.len -= 1;
         unsafe {
             // Safety: we have exclusive ownership over this chunk of stack.
 
@@ -158,6 +237,216 @@ impl<T: Linked<Links<T>>> SortedList<T> {
         }
     }
 
+    /// Returns the number of elements in this list.
+    ///
+    /// This is an *O*(1) operation.
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns `true` if this list contains no elements.
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.head.is_none()
+    }
+
+    /// Borrows the element [`pop_front`](Self::pop_front) would return, without
+    /// unlinking it, or `None` if the list is empty.
+    #[must_use]
+    pub fn front(&self) -> Option<Pin<&T>> {
+        let head = self.head?;
+        // Safety: the list owns this element, so it lives at least as long as
+        // the borrow of `self`, and it is pinned for as long as it is linked.
+        unsafe { Some(Pin::new_unchecked(head.as_ref())) }
+    }
+
+    /// Drops every element still linked into this list, leaving it empty.
+    ///
+    /// If an element's destructor panics, the remaining elements stay linked
+    /// and the length continues to describe them.
+    pub fn clear(&mut self) {
+        // Safety: this list owns every element in its chain and counts them.
+        unsafe { crate::singly::clear(&mut self.head, &mut self.len) }
+    }
+
+    /// Unlinks `item` from this list, returning the [`Handle`] that owns it.
+    ///
+    /// # Returns
+    ///
+    /// - [`Some`]`(T::Handle)` owning `item`, if `item` was linked into this
+    ///   list.
+    /// - [`None`] if `item` is not an element of this list, in which case the
+    ///   list is left exactly as it was.
+    ///
+    /// Because the list is singly linked, this walks it to find the element
+    /// before `item`, and is therefore *O*(*n*).
+    ///
+    /// [`Handle`]: crate::Linked::Handle
+    ///
+    /// # Safety
+    ///
+    /// `item` must point to an element which has not been freed.
+    pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
+        if let Some(node) = crate::singly::unlink(&mut self.head, item) {
+            self.len -= 1;
+            Some(T::from_ptr(node))
+        } else {
+            None
+        }
+    }
+
+    /// Returns an iterator which unlinks and yields the elements `pred`
+    /// accepts, leaving the rest linked and still in sorted order.
+    ///
+    /// Elements are handed to `pred` in sorted order. What the iterator yields
+    /// is owned by the caller; dropping the iterator before it is exhausted
+    /// leaves everything it has not reached linked, and the length correct.
+    pub fn drain_filter<F>(&mut self, pred: F) -> DrainFilter<'_, T, F>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        DrainFilter::new(&mut self.head, &mut self.len, pred)
+    }
+
+    /// Returns a cursor over this list, starting at the front.
+    ///
+    /// The cursor walks forwards only, which is all a singly-linked chain
+    /// allows, and can look at the element it is on, take it out, or split the
+    /// list there. It cannot put an element in at an arbitrary place, which
+    /// would not keep the list sorted; that is what [`insert`] is for.
+    ///
+    /// [`insert`]: Self::insert
+    #[must_use]
+    pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
+        CursorMut {
+            func: self.func,
+            inner: crate::singly::CursorMut::new(&mut self.head, &mut self.len),
+        }
+    }
+
+    /// Moves every element of `other` into this list, leaving `other` empty.
+    ///
+    /// The result is ordered by *this* list's ordering function; the one
+    /// `other` was built with has no bearing on where its elements land, and
+    /// `other` may well be ordered in a way this list is not. Where an element
+    /// of each compares [`Equal`](Ordering::Equal), this list's comes first,
+    /// which is the order [`insert`](Self::insert) also gives.
+    ///
+    /// Each element of `other` is placed in its sorted position here, so this
+    /// is *O*(*n* * *m*) in the worst case.
+    pub fn merge(&mut self, other: &mut Self) {
+        // Taken one at a time, so that `other` still owns everything not yet
+        // moved: the ordering function belongs to the caller and may panic, and
+        // neither list may lose an element or miscount if it does.
+        //
+        // `insert` places an element after any it compares equal to, so the
+        // elements already here keep their place ahead of `other`'s.
+        while let Some(element) = other.pop_front() {
+            self.insert(element);
+        }
+    }
+
+    /// Splits the list in two at `at`, leaving the first `at` elements here and
+    /// returning the rest as a new list ordered the same way.
+    ///
+    /// Splitting at zero moves every element into the returned list; splitting
+    /// at the length returns an empty list.
+    ///
+    /// # Panics
+    ///
+    /// If `at > self.len()`.
+    #[must_use]
+    pub fn split_off(&mut self, at: usize) -> Self {
+        assert!(
+            at <= self.len,
+            "cannot split at index {at}: the list is only {} elements long",
+            self.len
+        );
+
+        let mut split = Self {
+            func: self.func,
+            head: None,
+            len: self.len - at,
+        };
+
+        if at == 0 {
+            split.head = self.head.take();
+            self.len = 0;
+            return split;
+        }
+
+        // Walk to the last element which stays, then sever after it.
+        let mut cursor = self.head.expect("at > 0, so the list is not empty");
+        for _ in 1..at {
+            // Safety: `at <= len`, so there are at least `at` elements to walk.
+            cursor = unsafe { crate::singly::next_of(cursor) }
+                .expect("the list holds at least `at` elements");
+        }
+        // Safety: `cursor` is the last element which stays in this list.
+        split.head = unsafe { crate::singly::set_next(cursor, None) };
+        self.len = at;
+        split
+    }
+
+    /// Splits the list in two at `at`, leaving the first `at` elements here and
+    /// returning the rest as a new list ordered the same way, or `None` if `at`
+    /// is past the end of the list.
+    ///
+    /// This is the non-panicking form of [`split_off`](Self::split_off).
+    #[must_use]
+    pub fn try_split_off(&mut self, at: usize) -> Option<Self> {
+        if at > self.len {
+            return None;
+        }
+        Some(self.split_off(at))
+    }
+
+    /// Asserts that this list holds together: that its length is the number of
+    /// elements actually linked into it, and that they are in sorted order.
+    ///
+    /// This is intended for tests and debug assertions.
+    ///
+    /// # Panics
+    ///
+    /// If the list's length disagrees with its contents, or an element is out
+    /// of order.
+    #[track_caller]
+    pub fn assert_valid(&self) {
+        let mut walked = 0;
+        let mut curr = self.head;
+        let mut prev: Option<NonNull<T>> = None;
+
+        while let Some(node) = curr {
+            walked += 1;
+            assert!(
+                walked <= self.len,
+                "list holds more than the {} elements it claims; it may be cyclic",
+                self.len
+            );
+            if let Some(prev) = prev {
+                // Safety: both are live elements of this list's chain.
+                let ord = unsafe { (self.func)(prev.as_ref(), node.as_ref()) };
+                assert_ne!(
+                    ord,
+                    Ordering::Greater,
+                    "element {walked} of the list sorts before the one in front of it"
+                );
+            }
+            prev = Some(node);
+            // Safety: `node` is a live element of this list's chain.
+            curr = unsafe { crate::singly::next_of(node) };
+        }
+
+        assert_eq!(
+            walked, self.len,
+            "list claims {} elements but {walked} are linked into it",
+            self.len
+        );
+    }
+
     /// Insert a single item into the list, in its sorted order position
     ///
     /// Note that if the inserted item is [`Equal`](Ordering::Equal) to another
@@ -167,6 +456,23 @@ impl<T: Linked<Links<T>>> SortedList<T> {
     /// This is an _O_(_n_) operation.
     pub fn insert(&mut self, element: T::Handle) {
         let eptr = T::into_ptr(element);
+        // The ordering function is supplied by the caller and may panic. Until
+        // the element is linked nothing owns it, so hold it here: if `link`
+        // unwinds, this drops the element rather than stranding it, and the
+        // length is not touched until the element really is in the list.
+        let mut pending = Pending::<T>(Some(eptr));
+        // Safety: `eptr` came from a `Handle`, so it is live and unlinked.
+        unsafe { self.link(eptr) };
+        pending.0 = None;
+        self.len += 1;
+    }
+
+    /// Links `eptr` into its sorted position. Does not touch the length.
+    ///
+    /// # Safety
+    ///
+    /// `eptr` must own a live `T` which is not linked into any list.
+    unsafe fn link(&mut self, eptr: NonNull<T>) {
         test_trace!(?eptr, ?self.head, "SortedList::insert");
         debug_assert!(
             unsafe { T::links(eptr).as_ref().next.with(|n| (*n).is_none()) },
@@ -304,8 +610,11 @@ where
     T: Linked<Links<T>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { head, func: _ } = self;
-        f.debug_struct("SortedList").field("head", head).finish()
+        let Self { head, func: _, len } = self;
+        f.debug_struct("SortedList")
+            .field("head", head)
+            .field("len", len)
+            .finish()
     }
 }
 
@@ -316,8 +625,25 @@ impl<T: Linked<Links<T>>> Drop for SortedList<T> {
         // linked list of items one at a time.
         let stack = Stack {
             head: self.head.take(),
+            len: core::mem::take(&mut self.len),
         };
         drop(stack);
+    }
+}
+
+/// Owns an element which is on its way into a list.
+///
+/// Dropping this drops the element, so an insertion which unwinds part way
+/// through does not leave it owned by nobody.
+struct Pending<T: Linked<Links<T>>>(Option<NonNull<T>>);
+
+impl<T: Linked<Links<T>>> Drop for Pending<T> {
+    fn drop(&mut self) {
+        if let Some(ptr) = self.0.take() {
+            // Safety: this type is only ever given a pointer which came from a
+            // `Handle` and has not been linked into a list.
+            drop(unsafe { T::from_ptr(ptr) });
+        }
     }
 }
 

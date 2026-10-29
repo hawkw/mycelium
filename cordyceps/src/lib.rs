@@ -68,8 +68,9 @@
 //!   the stack through immutable `&` references. A consumer can [pop all
 //!   elements currently in the `TransferStack`](stack::TransferStack::take_all)
 //!   in a single atomic operation, returning a new [`Stack`]. Pushing an
-//!   element, and taking all elements in the [`TransferStack`] are both *O*(1)
-//!   operations.
+//!   element is an *O*(1) operation; taking all elements detaches them in a
+//!   single atomic swap and then walks them once to count them, so that the
+//!   returned [`Stack`] knows its length, making it *O*(*n*).
 //!
 //!   A [`TransferStack`] can be used to efficiently transfer ownership of
 //!   resources from multiple producers to a consumer, such as for reuse or
@@ -86,6 +87,7 @@ extern crate std;
 pub(crate) mod util;
 
 pub mod list;
+mod singly;
 pub mod sorted_list;
 pub mod stack;
 
